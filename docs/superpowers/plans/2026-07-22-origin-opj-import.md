@@ -30,7 +30,7 @@
 - Create: crates/io/tests/fixtures/origin/test-origin-7.0552.opj
 - Create: crates/io/tests/fixtures/origin/RawData_Locust_Revision1_TIS_Mechanism.opju
 
-- [ ] **Step 1: Mark Origin fixtures as binary**
+- [x] **Step 1: Mark Origin fixtures as binary**
 
 Add:
 
@@ -39,7 +39,7 @@ Add:
 *.opju binary
 ~~~
 
-- [ ] **Step 2: Download only the licensed public fixtures**
+- [x] **Step 2: Download only the licensed public fixtures**
 
 Run from the repository root:
 
@@ -52,7 +52,7 @@ curl -fL https://ndownloader.figshare.com/files/52794059 \
 
 Expected: both downloads succeed. Do not add any locally discovered or private Origin file.
 
-- [ ] **Step 3: Verify immutable fixture identity**
+- [x] **Step 3: Verify immutable fixture identity**
 
 Run:
 
@@ -72,11 +72,11 @@ ac7f71c367562e85e9d4bb4ae418cbcaaa1b5dff80436180e8d3331c7e1d6308
 13c47a6a5daaf14493da59c8f1b284d9efb08129c8320b6ad9fd0b5191faa55f
 ~~~
 
-- [ ] **Step 4: Document provenance and license**
+- [x] **Step 4: Document provenance and license**
 
 README.md must state source URL, original filename, byte length, SHA-256, license, attribution, and that neither fixture contains PlotX user data. Copy OpenOPJ's MIT license text to OPENOPJ-LICENSE.txt. Cite the Figshare DOI and CC BY 4.0 terms without adding an Origin logo.
 
-- [ ] **Step 5: Verify the fixture diff**
+- [x] **Step 5: Verify the fixture diff**
 
 Run:
 
@@ -88,7 +88,7 @@ git check-attr diff -- crates/io/tests/fixtures/origin/test-origin-7.0552.opj
 
 Expected: no whitespace errors, only intended files, and the OPJ fixture has binary diff handling.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ~~~bash
 git add .gitattributes crates/io/tests/fixtures/origin
