@@ -346,7 +346,7 @@ git commit -m "feat(io): add bounded OPJ block reader"
 - Create: crates/io/src/origin/opj/records_tests.rs
 - Modify: crates/io/src/origin/opj.rs
 
-- [ ] **Step 1: Write synthetic record tests**
+- [x] **Step 1: Write synthetic record tests**
 
 Build test records using the verified Origin7V552 offsets:
 
@@ -371,11 +371,19 @@ vec![OriginCell::Text("test string 123".into())]
 vec![OriginCell::Text("text".into()), OriginCell::Float(3.14)]
 ~~~
 
-The f64 value -1.23456789E-300 maps to OriginCell::Null. A nonzero first-row offset creates leading nulls in logical row geometry without reading before the payload.
+The f64 value -1.23456789E-300 maps to OriginCell::Null. The public fixture proves
+that `lastRow` is an exclusive end index and that payload slots before `firstRow`
+already contain the missing-value sentinel. Decode `[0, lastRow)` and validate
+`[0, firstRow)` as null; do not prepend synthetic nulls or skip those payload slots.
 
-- [ ] **Step 2: Add negative record tests**
+- [x] **Step 2: Add negative record tests**
 
-Test width/type mismatches, totalRows smaller than the inclusive first/last range, negative or overflowing geometry, incomplete fixed text, mixed-cell prefixes other than 0 or 1, truncated f64 after a numeric mixed prefix, non-ASCII text, unsupported 8-bit integer, and unverified unsigned flags.
+Test width/type mismatches, geometry that violates
+`firstRow <= lastRow <= totalRows`, negative or overflowing geometry, incomplete
+fixed text, mixed-cell prefixes other than `[0, 0]` or `[1, 0]`, truncated f64
+after a numeric mixed prefix, non-ASCII text, unsupported 8-bit integer, and
+unverified unsigned flags. Require the content block length to equal
+`totalRows * valueWidth` exactly.
 
 For every minimal valid record, run every truncated prefix inside catch_unwind and assert no panic plus a structured error.
 
@@ -387,7 +395,7 @@ Wire records_tests.rs from records.rs with:
 mod records_tests;
 ~~~
 
-- [ ] **Step 3: Run tests and observe RED**
+- [x] **Step 3: Run tests and observe RED**
 
 ~~~bash
 cargo test -p plotx-io --lib records_tests
@@ -395,7 +403,7 @@ cargo test -p plotx-io --lib records_tests
 
 Expected: the named record tests are discovered and compilation fails because record decoding functions do not exist.
 
-- [ ] **Step 4: Implement only evidence-backed decoders**
+- [x] **Step 4: Implement only evidence-backed decoders**
 
 Map:
 
@@ -408,7 +416,7 @@ Map:
 
 Reject rather than infer any type combination not represented by the public fixture. Never reinterpret malformed text bytes as numbers.
 
-- [ ] **Step 5: Run focused tests and static checks**
+- [x] **Step 5: Run focused tests and static checks**
 
 ~~~bash
 cargo test -p plotx-io --lib records_tests
@@ -419,7 +427,7 @@ rg -n "unwrap\(|unsafe\s*\{" crates/io/src/origin
 
 Expected: tests and Clippy pass. The source scan has no production external-input unwrap or unsafe block.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ~~~bash
 git add crates/io/src/origin
