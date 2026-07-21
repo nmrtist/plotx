@@ -545,7 +545,7 @@ git commit -m "feat(io): import Origin 7.0552 OPJ worksheets"
 - Create: crates/core/src/origin.rs
 - Create: crates/core/src/origin_tests.rs
 
-- [ ] **Step 1: Write core conversion tests before production code**
+- [x] **Step 1: Write core conversion tests before production code**
 
 Build a small OriginProject in memory and assert:
 
@@ -591,7 +591,7 @@ Wire the sibling test file from crates/core/src/lib.rs:
 mod origin_tests;
 ~~~
 
-- [ ] **Step 2: Run tests and observe RED**
+- [x] **Step 2: Run tests and observe RED**
 
 ~~~bash
 cargo test -p plotx-core --lib origin_tests
@@ -599,7 +599,7 @@ cargo test -p plotx-core --lib origin_tests
 
 Expected: the named core Origin tests are discovered and compilation fails because import_origin_project and its result/error types do not exist.
 
-- [ ] **Step 3: Implement deterministic schema conversion**
+- [x] **Step 3: Implement deterministic schema conversion**
 
 Use ColumnSchema, TableSchema, SnapshotBuilder, ColumnChunk, ColumnValues, and Validity directly. Process rows in chunks of 65,536 as the existing XLSX importer does. Consume OriginProject by value and drain cell storage rather than cloning it.
 
@@ -618,13 +618,13 @@ pub fn import_origin_project(
 
 ImportedOriginWorksheet contains the candidate label, TableSnapshot, bounded source metadata, and parser diagnostics. The application creates TypedTableState with imported_with_operation and constructs TableImportSource with media type application/x-origin-project, the selected filename, the shared source bytes, and this metadata.
 
-- [ ] **Step 4: Handle names, nulls, metadata, and resource accounting**
+- [x] **Step 4: Handle names, nulls, metadata, and resource accounting**
 
 Name normalization is deterministic and case-sensitive. Preserve every changed original name in metadata. Do not set ColumnSchema.unit for text columns. Notes and parameters remain source metadata and are never converted into table cells.
 
 Use checked arithmetic to estimate validity buffers, numeric arrays, string offsets, and UTF-8 data capacity before constructing each batch. Carry OriginResourceUsage forward and reject the total owned-byte budget before reserve.
 
-- [ ] **Step 5: Run both backend configurations**
+- [x] **Step 5: Run both backend configurations**
 
 ~~~bash
 cargo test -p plotx-core --lib origin_tests
@@ -635,7 +635,7 @@ cargo clippy -p plotx-core --all-targets -- -D warnings
 
 Expected: all pass and plotx-data has no dependency change.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ~~~bash
 git add crates/core/src/lib.rs crates/core/src/origin.rs crates/core/src/origin_tests.rs
