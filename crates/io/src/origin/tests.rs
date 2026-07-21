@@ -134,9 +134,26 @@ fn default_limits_match_the_public_contract() {
     assert_eq!(limits.max_workbooks, 256);
     assert_eq!(limits.max_worksheets_per_workbook, 128);
     assert_eq!(limits.max_columns, 4096);
+    assert_eq!(limits.max_metadata_records, 65_536);
     assert_eq!(limits.max_rows_per_column, 1_000_000);
     assert_eq!(limits.max_cells, 2_000_000);
     assert_eq!(limits.max_metadata_depth, 32);
+}
+
+#[test]
+fn rejects_a_zero_metadata_record_limit() {
+    let limits = OriginLimits {
+        max_metadata_records: 0,
+        ..OriginLimits::default()
+    };
+    assert!(matches!(
+        read_origin(b"CPYUA 4.3668 178\n", limits),
+        Err(OriginError::InvalidLimit {
+            name: "max_metadata_records",
+            value: 0,
+            ..
+        })
+    ));
 }
 
 #[test]

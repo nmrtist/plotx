@@ -63,6 +63,7 @@ fn parse_project_tree(cursor: &mut MetadataCursor<'_>) -> Result<(), OriginError
             });
         }
     };
+    cursor.charge_record()?;
     if span_payload.len() != TREE_SPAN_PAYLOAD_LEN {
         return Err(OriginError::CorruptStructure {
             offset: block_offset,
@@ -106,6 +107,7 @@ fn parse_project_tree(cursor: &mut MetadataCursor<'_>) -> Result<(), OriginError
 fn parse_attachments(cursor: &mut MetadataCursor<'_>) -> Result<usize, OriginError> {
     let mut count = 0_usize;
     while cursor.remaining() > 0 {
+        cursor.charge_record()?;
         let header_offset = cursor.absolute_offset()?;
         let header = cursor.read_exact(ATTACHMENT_HEADER_LEN)?;
         let header_len = read_u32(header, 0, header_offset, "attachment header size")?;
@@ -130,11 +132,6 @@ fn parse_attachments(cursor: &mut MetadataCursor<'_>) -> Result<usize, OriginErr
             });
         }
         count = checked_add(count, 1, "embedded Origin attachments")?;
-        enforce_limit(
-            "embedded Origin attachments",
-            count,
-            cursor.limits.max_columns,
-        )?;
     }
     Ok(count)
 }

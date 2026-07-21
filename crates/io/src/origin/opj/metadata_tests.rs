@@ -58,7 +58,11 @@ fn push_window(bytes: &mut Vec<u8>, name: &[u8]) {
     push_block(bytes, None);
 }
 
-fn synthetic_project(records: &[(&str, bool)], windows: &[&[u8]]) -> Vec<u8> {
+fn synthetic_project_with_parameters(
+    records: &[(&str, bool)],
+    windows: &[&[u8]],
+    parameters: &[(&[u8], f64)],
+) -> Vec<u8> {
     let mut bytes = SIGNATURE.to_vec();
     let mut origin_header = [0_u8; ORIGIN_HEADER_LEN];
     origin_header[0x1b..0x23].copy_from_slice(&7.0552_f64.to_le_bytes());
@@ -77,9 +81,12 @@ fn synthetic_project(records: &[(&str, bool)], windows: &[&[u8]]) -> Vec<u8> {
     }
     push_block(&mut bytes, None);
 
-    bytes.extend_from_slice(b"ERR\n");
-    bytes.extend_from_slice(&1.0_f64.to_le_bytes());
-    bytes.push(b'\n');
+    for (name, value) in parameters {
+        bytes.extend_from_slice(name);
+        bytes.push(b'\n');
+        bytes.extend_from_slice(&value.to_le_bytes());
+        bytes.push(b'\n');
+    }
     bytes.extend_from_slice(b"\0\n");
     push_block(&mut bytes, None);
 
@@ -89,6 +96,32 @@ fn synthetic_project(records: &[(&str, bool)], windows: &[&[u8]]) -> Vec<u8> {
     push_block(&mut bytes, None);
     push_block(&mut bytes, Some(&10_u32.to_le_bytes()));
     bytes
+}
+
+fn synthetic_project(records: &[(&str, bool)], windows: &[&[u8]]) -> Vec<u8> {
+    synthetic_project_with_parameters(records, windows, &[(b"ERR".as_slice(), 1.0)])
+}
+
+fn insert_layer_with_two_nested_lists(bytes: &mut Vec<u8>) {
+    let marker = [27_u32.to_le_bytes().as_slice(), b"\n\0\0Book"].concat();
+    let window = bytes
+        .windows(marker.len())
+        .position(|candidate| candidate == marker)
+        .expect("synthetic window framing");
+    let layer_list = window + 5 + 27 + 1;
+    let mut layer = Vec::new();
+    push_block(&mut layer, Some(&[0_u8]));
+    push_block(&mut layer, Some(&[1_u8]));
+    for _ in 1..4 {
+        push_block(&mut layer, None);
+    }
+    push_block(&mut layer, None);
+    push_block(&mut layer, Some(&[1_u8]));
+    push_block(&mut layer, None);
+    for _ in 0..5 {
+        push_block(&mut layer, None);
+    }
+    bytes.splice(layer_list..layer_list, layer);
 }
 
 fn only_column(project: &crate::origin::OriginProject) -> &crate::origin::OriginColumn {
@@ -237,6 +270,84 @@ fn enforces_workbook_and_metadata_limits() {
             ..
         })
     ));
+}
+
+#[test]
+fn metadata_records_do_not_consume_the_data_column_limit() {
+    let bytes = synthetic_project_with_parameters(
+        &[("Book_A", true)],
+        &[b"Book"],
+        &[
+            (b"ERR".as_slice(), 1.0),
+            (b"ALPHA".as_slice(), 2.0),
+            (b"BETA".as_slice(), 3.0),
+        ],
+    );
+    let limits = OriginLimits {
+        max_columns: 1,
+        ..OriginLimits::default()
+    };
+    let project = read_origin(&bytes, limits).unwrap();
+
+    assert_eq!(project.workbooks[0].worksheets[0].columns.len(), 1);
+    assert_eq!(project.parameters.len(), 3);
+}
+
+#[test]
+fn metadata_record_limit_is_cumulative_across_nested_lists() {
+    let mut bytes = synthetic_project(&[("Book_A", true)], &[b"Book"]);
+    insert_layer_with_two_nested_lists(&mut bytes);
+    let limits = OriginLimits {
+        // Window, layer, and the first nested item consume the full budget;
+        // the first item in the second independent list is record four.
+        max_metadata_records: 3,
+        ..OriginLimits::default()
+    };
+
+    assert!(matches!(
+        read_origin(&bytes, limits),
+        Err(OriginError::LimitExceeded {
+            resource: "metadata records",
+            limit: 3,
+            actual: 4,
+        })
+    ));
+}
+
+#[test]
+fn skipped_parameters_still_consume_the_metadata_record_budget() {
+    let cases: &[(&[u8], f64)] = &[(&[0x80], 2.0), (b"NAN", f64::NAN)];
+    for &(name, value) in cases {
+        let bytes = synthetic_project_with_parameters(
+            &[("Book_A", true)],
+            &[b"Book"],
+            &[(b"ERR", 1.0), (name, value)],
+        );
+        let limits = OriginLimits {
+            max_metadata_records: 2,
+            ..OriginLimits::default()
+        };
+        assert!(matches!(
+            read_origin(&bytes, limits),
+            Err(OriginError::LimitExceeded {
+                resource: "metadata records",
+                limit: 2,
+                actual: 3,
+            })
+        ));
+    }
+}
+
+#[test]
+fn metadata_record_count_equal_to_the_limit_succeeds() {
+    let bytes = synthetic_project(&[("Book_A", true)], &[b"Book"]);
+    let limits = OriginLimits {
+        max_metadata_records: 4,
+        ..OriginLimits::default()
+    };
+    let project = read_origin(&bytes, limits).unwrap();
+
+    assert_eq!(project.resource_usage.metadata_records, 4);
 }
 
 #[test]

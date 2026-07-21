@@ -16,6 +16,7 @@ pub(super) struct MetadataCursor<'a> {
     bytes: &'a [u8],
     offset: usize,
     base_offset: usize,
+    metadata_records: usize,
     pub(super) limits: &'a OriginLimits,
 }
 
@@ -25,8 +26,20 @@ impl<'a> MetadataCursor<'a> {
             bytes,
             offset: 0,
             base_offset,
+            metadata_records: 0,
             limits,
         }
+    }
+
+    pub(super) fn charge_record(&mut self) -> Result<(), OriginError> {
+        let actual = checked_add(self.metadata_records, 1, "metadata records")?;
+        enforce_limit("metadata records", actual, self.limits.max_metadata_records)?;
+        self.metadata_records = actual;
+        Ok(())
+    }
+
+    pub(super) fn metadata_records(&self) -> usize {
+        self.metadata_records
     }
 
     pub(super) fn read_block(&mut self) -> Result<MetadataBlock<'a>, OriginError> {

@@ -234,6 +234,8 @@ pub struct OriginResourceUsage {
     pub columns: usize,
     /// Decoded cell count.
     pub cells: usize,
+    /// Logical metadata records traversed, excluding list terminators.
+    pub metadata_records: usize,
 }
 
 /// Complete engine-neutral result of an Origin project read.
@@ -276,8 +278,10 @@ pub struct OriginLimits {
     pub max_workbooks: usize,
     /// Maximum worksheet count per workbook.
     pub max_worksheets_per_workbook: usize,
-    /// Maximum total column count.
+    /// Maximum total worksheet data column count.
     pub max_columns: usize,
+    /// Maximum logical metadata records traversed, excluding list terminators.
+    pub max_metadata_records: usize,
     /// Maximum logical rows in one column.
     pub max_rows_per_column: usize,
     /// Maximum total decoded cell count.
@@ -299,6 +303,7 @@ impl Default for OriginLimits {
             max_workbooks: 256,
             max_worksheets_per_workbook: 128,
             max_columns: 4096,
+            max_metadata_records: 65_536,
             max_rows_per_column: 1_000_000,
             max_cells: 2_000_000,
             max_metadata_depth: 32,
@@ -323,6 +328,7 @@ impl OriginLimits {
                 self.max_worksheets_per_workbook,
             ),
             ("max_columns", self.max_columns),
+            ("max_metadata_records", self.max_metadata_records),
             ("max_rows_per_column", self.max_rows_per_column),
             ("max_cells", self.max_cells),
             ("max_metadata_depth", self.max_metadata_depth),

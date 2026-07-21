@@ -87,6 +87,7 @@ pub(super) fn parse(
         &mut unsupported_objects,
         usage,
     )?;
+    usage.metadata_records = cursor.metadata_records();
 
     Ok(ParsedMetadata {
         windows,
@@ -111,12 +112,7 @@ fn parse_windows(
             MetadataBlock::Null { .. } => break,
             MetadataBlock::Data { offset, payload } => (offset, payload),
         };
-        let window_count = checked_add(windows.len(), 1, "Origin window records")?;
-        enforce_limit(
-            "Origin window records",
-            window_count,
-            cursor.limits.max_columns,
-        )?;
+        cursor.charge_record()?;
 
         // This exact header-plus-layer-list traversal is reimplemented from
         // the pinned MIT OpenOPJ Origin 7.0552 WindowList description:
@@ -170,15 +166,12 @@ fn parse_windows(
 
 fn walk_layer_list(cursor: &mut MetadataCursor<'_>, depth: usize) -> Result<usize, OriginError> {
     enforce_depth(depth, cursor.limits)?;
-    let mut layers = 0_usize;
     let mut records = 0_usize;
     loop {
         match cursor.read_block()? {
             MetadataBlock::Null { .. } => break,
-            MetadataBlock::Data { .. } => {}
+            MetadataBlock::Data { .. } => cursor.charge_record()?,
         }
-        layers = checked_add(layers, 1, "Origin layer records")?;
-        enforce_limit("Origin layer records", layers, cursor.limits.max_columns)?;
         records = checked_add(records, 1, "Origin window presentation records")?;
 
         records = checked_add(
@@ -217,10 +210,9 @@ fn walk_fixed_block_list(
     loop {
         match cursor.read_block()? {
             MetadataBlock::Null { .. } => break,
-            MetadataBlock::Data { .. } => {}
+            MetadataBlock::Data { .. } => cursor.charge_record()?,
         }
         items = checked_add(items, 1, "Origin nested records")?;
-        enforce_limit("Origin nested records", items, cursor.limits.max_columns)?;
         for _ in 1..blocks_per_item {
             let _ = cursor.read_block()?;
         }
@@ -242,6 +234,7 @@ fn parse_parameters(
         if name_bytes == [0] {
             break;
         }
+        cursor.charge_record()?;
         if name_bytes.is_empty() {
             return Err(OriginError::CorruptStructure {
                 offset: name_offset,
@@ -252,12 +245,6 @@ fn parse_parameters(
         let value_offset = cursor.absolute_offset()?;
         let value_bytes = cursor.read_parameter_value()?;
         let value = f64::from_le_bytes(value_bytes);
-        let parameter_count = checked_add(parameters.len(), 1, "Origin project parameters")?;
-        enforce_limit(
-            "Origin project parameters",
-            parameter_count,
-            cursor.limits.max_columns,
-        )?;
 
         let name = match validate_ascii(name_bytes, name_offset, "Origin parameter name") {
             Ok(name) => name,
@@ -321,12 +308,8 @@ fn parse_notes(
             MetadataBlock::Null { .. } => break,
             MetadataBlock::Data { offset, .. } => offset,
         };
+        cursor.charge_record()?;
         note_properties = checked_add(note_properties, 1, "Origin note properties")?;
-        enforce_limit(
-            "Origin note properties",
-            note_properties,
-            cursor.limits.max_columns,
-        )?;
         let (name_offset, name_block) = require_data_block(
             cursor.read_block()?,
             "an Origin note name must be a data block",
@@ -365,12 +348,6 @@ fn parse_notes(
             (Err(error), _) | (_, Err(error)) => return Err(error),
         };
 
-        let note_count = checked_add(notes.len(), 1, "Origin project notes")?;
-        enforce_limit(
-            "Origin project notes",
-            note_count,
-            cursor.limits.max_columns,
-        )?;
         let name = copy_decoded_text(name, cursor.limits, usage)?;
         let content = copy_decoded_text(content, cursor.limits, usage)?;
         try_reserve(&mut notes, 1, "Origin project notes", cursor.limits, usage)?;

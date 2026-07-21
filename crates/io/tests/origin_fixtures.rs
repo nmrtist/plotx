@@ -181,6 +181,7 @@ S\t1.29\r\n\r\n"
     assert_eq!(project.resource_usage.worksheets, 4);
     assert_eq!(project.resource_usage.columns, 16);
     assert_eq!(project.resource_usage.cells, 1889);
+    assert_eq!(project.resource_usage.metadata_records, 362);
     assert_eq!(
         project
             .unsupported_objects
