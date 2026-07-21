@@ -156,3 +156,31 @@ fn invalid_custom_limits_return_an_error_without_panicking() {
         })
     ));
 }
+
+#[test]
+fn project_notes_keep_distinct_names_and_content() {
+    let project = OriginProject {
+        probe: probe_origin(b"CPYA 4.2673 552#\n").unwrap(),
+        parameters: Vec::new(),
+        notes: vec![
+            OriginNote {
+                name: "Methods".to_owned(),
+                content: "Prepared under nitrogen.".to_owned(),
+            },
+            OriginNote {
+                name: "Observations".to_owned(),
+                content: "The solution remained clear.".to_owned(),
+            },
+        ],
+        workbooks: Vec::new(),
+        diagnostics: Vec::new(),
+        unsupported_objects: Vec::new(),
+        resource_usage: OriginResourceUsage::default(),
+    };
+
+    assert_eq!(project.notes.len(), 2);
+    assert_eq!(project.notes[0].name, "Methods");
+    assert_eq!(project.notes[0].content, "Prepared under nitrogen.");
+    assert_eq!(project.notes[1].name, "Observations");
+    assert_eq!(project.notes[1].content, "The solution remained clear.");
+}

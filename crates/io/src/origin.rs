@@ -106,6 +106,15 @@ pub struct OriginMetadataEntry {
     pub value: String,
 }
 
+/// One named project note retained without concatenating independent content.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OriginNote {
+    /// Source note name.
+    pub name: String,
+    /// Decoded note content.
+    pub content: String,
+}
+
 /// One worksheet column in the neutral import model.
 #[derive(Debug, Clone, PartialEq)]
 pub struct OriginColumn {
@@ -233,7 +242,7 @@ pub struct OriginProject {
     /// Bounded project parameters.
     pub parameters: Vec<OriginMetadataEntry>,
     /// Bounded project notes.
-    pub notes: String,
+    pub notes: Vec<OriginNote>,
     /// Decoded workbooks in source order.
     pub workbooks: Vec<OriginWorkbook>,
     /// Recoverable parsing diagnostics.
@@ -526,7 +535,7 @@ fn probe_origin_with_limit(
         })?,
     };
     let version = parse_version(raw_version)?;
-    let raw_version = raw_version.to_owned();
+    let raw_version = copy_header_version(raw_version)?;
 
     match format {
         OriginFormat::Opj if raw_version != ORIGIN_7_V552_VERSION => {
@@ -641,6 +650,19 @@ fn parse_version(raw_version: &str) -> Result<OriginHeaderVersion, OriginError> 
 
 fn is_ascii_digits(value: &str) -> bool {
     !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+fn copy_header_version(raw_version: &str) -> Result<String, OriginError> {
+    let requested = raw_version.len();
+    let mut owned = String::new();
+    owned
+        .try_reserve_exact(requested)
+        .map_err(|_| OriginError::AllocationFailed {
+            resource: "header version text",
+            requested,
+        })?;
+    owned.push_str(raw_version);
+    Ok(owned)
 }
 
 fn malformed<T>(detail: &str) -> Result<T, OriginError> {
