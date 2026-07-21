@@ -197,6 +197,7 @@ pub struct OriginLimits {
     pub max_workbooks: usize,
     pub max_worksheets_per_workbook: usize,
     pub max_columns: usize,
+    pub max_metadata_records: usize,
     pub max_rows_per_column: usize,
     pub max_cells: usize,
     pub max_metadata_depth: usize,
@@ -443,7 +444,7 @@ git commit -m "feat(io): decode supported OPJ worksheet columns"
 - Modify: crates/io/src/origin/opj.rs
 - Create: crates/io/tests/origin_fixtures.rs
 
-- [ ] **Step 1: Write real OPJ fixture assertions first**
+- [x] **Step 1: Write real OPJ fixture assertions first**
 
 Wire metadata_tests.rs from metadata.rs:
 
@@ -480,7 +481,7 @@ fn imports_openopj_origin_7_v552_fixture() {
 
 Define cell as a private integration-test iterator helper rather than adding a public convenience API solely for tests. Also assert f32 approximately 345.60001 and -100000.20313, i32 values 345 and -100000, i16 values 34 and -1000, text values "test string 123" and "only text", first-row null/5.23/-7 behavior, parameters ERR=1, SYRNG_C_DATA1=1.25, CELL_C_DATA1=.1246, S=1.28889201142965, and the Results note content.
 
-- [ ] **Step 2: Write OPJU fixture rejection first**
+- [x] **Step 2: Write OPJU fixture rejection first**
 
 ~~~rust
 #[test]
@@ -497,7 +498,7 @@ fn recognizes_public_opju_fixture_without_partial_output() {
 }
 ~~~
 
-- [ ] **Step 3: Run tests and observe RED**
+- [x] **Step 3: Run tests and observe RED**
 
 ~~~bash
 cargo test -p plotx-io --lib metadata_tests
@@ -506,17 +507,20 @@ cargo test -p plotx-io --test origin_fixtures
 
 Expected: the named metadata unit tests are discovered and fail because metadata parsing is absent; OPJU integration rejection passes; OPJ integration assertions fail because workbook assembly and metadata traversal are incomplete.
 
-- [ ] **Step 4: Implement window and dataset association**
+- [x] **Step 4: Implement window and dataset association**
 
 Reimplement the MIT OpenOPJ Origin 7.0552 window traversal in Rust with a source citation. Dataset names use the validated workbook prefix and column suffix. Choose the longest validated matching window prefix. If no unambiguous association exists, create a deterministic fallback worksheet name and emit a stable warning; never attach a column to a nearby name by byte proximity.
 
-Enforce workbook, worksheet, column, row, cell, decoded-text, parser-allocation, and nesting limits while assembling.
+Enforce workbook, worksheet, column, row, cell, decoded-text, parser-allocation,
+cumulative metadata-record, and nesting limits while assembling. Metadata records
+have their own 65,536-record default budget and do not consume the data-column
+limit; every logical record is charged before it can be retained or safely skipped.
 
-- [ ] **Step 5: Implement framed parameters and notes**
+- [x] **Step 5: Implement framed parameters and notes**
 
 Parse only validated parameter lines and note blocks needed by the public fixture. Retain bounded key/value strings and note names/content. Unsupported note properties and project objects become diagnostics, not executable content. Non-ASCII independent metadata may be skipped with a warning only if the next record boundary is already validated.
 
-- [ ] **Step 6: Run real and adversarial tests**
+- [x] **Step 6: Run real and adversarial tests**
 
 ~~~bash
 cargo test -p plotx-io --test origin_fixtures -- --nocapture
@@ -526,7 +530,7 @@ cargo clippy -p plotx-io --all-targets -- -D warnings
 
 Expected: concrete OPJ values and metadata pass; OPJU remains a clear error; all synthetic corruption tests pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ~~~bash
 git add crates/io/src/origin crates/io/tests/origin_fixtures.rs

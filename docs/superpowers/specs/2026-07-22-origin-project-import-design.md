@@ -267,6 +267,7 @@ Default limits:
 - maximum workbooks: 256;
 - maximum worksheets per workbook: 128;
 - maximum total columns: 4,096;
+- maximum cumulative metadata records: 65,536;
 - maximum rows per column: 1,000,000;
 - maximum total decoded cells: 2,000,000;
 - maximum metadata nesting depth: 32.
@@ -300,7 +301,7 @@ Synthetic bytes generated in tests will cover:
 - truncated files at every framing boundary;
 - invalid delimiters, zero or oversized records, illegal row counts, width/length mismatch, and arithmetic overflow;
 - unsupported versions, profile mismatches, recognized protection markers when evidence exists, malformed structural variants, and OPJU variants;
-- configured file, block, string, column, row, cell, and nesting limits;
+- configured file, block, string, column, metadata-record, row, cell, and nesting limits;
 - unsupported objects producing warnings rather than panics or silent success;
 - core conversion of concrete values, types, names, nulls, metadata, and diagnostics.
 
