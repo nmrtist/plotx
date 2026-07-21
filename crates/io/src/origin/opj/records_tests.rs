@@ -1,3 +1,4 @@
+use std::mem::size_of;
 use std::panic::catch_unwind;
 
 use super::{DecodedColumnRecord, decode_column_record};
@@ -173,12 +174,30 @@ fn mixed_record() -> RecordBytes {
 
 fn decode(record: &RecordBytes) -> Result<DecodedColumnRecord, OriginError> {
     let mut usage = OriginResourceUsage::default();
-    decode_column_record(
-        &record.header,
-        Some(&record.content),
-        &OriginLimits::default(),
-        &mut usage,
-    )
+    decode_with(record, OriginLimits::default(), &mut usage)
+}
+
+fn decode_with(
+    record: &RecordBytes,
+    limits: OriginLimits,
+    usage: &mut OriginResourceUsage,
+) -> Result<DecodedColumnRecord, OriginError> {
+    decode_column_record(&record.header, Some(&record.content), &limits, usage)
+}
+
+fn clear_dataset_name(record: &mut RecordBytes) {
+    record.header[NAME_OFFSET..NAME_OFFSET + NAME_WIDTH].fill(0);
+}
+
+fn assert_limit(error: OriginError, resource: &'static str, limit: usize, actual: usize) {
+    assert_eq!(
+        error,
+        OriginError::LimitExceeded {
+            resource,
+            limit,
+            actual,
+        }
+    );
 }
 
 #[test]
@@ -368,6 +387,146 @@ fn rejects_incomplete_fixed_text_and_mixed_numeric_payloads() {
     );
     mixed.content = vec![0, 0, 1, 2, 3, 4, 5, 6, 7];
     assert!(matches!(decode(&mixed), Err(OriginError::Truncated { .. })));
+}
+
+#[test]
+fn rejects_content_one_byte_larger_than_declared_geometry() {
+    let mut oversized = f64_record(&[0.4]);
+    oversized.content.push(0);
+
+    assert!(matches!(
+        decode(&oversized),
+        Err(OriginError::CorruptStructure { .. })
+    ));
+}
+
+#[test]
+fn enforces_row_column_and_cell_limits_with_exact_counts() {
+    let record = f64_record(&[0.4, EMPTY_F64]);
+    let mut usage = OriginResourceUsage::default();
+    let row_limits = OriginLimits {
+        max_rows_per_column: 1,
+        ..OriginLimits::default()
+    };
+    assert_limit(
+        decode_with(&record, row_limits, &mut usage).unwrap_err(),
+        "rows per column",
+        1,
+        2,
+    );
+
+    let mut usage = OriginResourceUsage {
+        columns: 1,
+        ..OriginResourceUsage::default()
+    };
+    let column_limits = OriginLimits {
+        max_columns: 1,
+        ..OriginLimits::default()
+    };
+    assert_limit(
+        decode_with(&record, column_limits, &mut usage).unwrap_err(),
+        "columns",
+        1,
+        2,
+    );
+
+    let mut usage = OriginResourceUsage {
+        cells: 1,
+        ..OriginResourceUsage::default()
+    };
+    let cell_limits = OriginLimits {
+        max_cells: 2,
+        ..OriginLimits::default()
+    };
+    assert_limit(
+        decode_with(&record, cell_limits, &mut usage).unwrap_err(),
+        "cells",
+        2,
+        3,
+    );
+}
+
+#[test]
+fn enforces_string_and_cumulative_decoded_text_limits() {
+    let named_record = f64_record(&[0.4]);
+    let mut usage = OriginResourceUsage::default();
+    let dataset_name_limits = OriginLimits {
+        max_string_bytes: 9,
+        ..OriginLimits::default()
+    };
+    assert_limit(
+        decode_with(&named_record, dataset_name_limits, &mut usage).unwrap_err(),
+        "string bytes",
+        9,
+        10,
+    );
+
+    let mut record = text_record("test string 123");
+    clear_dataset_name(&mut record);
+
+    let mut usage = OriginResourceUsage::default();
+    let string_limits = OriginLimits {
+        max_string_bytes: 14,
+        ..OriginLimits::default()
+    };
+    assert_limit(
+        decode_with(&record, string_limits, &mut usage).unwrap_err(),
+        "string bytes",
+        14,
+        15,
+    );
+
+    let mut usage = OriginResourceUsage {
+        decoded_text_bytes: 1,
+        ..OriginResourceUsage::default()
+    };
+    let text_limits = OriginLimits {
+        max_decoded_text_bytes: 15,
+        ..OriginLimits::default()
+    };
+    assert_limit(
+        decode_with(&record, text_limits, &mut usage).unwrap_err(),
+        "decoded text bytes",
+        15,
+        16,
+    );
+}
+
+#[test]
+fn enforces_parser_and_total_owned_limits_before_cell_vector_allocation() {
+    let mut record = f64_record(&[0.4, EMPTY_F64]);
+    clear_dataset_name(&mut record);
+    let cell_bytes = 2 * size_of::<OriginCell>();
+
+    let mut usage = OriginResourceUsage {
+        parser_bytes: 1,
+        ..OriginResourceUsage::default()
+    };
+    let parser_limits = OriginLimits {
+        max_parser_bytes: cell_bytes,
+        ..OriginLimits::default()
+    };
+    assert_limit(
+        decode_with(&record, parser_limits, &mut usage).unwrap_err(),
+        "parser bytes",
+        cell_bytes,
+        cell_bytes + 1,
+    );
+
+    let mut usage = OriginResourceUsage {
+        total_owned_bytes: 1,
+        ..OriginResourceUsage::default()
+    };
+    let total_limits = OriginLimits {
+        max_total_owned_bytes: cell_bytes,
+        ..OriginLimits::default()
+    };
+    assert_limit(
+        decode_with(&record, total_limits, &mut usage).unwrap_err(),
+        "total owned bytes",
+        cell_bytes,
+        cell_bytes + 1,
+    );
 }
 
 #[test]
