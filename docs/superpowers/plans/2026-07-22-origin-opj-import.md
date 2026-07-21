@@ -104,7 +104,7 @@ git commit -m "test: add licensed Origin project fixtures"
 - Create: crates/io/src/origin/opju.rs
 - Create: crates/io/src/origin/tests.rs
 
-- [ ] **Step 1: Write failing public-behavior tests**
+- [x] **Step 1: Write failing public-behavior tests**
 
 Add tests that establish these outcomes before production code exists:
 
@@ -151,7 +151,7 @@ Wire the tests into origin.rs so the focused command cannot silently run zero te
 mod tests;
 ~~~
 
-- [ ] **Step 2: Run tests and observe RED**
+- [x] **Step 2: Run tests and observe RED**
 
 ~~~bash
 cargo test -p plotx-io --lib origin::tests
@@ -159,7 +159,7 @@ cargo test -p plotx-io --lib origin::tests
 
 Expected: compilation fails because plotx_io::origin and its public types do not exist. Record the failure in the task handoff.
 
-- [ ] **Step 3: Implement the minimal public model**
+- [x] **Step 3: Implement the minimal public model**
 
 Define:
 
@@ -215,13 +215,13 @@ pub fn read_origin(
 
 The default limits must equal the design values. Keep all fields engine-neutral and independent of UI and DataFusion types.
 
-- [ ] **Step 4: Implement bounded signature probing**
+- [x] **Step 4: Implement bounded signature probing**
 
 Parse only a bounded first line. Require CPYA for OPJ or CPYUA for OPJU, a terminating LF, printable ASCII version text, and the profile-specific terminator. Classic OPJ uses the verified CPYA 4.2673 552# LF grammar; the public OPJU regression fixture uses CPYUA 4.3668 178 LF with no #. Never select a format from an extension.
 
 Origin 7.0552 maps to OriginProfile::Origin7V552. Other CPYA versions return UnsupportedVersion. CPYUA dispatches to opju.rs, which validates the family header and then returns UnsupportedOpjuVariant with a user-safe message.
 
-- [ ] **Step 5: Run tests and observe GREEN**
+- [x] **Step 5: Run tests and observe GREEN**
 
 ~~~bash
 cargo test -p plotx-io --lib origin::tests
@@ -230,7 +230,7 @@ cargo check -p plotx-io --locked
 
 Expected: all new probe and OPJU tests pass; the test runner reports the named tests above rather than zero tests; plotx-io compiles without a new dependency.
 
-- [ ] **Step 6: Inspect public documentation and line counts**
+- [x] **Step 6: Inspect public documentation and line counts**
 
 ~~~bash
 cargo fmt --check
@@ -240,7 +240,7 @@ wc -l crates/io/src/origin.rs crates/io/src/origin/opju.rs crates/io/src/origin/
 
 Expected: public APIs have useful rustdoc and every Rust file is under 800 lines.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ~~~bash
 git add crates/io/src/lib.rs crates/io/src/origin.rs crates/io/src/origin
