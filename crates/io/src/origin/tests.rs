@@ -184,3 +184,65 @@ fn project_notes_keep_distinct_names_and_content() {
     assert_eq!(project.notes[1].name, "Observations");
     assert_eq!(project.notes[1].content, "The solution remained clear.");
 }
+
+#[test]
+fn enforces_the_header_limit_at_the_lf_byte_boundary() {
+    let mut accepted = b"CPYUA ".to_vec();
+    accepted.extend(std::iter::repeat_n(b'0', 111));
+    accepted.extend_from_slice(b"4.3668 178\n");
+    assert_eq!(accepted.len(), 128);
+
+    let probe = probe_origin(&accepted).unwrap();
+    assert_eq!(probe.format, OriginFormat::Opju);
+    assert_eq!(probe.version.major, 4);
+    assert_eq!(probe.version.minor, 3668);
+    assert_eq!(probe.version.build, 178);
+
+    let mut too_long = b"CPYUA ".to_vec();
+    too_long.extend(std::iter::repeat_n(b'0', 112));
+    too_long.extend_from_slice(b"4.3668 178\n");
+    assert_eq!(too_long.len(), 129);
+    assert!(matches!(
+        probe_origin(&too_long),
+        Err(OriginError::HeaderTooLong { limit: 128 })
+    ));
+}
+
+#[test]
+fn rejects_complete_magic_with_an_invalid_following_byte() {
+    for bytes in [
+        b"CPYAB 4.2673 552#\n".as_slice(),
+        b"CPYUAX 4.3668 178\n".as_slice(),
+    ] {
+        assert!(matches!(
+            probe_origin(bytes),
+            Err(OriginError::MalformedHeader { .. })
+        ));
+    }
+}
+
+#[test]
+fn parses_numeric_maxima_and_rejects_integer_overflow() {
+    let opju = probe_origin(b"CPYUA 65535.65535 4294967295\n").unwrap();
+    assert_eq!(opju.version.major, u16::MAX);
+    assert_eq!(opju.version.minor, u16::MAX);
+    assert_eq!(opju.version.build, u32::MAX);
+
+    assert!(matches!(
+        probe_origin(b"CPYA 65535.65535 4294967295#\n"),
+        Err(OriginError::UnsupportedVersion { .. })
+    ));
+
+    for bytes in [
+        b"CPYUA 65536.1 1\n".as_slice(),
+        b"CPYUA 1.65536 1\n".as_slice(),
+        b"CPYUA 1.1 4294967296\n".as_slice(),
+    ] {
+        let result = std::panic::catch_unwind(|| probe_origin(bytes));
+        assert!(result.is_ok());
+        assert!(matches!(
+            result.unwrap(),
+            Err(OriginError::MalformedHeader { .. })
+        ));
+    }
+}

@@ -587,15 +587,13 @@ fn identify_family(bytes: &[u8]) -> Result<OriginFormat, OriginError> {
 
 fn bounded_first_line(bytes: &[u8], max_header_bytes: usize) -> Result<&[u8], OriginError> {
     let scan_len = bytes.len().min(max_header_bytes);
-    let scan = bytes
-        .get(..scan_len)
-        .ok_or_else(|| OriginError::Truncated {
-            offset: 0,
-            needed: scan_len,
-            have: bytes.len(),
-        })?;
+    let scan = bytes.get(..scan_len).ok_or(OriginError::Truncated {
+        offset: 0,
+        needed: scan_len,
+        have: bytes.len(),
+    })?;
     if let Some(newline) = scan.iter().position(|byte| *byte == b'\n') {
-        return scan.get(..newline).ok_or_else(|| OriginError::Truncated {
+        return scan.get(..newline).ok_or(OriginError::Truncated {
             offset: 0,
             needed: newline,
             have: scan.len(),
