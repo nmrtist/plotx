@@ -186,9 +186,13 @@ fn associate_dataset(dataset_name: &str, windows: &[metadata::WindowInfo]) -> Da
             exact = true;
             continue;
         }
-        if !is_verified_identifier(window_name)
-            || !is_verified_dataset_suffix(dataset_name, window_name)
-        {
+        let Some(suffix) = dataset_name
+            .strip_prefix(window_name)
+            .and_then(|rest| rest.strip_prefix('_'))
+        else {
+            continue;
+        };
+        if suffix.is_empty() {
             continue;
         }
 
@@ -213,24 +217,6 @@ fn associate_dataset(dataset_name: &str, windows: &[metadata::WindowInfo]) -> Da
         },
         _ => DatasetAssociation::Fallback,
     }
-}
-
-fn is_verified_identifier(value: &str) -> bool {
-    let mut bytes = value.bytes();
-    bytes.next().is_some_and(|byte| byte.is_ascii_alphabetic())
-        && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
-}
-
-fn is_verified_dataset_suffix(dataset_name: &str, window_name: &str) -> bool {
-    let Some(rest) = dataset_name.strip_prefix(window_name) else {
-        return false;
-    };
-    let Some(suffix) = rest.strip_prefix('_') else {
-        return false;
-    };
-    let mut bytes = suffix.bytes();
-    bytes.next().is_some_and(|byte| byte.is_ascii_alphabetic())
-        && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
 }
 
 fn make_column(

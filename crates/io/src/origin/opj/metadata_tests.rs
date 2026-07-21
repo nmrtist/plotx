@@ -122,6 +122,23 @@ fn requires_an_underscore_between_window_and_column_names() {
 }
 
 #[test]
+fn preserves_non_identifier_column_suffixes_after_an_exact_window_prefix() {
+    let bytes = synthetic_project(&[("Book_1", true), ("Book_A-B", true)], &[b"Book"]);
+    let project = read_origin(&bytes, OriginLimits::default()).unwrap();
+
+    assert_eq!(project.workbooks.len(), 1);
+    assert_eq!(project.workbooks[0].name, "Book");
+    assert_eq!(
+        project.workbooks[0].worksheets[0]
+            .columns
+            .iter()
+            .map(|column| column.name.as_str())
+            .collect::<Vec<_>>(),
+        ["1", "A-B"]
+    );
+}
+
+#[test]
 fn ambiguous_or_missing_window_associations_use_a_stable_fallback() {
     for windows in [
         &[b"Other".as_slice()][..],

@@ -63,6 +63,26 @@ fn imports_openopj_origin_7_v552_fixture() {
         ["Data1", "Data1Coeff", "Data1spline", "TestW"]
     );
     assert_eq!(
+        project
+            .workbooks
+            .iter()
+            .map(|workbook| {
+                let worksheet = &workbook.worksheets[0];
+                (
+                    workbook.name.as_str(),
+                    worksheet.row_count,
+                    worksheet.columns.len(),
+                )
+            })
+            .collect::<Vec<_>>(),
+        [
+            ("Data1", 21, 5),
+            ("Data1Coeff", 774, 4),
+            ("Data1spline", 481, 1),
+            ("TestW", 3, 6),
+        ]
+    );
+    assert_eq!(
         cell(&project, "Data1", "INJV", 0),
         Some(&OriginCell::Float(0.4))
     );
@@ -125,6 +145,7 @@ fn imports_openopj_origin_7_v552_fixture() {
     assert_float_cell(&project, "TestW", "firstRow", 1, 5.23);
     assert_float_cell(&project, "TestW", "firstRow", 2, -7.0);
 
+    assert_eq!(project.parameters.len(), 41);
     assert_eq!(parameter(&project, "ERR"), 1.0);
     assert_eq!(parameter(&project, "SYRNG_C_DATA1"), 1.25);
     assert_eq!(parameter(&project, "CELL_C_DATA1"), 0.1246);
@@ -160,6 +181,14 @@ S\t1.29\r\n\r\n"
     assert_eq!(project.resource_usage.worksheets, 4);
     assert_eq!(project.resource_usage.columns, 16);
     assert_eq!(project.resource_usage.cells, 1889);
+    assert_eq!(
+        project
+            .unsupported_objects
+            .iter()
+            .find(|summary| summary.kind == "worksheet columns")
+            .map(|summary| summary.count),
+        Some(23)
+    );
     assert!(project.diagnostics.iter().any(|diagnostic| {
         diagnostic.code == plotx_io::origin::OriginDiagnosticCode::UnsupportedColumnSkipped
     }));
