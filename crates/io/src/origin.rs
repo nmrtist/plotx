@@ -3,7 +3,9 @@
 //! Format detection is based only on the first line of the file. The module
 //! does not use filename extensions, and OPJU input is detection-only.
 
+mod opj;
 mod opju;
+mod reader;
 
 const DEFAULT_MAX_HEADER_BYTES: usize = 128;
 const MIB: usize = 1024 * 1024;
@@ -493,10 +495,7 @@ pub fn read_origin(bytes: &[u8], limits: OriginLimits) -> Result<OriginProject, 
     let probe = probe_origin_with_limit(bytes, limits.max_header_bytes)?;
     match probe.format {
         OriginFormat::Opju => opju::read(probe),
-        OriginFormat::Opj => Err(OriginError::UnsupportedFeature {
-            feature: "classic OPJ project-body decoding is not available in this parser stage"
-                .to_owned(),
-        }),
+        OriginFormat::Opj => opj::read(bytes, &limits, probe),
     }
 }
 
@@ -672,6 +671,10 @@ fn malformed_error(detail: &str) -> OriginError {
         detail: detail.to_owned(),
     }
 }
+
+#[cfg(test)]
+#[path = "origin/reader_tests.rs"]
+mod reader_tests;
 
 #[cfg(test)]
 #[path = "origin/tests.rs"]

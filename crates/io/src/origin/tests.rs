@@ -246,3 +246,227 @@ fn parses_numeric_maxima_and_rejects_integer_overflow() {
         ));
     }
 }
+
+mod origin7_profile {
+    use super::*;
+
+    const SIGNATURE: &[u8] = b"CPYA 4.2673 552#\n";
+    const ORIGIN_HEADER_LEN: usize = 39;
+    const DATA_HEADER_LEN: usize = 123;
+    const SIZE_PREFIX_LEN: usize = 5;
+    const NULL_BLOCK_LEN: usize = 5;
+
+    fn push_block(bytes: &mut Vec<u8>, payload: Option<&[u8]>) {
+        let payload = payload.unwrap_or_default();
+        let length = u32::try_from(payload.len()).unwrap();
+        bytes.extend_from_slice(&length.to_le_bytes());
+        bytes.push(b'\n');
+        if !payload.is_empty() {
+            bytes.extend_from_slice(payload);
+            bytes.push(b'\n');
+        }
+    }
+
+    fn origin_header() -> [u8; ORIGIN_HEADER_LEN] {
+        let mut header = [0; ORIGIN_HEADER_LEN];
+        header[0x1b..0x23].copy_from_slice(&7.0552_f64.to_le_bytes());
+        header
+    }
+
+    fn data_header() -> [u8; DATA_HEADER_LEN] {
+        [0; DATA_HEADER_LEN]
+    }
+
+    fn synthetic_project(contents: &[Option<&[u8]>]) -> Vec<u8> {
+        let mut bytes = SIGNATURE.to_vec();
+        push_block(&mut bytes, Some(&origin_header()));
+        push_block(&mut bytes, None);
+        for content in contents {
+            push_block(&mut bytes, Some(&data_header()));
+            push_block(&mut bytes, *content);
+            push_block(&mut bytes, None);
+        }
+        push_block(&mut bytes, None);
+        bytes
+    }
+
+    fn first_data_header_offset() -> usize {
+        SIGNATURE.len() + SIZE_PREFIX_LEN + ORIGIN_HEADER_LEN + 1 + NULL_BLOCK_LEN
+    }
+
+    #[test]
+    fn accepts_exact_header_and_empty_data_list_framing() {
+        let bytes = synthetic_project(&[]);
+        let probe = probe_origin(&bytes).unwrap();
+        assert_eq!(probe.profile, Some(OriginProfile::Origin7V552));
+        assert!(matches!(
+            read_origin(&bytes, OriginLimits::default()),
+            Err(OriginError::NoSupportedWorksheet)
+        ));
+    }
+
+    #[test]
+    fn accepts_data_and_null_content_block_framing_before_decode() {
+        let bytes = synthetic_project(&[Some(b"values"), None]);
+        assert!(matches!(
+            read_origin(&bytes, OriginLimits::default()),
+            Err(OriginError::UnsupportedFeature { .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_other_producer_version() {
+        let mut bytes = synthetic_project(&[]);
+        bytes[14] = b'1';
+        assert!(matches!(
+            read_origin(&bytes, OriginLimits::default()),
+            Err(OriginError::UnsupportedVersion { .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_wrong_origin_header_length() {
+        let mut bytes = synthetic_project(&[]);
+        bytes[SIGNATURE.len()..SIGNATURE.len() + 4]
+            .copy_from_slice(&(ORIGIN_HEADER_LEN as u32 - 1).to_le_bytes());
+        let final_header_byte = SIGNATURE.len() + SIZE_PREFIX_LEN + ORIGIN_HEADER_LEN - 1;
+        bytes.remove(final_header_byte);
+        assert!(matches!(
+            read_origin(&bytes, OriginLimits::default()),
+            Err(OriginError::CorruptStructure {
+                offset,
+                ..
+            }) if offset == SIGNATURE.len()
+        ));
+    }
+
+    #[test]
+    fn rejects_wrong_embedded_origin_version() {
+        let mut bytes = synthetic_project(&[]);
+        let version_offset = SIGNATURE.len() + SIZE_PREFIX_LEN + 0x1b;
+        bytes[version_offset..version_offset + 8].copy_from_slice(&7.0551_f64.to_le_bytes());
+        assert!(matches!(
+            read_origin(&bytes, OriginLimits::default()),
+            Err(OriginError::UnsupportedVersion { .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_bad_origin_header_size_delimiter_with_offset() {
+        let mut bytes = synthetic_project(&[]);
+        let delimiter = SIGNATURE.len() + 4;
+        bytes[delimiter] = b'!';
+        assert!(matches!(
+            read_origin(&bytes, OriginLimits::default()),
+            Err(OriginError::CorruptStructure { offset, .. }) if offset == delimiter
+        ));
+    }
+
+    #[test]
+    fn rejects_bad_origin_header_payload_delimiter_with_offset() {
+        let mut bytes = synthetic_project(&[]);
+        let delimiter = SIGNATURE.len() + SIZE_PREFIX_LEN + ORIGIN_HEADER_LEN;
+        bytes[delimiter] = b'!';
+        assert!(matches!(
+            read_origin(&bytes, OriginLimits::default()),
+            Err(OriginError::CorruptStructure { offset, .. }) if offset == delimiter
+        ));
+    }
+
+    #[test]
+    fn rejects_declared_oversized_block_before_payload_access() {
+        let mut bytes = synthetic_project(&[]);
+        let limits = OriginLimits {
+            max_block_bytes: ORIGIN_HEADER_LEN,
+            ..OriginLimits::default()
+        };
+        bytes[SIGNATURE.len()..SIGNATURE.len() + 4]
+            .copy_from_slice(&(ORIGIN_HEADER_LEN as u32 + 1).to_le_bytes());
+        assert!(matches!(
+            read_origin(&bytes, limits),
+            Err(OriginError::LimitExceeded {
+                resource: "block bytes",
+                limit: ORIGIN_HEADER_LEN,
+                actual,
+            }) if actual == ORIGIN_HEADER_LEN + 1
+        ));
+    }
+
+    #[test]
+    fn rejects_missing_origin_header_null_block() {
+        let mut bytes = synthetic_project(&[Some(b"value")]);
+        let header_null = first_data_header_offset() - NULL_BLOCK_LEN;
+        bytes.drain(header_null..header_null + NULL_BLOCK_LEN);
+        assert!(matches!(
+            read_origin(&bytes, OriginLimits::default()),
+            Err(OriginError::CorruptStructure { offset, .. }) if offset == header_null
+        ));
+    }
+
+    #[test]
+    fn rejects_wrong_data_header_length() {
+        let mut bytes = synthetic_project(&[Some(b"value")]);
+        let data_header = first_data_header_offset();
+        bytes[data_header..data_header + 4]
+            .copy_from_slice(&(DATA_HEADER_LEN as u32 - 1).to_le_bytes());
+        bytes.remove(data_header + SIZE_PREFIX_LEN + DATA_HEADER_LEN - 1);
+        assert!(matches!(
+            read_origin(&bytes, OriginLimits::default()),
+            Err(OriginError::CorruptStructure { offset, .. }) if offset == data_header
+        ));
+    }
+
+    #[test]
+    fn rejects_missing_data_content_block_as_truncated() {
+        let mut bytes = synthetic_project(&[Some(b"value")]);
+        let content = first_data_header_offset() + SIZE_PREFIX_LEN + DATA_HEADER_LEN + 1;
+        let content_len = SIZE_PREFIX_LEN + b"value".len() + 1;
+        bytes.drain(content..content + content_len);
+        assert!(matches!(
+            read_origin(&bytes, OriginLimits::default()),
+            Err(OriginError::Truncated { .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_missing_per_section_null_as_truncated() {
+        let mut bytes = synthetic_project(&[Some(b"value")]);
+        let section_null = first_data_header_offset()
+            + SIZE_PREFIX_LEN
+            + DATA_HEADER_LEN
+            + 1
+            + SIZE_PREFIX_LEN
+            + b"value".len()
+            + 1;
+        bytes.drain(section_null..section_null + NULL_BLOCK_LEN);
+        assert!(matches!(
+            read_origin(&bytes, OriginLimits::default()),
+            Err(OriginError::Truncated { .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_missing_data_list_terminator_as_truncated() {
+        let mut bytes = synthetic_project(&[]);
+        bytes.truncate(bytes.len() - NULL_BLOCK_LEN);
+        assert!(matches!(
+            read_origin(&bytes, OriginLimits::default()),
+            Err(OriginError::Truncated { .. })
+        ));
+    }
+
+    #[test]
+    fn every_truncated_project_prefix_returns_a_structured_error() {
+        let complete = synthetic_project(&[]);
+        for prefix_len in 0..complete.len() {
+            let result = std::panic::catch_unwind(|| {
+                read_origin(&complete[..prefix_len], OriginLimits::default())
+            });
+            assert!(result.is_ok(), "prefix {prefix_len} panicked");
+            assert!(matches!(
+                result.unwrap(),
+                Err(OriginError::Truncated { .. })
+            ));
+        }
+    }
+}
