@@ -1,8 +1,12 @@
 use std::mem::size_of;
 
 use super::reader::{FramedBlock, Reader, checked_add};
-use super::{OriginError, OriginLimits, OriginProbe, OriginProject, OriginResourceUsage};
+use super::{
+    OriginColumn, OriginDiagnosticCode, OriginError, OriginLimits, OriginProbe, OriginProject,
+    OriginResourceUsage, OriginWorkbook, OriginWorksheet,
+};
 
+mod metadata;
 mod records;
 
 const SIGNATURE: &[u8] = b"CPYA 4.2673 552#\n";
@@ -29,40 +33,321 @@ pub(super) struct RawOpjProject<'a> {
 pub(super) fn read(
     bytes: &[u8],
     limits: &OriginLimits,
-    _probe: OriginProbe,
+    probe: OriginProbe,
 ) -> Result<OriginProject, OriginError> {
     let raw = parse_raw(bytes, limits)?;
-    let has_data = !raw.data_sections.is_empty();
-    let has_unparsed_structure = !raw.remaining.is_empty();
+    if raw.data_sections.is_empty() && raw.remaining.is_empty() {
+        return Err(OriginError::NoSupportedWorksheet);
+    }
 
-    // Keep the borrowed framing and its accounting live through dispatch. Later
-    // decoding stages consume these exact slices instead of rediscovering bounds.
-    let _header_len = raw.origin_header.len();
+    let _validated_header_len = raw.origin_header.len();
     let mut usage = raw.resource_usage;
-    let _section_bytes = raw
-        .data_sections
-        .iter()
-        .try_fold(0_usize, |total, section| {
-            let with_header = checked_add(total, section.header.len(), "raw OPJ section bytes")?;
-            checked_add(
-                with_header,
-                section.content.map_or(0, <[u8]>::len),
-                "raw OPJ section bytes",
-            )
-        })?;
+    let metadata_offset =
+        bytes
+            .len()
+            .checked_sub(raw.remaining.len())
+            .ok_or(OriginError::ArithmeticOverflow {
+                resource: "OPJ metadata offset",
+            })?;
+    let mut parsed = metadata::parse(raw.remaining, metadata_offset, limits, &mut usage)?;
+    let mut fallback_columns = Vec::new();
+    let mut unsupported_columns = 0_usize;
 
     for section in &raw.data_sections {
-        let _decoded =
-            records::decode_column_record(section.header, section.content, limits, &mut usage)?;
+        match records::decode_column_record(section.header, section.content, limits, &mut usage) {
+            Ok(decoded) => {
+                match associate_dataset(&decoded.dataset_name, &parsed.windows) {
+                    DatasetAssociation::Window {
+                        index,
+                        prefix_bytes,
+                    } => {
+                        let column = make_column(decoded, Some(prefix_bytes))?;
+                        let window = parsed.windows.get_mut(index).ok_or(
+                            OriginError::ArithmeticOverflow {
+                                resource: "associated Origin window",
+                            },
+                        )?;
+                        metadata::try_reserve(
+                            &mut window.columns,
+                            1,
+                            "Origin worksheet columns",
+                            limits,
+                            &mut usage,
+                        )?;
+                        window.columns.push(column);
+                    }
+                    DatasetAssociation::ExactWindow => {
+                        unsupported_columns =
+                            checked_add(unsupported_columns, 1, "unsupported Origin columns")?;
+                    }
+                    DatasetAssociation::Fallback => {
+                        metadata::push_diagnostic(
+                            &mut parsed.diagnostics,
+                            OriginDiagnosticCode::DecodingWarning,
+                            "A worksheet column had no unambiguous Origin window; PlotX kept it in Unmatched Origin data.",
+                            None,
+                            limits,
+                            &mut usage,
+                        )?;
+                        let column = make_column(decoded, None)?;
+                        metadata::try_reserve(
+                            &mut fallback_columns,
+                            1,
+                            "unmatched Origin worksheet columns",
+                            limits,
+                            &mut usage,
+                        )?;
+                        fallback_columns.push(column);
+                    }
+                }
+            }
+            Err(OriginError::UnsupportedFeature { .. }) => {
+                // The Task 4 decoder emits UnsupportedFeature only while
+                // classifying a fully framed column header, before it reads or
+                // interprets that column's payload. The outer data-section
+                // bounds therefore make this individual skip deterministic.
+                unsupported_columns =
+                    checked_add(unsupported_columns, 1, "unsupported Origin columns")?;
+            }
+            Err(error) => return Err(error),
+        }
     }
 
-    if has_data || has_unparsed_structure {
-        return Err(OriginError::UnsupportedFeature {
-            feature: "classic OPJ data records after validated framing are not decoded yet"
-                .to_owned(),
+    if unsupported_columns > 0 {
+        metadata::push_summary(
+            &mut parsed.unsupported_objects,
+            "worksheet columns",
+            unsupported_columns,
+            limits,
+            &mut usage,
+        )?;
+        metadata::push_diagnostic(
+            &mut parsed.diagnostics,
+            OriginDiagnosticCode::UnsupportedColumnSkipped,
+            "PlotX skipped independently framed Origin columns whose value layouts are not verified.",
+            None,
+            limits,
+            &mut usage,
+        )?;
+    }
+
+    let unused_windows = parsed
+        .windows
+        .iter()
+        .filter(|window| window.columns.is_empty())
+        .count();
+    if unused_windows > 0 {
+        metadata::push_summary(
+            &mut parsed.unsupported_objects,
+            "unsupported window records",
+            unused_windows,
+            limits,
+            &mut usage,
+        )?;
+        metadata::push_diagnostic(
+            &mut parsed.diagnostics,
+            OriginDiagnosticCode::UnsupportedObjectSkipped,
+            "PlotX skipped Origin window records that had no supported worksheet columns.",
+            None,
+            limits,
+            &mut usage,
+        )?;
+    }
+
+    let workbooks = assemble_workbooks(parsed.windows, fallback_columns, limits, &mut usage)?;
+    Ok(OriginProject {
+        probe,
+        parameters: parsed.parameters,
+        notes: parsed.notes,
+        workbooks,
+        diagnostics: parsed.diagnostics,
+        unsupported_objects: parsed.unsupported_objects,
+        resource_usage: usage,
+    })
+}
+
+enum DatasetAssociation {
+    Window { index: usize, prefix_bytes: usize },
+    ExactWindow,
+    Fallback,
+}
+
+fn associate_dataset(dataset_name: &str, windows: &[metadata::WindowInfo]) -> DatasetAssociation {
+    let mut best = None;
+    let mut best_len = 0_usize;
+    let mut ambiguous = false;
+    let mut exact = false;
+
+    for (index, window) in windows.iter().enumerate() {
+        let Some(window_name) = window.name.as_deref() else {
+            continue;
+        };
+        if dataset_name == window_name {
+            exact = true;
+            continue;
+        }
+        if !is_verified_identifier(window_name)
+            || !is_verified_dataset_suffix(dataset_name, window_name)
+        {
+            continue;
+        }
+
+        match window_name.len().cmp(&best_len) {
+            std::cmp::Ordering::Greater => {
+                best = Some(index);
+                best_len = window_name.len();
+                ambiguous = false;
+            }
+            std::cmp::Ordering::Equal => ambiguous = true,
+            std::cmp::Ordering::Less => {}
+        }
+    }
+
+    if exact {
+        return DatasetAssociation::ExactWindow;
+    }
+    match (best, ambiguous) {
+        (Some(index), false) => DatasetAssociation::Window {
+            index,
+            prefix_bytes: best_len,
+        },
+        _ => DatasetAssociation::Fallback,
+    }
+}
+
+fn is_verified_identifier(value: &str) -> bool {
+    let mut bytes = value.bytes();
+    bytes.next().is_some_and(|byte| byte.is_ascii_alphabetic())
+        && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+}
+
+fn is_verified_dataset_suffix(dataset_name: &str, window_name: &str) -> bool {
+    let Some(rest) = dataset_name.strip_prefix(window_name) else {
+        return false;
+    };
+    let Some(suffix) = rest.strip_prefix('_') else {
+        return false;
+    };
+    let mut bytes = suffix.bytes();
+    bytes.next().is_some_and(|byte| byte.is_ascii_alphabetic())
+        && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+}
+
+fn make_column(
+    decoded: records::DecodedColumnRecord,
+    prefix_bytes: Option<usize>,
+) -> Result<OriginColumn, OriginError> {
+    let mut name = decoded.dataset_name;
+    if let Some(prefix_bytes) = prefix_bytes {
+        if !name.is_char_boundary(prefix_bytes) || name.get(prefix_bytes..).is_none() {
+            return Err(OriginError::CorruptStructure {
+                offset: 0,
+                detail: "an associated Origin dataset prefix is not a text boundary".to_owned(),
+            });
+        }
+        name.replace_range(..prefix_bytes, "");
+        if name.as_bytes().first() == Some(&b'_') {
+            name.remove(0);
+        }
+    }
+    Ok(OriginColumn {
+        name,
+        long_name: None,
+        role: None,
+        units: None,
+        comments: None,
+        column_type: decoded.column_type,
+        cells: decoded.cells,
+    })
+}
+
+fn assemble_workbooks(
+    windows: Vec<metadata::WindowInfo>,
+    fallback_columns: Vec<OriginColumn>,
+    limits: &OriginLimits,
+    usage: &mut OriginResourceUsage,
+) -> Result<Vec<OriginWorkbook>, OriginError> {
+    let named_workbooks = windows
+        .iter()
+        .filter(|window| !window.columns.is_empty())
+        .count();
+    let workbook_count = checked_add(
+        named_workbooks,
+        usize::from(!fallback_columns.is_empty()),
+        "workbooks",
+    )?;
+    if workbook_count == 0 {
+        return Err(OriginError::NoSupportedWorksheet);
+    }
+    enforce_count("workbooks", workbook_count, limits.max_workbooks)?;
+    enforce_count(
+        "worksheets per workbook",
+        1,
+        limits.max_worksheets_per_workbook,
+    )?;
+
+    let mut workbooks = Vec::new();
+    metadata::try_reserve(
+        &mut workbooks,
+        workbook_count,
+        "Origin workbooks",
+        limits,
+        usage,
+    )?;
+    for window in windows {
+        if window.columns.is_empty() {
+            continue;
+        }
+        let name = window.name.ok_or(OriginError::CorruptStructure {
+            offset: 0,
+            detail: "a supported Origin worksheet lost its validated window name".to_owned(),
+        })?;
+        push_workbook(&mut workbooks, name, window.columns, limits, usage)?;
+    }
+    if !fallback_columns.is_empty() {
+        let name = metadata::copy_generated_text("Unmatched Origin data", limits, usage)?;
+        push_workbook(&mut workbooks, name, fallback_columns, limits, usage)?;
+    }
+
+    usage.workbooks = workbook_count;
+    usage.worksheets = workbook_count;
+    Ok(workbooks)
+}
+
+fn push_workbook(
+    workbooks: &mut Vec<OriginWorkbook>,
+    name: String,
+    columns: Vec<OriginColumn>,
+    limits: &OriginLimits,
+    usage: &mut OriginResourceUsage,
+) -> Result<(), OriginError> {
+    let row_count = columns
+        .iter()
+        .map(|column| column.cells.len())
+        .max()
+        .unwrap_or(0);
+    let worksheet_name = metadata::copy_generated_text("Sheet1", limits, usage)?;
+    let mut worksheets = Vec::new();
+    metadata::try_reserve(&mut worksheets, 1, "Origin worksheets", limits, usage)?;
+    worksheets.push(OriginWorksheet {
+        name: worksheet_name,
+        columns,
+        row_count,
+        metadata: Vec::new(),
+    });
+    workbooks.push(OriginWorkbook { name, worksheets });
+    Ok(())
+}
+
+fn enforce_count(resource: &'static str, actual: usize, limit: usize) -> Result<(), OriginError> {
+    if actual > limit {
+        return Err(OriginError::LimitExceeded {
+            resource,
+            limit,
+            actual,
         });
     }
-    Err(OriginError::NoSupportedWorksheet)
+    Ok(())
 }
 
 pub(super) fn parse_raw<'a>(

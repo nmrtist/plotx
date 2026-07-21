@@ -306,11 +306,11 @@ mod origin7_profile {
     }
 
     #[test]
-    fn accepts_data_and_null_content_block_framing_before_decode() {
+    fn framed_data_without_required_metadata_is_truncated() {
         let bytes = synthetic_project(&[Some(b"values"), None]);
         assert!(matches!(
             read_origin(&bytes, OriginLimits::default()),
-            Err(OriginError::UnsupportedFeature { .. })
+            Err(OriginError::Truncated { .. })
         ));
     }
 
