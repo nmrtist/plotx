@@ -256,7 +256,7 @@ git commit -m "feat(io): detect Origin project formats"
 - Create: crates/io/src/origin/opj.rs
 - Extend: crates/io/src/origin/tests.rs
 
-- [ ] **Step 1: Write reader tests before implementation**
+- [x] **Step 1: Write reader tests before implementation**
 
 Cover:
 
@@ -280,7 +280,7 @@ Wire reader_tests.rs from origin.rs before running RED:
 mod reader_tests;
 ~~~
 
-- [ ] **Step 2: Run tests and observe RED**
+- [x] **Step 2: Run tests and observe RED**
 
 ~~~bash
 cargo test -p plotx-io --lib reader_tests
@@ -288,13 +288,13 @@ cargo test -p plotx-io --lib reader_tests
 
 Expected: the named reader tests are discovered and fail to compile because the checked reader does not exist.
 
-- [ ] **Step 3: Implement the checked reader**
+- [x] **Step 3: Implement the checked reader**
 
 The reader owns an immutable byte slice, current offset, OriginLimits reference, and OriginResourceUsage. All methods return Result and include the current offset in structural errors. It must use checked slices and checked arithmetic. It must not use unsafe, unwrap, or unchecked indexing on external data.
 
 Charge requested capacities before Vec::try_reserve or String allocation. A capacity request that exceeds any parser or cumulative limit returns LimitExceeded without attempting allocation.
 
-- [ ] **Step 4: Write profile-framing tests**
+- [x] **Step 4: Write profile-framing tests**
 
 Construct synthetic bytes using test-only helpers. Assert:
 
@@ -309,7 +309,7 @@ fn accepts_only_exact_origin_7_v552_header_and_framing() {
 
 Mutate producer version, header terminator, first block delimiter, declared length, and final delimiter separately. Assert a specific UnsupportedVersion or CorruptStructure category.
 
-- [ ] **Step 5: Run the profile tests and observe RED**
+- [x] **Step 5: Run the profile tests and observe RED**
 
 ~~~bash
 cargo test -p plotx-io --lib origin::tests::origin7_profile
@@ -317,11 +317,11 @@ cargo test -p plotx-io --lib origin::tests::origin7_profile
 
 Expected: the probe passes but read_origin fails because OPJ framing is not implemented.
 
-- [ ] **Step 6: Implement exact OPJ block traversal**
+- [x] **Step 6: Implement exact OPJ block traversal**
 
 Implement only the top-level grammar needed by Origin7V552. Comments must cite the relevant OpenOPJ MIT source or documentation file and explain the checked boundary. Unknown length-framed blocks may be retained as UnsupportedObjectSummary entries only where skipping cannot alter later record alignment.
 
-- [ ] **Step 7: Run focused tests**
+- [x] **Step 7: Run focused tests**
 
 ~~~bash
 cargo test -p plotx-io --lib reader_tests
@@ -331,7 +331,7 @@ cargo clippy -p plotx-io --all-targets -- -D warnings
 
 Expected: all pass.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ~~~bash
 git add crates/io/src/origin
