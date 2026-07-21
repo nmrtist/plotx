@@ -2,20 +2,20 @@
 
 **Date:** 2026-07-22
 
-**Status:** Pending written-spec review
+**Status:** Approved after self-review
 
 **Feature label:** Origin project import (experimental)
 
 ## Summary
 
-PlotX will import worksheet data directly from supported Origin project files without installing, launching, or automating Origin. The first release will provide a native Rust importer for a verified older binary `.opj` profile. It will expose a deliberately narrow, experimental decoder for one numeric `.opju` encoding only if implementation work proves a complete container profile around that encoding. If that proof fails, PlotX will still recognize `.opju` and return a clear unsupported-variant error, but it will not offer a successful OPJU import. Both paths will use file signatures and structural validation rather than trusting filename extensions.
+PlotX will import worksheet data directly from supported Origin project files without installing, launching, or automating Origin. The first release will provide a native Rust importer for a verified older binary `.opj` profile. It will recognize `.opju` by content and return a clear unsupported-variant error, but it will not offer a successful OPJU import because the available public implementation does not prove complete container boundaries. Both paths will use file signatures and structural validation rather than trusting filename extensions.
 
 The importer will recover workbook and worksheet structure, supported numeric and text cells, column names, and basic column metadata. It will not claim full Origin project compatibility. Graphs, formula execution, scripts, analysis recomputation, matrices, embedded objects, attachments, and password-protected projects remain unsupported. Unknown structures will produce explicit warnings or errors; they will never be silently interpreted as valid table data.
 
 ## Goals
 
 - Import useful worksheet data from supported `.opj` files on macOS without Origin or any proprietary runtime.
-- Experimentally import numeric worksheet columns from the FPC-encoded `.opju` variant only after its complete container profile passes the validation gate defined below.
+- Recognize `.opju` without misidentifying it as OPJ, and explain that its container variant is not supported yet.
 - Preserve workbook and worksheet identity, column names, values, nulls, and metadata that can be structurally validated.
 - Reuse PlotX's existing table import preview, typed snapshot conversion, source provenance, recent-file routing, and operation-reporting paths.
 - Fail safely on malformed, truncated, oversized, encrypted, unknown, or unsupported input.
@@ -44,7 +44,7 @@ Public implementations and sample files show that classic OPJ is a little-endian
 Relevant evidence:
 
 - OriginLab documents `.opj` and `.opju` as Origin project file types and documents opening and saving projects without describing a public complete binary specification: [Origin file types](https://docs.originlab.com/user-guide/origin-file-types/) and [Origin project files](https://docs.originlab.com/origin-help/origin-project-file/).
-- [liborigin](https://github.com/gerlachs/liborigin) is a mature native reader for multiple OPJ generations. Its GPL licensing is incompatible with PlotX's dependency policy, so its code will not be copied or linked. It is useful only as an independent behavioral oracle and evidence that macOS-native parsing is feasible.
+- [liborigin](https://github.com/gerlachs/liborigin) is a mature GPL-3.0 native reader for multiple OPJ generations. GPL-3.0 is compatible with PlotX's GPL-3.0-or-later project license, but this implementation deliberately does not copy, translate, or link liborigin code. Keeping it as an independent behavioral oracle preserves a genuinely separate cross-check while the MIT-licensed OpenOPJ material supplies the attributed structure descriptions used by the Rust implementation.
 - [OpenOPJ](https://github.com/jgonera/openopj) is MIT-licensed and documents OPJ structures with a redistributable Origin 7.0552 fixture. Its documented values provide an independent expected-data source.
 - Local probes parsed an Origin 7.0552 OpenOPJ fixture and separate Origin 8.0 and 9.7 fixtures with an independently compiled liborigin build. The latter probes are feasibility evidence only and do not make Origin 8.0 or 9.7 part of the first release's compatibility claim.
 
@@ -56,12 +56,12 @@ OPJU starts with `CPYUA` and is not a ZIP, XML, or JSON document. Public samples
 
 Relevant evidence:
 
-- [quantized](https://github.com/pquarterman17/quantized), licensed Apache-2.0, contains an independent OPJU numeric decoder. Its implementation and tests are new and its real-file corpus is mostly private, so it is evidence for one variant rather than evidence of general compatibility.
+- [quantized](https://github.com/pquarterman17/quantized), licensed Apache-2.0, contains an independent OPJU numeric decoder. Its implementation and tests are new and its real-file corpus is mostly private. Its decoder scans the entire file for `ff ff` candidates, labels them with the nearest preceding name-like byte sequence, and filters decoded values heuristically; it does not validate a complete top-level worksheet data region. It is evidence for one numeric encoding, not a container profile safe enough for PlotX import.
 - The decoder was locally exercised against the public Figshare project `RawData_Locust_Revision1_TIS_Mechanism.opju`, where it recovered 36 numeric columns across five worksheet groups. The dataset is published under CC BY 4.0: [Figshare record](https://doi.org/10.6084/m9.figshare.28535426.v1).
 - The same decoder recovered no columns from 13 of 14 public Altaxo OPJU fixtures, including workbook and mixed-column examples. These failures demonstrate meaningful, undocumented OPJU record variants.
 - Removing the OPJU prelude and passing the remaining bytes to liborigin did not produce a valid OPJ parse, confirming that OPJU is not classic OPJ with a different filename or a trivial wrapper.
 
-OPJU support will therefore be experimental and fail-closed. PlotX will accept the FPC numeric record grammar only inside a verified top-level container profile, with trustworthy data-region and group boundaries. A byte-pattern match inside an otherwise unknown payload is never enough. PlotX will reject files that contain no supported worksheet data, exhibit a conflicting record variant, or leave ambiguous bytes inside the worksheet data region.
+OPJU will therefore remain detection-only in the first release. PlotX will identify the `CPYUA` family and reject it with an actionable unsupported-variant message. A later change may decode the FPC numeric grammar only after a trustworthy top-level profile, data-region boundary, group table, and complete record consumption are independently established. A byte-pattern match inside an otherwise unknown payload is never enough.
 
 ## Chosen approach
 
@@ -72,6 +72,8 @@ The implementation will be native Rust in PlotX:
 3. The desktop application reuses the existing table-import preview and commit flow, presenting parser warnings and errors through `OperationReport` and the established feedback state.
 
 This approach keeps parsing out of the UI, avoids a runtime dependency on an external executable, and preserves the existing crate boundaries. The rejected alternatives are linking or copying GPL liborigin code, shipping a Python or C++ sidecar, and pretending OPJU is a standard archive.
+
+The parser design may reimplement documented record layouts and algorithms from license-compatible public projects in idiomatic Rust. OpenOPJ's MIT-licensed structure descriptions may be adapted with attribution. Liborigin remains an independent GPL behavioral oracle only: PlotX contributors will not copy, translate, or derive source code from it. Quantized's Apache-2.0 implementation may inform later clean-room OPJU work with attribution, but its heuristic scanner is not a valid container parser and will not be reproduced in the first release.
 
 ## Compatibility contract
 
@@ -96,22 +98,24 @@ The first-release evidence matrix is intentionally narrower than the type codes 
 | Capability | Real-file evidence | First-release behavior |
 | --- | --- | --- |
 | 64-bit floating-point columns | OpenOPJ `test.opj` and its published expected values | Supported |
+| 32-bit floating-point columns | OpenOPJ `test.opj` and its published expected values | Supported |
 | 32-bit signed `long` columns | OpenOPJ `test.opj` and its published expected values | Supported |
+| 16-bit signed integer columns | OpenOPJ `test.opj` and its published expected values | Supported |
 | Fixed-width text columns | OpenOPJ `test.opj` and its published expected values | Supported |
 | Mixed numeric/text columns | OpenOPJ `test.opj` and its published expected values | Supported |
 | Missing values and nonzero first-row offsets | OpenOPJ `test.opj` and its published expected values | Supported |
 | Dataset and column names, project parameters, and project notes | OpenOPJ `test.opj` and its published expected values | Supported as basic metadata |
-| 8/16-bit integers, unsigned integers, 32-bit floats, long names, units, comments, and column designations | No redistributable real fixture with independent values in the current evidence set | Not advertised or enabled until equivalent evidence is added |
+| 8-bit integers, unsigned integers, long names, units, comments, and column designations | No redistributable real fixture with independent values in the current evidence set | Not advertised or enabled until equivalent evidence is added |
 
 Workbook and worksheet grouping are exposed only where the verified window and dataset records associate them unambiguously. Unequal supported column lengths are allowed and are padded with nulls during core conversion. The project format and detected producer-version text are retained as import provenance.
 
-ASCII is always safe to decode. Non-ASCII byte strings require a trustworthy project code-page declaration that names an encoding supported by the importer; Windows-1252 is the initial supported legacy code page. Windows-1252 is never assumed merely because every byte can be mapped. If the code page is missing or unsupported, non-ASCII text is not guessed: affected independent metadata is skipped with a warning when its omission cannot affect table geometry, while text cell data causes an unsupported-encoding error. Embedded NUL padding is removed only within the declared fixed-width cell. Lossy replacement is allowed only for a recognized encoding and only with a warning that names or text may not exactly match the source bytes.
+The public `Origin7V552` evidence does not expose a trustworthy project code-page field, so the first release guarantees ASCII text only. Non-ASCII bytes are never guessed as Windows-1252 or another legacy encoding merely because every byte could be mapped. Non-ASCII text cell data causes an unsupported-encoding error. Independent non-ASCII metadata may be skipped with a warning only when its omission cannot affect table geometry or cell alignment. Embedded NUL padding is removed only within the declared fixed-width cell. A later profile may add a legacy encoding only when a redistributable fixture and a validated code-page field establish it.
 
 Unsupported OPJ value types or objects will be counted and reported. A worksheet may still be imported when at least one supported column is recovered and skipping an unsupported, length-framed object cannot alter the interpretation of supported columns. If structural uncertainty could shift record boundaries or cell alignment, the entire file is rejected.
 
-### OPJU supported data
+### OPJU gate outcome
 
-OPJU support is limited to an `FpcNumericV1` profile, and that profile remains disabled until all validation-gate conditions are met:
+The investigated `FpcNumericV1` profile is disabled because the available public evidence does not satisfy all validation-gate conditions:
 
 - the file must have a valid `CPYUA` header;
 - the complete ordered top-level profile, data-region boundary, worksheet group table, and column-record boundaries must be derived from the public fixture and checked without scanning arbitrary payloads for magic bytes;
@@ -123,11 +127,11 @@ OPJU support is limited to an `FpcNumericV1` profile, and that profile remains d
 - objects outside the worksheet data region are reported as not imported and are skipped only when validated top-level framing supplies their complete boundaries;
 - changing the fixture so that a valid-looking column marker appears only inside an unrelated bounded payload must not produce a column.
 
-If a trustworthy outer profile or full data-region consumption cannot be demonstrated during implementation, `FpcNumericV1` stays disabled. In that case the first release detects OPJU by content and returns a clear unsupported-variant error for every OPJU file. This gate is an explicit successful outcome; no deadline or desire for OPJU support permits marker scanning or ambiguous partial import.
+The current scanner fails the complete-profile and false-marker conditions, so `FpcNumericV1` stays disabled. The first release detects OPJU by content and returns a clear unsupported-variant error for every OPJU file. This gate result is an explicit successful outcome; no deadline or desire for OPJU support permits marker scanning or ambiguous partial import.
 
-The FPC implementation may be clean-room Rust based on the public Burtscher algorithm and cross-checked against the Apache-2.0 implementation. Any directly adapted ideas or test vectors will be attributed in source comments and fixture documentation. PlotX will not depend on the Python package at runtime.
+A future FPC implementation may be clean-room Rust based on the public Burtscher algorithm and cross-checked against the Apache-2.0 implementation only after the outer profile is proven. Any directly adapted ideas or test vectors must be attributed in source comments and fixture documentation. PlotX will not depend on the Python package at runtime.
 
-Text cells, dates, categorical columns, matrices, graphs, formula state, and alternative OPJU record grammars are outside the first OPJU support tier. The UI and documentation will call this support experimental.
+Numeric columns, text cells, dates, categorical columns, matrices, graphs, formula state, and alternative OPJU record grammars are all unsupported in the first release. The UI and documentation will describe `.opju` as recognized but not currently importable.
 
 ## Crate and module design
 
@@ -138,7 +142,7 @@ New modules:
 - `crates/io/src/origin.rs`: public model, probe API, top-level limits, errors, and dispatch;
 - `crates/io/src/origin/reader.rs`: checked cursor, bounded block and string reads, integer conversion, and shared diagnostics;
 - `crates/io/src/origin/opj.rs`: explicit OPJ profiles, framing, dataset decoding, workbook assembly, and metadata extraction;
-- `crates/io/src/origin/opju.rs`: optional strict OPJU container profile, variable integers, FPC decode, and group assembly without arbitrary marker scanning;
+- `crates/io/src/origin/opju.rs`: `CPYUA` header validation and the stable detection-only unsupported-variant error;
 - `crates/io/src/origin/tests.rs`: synthetic positive and negative format tests, kept outside production modules to preserve the 800-line rule.
 
 Proposed public surface:
@@ -193,7 +197,6 @@ UI integration:
 - route file-open, import, drag/drop if already supported by the common path, and recent-file reopen through content probing;
 - read the selected file once after a filesystem metadata size check;
 - display one preview candidate per worksheet and require the normal explicit import action;
-- show a concise compatibility warning before committing an experimental OPJU import;
 - include skipped-object counts and decoding warnings in the visible operation result;
 - surface corrupt, unsupported, oversized, or version-incompatible files through the normal error state, with no panic and no empty success notification.
 
@@ -238,16 +241,13 @@ Required error categories:
 - invalid delimiter, impossible length, integer overflow, or invalid row geometry;
 - configured resource limit exceeded;
 - unsupported encoding where safe recovery is impossible;
-- decompression failure or inconsistent decoded row count;
+- inconsistent declared and decoded row counts;
 - no supported worksheet data found.
 
 Required warning categories:
 
-- legacy text required lossy replacement;
 - unsupported object types were skipped;
 - unsupported columns were skipped while independent supported columns remained valid;
-- OPJU metadata could not be recovered and deterministic fallback names were used;
-- experimental OPJU support recovered only numeric worksheet data.
 
 Messages will use plain product language, for example: `This OPJU file uses a record layout that PlotX does not support yet. No data was imported.` Internal byte offsets and diagnostic codes may be included in expandable detail or logs, but the primary message will not require format expertise.
 
@@ -273,15 +273,15 @@ Default limits:
 
 All additions, multiplications, signed-to-unsigned conversions, row-size calculations, offsets, and allocation sizes use checked arithmetic. Reads use checked slices or cursor methods. Parser allocation is charged before reserving memory, using requested capacity and element size. `OriginResourceUsage` records input and parser charges, then core consumes the project by value and charges estimated snapshot capacities against the shared 384 MiB total before allocating. Accounting is conservative and is not refunded in a way that permits repeated allocation churn to bypass the cap. Production parsing code will not use `unwrap()`, unchecked indexing, unchecked allocation from file lengths, or unsafe code.
 
-Unknown records are skipped only when a validated outer framing supplies a bounded length. If no trustworthy boundary exists, parsing stops with an error. Embedded paths are never joined to the filesystem. Attachments, preview images, OLE payloads, scripts, and embedded XML are never extracted or executed. Compression is decoded only for the supported numeric FPC stream, with declared and cumulative output limits, so ZIP path traversal and generic archive-bomb behavior are not applicable.
+Unknown records are skipped only when a validated outer framing supplies a bounded length. If no trustworthy boundary exists, parsing stops with an error. Embedded paths are never joined to the filesystem. Attachments, preview images, OLE payloads, scripts, and embedded XML are never extracted or executed. OPJU compression is not decoded in the first release, so arbitrary compressed output cannot be allocated from that container.
 
-Filesystem metadata is an early rejection hint, not the memory guard. The application reads through a bounded reader capped at `max_input_bytes + 1`; it never reserves the untrusted metadata length, and the extra byte distinguishes an exact-limit file from an oversized or growing file before unbounded allocation occurs. Source bytes are retained once through shared ownership rather than copied and are charged to the shared total. Core conversion consumes worksheet values and releases parser storage as it creates snapshots, while conservative accounting still caps the cumulative owned capacity even where exact allocator liveness cannot be observed. A decoder cancellation check will be included if the existing background import API exposes cancellation.
+Filesystem metadata is an early rejection hint, not the memory guard. The application computes the bounded-reader cap with `max_input_bytes.checked_add(1)` and a checked conversion to the reader's limit type; an unrepresentable custom limit is rejected before reading. It never reserves the untrusted metadata length, and the extra byte distinguishes an exact-limit file from an oversized or growing file before unbounded allocation occurs. Source bytes are retained once through shared ownership rather than copied and are charged to the shared total. Core conversion consumes worksheet values and releases parser storage as it creates snapshots, while conservative accounting still caps the cumulative owned capacity even where exact allocator liveness cannot be observed. A decoder cancellation check will be included if the existing background import API exposes cancellation.
 
 ## Dependencies and licensing
 
-The implementation will avoid liborigin and other GPL code. No external Origin installation or runtime parser process will be introduced.
+The implementation will not incorporate or link liborigin code. This is an engineering and independent-validation choice, not a claim that GPL-3.0 is incompatible with PlotX. No external Origin installation or runtime parser process will be introduced.
 
-The only anticipated new direct crate dependency is `encoding_rs` for explicit Windows-1252 decoding. It is already present transitively in the workspace lockfile and is available under MIT/Apache-2.0 terms. Before committing the dependency change, its current locked version, license metadata, supported targets, and advisory status will be verified by Cargo and `cargo deny`.
+No new direct crate dependency is planned for the first release. `encoding_rs` already exists transitively in the workspace lockfile, but it will not be added to `plotx-io` until a verified Origin code-page field and redistributable fixture justify a specific decoder. Cargo and `cargo deny` will still verify the resulting dependency graph, licenses, and advisories.
 
 Fixtures and borrowed test vectors will have a provenance document containing source URL, author or dataset citation, license, original filename, byte length, cryptographic checksum, and any transformation performed by PlotX. If implementation details or structure descriptions are adapted from OpenOPJ or quantized, the relevant MIT or Apache-2.0 attribution will also appear in source comments and the repository's third-party attribution material. No private or merely discoverable Origin project will be committed.
 
@@ -293,10 +293,10 @@ Synthetic bytes generated in tests will cover:
 
 - OPJ and OPJU signature detection independent of extension;
 - extension/signature mismatch reporting at the application routing layer;
-- the real-fixture-backed 64-bit float, 32-bit signed integer, text, mixed-cell, null, unequal-length, and metadata paths;
+- the real-fixture-backed 64-bit and 32-bit float, 32-bit and 16-bit signed integer, text, mixed-cell, null, unequal-length, and metadata paths;
 - documented but disabled type codes rejecting safely until real-file evidence is added;
-- ASCII and Windows-1252 characters, fixed-width padding, unsupported code pages, invalid text, and lossy-warning behavior;
-- OPJU variable integers, ZigZag values, FPC predictor paths, repeat runs, missing values, top-level and group boundaries, fallback names, ambiguous trailing bytes, and false markers inside unrelated payloads;
+- ASCII characters, fixed-width padding, non-ASCII cell rejection, and safe skipping of structurally independent non-ASCII metadata with a warning;
+- OPJU signature recognition, truncated headers, extension/signature mismatch, and a public OPJU fixture producing the stable unsupported-variant error with no partial result;
 - truncated files at every framing boundary;
 - invalid delimiters, zero or oversized records, illegal row counts, width/length mismatch, and arithmetic overflow;
 - unsupported versions, profile mismatches, recognized protection markers when evidence exists, malformed structural variants, and OPJU variants;
@@ -311,9 +311,9 @@ Negative tests will use generated bytes and will verify exact error categories a
 The repository will include only fixtures whose redistribution terms are explicit:
 
 - OPJ: OpenOPJ's MIT-licensed `support/test.opj`, Origin 7.0552, 282,034 bytes, SHA-256 `ac7f71c367562e85e9d4bb4ae418cbcaaa1b5dff80436180e8d3331c7e1d6308`.
-- OPJU profile research and, only if the validation gate passes, regression import: Figshare `RawData_Locust_Revision1_TIS_Mechanism.opju`, CC BY 4.0, 64,954 bytes, SHA-256 `13c47a6a5daaf14493da59c8f1b284d9efb08129c8320b6ad9fd0b5191faa55f`, from DOI `10.6084/m9.figshare.28535426.v1`.
+- OPJU detection-only regression: Figshare `RawData_Locust_Revision1_TIS_Mechanism.opju`, CC BY 4.0, 64,954 bytes, SHA-256 `13c47a6a5daaf14493da59c8f1b284d9efb08129c8320b6ad9fd0b5191faa55f`, from DOI `10.6084/m9.figshare.28535426.v1`.
 
-The OPJ fixture test will assert workbook or group names, worksheet counts, column names, exact row counts, exact representative numeric and text values, null positions, and selected metadata. If the OPJU validation gate passes, its fixture test will assert exact groups, columns, row counts, representative numeric values, nulls, and recoverable names. If the gate does not pass, that same fixture will instead assert reliable OPJU detection and a clear unsupported-variant rejection with no partial result. A fixture README will carry required MIT attribution and CC BY citation details.
+The OPJ fixture test will assert workbook or group names, worksheet counts, column names, exact row counts, exact representative numeric and text values, null positions, and selected metadata. The OPJU fixture test will assert reliable OPJU detection and a clear unsupported-variant rejection with no partial result. A fixture README will carry required MIT attribution and CC BY citation details.
 
 ### Independent comparison
 
@@ -344,7 +344,7 @@ The manual will state:
 
 - accepted extensions and signature-based detection;
 - the exact `Origin7V552` OPJ profile represented by the public regression fixture;
-- whether the experimental OPJU numeric profile passed its complete-container validation gate or remains detection-only;
+- that `.opju` is recognized but remains detection-only because no complete safe container profile has been verified;
 - imported worksheet data and metadata;
 - unsupported objects and data types;
 - corrupt, incompatible, recognizably protected, and unsupported-variant behavior, without claiming that every encrypted file can be distinguished from other unknown structures;
@@ -358,7 +358,7 @@ No Origin trademark icon, logo, or copyrighted visual asset will be added.
 The implementation is ready for an upstream pull request only when all of the following are true:
 
 - a valid supported OPJ fixture produces the expected worksheets, names, types, values, nulls, and metadata through the visible import preview and final table import;
-- either the OPJU validation gate passes and the verified fixture produces the expected five groups and 36 numeric columns with the experimental limitation visible, or the profile remains disabled and every OPJU file is recognized and rejected with a clear unsupported-variant error;
+- the public OPJU fixture and synthetic `CPYUA` inputs are recognized and rejected with a clear unsupported-variant error and no partial table data;
 - invalid extensions cannot override content detection;
 - every negative fixture returns a stable error or warning without panic, excessive allocation, path access, script execution, or silent data corruption;
 - skipped unsupported objects are disclosed and structurally uncertain files are rejected;
