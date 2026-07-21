@@ -3,6 +3,8 @@ use std::mem::size_of;
 use super::reader::{FramedBlock, Reader, checked_add};
 use super::{OriginError, OriginLimits, OriginProbe, OriginProject, OriginResourceUsage};
 
+mod records;
+
 const SIGNATURE: &[u8] = b"CPYA 4.2673 552#\n";
 const ORIGIN_HEADER_LEN: usize = 39;
 const ORIGIN_VERSION_OFFSET: usize = 0x1b;
@@ -36,7 +38,7 @@ pub(super) fn read(
     // Keep the borrowed framing and its accounting live through dispatch. Later
     // decoding stages consume these exact slices instead of rediscovering bounds.
     let _header_len = raw.origin_header.len();
-    let _usage = &raw.resource_usage;
+    let mut usage = raw.resource_usage;
     let _section_bytes = raw
         .data_sections
         .iter()
@@ -48,6 +50,11 @@ pub(super) fn read(
                 "raw OPJ section bytes",
             )
         })?;
+
+    for section in &raw.data_sections {
+        let _decoded =
+            records::decode_column_record(section.header, section.content, limits, &mut usage)?;
+    }
 
     if has_data || has_unparsed_structure {
         return Err(OriginError::UnsupportedFeature {
