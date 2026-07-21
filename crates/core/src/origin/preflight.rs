@@ -4,40 +4,54 @@ use plotx_data::{
     ChunkDescriptor, ColumnChunk, ColumnManifest, ColumnSchema, RowId, TableSnapshot,
 };
 use plotx_io::origin::{
-    OriginCell, OriginColumn, OriginColumnType, OriginDiagnostic, OriginFormat, OriginLimits,
-    OriginMetadataEntry, OriginProfile, OriginProject, OriginResourceUsage, OriginSupport,
-    OriginWorksheet,
+    OriginByteOrder, OriginCell, OriginColumn, OriginColumnType, OriginDiagnostic, OriginFormat,
+    OriginHeaderVersion, OriginLimits, OriginMetadataEntry, OriginProfile, OriginProject,
+    OriginResourceUsage, OriginSupport, OriginWorksheet,
 };
 
 use super::{
-    CHUNK_ROWS, ImportedOriginWorksheet, OriginImportError, cell_kind, cell_matches, checked_add,
-    checked_mul, copy_text, enforce,
+    CHUNK_ROWS, ImportedOriginWorksheet, OriginImportError, PreparedOriginWorksheet, cell_kind,
+    cell_matches, checked_add, checked_mul, copy_text, enforce, names, try_reserve,
 };
 
 const ARROW_BLOCK_OVERHEAD: usize = 4_096;
+const BTREE_ENTRY_OVERHEAD: usize = 64;
+const IPC_OFFSET_BYTES: usize = 4;
+const FINGERPRINT_LENGTH_BYTES: usize = 8;
+const UUID_TEXT_BYTES: usize = 36;
 const JSON_ENTRY_OVERHEAD: usize = 256;
 const MIXED_FLOAT_TEXT_MAX: usize = 32;
 const MIXED_INTEGER_TEXT_MAX: usize = 20;
 
+mod model;
+
 pub(super) struct Preflight {
-    pub(super) candidate_count: usize,
+    pub(super) worksheets: Vec<WorksheetPreflight>,
     pub(super) total_owned_bytes: usize,
+}
+
+pub(super) struct WorksheetPreflight {
+    pub(super) imported_names: Vec<String>,
 }
 
 pub(super) fn validate(
     project: &OriginProject,
     limits: &OriginLimits,
 ) -> Result<Preflight, OriginImportError> {
-    if project.probe.format != OriginFormat::Opj
-        || project.probe.support != OriginSupport::Supported
-        || project.probe.profile != Some(OriginProfile::Origin7V552)
-    {
-        return Err(OriginImportError::InvalidModel {
-            detail: "only the verified Origin7V552 OPJ profile can be converted".to_owned(),
-        });
-    }
+    validate_probe(project)?;
     validate_reported_usage(&project.resource_usage, limits)?;
     enforce("workbooks", project.workbooks.len(), limits.max_workbooks)?;
+    let retained_model = checked_add(
+        project.resource_usage.input_bytes,
+        model::owned_lower_bound(project)?,
+        "retained Origin model",
+    )?;
+    let mut estimated_total = project.resource_usage.total_owned_bytes.max(retained_model);
+    enforce(
+        "total owned bytes",
+        estimated_total,
+        limits.max_total_owned_bytes,
+    )?;
 
     let mut text_bytes = 0_usize;
     charge_text(&mut text_bytes, &project.probe.raw_version, limits)?;
@@ -66,8 +80,13 @@ pub(super) fn validate(
 
     let mut total_columns = 0_usize;
     let mut total_cells = 0_usize;
-    let mut candidate_count = 0_usize;
-    let mut estimated_total = project.resource_usage.total_owned_bytes;
+    let mut total_worksheets = 0_usize;
+    let mut retained_metadata_records = checked_add(
+        project.parameters.len(),
+        project.notes.len(),
+        "retained metadata records",
+    )?;
+    let mut worksheets = Vec::new();
     for workbook in &project.workbooks {
         charge_text(&mut text_bytes, &workbook.name, limits)?;
         enforce(
@@ -76,6 +95,12 @@ pub(super) fn validate(
             limits.max_worksheets_per_workbook,
         )?;
         for worksheet in &workbook.worksheets {
+            total_worksheets = checked_add(total_worksheets, 1, "worksheets")?;
+            retained_metadata_records = checked_add(
+                retained_metadata_records,
+                worksheet.metadata.len(),
+                "retained metadata records",
+            )?;
             charge_text(&mut text_bytes, &worksheet.name, limits)?;
             validate_entries(
                 &worksheet.metadata,
@@ -100,14 +125,17 @@ pub(super) fn validate(
                 )?;
             }
             if worksheet.row_count > 0 && !worksheet.columns.is_empty() {
-                candidate_count = checked_add(candidate_count, 1, "worksheet candidates")?;
+                let imported_names = names::normalize(&worksheet.columns, limits)?;
                 estimate_worksheet(
                     &mut estimated_total,
                     project,
                     &workbook.name,
                     worksheet,
+                    &imported_names,
                     limits,
                 )?;
+                try_reserve(&mut worksheets, 1, "Origin worksheet preflight")?;
+                worksheets.push(WorksheetPreflight { imported_names });
             }
         }
     }
@@ -122,15 +150,45 @@ pub(super) fn validate(
         limits.max_metadata_records,
     )?;
     enforce("cells", total_cells, limits.max_cells)?;
+    validate_retained_counts(
+        &project.resource_usage,
+        project.workbooks.len(),
+        total_worksheets,
+        total_columns,
+        total_cells,
+        retained_metadata_records,
+    )?;
     enforce(
         "total owned bytes",
         estimated_total,
         limits.max_total_owned_bytes,
     )?;
     Ok(Preflight {
-        candidate_count,
+        worksheets,
         total_owned_bytes: estimated_total,
     })
+}
+
+fn validate_probe(project: &OriginProject) -> Result<(), OriginImportError> {
+    const EXPECTED_VERSION: OriginHeaderVersion = OriginHeaderVersion {
+        major: 4,
+        minor: 2673,
+        build: 552,
+    };
+    if project.probe.format != OriginFormat::Opj
+        || project.probe.support != OriginSupport::Supported
+        || project.probe.profile != Some(OriginProfile::Origin7V552)
+        || project.probe.byte_order != OriginByteOrder::LittleEndian
+        || project.probe.raw_version != "4.2673 552"
+        || project.probe.version != EXPECTED_VERSION
+    {
+        return Err(OriginImportError::InvalidModel {
+            detail:
+                "only the exact verified little-endian Origin7V552 OPJ profile can be converted"
+                    .to_owned(),
+        });
+    }
+    Ok(())
 }
 
 fn validate_reported_usage(
@@ -167,6 +225,38 @@ fn validate_reported_usage(
         return Err(OriginImportError::InvalidModel {
             detail: "decoded text accounting exceeds parser ownership".to_owned(),
         });
+    }
+    Ok(())
+}
+
+fn validate_retained_counts(
+    usage: &OriginResourceUsage,
+    workbooks: usize,
+    worksheets: usize,
+    columns: usize,
+    cells: usize,
+    metadata_records: usize,
+) -> Result<(), OriginImportError> {
+    for (resource, reported, retained, exact) in [
+        ("workbooks", usage.workbooks, workbooks, true),
+        ("worksheets", usage.worksheets, worksheets, true),
+        ("columns", usage.columns, columns, false),
+        ("cells", usage.cells, cells, false),
+        (
+            "metadata records",
+            usage.metadata_records,
+            metadata_records,
+            false,
+        ),
+    ] {
+        if (exact && reported != retained) || (!exact && reported < retained) {
+            let relation = if exact { "equal" } else { "cover" };
+            return Err(OriginImportError::InvalidModel {
+                detail: format!(
+                    "reported {resource} count {reported} does not {relation} the retained count {retained}"
+                ),
+            });
+        }
     }
     Ok(())
 }
@@ -267,12 +357,15 @@ fn estimate_worksheet(
     project: &OriginProject,
     workbook_name: &str,
     worksheet: &OriginWorksheet,
+    imported_names: &[String],
     limits: &OriginLimits,
 ) -> Result<(), OriginImportError> {
     let rows = worksheet.row_count;
     let columns = worksheet.columns.len();
     let batches = checked_add((rows - 1) / CHUNK_ROWS, 1, "snapshot batches")?;
     estimate_add(total, size_of::<ImportedOriginWorksheet>(), limits)?;
+    estimate_add(total, size_of::<PreparedOriginWorksheet>(), limits)?;
+    estimate_add(total, size_of::<WorksheetPreflight>(), limits)?;
     estimate_add(total, size_of::<TableSnapshot>(), limits)?;
     estimate_mul(total, columns, size_of::<ColumnSchema>(), limits)?;
     estimate_mul(total, columns, size_of::<ColumnManifest>(), limits)?;
@@ -284,30 +377,45 @@ fn estimate_worksheet(
         limits,
     )?;
     estimate_mul(total, rows, size_of::<RowId>(), limits)?;
-    // SnapshotBuilder formats RowIds as UUID strings and checks each batch in
-    // a BTreeSet. The trusted-identity mode avoids retaining a second global
-    // set, while this charge still covers per-batch work cumulatively.
-    estimate_mul(total, rows, size_of::<String>() + 36 + 64, limits)?;
-    estimate_utf8_array(
+    // SnapshotBuilder validates every batch in a BTreeSet before formatting
+    // UUID row ids as strings and sending them through the UTF-8 codec path.
+    estimate_mul(
         total,
         rows,
-        checked_mul(rows, 36, "row identity text")?,
+        checked_add(size_of::<RowId>(), BTREE_ENTRY_OVERHEAD, "row identity set")?,
         limits,
     )?;
+    let row_identity_text = checked_mul(rows, UUID_TEXT_BYTES, "row identity text")?;
+    estimate_utf8_conversion(total, rows, row_identity_text, row_identity_text, limits)?;
     estimate_mul(
         total,
         checked_mul(columns, batches, "column chunks")?,
         size_of::<ColumnChunk>(),
         limits,
     )?;
+    estimate_mul(total, columns, size_of::<String>(), limits)?;
+    let imported_name_bytes = imported_names.iter().try_fold(0_usize, |total, name| {
+        checked_add(total, name.len(), "imported column names")
+    })?;
+    // Normalization retains the final names and temporarily owns reserved and
+    // used-name set copies while protecting genuine source names.
+    estimate_mul(total, imported_name_bytes, 3, limits)?;
+    estimate_mul(total, columns, BTREE_ENTRY_OVERHEAD * 2, limits)?;
 
     for column in &worksheet.columns {
         match column.column_type {
             OriginColumnType::Float | OriginColumnType::Integer => {
-                estimate_numeric_array(total, rows, limits)?;
+                estimate_numeric_conversion(total, rows, limits)?;
             }
             OriginColumnType::Text | OriginColumnType::Mixed => {
-                estimate_utf8_array(total, rows, estimated_column_text(column)?, limits)?;
+                let text = estimated_column_text(column)?;
+                estimate_utf8_conversion(
+                    total,
+                    rows,
+                    text.encoded_bytes,
+                    text.new_target_bytes,
+                    limits,
+                )?;
             }
         }
         estimate_add(
@@ -359,43 +467,110 @@ fn estimate_worksheet(
     )
 }
 
-fn estimate_numeric_array(
+fn estimate_numeric_conversion(
     total: &mut usize,
     rows: usize,
     limits: &OriginLimits,
 ) -> Result<(), OriginImportError> {
     let validity = bitmap_bytes(rows);
-    estimate_mul(total, rows, 16, limits)?;
+    // Conversion target plus the byte-per-row validity input.
+    estimate_mul(total, rows, size_of::<f64>(), limits)?;
     estimate_add(total, rows, limits)?;
-    estimate_mul(total, validity, 2, limits)
+    estimate_add(total, validity, limits)?;
+    // The Arrow codec first materializes Vec<Option<T>>, then Arrow value and
+    // validity buffers. IPC retains another value representation in the block
+    // store, and logical_fingerprint builds a separate canonical byte vector.
+    estimate_mul(total, rows, size_of::<Option<f64>>(), limits)?;
+    estimate_numeric_buffers(total, rows, validity, limits)?;
+    estimate_numeric_buffers(total, rows, validity, limits)?;
+    estimate_numeric_buffers(total, rows, validity, limits)
 }
 
-fn estimate_utf8_array(
+fn estimate_numeric_buffers(
+    total: &mut usize,
+    rows: usize,
+    validity: usize,
+    limits: &OriginLimits,
+) -> Result<(), OriginImportError> {
+    estimate_mul(total, rows, size_of::<f64>(), limits)?;
+    estimate_add(total, validity, limits)
+}
+
+fn estimate_utf8_conversion(
     total: &mut usize,
     rows: usize,
     text_bytes: usize,
+    new_target_text_bytes: usize,
     limits: &OriginLimits,
 ) -> Result<(), OriginImportError> {
     let validity = bitmap_bytes(rows);
+    // Conversion target plus the byte-per-row validity input and the retained
+    // ColumnChunk bitmap.
     estimate_mul(total, rows, size_of::<String>(), limits)?;
+    estimate_add(total, new_target_text_bytes, limits)?;
     estimate_add(total, rows, limits)?;
-    estimate_mul(total, validity, 2, limits)?;
-    estimate_mul(total, text_bytes, 2, limits)?;
-    estimate_mul(total, checked_add(rows, 1, "UTF-8 offsets")?, 4, limits)
+    estimate_add(total, validity, limits)?;
+    // StringArray::from first collects borrowed values into Vec<Option<&str>>.
+    estimate_mul(total, rows, size_of::<Option<&str>>(), limits)?;
+    // Arrow, retained IPC, and the canonical fingerprint each own a separate
+    // row-scaled representation. The fingerprint uses u64 lengths rather than
+    // Arrow's i32 offsets.
+    estimate_utf8_buffers(total, rows, text_bytes, validity, IPC_OFFSET_BYTES, limits)?;
+    estimate_utf8_buffers(total, rows, text_bytes, validity, IPC_OFFSET_BYTES, limits)?;
+    estimate_utf8_buffers(
+        total,
+        rows,
+        text_bytes,
+        validity,
+        FINGERPRINT_LENGTH_BYTES,
+        limits,
+    )
 }
 
-fn estimated_column_text(column: &OriginColumn) -> Result<usize, OriginImportError> {
-    let mut bytes = 0_usize;
+fn estimate_utf8_buffers(
+    total: &mut usize,
+    rows: usize,
+    text_bytes: usize,
+    validity: usize,
+    offset_width: usize,
+    limits: &OriginLimits,
+) -> Result<(), OriginImportError> {
+    estimate_mul(
+        total,
+        checked_add(rows, 1, "UTF-8 offsets")?,
+        offset_width,
+        limits,
+    )?;
+    estimate_add(total, text_bytes, limits)?;
+    estimate_add(total, validity, limits)
+}
+
+struct EstimatedColumnText {
+    encoded_bytes: usize,
+    new_target_bytes: usize,
+}
+
+fn estimated_column_text(column: &OriginColumn) -> Result<EstimatedColumnText, OriginImportError> {
+    let mut encoded_bytes = 0_usize;
+    let mut new_target_bytes = 0_usize;
     for cell in &column.cells {
-        let additional = match cell {
-            OriginCell::Text(value) => value.len(),
-            OriginCell::Float(_) => MIXED_FLOAT_TEXT_MAX,
-            OriginCell::Integer(_) => MIXED_INTEGER_TEXT_MAX,
-            OriginCell::Null => 0,
+        let (encoded, newly_allocated) = match cell {
+            OriginCell::Text(value) => (value.len(), 0),
+            OriginCell::Float(_) => (MIXED_FLOAT_TEXT_MAX, MIXED_FLOAT_TEXT_MAX),
+            OriginCell::Integer(_) => (MIXED_INTEGER_TEXT_MAX, MIXED_INTEGER_TEXT_MAX),
+            OriginCell::Null => (0, 0),
         };
-        bytes = checked_add(bytes, additional, "UTF-8 cell data")?;
+        encoded_bytes = checked_add(encoded_bytes, encoded, "UTF-8 cell data")?;
+        new_target_bytes = checked_add(
+            new_target_bytes,
+            newly_allocated,
+            "converted UTF-8 cell data",
+        )?;
     }
-    Ok(bytes)
+    Ok(EstimatedColumnText {
+        encoded_bytes,
+        new_target_bytes,
+    })
 }
 
 fn source_metadata_text_bytes(

@@ -1,9 +1,6 @@
 //! Conversion from the bounded Origin transport model to PlotX tables.
 
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    mem::size_of,
-};
+use std::{collections::BTreeMap, mem::size_of};
 
 use plotx_data::{
     BlockStore, CodecRegistry, ColumnChunk, ColumnSchema, ColumnValues, LogicalType, RowId,
@@ -16,6 +13,7 @@ use plotx_io::origin::{
 };
 use serde_json::{Map, Value};
 
+mod names;
 mod preflight;
 
 /// Stable operation identifier stored in revisions created from Origin imports.
@@ -53,6 +51,16 @@ pub struct ImportedOriginWorksheet {
     pub diagnostics: Vec<OriginDiagnostic>,
     /// Shared cumulative parser and conversion allocation estimate.
     pub resource_usage: OriginResourceUsage,
+}
+
+struct PreparedOriginWorksheet {
+    name: String,
+    worksheet: OriginWorksheet,
+    schema: TableSchema,
+    source_metadata: BTreeMap<String, Value>,
+    snapshot_metadata: BTreeMap<String, Value>,
+    diagnostics: Vec<OriginDiagnostic>,
+    resource_usage: OriginResourceUsage,
 }
 
 /// Errors raised while validating or converting an engine-neutral Origin model.
@@ -113,7 +121,7 @@ pub fn import_origin_project(
 ) -> Result<Vec<ImportedOriginWorksheet>, OriginImportError> {
     limits.validate()?;
     let preflight = preflight::validate(&project, &limits)?;
-    if preflight.candidate_count == 0 {
+    if preflight.worksheets.is_empty() {
         return Err(OriginImportError::NoSupportedWorksheet);
     }
 
@@ -127,12 +135,10 @@ pub fn import_origin_project(
         mut resource_usage,
     } = project;
     resource_usage.total_owned_bytes = preflight.total_owned_bytes;
-    let mut imported = Vec::new();
-    try_reserve(
-        &mut imported,
-        preflight.candidate_count,
-        "Origin worksheet candidates",
-    )?;
+    let candidate_count = preflight.worksheets.len();
+    let mut worksheet_preflights = preflight.worksheets.into_iter();
+    let mut prepared = Vec::new();
+    try_reserve(&mut prepared, candidate_count, "prepared Origin worksheets")?;
 
     for workbook in workbooks {
         let workbook_name = workbook.name;
@@ -140,7 +146,13 @@ pub fn import_origin_project(
             if worksheet.row_count == 0 || worksheet.columns.is_empty() {
                 continue;
             }
-            let imported_names = normalized_column_names(&worksheet.columns, &limits)?;
+            let worksheet_preflight =
+                worksheet_preflights
+                    .next()
+                    .ok_or_else(|| OriginImportError::InvalidModel {
+                        detail: "worksheet preflight count does not match the retained model"
+                            .to_owned(),
+                    })?;
             let source_metadata = source_metadata(
                 &probe.raw_version,
                 &parameters,
@@ -150,32 +162,60 @@ pub fn import_origin_project(
                 &resource_usage,
                 &workbook_name,
                 &worksheet,
-                &imported_names,
+                &worksheet_preflight.imported_names,
             )?;
             let snapshot_metadata = snapshot_metadata(&source_metadata)?;
             let name = candidate_name(&workbook_name, &worksheet.name)?;
-            let snapshot =
-                build_snapshot(worksheet, imported_names, snapshot_metadata, store, codecs)?;
-            imported.push(ImportedOriginWorksheet {
+            let schema = build_schema(&worksheet.columns, worksheet_preflight.imported_names)?;
+            prepared.push(PreparedOriginWorksheet {
                 name,
-                snapshot,
+                worksheet,
+                schema,
                 source_metadata,
+                snapshot_metadata,
                 diagnostics: diagnostics.clone(),
                 resource_usage: resource_usage.clone(),
             });
         }
+    }
+    if worksheet_preflights.next().is_some() {
+        return Err(OriginImportError::InvalidModel {
+            detail: "worksheet preflight count does not match the retained model".to_owned(),
+        });
+    }
+
+    let mut imported = Vec::new();
+    try_reserve(
+        &mut imported,
+        candidate_count,
+        "Origin worksheet candidates",
+    )?;
+    for prepared in prepared {
+        let snapshot = build_snapshot(
+            prepared.worksheet,
+            prepared.schema,
+            prepared.snapshot_metadata,
+            store,
+            codecs,
+        )?;
+        imported.push(ImportedOriginWorksheet {
+            name: prepared.name,
+            snapshot,
+            source_metadata: prepared.source_metadata,
+            diagnostics: prepared.diagnostics,
+            resource_usage: prepared.resource_usage,
+        });
     }
     Ok(imported)
 }
 
 fn build_snapshot(
     mut worksheet: OriginWorksheet,
-    imported_names: Vec<String>,
+    schema: TableSchema,
     metadata: BTreeMap<String, Value>,
     store: &dyn BlockStore,
     codecs: &CodecRegistry,
 ) -> Result<TableSnapshot, OriginImportError> {
-    let schema = build_schema(&worksheet.columns, imported_names)?;
     let mut builder =
         SnapshotBuilder::new(TableId::new(), schema, store, codecs)?.with_trusted_row_identity();
     *builder.metadata_mut() = metadata;
@@ -343,82 +383,6 @@ fn cell_type_error<T>(
         expected,
         actual: cell_kind(cell),
     })
-}
-
-fn normalized_column_names(
-    columns: &[OriginColumn],
-    limits: &OriginLimits,
-) -> Result<Vec<String>, OriginImportError> {
-    let mut names = Vec::new();
-    try_reserve(&mut names, columns.len(), "Origin column names")?;
-    let mut used = BTreeSet::new();
-    let mut next_suffix = BTreeMap::new();
-    for (index, column) in columns.iter().enumerate() {
-        let base = if column.name.trim().is_empty() {
-            generated_column_name(index, limits)?
-        } else {
-            copy_text(&column.name, "Origin column name")?
-        };
-        enforce("string bytes", base.len(), limits.max_string_bytes)?;
-        let candidate = if used.contains(&base) {
-            let mut suffix = next_suffix.get(&base).copied().unwrap_or(2);
-            let candidate = loop {
-                let candidate = suffixed_name(&base, suffix, limits)?;
-                suffix = checked_add(suffix, 1, "column name suffix")?;
-                if !used.contains(&candidate) {
-                    break candidate;
-                }
-            };
-            next_suffix.insert(copy_text(&base, "Origin column name")?, suffix);
-            candidate
-        } else {
-            base
-        };
-        if !used.insert(copy_text(&candidate, "Origin column name")?) {
-            return Err(OriginImportError::InvalidModel {
-                detail: "column name normalization produced a duplicate".to_owned(),
-            });
-        }
-        names.push(candidate);
-    }
-    Ok(names)
-}
-
-fn generated_column_name(index: usize, limits: &OriginLimits) -> Result<String, OriginImportError> {
-    let number = checked_add(index, 1, "generated column number")?.to_string();
-    joined_name("Column ", "", &number, limits)
-}
-
-fn suffixed_name(
-    base: &str,
-    suffix: usize,
-    limits: &OriginLimits,
-) -> Result<String, OriginImportError> {
-    joined_name(base, " (", &format!("{suffix})"), limits)
-}
-
-fn joined_name(
-    left: &str,
-    separator: &str,
-    right: &str,
-    limits: &OriginLimits,
-) -> Result<String, OriginImportError> {
-    let length = checked_add(
-        checked_add(left.len(), separator.len(), "column name")?,
-        right.len(),
-        "column name",
-    )?;
-    enforce("string bytes", length, limits.max_string_bytes)?;
-    let mut name = String::new();
-    name.try_reserve_exact(length)
-        .map_err(|_| OriginImportError::AllocationFailed {
-            resource: "Origin column name",
-            requested: length,
-        })?;
-    name.push_str(left);
-    name.push_str(separator);
-    name.push_str(right);
-    Ok(name)
 }
 
 #[allow(clippy::too_many_arguments)]

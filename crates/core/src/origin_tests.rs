@@ -48,7 +48,7 @@ fn worksheet(name: &str, row_count: usize, columns: Vec<OriginColumn>) -> Origin
 }
 
 fn project(workbooks: Vec<OriginWorkbook>) -> OriginProject {
-    OriginProject {
+    let mut project = OriginProject {
         probe: probe(),
         parameters: Vec::new(),
         notes: Vec::new(),
@@ -56,7 +56,39 @@ fn project(workbooks: Vec<OriginWorkbook>) -> OriginProject {
         diagnostics: Vec::new(),
         unsupported_objects: Vec::new(),
         resource_usage: OriginResourceUsage::default(),
-    }
+    };
+    sync_resource_counts(&mut project);
+    project
+}
+
+fn sync_resource_counts(project: &mut OriginProject) {
+    project.resource_usage.workbooks = project.workbooks.len();
+    project.resource_usage.worksheets = project
+        .workbooks
+        .iter()
+        .map(|workbook| workbook.worksheets.len())
+        .sum();
+    project.resource_usage.columns = project
+        .workbooks
+        .iter()
+        .flat_map(|workbook| &workbook.worksheets)
+        .map(|worksheet| worksheet.columns.len())
+        .sum();
+    project.resource_usage.cells = project
+        .workbooks
+        .iter()
+        .flat_map(|workbook| &workbook.worksheets)
+        .flat_map(|worksheet| &worksheet.columns)
+        .map(|column| column.cells.len())
+        .sum();
+    project.resource_usage.metadata_records = project.parameters.len()
+        + project.notes.len()
+        + project
+            .workbooks
+            .iter()
+            .flat_map(|workbook| &workbook.worksheets)
+            .map(|worksheet| worksheet.metadata.len())
+            .sum::<usize>();
 }
 
 fn workbook(name: &str, worksheets: Vec<OriginWorksheet>) -> OriginWorkbook {
@@ -67,12 +99,13 @@ fn workbook(name: &str, worksheets: Vec<OriginWorksheet>) -> OriginWorkbook {
 }
 
 fn imported(
-    project: OriginProject,
+    mut project: OriginProject,
 ) -> (
     Vec<crate::origin::ImportedOriginWorksheet>,
     MemoryBlockStore,
     CodecRegistry,
 ) {
+    sync_resource_counts(&mut project);
     let store = MemoryBlockStore::default();
     let codecs = CodecRegistry::with_arrow_ipc();
     let imported = import_origin_project(project, &store, &codecs, OriginLimits::default())
@@ -443,6 +476,98 @@ fn rejects_snapshot_capacity_before_writing_any_blocks() {
 }
 
 #[test]
+fn rejects_nonempty_models_with_zero_reported_resource_usage() {
+    let mut project = project(vec![workbook(
+        "Book",
+        vec![worksheet(
+            "Sheet",
+            1,
+            vec![column(
+                "value",
+                OriginColumnType::Integer,
+                vec![OriginCell::Integer(1)],
+            )],
+        )],
+    )]);
+    project.resource_usage = OriginResourceUsage::default();
+    let store = MemoryBlockStore::default();
+
+    let error = import_origin_project(
+        project,
+        &store,
+        &CodecRegistry::with_arrow_ipc(),
+        OriginLimits::default(),
+    )
+    .expect_err("a nonempty model cannot report zero decoded objects");
+
+    assert!(matches!(error, OriginImportError::InvalidModel { .. }));
+    assert_eq!(store.block_count(), 0);
+}
+
+#[test]
+fn rejects_resource_counts_smaller_than_the_retained_model() {
+    let mut project = project(vec![workbook(
+        "Book",
+        vec![worksheet(
+            "Sheet",
+            1,
+            vec![column(
+                "value",
+                OriginColumnType::Integer,
+                vec![OriginCell::Integer(1)],
+            )],
+        )],
+    )]);
+    project.resource_usage.columns = 0;
+    project.resource_usage.cells = 0;
+    let store = MemoryBlockStore::default();
+
+    let error = import_origin_project(
+        project,
+        &store,
+        &CodecRegistry::with_arrow_ipc(),
+        OriginLimits::default(),
+    )
+    .expect_err("reported counts must cover retained objects");
+
+    assert!(matches!(error, OriginImportError::InvalidModel { .. }));
+    assert_eq!(store.block_count(), 0);
+}
+
+#[test]
+fn rejects_supported_profile_claims_with_inconsistent_version_fields() {
+    let base = project(vec![workbook(
+        "Book",
+        vec![worksheet(
+            "Sheet",
+            1,
+            vec![column(
+                "value",
+                OriginColumnType::Integer,
+                vec![OriginCell::Integer(1)],
+            )],
+        )],
+    )]);
+    let mut projects = vec![base.clone(), base];
+    projects[0].probe.raw_version = "4.2673 553".to_owned();
+    projects[1].probe.version.build = 553;
+
+    for project in projects {
+        let store = MemoryBlockStore::default();
+        let error = import_origin_project(
+            project,
+            &store,
+            &CodecRegistry::with_arrow_ipc(),
+            OriginLimits::default(),
+        )
+        .expect_err("a supported profile must match its exact verified header");
+
+        assert!(matches!(error, OriginImportError::InvalidModel { .. }));
+        assert_eq!(store.block_count(), 0);
+    }
+}
+
+#[test]
 fn rejects_declared_cell_type_mismatches_without_panicking() {
     let invalid = project(vec![workbook(
         "Book",
@@ -527,7 +652,7 @@ fn generated_names_skip_existing_generated_and_suffixed_names() {
             .iter()
             .map(|column| column.name.as_str())
             .collect::<Vec<_>>(),
-        ["name", "name (2)", "name (3)", "Column 4", "Column 4 (2)"]
+        ["name", "name (2)", "name (3)", "Column 4 (2)", "Column 4"]
     );
 }
 
@@ -570,4 +695,78 @@ fn source_metadata_is_a_direct_table_import_source_map() {
     )]));
 
     let _: &BTreeMap<String, serde_json::Value> = &imported[0].source_metadata;
+}
+
+#[test]
+fn rejects_large_numeric_conversion_before_writing_blocks() {
+    const ROWS: usize = 65_536;
+    let mut project = project(vec![workbook(
+        "Book",
+        vec![worksheet(
+            "Sheet",
+            ROWS,
+            vec![column(
+                "value",
+                OriginColumnType::Float,
+                (0..ROWS)
+                    .map(|value| OriginCell::Float(value as f64))
+                    .collect(),
+            )],
+        )],
+    )]);
+    sync_resource_counts(&mut project);
+    let store = MemoryBlockStore::default();
+    let limits = OriginLimits {
+        max_total_owned_bytes: 20_000_000,
+        ..OriginLimits::default()
+    };
+
+    let error = import_origin_project(project, &store, &CodecRegistry::with_arrow_ipc(), limits)
+        .expect_err("all row-scaled conversion allocations must be preflighted");
+
+    assert!(matches!(
+        error,
+        OriginImportError::LimitExceeded {
+            resource: "total owned bytes",
+            ..
+        }
+    ));
+    assert_eq!(store.block_count(), 0);
+}
+
+#[test]
+fn rejects_large_utf8_conversion_before_writing_blocks() {
+    const ROWS: usize = 65_536;
+    let mut project = project(vec![workbook(
+        "Book",
+        vec![worksheet(
+            "Sheet",
+            ROWS,
+            vec![column(
+                "value",
+                OriginColumnType::Text,
+                (0..ROWS)
+                    .map(|_| OriginCell::Text("0123456789abcdef".to_owned()))
+                    .collect(),
+            )],
+        )],
+    )]);
+    sync_resource_counts(&mut project);
+    let store = MemoryBlockStore::default();
+    let limits = OriginLimits {
+        max_total_owned_bytes: 24_000_000,
+        ..OriginLimits::default()
+    };
+
+    let error = import_origin_project(project, &store, &CodecRegistry::with_arrow_ipc(), limits)
+        .expect_err("all row-scaled conversion allocations must be preflighted");
+
+    assert!(matches!(
+        error,
+        OriginImportError::LimitExceeded {
+            resource: "total owned bytes",
+            ..
+        }
+    ));
+    assert_eq!(store.block_count(), 0);
 }
