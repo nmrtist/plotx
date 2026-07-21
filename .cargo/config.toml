@@ -1,0 +1,11 @@
+[alias]
+pr-check = "run -q -p xtask -- pr-check"
+licenses = "run -q -p xtask -- licenses"
+xtask = "run -q -p xtask --"
+
+# The app and CLI default to the reference table executor, so plain
+# `cargo check -p plotx` and `cargo run -p plotx` already are the fast path and
+# need no alias. Shipping builds must opt into DataFusion, and the release
+# workflow calls this alias instead of spelling the feature out, so the flag
+# lives in one version-controlled place.
+release-build = "build --locked --release -p plotx --features datafusion"

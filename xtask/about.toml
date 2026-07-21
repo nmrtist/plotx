@@ -1,0 +1,34 @@
+# PlotX is dual-licensed. Only licenses whose code may also ship inside a
+# proprietary product belong here; copyleft *code* licenses (GPL/AGPL/LGPL/
+# MPL/EPL/CDDL/SSPL/OSL) are deliberately absent, so a dependency that pulls
+# one in makes `cargo about generate` fail.
+#
+# Keep this list to exactly the licenses in the resolved tree; no "just in
+# case" entries.
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "BSL-1.0",
+    "CC0-1.0",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "OFL-1.1",
+    "LicenseRef-UFL-1.0",
+    # Data-only license of the bundled Mozilla CA root store (webpki-roots);
+    # permissive for both PlotX license variants.
+    "CDLA-Permissive-2.0",
+]
+
+[private]
+ignore = true
+
+[epaint_default_fonts.clarify]
+license = "(Apache-2.0 OR MIT) AND OFL-1.1 AND LicenseRef-UFL-1.0"
+[[epaint_default_fonts.clarify.files]]
+path = "fonts/UFL.txt"
+license = "LicenseRef-UFL-1.0"
+checksum = "2f0015108d68627bd788d313f529c21ff4da2c2c42a5e1f3883acc83480f9002"

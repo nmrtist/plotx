@@ -1,0 +1,124 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/data",
+    "crates/datafusion",
+    "crates/substrait",
+    "crates/io",
+    "crates/analysis",
+    "crates/processing",
+    "crates/figure",
+    "crates/render",
+    "crates/core",
+    "crates/cli",
+    "crates/app",
+    "xtask",
+]
+# Keep the Substrait exchange crate out of bare root builds: it is the only
+# member that requires protoc, prost, and pbjson-types. CI and `cargo pr-check`
+# use `--workspace`, so they still cover every crate.
+default-members = [
+    "crates/data",
+    "crates/datafusion",
+    "crates/io",
+    "crates/analysis",
+    "crates/processing",
+    "crates/figure",
+    "crates/render",
+    "crates/core",
+    "crates/cli",
+    "crates/app",
+    "xtask",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+authors = ["Jiekang Tian <jiekangtian@gmail.com>"]
+publish = false
+repository = "https://github.com/nmrtist/plotx"
+
+[workspace.dependencies]
+colorous = "1"
+num-complex = "0.4"
+rustfft = "6.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+semver = "1"
+sha2 = "0.10"
+ureq = { version = "2", default-features = false, features = ["tls"] }
+thiserror = "2.0"
+statrs = { version = "0.18", default-features = false }
+tukey_test = "0.2"
+directories = "6"
+uuid = { version = "1", features = ["serde", "v4"] }
+arrow = { version = "58.3", default-features = false, features = ["ipc"] }
+datafusion = { version = "54.0", default-features = false }
+datafusion-substrait = { version = "54.0", default-features = false }
+futures = "0.3"
+substrait = { version = "0.63", default-features = false, features = ["serde"] }
+prost = "0.14"
+pbjson-types = "0.8"
+chrono-tz = "0.10"
+calamine = { version = "0.36", default-features = false, features = ["dates"] }
+rust_xlsxwriter = { version = "0.96", default-features = false, features = ["constant_memory"] }
+tokio = { version = "1", features = ["rt"] }
+egui = "0.34"
+eframe = { version = "0.34", default-features = true }
+egui_extras = { version = "0.34", default-features = false }
+egui-phosphor = "0.12"
+muda = { version = "0.19.3", default-features = false }
+rfd = "0.17"
+zip = { version = "8.6", default-features = false, features = ["deflate"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "tiff"] }
+pdf-writer = "0.12"
+resvg = "0.47"
+svg2pdf = "0.13"
+raw-window-handle = "0.6"
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Gdi",
+    "Win32_Storage_FileSystem",
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
+    "Win32_System_Ole",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Threading",
+    "Win32_UI_Controls",
+] }
+
+plotx-io = { path = "crates/io" }
+plotx-data = { path = "crates/data" }
+plotx-datafusion = { path = "crates/datafusion" }
+plotx-substrait = { path = "crates/substrait" }
+plotx-analysis = { path = "crates/analysis" }
+plotx-processing = { path = "crates/processing" }
+plotx-figure = { path = "crates/figure" }
+plotx-render = { path = "crates/render" }
+plotx-core = { path = "crates/core", default-features = false }
+
+# Keep numerical hot paths responsive in debug builds.
+[profile.dev.package.plotx-analysis]
+opt-level = 3
+
+[profile.dev.package.plotx-processing]
+opt-level = 3
+
+# rustfft is the only third-party dependency that needs optimized debug code.
+[profile.dev.package.rustfft]
+opt-level = 2
+
+[profile.pr-check]
+inherits = "dev"
+debug = 0
+incremental = false
+
+[profile.pr-check.package."*"]
+opt-level = 0
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

@@ -1,0 +1,20 @@
+[package]
+name = "plotx-data"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Data layer for PlotX: typed, revisioned, backend-independent tables."
+
+[lib]
+name = "plotx_data"
+path = "src/lib.rs"
+
+[dependencies]
+arrow.workspace = true
+chrono-tz.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+uuid.workspace = true

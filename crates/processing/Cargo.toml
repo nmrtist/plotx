@@ -1,0 +1,18 @@
+[package]
+name = "plotx-processing"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Processing layer for PlotX: FFT, reconstruction, correction, and transforms."
+
+[lib]
+name = "plotx_processing"
+path = "src/lib.rs"
+
+[dependencies]
+plotx-io.workspace = true
+plotx-analysis.workspace = true
+num-complex.workspace = true
+rustfft.workspace = true
+thiserror.workspace = true

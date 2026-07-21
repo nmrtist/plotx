@@ -1,0 +1,38 @@
+---
+title: PlotX
+description: A desktop application for scientific data analysis and figure preparation.
+template: splash
+hero:
+  tagline: Import, process, analyze, and publish scientific data — all in one desktop application.
+  actions:
+    - text: Get started
+      link: /getting-started/installation/
+      icon: right-arrow
+    - text: View on GitHub
+      link: https://github.com/nmrtist/plotx
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+<CardGrid stagger>
+	<Card title="Import your data" icon="open-book">
+		Read NMR data from JEOL Delta (`.jdf`) and Bruker TopSpin,
+		patch-clamp recordings (ABF2), and tabular data from CSV or Excel —
+		no conversion step.
+	</Card>
+	<Card title="Process interactively" icon="setting">
+		Build an ordered processing pipeline: apodization, FFT, phase and
+		baseline correction — with live preview and full undo.
+	</Card>
+	<Card title="Analyze" icon="magnifier">
+		Peaks, integrals, DOSY / relaxation and IV analysis, curve fitting
+		with custom models, and classical statistics — all feeding linked
+		data tables.
+	</Card>
+	<Card title="Publish" icon="document">
+		Arrange figures on an infinite board and export to SVG, PDF, PNG, or
+		TIFF at publication-quality presets.
+	</Card>
+</CardGrid>

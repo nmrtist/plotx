@@ -1,0 +1,25 @@
+[package]
+name = "plotx-datafusion"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "DataFusion execution adapter for PlotX typed tables."
+
+[lib]
+name = "plotx_datafusion"
+path = "src/lib.rs"
+
+[dependencies]
+arrow.workspace = true
+datafusion.workspace = true
+futures.workspace = true
+plotx-data.workspace = true
+tokio.workspace = true
+
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys.workspace = true
+
+[[bench]]
+name = "table_scale"
+harness = false

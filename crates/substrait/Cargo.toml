@@ -1,0 +1,21 @@
+[package]
+name = "plotx-substrait"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Explicit Substrait interoperability for PlotX table plans."
+
+[lib]
+name = "plotx_substrait"
+path = "src/lib.rs"
+
+[dependencies]
+datafusion-substrait.workspace = true
+pbjson-types.workspace = true
+plotx-data.workspace = true
+plotx-datafusion.workspace = true
+prost.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+substrait.workspace = true

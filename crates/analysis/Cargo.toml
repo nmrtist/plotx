@@ -1,0 +1,19 @@
+[package]
+name = "plotx-analysis"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Analysis layer for PlotX: detection, quantitative extraction, scientific fitting, and deconvolution."
+
+[lib]
+name = "plotx_analysis"
+path = "src/lib.rs"
+
+[dependencies]
+plotx-io.workspace = true
+num-complex.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+statrs.workspace = true
+tukey_test.workspace = true

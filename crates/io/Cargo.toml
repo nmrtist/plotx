@@ -1,0 +1,20 @@
+[package]
+name = "plotx-io"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Data I/O layer for PlotX: format parsing, import, and export."
+
+[lib]
+name = "plotx_io"
+path = "src/lib.rs"
+
+[dependencies]
+num-complex.workspace = true
+thiserror.workspace = true
+zip.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+calamine.workspace = true
+rust_xlsxwriter.workspace = true

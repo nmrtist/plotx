@@ -1,0 +1,21 @@
+[package]
+name = "plotx-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Command-line inspection, processing, and export tool for PlotX."
+
+[[bin]]
+name = "plotx-cli"
+path = "src/main.rs"
+
+[features]
+# Default builds use the reference executor. Enable this feature for
+# spill-capable DataFusion execution on large tables.
+default = []
+datafusion = ["plotx-core/datafusion"]
+
+[dependencies]
+plotx-core.workspace = true
+serde_json.workspace = true

@@ -1,0 +1,44 @@
+[package]
+name = "plotx-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Application layer for PlotX: UI-independent state, actions, project I/O, export, and figure integration."
+
+[lib]
+name = "plotx_core"
+path = "src/lib.rs"
+
+[features]
+default = []
+datafusion = ["dep:plotx-datafusion"]
+
+[dependencies]
+plotx-data.workspace = true
+plotx-datafusion = { workspace = true, optional = true }
+plotx-io.workspace = true
+plotx-analysis.workspace = true
+plotx-processing.workspace = true
+plotx-figure.workspace = true
+plotx-render = { path = "../render", default-features = false }
+num-complex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+semver.workspace = true
+sha2.workspace = true
+ureq.workspace = true
+thiserror.workspace = true
+directories.workspace = true
+uuid.workspace = true
+zip.workspace = true
+image.workspace = true
+pdf-writer.workspace = true
+resvg.workspace = true
+svg2pdf.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
+
+[dev-dependencies]
+num-complex.workspace = true

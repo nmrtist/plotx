@@ -1,0 +1,34 @@
+---
+title: PlotX
+description: 面向科学数据分析与出版级图形制作的桌面应用。
+template: splash
+hero:
+  tagline: 导入、处理、分析、出版级导出——一个桌面应用完成全部流程。
+  actions:
+    - text: 快速上手
+      link: /zh-cn/getting-started/installation/
+      icon: right-arrow
+    - text: 在 GitHub 查看
+      link: https://github.com/nmrtist/plotx
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+<CardGrid stagger>
+	<Card title="导入数据" icon="open-book">
+		直接读取 JEOL Delta（`.jdf`）和 Bruker TopSpin 的 NMR 数据、
+		膜片钳记录（ABF2），以及 CSV / Excel 表格数据——无需转换。
+	</Card>
+	<Card title="交互式处理" icon="setting">
+		以有序步骤列表构建处理管线：切趾、FFT、相位与基线校正——实时预览，完整撤销。
+	</Card>
+	<Card title="分析" icon="magnifier">
+		峰与积分、DOSY / 弛豫与 IV 分析、支持自定义模型的曲线拟合，
+		以及经典统计——全部汇入联动数据表。
+	</Card>
+	<Card title="出版" icon="document">
+		在无限画板上排布图形，按出版级预设导出 SVG、PDF、PNG 或 TIFF。
+	</Card>
+</CardGrid>

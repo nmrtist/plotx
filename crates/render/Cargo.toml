@@ -1,0 +1,25 @@
+[package]
+name = "plotx-render"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Rendering layer for PlotX: screen painting and vector export from a shared figure model."
+
+[lib]
+name = "plotx_render"
+path = "src/lib.rs"
+
+[features]
+default = ["screen"]
+# SVG export is always available. Gate egui screen rendering so headless and
+# export-only builds do not depend on egui; EMF export is available on Windows.
+screen = ["dep:egui"]
+emf = ["dep:windows-sys"]
+
+[dependencies]
+plotx-figure.workspace = true
+egui = { workspace = true, optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, optional = true }

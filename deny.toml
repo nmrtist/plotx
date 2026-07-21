@@ -1,0 +1,65 @@
+# Dependency policy for both GPL and proprietary PlotX distributions.
+# Keep the license allow-list aligned with xtask/about.toml.
+
+[graph]
+all-features = true
+# Every platform CI builds on. Releases currently ship for 64-bit Windows
+# only, but the dependency policy must cover whatever CI compiles.
+targets = [
+    "x86_64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-apple-darwin",
+]
+
+[advisories]
+ignore = [
+    # Transitive through resvg/svg2pdf. RustSec lists no safe upgrade; remove
+    # these exceptions when those upstream projects migrate to maintained font
+    # libraries.
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser is transitive and has no safe upgrade" },
+    { id = "RUSTSEC-2026-0206", reason = "rustybuzz is transitive and has no safe upgrade" },
+    # quick-xml 0.39 is pinned by wayland-scanner (Linux graph), a compile-time
+    # proc-macro that only parses the Wayland protocol XML bundled with its
+    # dependents: never untrusted input, never in shipped binaries. Remove when
+    # wayland-scanner moves to quick-xml >= 0.41.
+    { id = "RUSTSEC-2026-0194", reason = "quick-xml is build-time only via wayland-scanner; no safe upgrade" },
+    { id = "RUSTSEC-2026-0195", reason = "quick-xml is build-time only via wayland-scanner; no safe upgrade" },
+]
+
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "BSL-1.0",
+    "CC0-1.0",
+    "Unicode-3.0",
+    "OFL-1.1",
+    "Ubuntu-font-1.0",
+    # Permissive data-only license used by the bundled Mozilla CA root store
+    # (webpki-roots); it covers certificate data, not code.
+    "CDLA-Permissive-2.0",
+]
+confidence-threshold = 0.8
+exceptions = [
+    # MPL is file-level copyleft. option-ext is used unmodified through
+    # directories and can be distributed in both PlotX license variants.
+    { crate = "option-ext", allow = ["MPL-2.0"] },
+]
+
+[licenses.private]
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "allow"
+highlight = "simplest-path"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

@@ -1,0 +1,215 @@
+name: CI
+
+# No workflow-level path filters: a filtered-out workflow never reports its
+# checks, which deadlocks pull requests once a check is required. Instead the
+# `changes` job classifies the changed paths and the heavy jobs skip
+# themselves; branch protection should require only `conclusion`, which
+# treats skipped jobs as passing.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Incremental compilation only bloats the CI caches.
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  # Decides which job groups this change needs. Fails open: when the changed
+  # files cannot be determined (workflow_dispatch, branch creation, API
+  # hiccup, or a push too large for the compare API), everything runs.
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      rust: ${{ steps.classify.outputs.rust }}
+      docs: ${{ steps.classify.outputs.docs }}
+    steps:
+      - name: Classify changed paths
+        id: classify
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rust=true
+          docs=true
+          files=""
+          case "${{ github.event_name }}" in
+            pull_request)
+              files=$(gh api --paginate \
+                "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+                --jq '.[].filename') || files=""
+              ;;
+            push)
+              before="${{ github.event.before }}"
+              if [ "$before" != "0000000000000000000000000000000000000000" ]; then
+                files=$(gh api \
+                  "repos/${{ github.repository }}/compare/$before...${{ github.sha }}" \
+                  --jq '.files[].filename') || files=""
+                # The compare API caps the file list at 300 entries; a longer
+                # list may be truncated, so run everything instead.
+                if [ "$(printf '%s\n' "$files" | wc -l)" -ge 300 ]; then
+                  files=""
+                fi
+              fi
+              ;;
+          esac
+          if [ -n "$files" ]; then
+            rust=false
+            docs=false
+            while IFS= read -r file; do
+              case "$file" in
+                # Workflow changes must prove every job still works.
+                .github/*) rust=true; docs=true ;;
+                docs/*) docs=true ;;
+                # Markdown is safe to skip because no Rust source embeds it
+                # (assets are embedded, so asset changes keep rust=true).
+                signatures/*|LICENSE|*.md) ;;
+                *) rust=true ;;
+              esac
+            done < <(printf '%s\n' "$files")
+          fi
+          echo "rust=$rust" >> "$GITHUB_OUTPUT"
+          echo "docs=$docs" >> "$GITHUB_OUTPUT"
+          echo "rust=$rust docs=$docs"
+
+  # Formatting, source sizes, and dependency policy are platform-independent
+  # and build nothing but xtask itself, so one cheap uncached runner fails
+  # within minutes. Always runs: it is fast and covers every file kind.
+  quick:
+    name: quick checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+
+      - name: Update Rust toolchain
+        run: |
+          rustup update --no-self-update stable
+          rustup default stable
+          rustup component add rustfmt
+
+      - name: Check formatting, source sizes, and dependency policy
+        run: cargo xtask pr-check quick
+
+  lint:
+    name: lint (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      # `--all-features` builds plotx-substrait, which generates code with protoc.
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update Rust toolchain
+        run: |
+          rustup update --no-self-update stable
+          rustup default stable
+          rustup component add clippy
+
+      # After toolchain setup so the cache key sees the final rustc version.
+      # Only main writes caches: pull requests restore main's entry, keeping
+      # one cache per platform and job inside the repository quota.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
+
+      - name: Check default frontends and run Clippy
+        run: cargo xtask pr-check lint
+
+  test:
+    name: test (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update Rust toolchain
+        run: |
+          rustup update --no-self-update stable
+          rustup default stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
+
+      - name: Run the test suite in both backend configurations
+        run: cargo xtask pr-check test
+
+  # Validates that the user manual builds. Deployment is separate: Cloudflare
+  # Workers Builds watches pushes and deploys on its own.
+  docs:
+    name: build manual
+    needs: changes
+    if: needs.changes.outputs.docs == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: docs
+
+      - name: Build the user manual
+        run: npm run build
+        working-directory: docs
+
+  # The single job branch protection should require. Skipped jobs pass, so
+  # path-skipped groups never deadlock a pull request, and matrix or job
+  # renames never require touching the protection settings.
+  conclusion:
+    name: conclusion
+    needs: [changes, quick, lint, test, docs]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every needed job to succeed or be skipped
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS"
+          echo "$RESULTS" | jq -e '[.[].result] | all(. == "success" or . == "skipped")'

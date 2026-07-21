@@ -1,0 +1,15 @@
+[package]
+name = "plotx-figure"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Figure-model layer for PlotX: axes, layers, series, and styling, independent of rendering."
+
+[lib]
+name = "plotx_figure"
+path = "src/lib.rs"
+
+[dependencies]
+colorous.workspace = true
+serde.workspace = true
