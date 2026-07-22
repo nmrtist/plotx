@@ -226,7 +226,7 @@ pub fn rasterize_svg(
     enforce_limits(width, height, options.limits)?;
 
     let mut usvg_options = resvg::usvg::Options::default();
-    usvg_options.fontdb_mut().load_system_fonts();
+    super::fonts::load_system_fonts(usvg_options.fontdb_mut());
     let tree = resvg::usvg::Tree::from_str(svg, &usvg_options)
         .map_err(|error| RasterError::SvgParse(error.to_string()))?;
     let mut pixmap =

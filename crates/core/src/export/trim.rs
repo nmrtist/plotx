@@ -175,7 +175,7 @@ pub(crate) fn trim_document_svg(
 
 fn svg_content_bounds(svg: &str, page: [f32; 2]) -> Result<Option<Rect>, ExportError> {
     let mut options = resvg::usvg::Options::default();
-    options.fontdb_mut().load_system_fonts();
+    super::fonts::load_system_fonts(options.fontdb_mut());
     let tree = resvg::usvg::Tree::from_str(svg, &options)
         .map_err(|error| ExportError::SvgParse(error.to_string()))?;
     if tree.root().children().is_empty() {

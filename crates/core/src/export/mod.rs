@@ -1,3 +1,4 @@
+mod fonts;
 mod precheck;
 mod preset;
 mod raster;
@@ -261,8 +262,7 @@ pub fn export_canvases(
     }
 }
 
-/// Scale the SVG's declared physical size while leaving its geometry untouched.
-/// `None` preserves the authored page size.
+/// Scale the SVG's declared physical size; `None` preserves the authored size.
 fn document_svg(canvas: &CanvasDocument, target_width_mm: Option<f32>) -> String {
     let svg = render_document_svg(canvas);
     let Some(target) = target_width_mm else {
@@ -475,7 +475,7 @@ fn render_multi_page_pdf(svgs: &[String]) -> Result<Vec<u8>, ExportError> {
 
 fn parse_pdf_svg(svg: &str) -> Result<svg2pdf::usvg::Tree, ExportError> {
     let mut options = svg2pdf::usvg::Options::default();
-    options.fontdb_mut().load_system_fonts();
+    fonts::load_system_fonts(options.fontdb_mut());
     svg2pdf::usvg::Tree::from_str(svg, &options).map_err(|e| ExportError::SvgParse(e.to_string()))
 }
 
@@ -721,7 +721,7 @@ mod tests {
         assert!((width_pt - view_box[2] * authored_scale).abs() < 0.01);
         let bounds_svg = crate::state::render_document_svg_for_bounds(&doc);
         let mut options = resvg::usvg::Options::default();
-        options.fontdb_mut().load_system_fonts();
+        fonts::load_system_fonts(options.fontdb_mut());
         let tree = resvg::usvg::Tree::from_str(&bounds_svg, &options).unwrap();
         let painted = tree.root().abs_stroke_bounding_box();
         let painted_x = painted.x() * doc.size_pt()[0] / tree.size().width();
