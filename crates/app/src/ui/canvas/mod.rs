@@ -32,7 +32,6 @@ const SNAP_PX: f32 = 6.0;
 const GRID_COLOR: Color32 = Color32::from_rgb(0x5a, 0xa9, 0xc4);
 const GUIDE_COLOR: Color32 = Color32::from_rgb(0xff, 0x2d, 0x92);
 const INTEGRAL_COLOR: Color32 = Color32::from_rgb(0x2b, 0x6c, 0xb0);
-const INTEGRAL_REF_COLOR: Color32 = Color32::from_rgb(0xc7, 0x8a, 0x14);
 const PEAK_COLOR: Color32 = Color32::from_rgb(0x8a, 0x1c, 0x1c);
 
 mod authoring;

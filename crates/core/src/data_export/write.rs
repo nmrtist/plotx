@@ -187,6 +187,7 @@ pub(super) fn write_integrals_1d<W: Write>(
         Field::Text("end_ppm"),
         Field::Text("area"),
         Field::Text("normalized_area"),
+        Field::Text("reference_value"),
         Field::Text("mode"),
     ])?;
     for value in values {
@@ -195,6 +196,10 @@ pub(super) fn write_integrals_1d<W: Write>(
             Field::Number(value.end_ppm),
             Field::Number(value.area),
             Field::Number(value.normalized_area),
+            value
+                .reference_value
+                .map(Field::Number)
+                .unwrap_or(Field::Empty),
             Field::Text(value.mode.as_str()),
         ])?;
     }
@@ -213,7 +218,6 @@ pub(super) fn write_integrals_2d<W: Write>(
         Field::Text("f1_hi"),
         Field::Text("volume"),
         Field::Text("normalized_volume"),
-        Field::Text("is_reference"),
         Field::Text("reference_value"),
         Field::Text("mode"),
         Field::Text("method"),
@@ -237,8 +241,7 @@ pub(super) fn write_integrals_2d<W: Write>(
             Field::Number(value.f1.1),
             Field::Number(value.volume),
             normalized,
-            Field::Text(if value.is_reference { "true" } else { "false" }),
-            Field::Number(value.reference_value),
+            value.reference_value.map_or(Field::Empty, Field::Number),
             Field::Text(value.mode.as_str()),
             Field::Text(method),
             Field::Text(baseline),

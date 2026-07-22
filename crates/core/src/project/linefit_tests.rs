@@ -132,7 +132,7 @@ fn recipe_without_line_fits_key_loads_with_empty_fits() {
         }),
     };
 
-    apply_1d_recipe(&mut dataset, &recipe);
+    apply_1d_recipe(&mut dataset, &recipe).unwrap();
 
     assert!(dataset.line_fits.is_empty());
     assert_eq!(dataset.next_line_fit_id, 0);

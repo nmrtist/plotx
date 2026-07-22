@@ -163,7 +163,7 @@ pub fn object_to_dataset(
                 source: nmr_source(data),
                 group_delay: dim.group_delay.unwrap_or(0.0),
             });
-            apply_1d_recipe(&mut dataset, recipe);
+            apply_1d_recipe(&mut dataset, recipe)?;
             dataset.name = data.label.clone();
             dataset.retransform();
             Ok(Dataset::Nmr(Box::new(dataset)))

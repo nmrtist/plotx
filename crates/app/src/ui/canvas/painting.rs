@@ -225,6 +225,9 @@ pub(crate) fn paint_integrals(
     plot: PlotRect,
     painter: &egui::Painter,
 ) {
+    if app.session.tool != Tool::Integrate {
+        return;
+    }
     let Some(fig) = app.doc.canvases[ci]
         .object(object_id)
         .and_then(|object| object.plot())
@@ -236,6 +239,13 @@ pub(crate) fn paint_integrals(
         return;
     };
     let selected = app.session.ui.selected_integral;
+    let hover_x = painter.ctx().input(|input| {
+        input
+            .pointer
+            .hover_pos()
+            .filter(|position| plot_rect(plot).contains(*position))
+            .map(|position| position.x)
+    });
     for integ in &n.integrals {
         let x0 = x_to_screen(
             integ.start_ppm,
@@ -253,37 +263,31 @@ pub(crate) fn paint_integrals(
         if r.width() < 1.0 {
             continue;
         }
-        let color = if integ.is_reference {
-            INTEGRAL_REF_COLOR
-        } else {
-            INTEGRAL_COLOR
-        };
+        let color = INTEGRAL_COLOR;
         let [cr, cg, cb, _] = color.to_array();
-        painter.rect_filled(r, 0.0, Color32::from_rgba_unmultiplied(cr, cg, cb, 30));
         let is_sel = selected == Some(integ.id);
-        painter.rect_stroke(
-            r,
-            0.0,
-            Stroke::new(if is_sel { 2.0_f32 } else { 1.0_f32 }, color),
-            StrokeKind::Inside,
-        );
-        let label = if integ.is_reference {
-            format!("{:.3} (ref)", integ.normalized_area)
-        } else {
-            format!("{:.3}", integ.normalized_area)
-        };
-        painter.text(
-            Pos2::new(r.left() + 3.0, r.top() + 2.0),
-            egui::Align2::LEFT_TOP,
-            label,
-            egui::FontId::proportional(11.0),
-            color,
-        );
+        let is_hovered = hover_x.is_some_and(|x| x >= r.left() && x <= r.right());
+        if is_sel || is_hovered {
+            painter.rect_filled(r, 0.0, Color32::from_rgba_unmultiplied(cr, cg, cb, 30));
+        }
+        for edge in [r.left(), r.right()] {
+            painter.line_segment(
+                [Pos2::new(edge, r.top()), Pos2::new(edge, r.bottom())],
+                Stroke::new(
+                    if is_sel { 2.0_f32 } else { 1.0_f32 },
+                    color.gamma_multiply(0.65),
+                ),
+            );
+        }
         if is_sel {
             for ex in [r.left(), r.right()] {
-                painter.line_segment(
-                    [Pos2::new(ex, r.top()), Pos2::new(ex, r.bottom())],
-                    Stroke::new(2.5_f32, color),
+                painter.rect_filled(
+                    EguiRect::from_center_size(
+                        Pos2::new(ex, (r.top() + r.bottom()) * 0.5),
+                        Vec2::new(6.0, 16.0),
+                    ),
+                    1.0,
+                    color,
                 );
             }
         }

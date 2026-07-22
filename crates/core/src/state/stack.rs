@@ -145,6 +145,9 @@ impl PlotxApp {
         fig.x.max = x_max;
         fig.y.min = y_min;
         fig.y.max = y_max;
+        if !binding.primary_visible() {
+            fig.integral_curves.clear();
+        }
         fig.show_legend = true;
         fig
     }

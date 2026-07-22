@@ -382,7 +382,7 @@ fn finish_integral_2d_drag(
             .and_then(Dataset::as_nmr2d_mut)
         {
             let id = n.next_integral_id();
-            let is_reference = n.integrals.is_empty();
+            let reference_value = n.integrals.is_empty().then_some(1.0);
             let mode = n.display_mode().into();
             n.integrals.push(Integral2D {
                 id,
@@ -391,8 +391,7 @@ fn finish_integral_2d_drag(
                 f1,
                 volume: 0.0,
                 normalized_volume: None,
-                is_reference,
-                reference_value: 1.0,
+                reference_value,
                 mode,
                 method: IntegralMethod::Sum,
                 baseline: BaselineMode::None,
@@ -437,8 +436,8 @@ fn integral_2d_context_menu(
             ui.close();
             return;
         };
-        if ui.button("Set as reference").clicked() {
-            app.set_integral_2d_reference(dataset, id);
+        if ui.button("Use as normalization reference").clicked() {
+            app.set_integral_2d_reference(dataset, id, 1.0);
             ui.close();
         }
         if ui.button("Delete").clicked() {
@@ -488,11 +487,7 @@ pub(crate) fn paint_integrals_2d(
         if r.width() < 1.0 || r.height() < 1.0 {
             continue;
         }
-        let color = if integral.is_reference {
-            INTEGRAL_REF_COLOR
-        } else {
-            INTEGRAL_COLOR
-        };
+        let color = INTEGRAL_COLOR;
         let [red, green, blue, _] = color.to_array();
         painter.rect_filled(
             r,
@@ -509,11 +504,10 @@ pub(crate) fn paint_integrals_2d(
         let value = integral
             .normalized_volume
             .map_or_else(|| "—".to_owned(), |v| format!("{v:.3}"));
-        let reference = if integral.is_reference { " (ref)" } else { "" };
         painter.text(
             r.left_top() + egui::vec2(3.0, 2.0),
             egui::Align2::LEFT_TOP,
-            format!("{}: {}{}", integral.name, value, reference),
+            format!("{}: {}", integral.name, value),
             egui::FontId::proportional(11.0),
             color,
         );
@@ -548,8 +542,7 @@ pub(crate) fn paint_integrals_2d(
             f1: (drag.anchor[1], drag.current[1]),
             volume: 0.0,
             normalized_volume: None,
-            is_reference: false,
-            reference_value: 1.0,
+            reference_value: None,
             mode: DisplayModeLabel::Real,
             method: IntegralMethod::Sum,
             baseline: BaselineMode::None,
@@ -577,8 +570,7 @@ mod tests {
             f1: (3.0, 6.0),
             volume: 0.0,
             normalized_volume: None,
-            is_reference: false,
-            reference_value: 1.0,
+            reference_value: None,
             mode: DisplayModeLabel::Real,
             method: IntegralMethod::Sum,
             baseline: BaselineMode::None,

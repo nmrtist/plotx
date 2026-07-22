@@ -20,8 +20,8 @@ workflow.
    committed.
 
 Press `Esc` to cancel an in-progress edit. Press `Delete` or `Backspace` to
-remove the selected integral. The context menu also provides **Set as
-reference** and **Delete**. Creating, moving, resizing, renaming, changing the
+remove the selected integral. The context menu also provides **Use as
+normalization reference** and **Delete**. Creating, moving, resizing, renaming, changing the
 reference, and deleting can all be undone and redone.
 
 The Integrals table lists the F2 and F1 bounds, raw and normalized volumes, the
@@ -77,7 +77,8 @@ the opposite sign from the reference.
 
 If the reference volume is effectively zero relative to the other integrals,
 normalization is unavailable. The table and plot label show `—` instead of an
-unstable ratio. Deleting the reference promotes the first remaining integral.
+unstable ratio. Deleting the reference leaves the remaining integrals without
+one — their normalized volumes show `—` until you choose a new reference.
 
 ## Limits and placement advice
 

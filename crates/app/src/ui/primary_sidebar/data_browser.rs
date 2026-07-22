@@ -430,7 +430,7 @@ mod tests {
             area: 1.0,
             normalized_area: 1.0,
             mode: DisplayModeLabel::Real,
-            is_reference: false,
+            reference_value: None,
         });
         nmr.line_fits.push(StoredLineFit {
             id: 13,

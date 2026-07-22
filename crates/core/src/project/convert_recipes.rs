@@ -4,7 +4,7 @@
 use super::*;
 use crate::state::{PeakMark, PeakOrigin, PeakSet};
 
-pub fn apply_1d_recipe(dataset: &mut NmrDataset, recipe: &RecipeObject) {
+pub fn apply_1d_recipe(dataset: &mut NmrDataset, recipe: &RecipeObject) -> Result<()> {
     let p = &recipe.parameters;
     if let Some(dto) = p.pipelines.first() {
         dataset.pipeline = pipeline_from_dto(dto);
@@ -17,12 +17,13 @@ pub fn apply_1d_recipe(dataset: &mut NmrDataset, recipe: &RecipeObject) {
             .cloned()
             .and_then(|v| serde_json::from_value(v).ok())
             .unwrap_or_else(|| legacy_peaks(analysis));
-        dataset.integrals = analysis
-            .get("integrals")
-            .cloned()
-            .and_then(|v| serde_json::from_value(v).ok())
-            .unwrap_or_default();
-        dataset.normalize_integral_ids();
+        dataset.integrals = match analysis.get("integrals") {
+            Some(value) => serde_json::from_value(value.clone()).map_err(|error| {
+                ProjectError::Invalid(format!("plotx.analysis.integrals is malformed: {error}"))
+            })?,
+            None => Vec::new(),
+        };
+        dataset.reseed_integral_ids();
         dataset.line_fits = analysis
             .get("line_fits")
             .cloned()
@@ -46,6 +47,7 @@ pub fn apply_1d_recipe(dataset: &mut NmrDataset, recipe: &RecipeObject) {
             .max()
             .unwrap_or(0);
     }
+    Ok(())
 }
 
 fn legacy_peaks(analysis: &serde_json::Value) -> PeakSet {

@@ -104,6 +104,9 @@ impl PlotxApp {
     ) -> Figure {
         let mut figure =
             crate::workflow::build_dataset_figure(&self.doc.datasets[dataset], chart, size_mm);
+        if let Some(nmr) = self.doc.datasets[dataset].as_nmr() {
+            figure.integral_curves = nmr.integral_curves();
+        }
         // Every figure build stamps the document's typography, so a doc-level
         // edit reaches each plot on its next rebuild without per-plot state.
         figure.typography = self.doc.style_library.figure_typography;
@@ -262,6 +265,9 @@ impl PlotxApp {
         );
         if let Some(plot) = object.plot_mut() {
             plot.figure.typography = self.doc.style_library.figure_typography;
+            if let Some(nmr) = self.doc.datasets[dataset].as_nmr() {
+                plot.figure.integral_curves = nmr.integral_curves();
+            }
         }
         object
     }
@@ -372,14 +378,16 @@ impl PlotxApp {
                 }
             }
             Interaction::Integral(drag) => {
+                let dataset = drag.dataset;
                 if let Some(n) = self
                     .doc
                     .datasets
-                    .get_mut(drag.dataset)
+                    .get_mut(dataset)
                     .and_then(Dataset::as_nmr_mut)
                 {
                     n.integrals = drag.before;
                 }
+                self.sync_integral_curves_for(dataset);
             }
             Interaction::Integral2D(drag) => {
                 if let Some(n) = self
@@ -624,6 +632,7 @@ impl PlotxApp {
     pub fn apply_dataset_edit(&mut self, dataset: usize) {
         if let Some(n) = self.doc.datasets[dataset].as_nmr_mut() {
             n.rebuild();
+            n.recompute_integrals();
         } else if self.doc.datasets[dataset].as_nmr2d().is_some() {
             self.schedule_2d_processing(dataset, false);
             self.doc.dirty = true;
@@ -638,6 +647,7 @@ impl PlotxApp {
     pub fn apply_dataset_retransform(&mut self, dataset: usize) {
         if let Some(n) = self.doc.datasets[dataset].as_nmr_mut() {
             n.retransform();
+            n.recompute_integrals();
         } else if self.doc.datasets[dataset].as_nmr2d().is_some() {
             self.schedule_2d_processing(dataset, true);
             self.doc.dirty = true;

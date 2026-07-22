@@ -13,7 +13,7 @@ mod statistics_config;
 mod task_card;
 
 use curve_fit::curve_fit_group;
-use egui::{Button, DragValue, Response, Ui};
+use egui::{Button, DragValue, Id, Response, Ui};
 use egui_phosphor::regular as icon;
 use line_fit::line_fit_group;
 use plotx_core::actions::{DatasetProcessingState, PendingProcessingEdit};
@@ -23,6 +23,40 @@ use region_analysis::region_analysis_group;
 use slice::slice_group;
 
 pub(super) use line_fit::line_fit_shape_id;
+
+#[derive(Clone, Copy, Default)]
+struct DeferredReferenceValue {
+    value: f64,
+    changed: bool,
+}
+
+/// Keep a reference-value edit outside the document until the widget gesture
+/// ends, so one drag or typing run produces exactly one undoable action.
+fn reference_value_drag(ui: &mut Ui, id: Id, committed: f64) -> Option<f64> {
+    let mut pending = ui
+        .data_mut(|data| data.get_temp::<DeferredReferenceValue>(id))
+        .unwrap_or(DeferredReferenceValue {
+            value: committed,
+            changed: false,
+        });
+    let response = ui
+        .add(
+            DragValue::new(&mut pending.value)
+                .speed(0.1)
+                .max_decimals(3),
+        )
+        .on_hover_text("Normalization value assigned to this reference integral");
+    pending.changed |= response.changed();
+
+    if response.drag_stopped() || response.lost_focus() {
+        ui.data_mut(|data| data.remove_temp::<DeferredReferenceValue>(id));
+        return pending.changed.then_some(pending.value);
+    }
+    if response.dragged() || response.has_focus() || response.changed() {
+        ui.data_mut(|data| data.insert_temp(id, pending));
+    }
+    None
+}
 
 pub(crate) fn render_region_task(app: &mut PlotxApp, ui: &mut Ui) {
     region_analysis::render_task(app, ui);
@@ -278,12 +312,12 @@ pub(super) fn integrate_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
     if drawing {
         ui.small(
             "Drag across a peak to add · drag edges to resize · drag middle to move · \
-             right-click to set the reference or delete.",
+             right-click to set the normalization reference or delete.",
         );
     }
 
     let selected = app.session.ui.selected_integral;
-    let mut set_ref: Option<u64> = None;
+    let mut set_ref: Option<(u64, f64)> = None;
     let mut delete_id: Option<u64> = None;
     let mut select_id: Option<u64> = None;
 
@@ -309,13 +343,21 @@ pub(super) fn integrate_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
             {
                 select_id = Some(integ.id);
             }
-            ui.label(format!("{:.3}", integ.normalized_area));
-            if ui
-                .selectable_label(integ.is_reference, "ref")
-                .on_hover_text("Use this integral as the =1 reference")
-                .clicked()
-            {
-                set_ref = Some(integ.id);
+            if let Some(value) = integ.reference_value {
+                let id = ui.make_persistent_id(("integral_reference_1d", di, integ.id));
+                if let Some(value) = reference_value_drag(ui, id, value) {
+                    set_ref = Some((integ.id, value));
+                }
+                ui.weak("reference");
+            } else {
+                ui.label(format!("{:.3}", integ.normalized_area));
+                if ui
+                    .small_button("set reference")
+                    .on_hover_text("Use this integral as the normalization reference")
+                    .clicked()
+                {
+                    set_ref = Some((integ.id, 1.0));
+                }
             }
             if ui.small_button(icon::X).clicked() {
                 delete_id = Some(integ.id);
@@ -326,8 +368,8 @@ pub(super) fn integrate_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
     if let Some(id) = select_id {
         app.session.ui.selected_integral = Some(id);
     }
-    if let Some(id) = set_ref {
-        app.set_integral_reference(di, id);
+    if let Some((id, value)) = set_ref {
+        app.set_integral_reference(di, id, value);
     }
     if let Some(id) = delete_id {
         app.delete_integral(di, id);
@@ -370,7 +412,15 @@ fn integrate_2d_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
     if integrals.is_empty() {
         ui.weak("No 2D integrals yet — draw a rectangle around a peak.");
     }
-    if integrals
+    let has_reference = integrals
+        .iter()
+        .any(|integral| integral.reference_value.is_some());
+    if !integrals.is_empty() && !has_reference {
+        ui.colored_label(
+            ui.visuals().warn_fg_color,
+            "Choose a normalization reference to show normalized values.",
+        );
+    } else if integrals
         .iter()
         .any(|integral| integral.normalized_volume.is_none())
     {
@@ -406,9 +456,21 @@ fn integrate_2d_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
                 let normalized = integral
                     .normalized_volume
                     .map_or_else(|| "—".to_owned(), |value| format!("{value:.3}"));
-                ui.label(normalized);
-                if ui.selectable_label(integral.is_reference, "ref").clicked() {
-                    app.set_integral_2d_reference(di, integral.id);
+                if let Some(value) = integral.reference_value {
+                    let id = ui.make_persistent_id(("integral_reference_2d", di, integral.id));
+                    if let Some(value) = reference_value_drag(ui, id, value) {
+                        app.set_integral_2d_reference(di, integral.id, value);
+                    }
+                    ui.weak("reference");
+                } else {
+                    ui.label(normalized);
+                    if ui
+                        .small_button("set reference")
+                        .on_hover_text("Use this integral as the normalization reference")
+                        .clicked()
+                    {
+                        app.set_integral_2d_reference(di, integral.id, 1.0);
+                    }
                 }
                 if ui.small_button(icon::X).clicked() {
                     app.delete_integral_2d(di, integral.id);
@@ -447,22 +509,6 @@ fn integrate_2d_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
                             value.baseline = baseline;
                         }
                     });
-                }
-                if integral.is_reference {
-                    ui.label("Reference value");
-                    let mut reference_value = integral.reference_value;
-                    if ui
-                        .add(DragValue::new(&mut reference_value).speed(0.1))
-                        .changed()
-                    {
-                        app.edit_integrals_2d(di, |values, _| {
-                            if let Some(value) =
-                                values.iter_mut().find(|value| value.id == integral.id)
-                            {
-                                value.reference_value = reference_value;
-                            }
-                        });
-                    }
                 }
             });
         });

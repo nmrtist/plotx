@@ -268,8 +268,7 @@ fn analysis_tables_keep_stable_headers_and_escape_user_text() {
         f1: (3.0, 4.0),
         volume: -5.0,
         normalized_volume: None,
-        is_reference: true,
-        reference_value: 2.0,
+        reference_value: Some(2.0),
         mode: crate::DisplayModeLabel::Real,
         method: IntegralMethod::Sum,
         baseline: BaselineMode::Plane,
@@ -280,9 +279,9 @@ fn analysis_tables_keep_stable_headers_and_escape_user_text() {
     );
     let text = integrals.to_text(Delimiter::Comma).unwrap();
     assert!(text.starts_with(
-        "name,f2_lo,f2_hi,f1_lo,f1_hi,volume,normalized_volume,is_reference,reference_value,mode,method,baseline\n"
+        "name,f2_lo,f2_hi,f1_lo,f1_hi,volume,normalized_volume,reference_value,mode,method,baseline\n"
     ));
-    assert!(text.ends_with("\"cross, peak\",1,2,3,4,-5,,true,2,real,sum,plane\n"));
+    assert!(text.ends_with("\"cross, peak\",1,2,3,4,-5,,2,real,sum,plane\n"));
 }
 
 #[test]

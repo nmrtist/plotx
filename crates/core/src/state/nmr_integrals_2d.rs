@@ -94,43 +94,32 @@ impl Nmr2DDataset {
         id
     }
 
-    /// Enforce one reference and refresh all presentation-layer normalized values.
-    ///
-    /// The first marked reference wins when malformed input marks more than one;
-    /// when none is marked the first collection entry is promoted. A reference
-    /// indistinguishable from zero relative to the collection's largest volume is
-    /// unusable and leaves every normalized value unavailable.
+    /// Refresh normalized values from the optional user-selected reference.
     pub fn renormalize_integrals(&mut self) {
-        if self.integrals.is_empty() {
-            return;
-        }
-
-        let reference_index = self
-            .integrals
-            .iter()
-            .position(|integral| integral.is_reference)
-            .unwrap_or(0);
-        for (index, integral) in self.integrals.iter_mut().enumerate() {
-            integral.is_reference = index == reference_index;
-        }
-
-        let reference = &self.integrals[reference_index];
-        let reference_volume = reference.volume;
-        let reference_value = reference.reference_value;
+        let reference = self.integrals.iter().find_map(|integral| {
+            integral
+                .reference_value
+                .map(|value| (integral.volume, value))
+        });
         let max_volume = self
             .integrals
             .iter()
             .map(|integral| integral.volume.abs())
             .fold(0.0, f64::max);
-        let usable = reference_volume.is_finite()
-            && reference_value.is_finite()
-            && max_volume.is_finite()
-            && max_volume > 0.0
-            && reference_volume.abs() >= 1e-12 * max_volume;
+        let usable = reference.is_some_and(|(volume, value)| {
+            volume.is_finite()
+                && value.is_finite()
+                && max_volume.is_finite()
+                && max_volume > 0.0
+                && volume.abs() >= 1e-12 * max_volume
+        });
 
         for integral in &mut self.integrals {
             integral.normalized_volume = usable
-                .then(|| integral.volume / reference_volume * reference_value)
+                .then(|| {
+                    let (reference_volume, reference_value) = reference.unwrap();
+                    integral.volume / reference_volume * reference_value
+                })
                 .filter(|value| value.is_finite());
         }
     }
@@ -142,7 +131,7 @@ mod tests {
 
     use super::*;
 
-    fn integral(id: u64, volume: f64, is_reference: bool) -> Integral2D {
+    fn integral(id: u64, volume: f64, reference_value: Option<f64>) -> Integral2D {
         Integral2D {
             id,
             name: format!("I{id}"),
@@ -150,8 +139,7 @@ mod tests {
             f1: (3.0, 4.0),
             volume,
             normalized_volume: None,
-            is_reference,
-            reference_value: 1.0,
+            reference_value,
             mode: DisplayModeLabel::Real,
             method: IntegralMethod::Sum,
             baseline: BaselineMode::None,
@@ -159,22 +147,20 @@ mod tests {
     }
 
     #[test]
-    fn normalization_promotes_first_and_supports_signed_reference_weight() {
-        let mut values = vec![integral(7, -2.0, false), integral(11, 6.0, false)];
-        values[0].reference_value = 2.0;
+    fn normalization_supports_signed_reference_weight() {
+        let values = vec![integral(7, -2.0, Some(2.0)), integral(11, 6.0, None)];
         let mut dataset = test_dataset();
         dataset.integrals = values;
         dataset.renormalize_integrals();
 
-        assert!(dataset.integrals[0].is_reference);
         assert_eq!(dataset.integrals[0].normalized_volume, Some(2.0));
         assert_eq!(dataset.integrals[1].normalized_volume, Some(-6.0));
     }
 
     #[test]
-    fn near_zero_reference_is_unusable_and_delete_promotes_first() {
+    fn near_zero_reference_is_unusable_and_delete_leaves_no_reference() {
         let mut dataset = test_dataset();
-        dataset.integrals = vec![integral(5, 1e-13, true), integral(9, 1.0, false)];
+        dataset.integrals = vec![integral(5, 1e-13, Some(1.0)), integral(9, 1.0, None)];
         dataset.renormalize_integrals();
         assert!(
             dataset
@@ -185,14 +171,14 @@ mod tests {
 
         dataset.integrals.retain(|integral| integral.id != 5);
         dataset.renormalize_integrals();
-        assert!(dataset.integrals[0].is_reference);
-        assert_eq!(dataset.integrals[0].normalized_volume, Some(1.0));
+        assert_eq!(dataset.integrals[0].reference_value, None);
+        assert_eq!(dataset.integrals[0].normalized_volume, None);
     }
 
     #[test]
     fn reseeding_preserves_sparse_stable_ids() {
         let mut dataset = test_dataset();
-        dataset.integrals = vec![integral(3, 1.0, true), integral(41, 2.0, false)];
+        dataset.integrals = vec![integral(3, 1.0, Some(1.0)), integral(41, 2.0, None)];
         dataset.reseed_integral_ids();
         assert_eq!(dataset.integrals[0].id, 3);
         assert_eq!(dataset.integrals[1].id, 41);
@@ -202,7 +188,7 @@ mod tests {
     #[test]
     fn processing_preview_defers_volume_recompute_until_commit() {
         let mut dataset = test_dataset();
-        dataset.integrals = vec![integral(0, 123.0, true)];
+        dataset.integrals = vec![integral(0, 123.0, Some(1.0))];
 
         dataset.rebuild();
         assert_eq!(dataset.integrals[0].volume, 123.0);
@@ -217,7 +203,7 @@ mod tests {
         use std::f64::consts::PI;
 
         let mut dataset = test_dataset();
-        dataset.integrals = vec![integral(0, 0.0, true)];
+        dataset.integrals = vec![integral(0, 0.0, Some(1.0))];
         dataset.recompute_integrals().unwrap();
         assert!(dataset.integrals[0].volume > 0.0);
 
