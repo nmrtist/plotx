@@ -1,6 +1,8 @@
 use super::linefit_tests::sample_line_fit;
 use super::*;
-use crate::state::{AnalysisSelection, CanvasDocument, CanvasViewport, Dataset, Tool};
+use crate::state::{
+    AnalysisSelection, AxisOverrides, CanvasDocument, CanvasViewport, Dataset, Tool,
+};
 use crate::state::{PeakMark, PeakOrigin};
 use crate::{DisplayModeLabel, IntegralResult};
 use std::f64::consts::TAU;
@@ -254,6 +256,14 @@ fn project_roundtrip_preserves_data_recipe_and_view() {
     first_plot_mut(&mut app).panel.user_note = "custom title\nHSQC summary".to_owned();
     first_plot_mut(&mut app).panel.position = [33.0, 14.0];
     first_plot_mut(&mut app).panel.visible = false;
+    let axis_overrides = AxisOverrides {
+        x_label: Some("Chemical shift".to_owned()),
+        y_label: Some("Response".to_owned()),
+        x_range: Some(AxisRange::new(1.0, 8.0)),
+        y_range: Some(AxisRange::new(-2.0, 12.0)),
+    };
+    let plot_id = app.doc.canvases[0].objects[0].id;
+    app.set_axis_overrides_value(0, plot_id, &axis_overrides);
     let custom_typography = plotx_figure::FigureTypography {
         tick_pt: 9.5,
         label_pt: 10.0,
@@ -333,6 +343,18 @@ fn project_roundtrip_preserves_data_recipe_and_view() {
         "custom title\nHSQC summary"
     );
     assert_eq!(first_plot(&loaded).panel.position, [33.0, 14.0]);
+    assert_eq!(first_plot(&loaded).axis_overrides, axis_overrides);
+    assert_eq!(first_plot(&loaded).figure.x.label, "Chemical shift");
+    assert_eq!(first_plot(&loaded).figure.y.label, "Response");
+    assert_eq!(
+        first_plot(&loaded).viewport.full_x,
+        AxisRange::new(1.0, 8.0)
+    );
+    assert_eq!(
+        first_plot(&loaded).viewport.full_y,
+        AxisRange::new(-2.0, 12.0)
+    );
+    assert!(!first_plot(&loaded).viewport.auto_y);
     assert!(!first_plot(&loaded).panel.visible);
 
     let Dataset::Nmr(n) = &loaded.doc.datasets[0] else {
@@ -649,6 +671,7 @@ fn legacy_single_input_loads_as_one_series_binding() {
     )
     .unwrap();
     assert!(view.series.is_empty(), "old files carry no series list");
+    assert!(view.axis_overrides.is_none());
 }
 
 #[test]
@@ -740,7 +763,12 @@ fn scheme_save_load_apply_roundtrips() {
 #[test]
 fn snapshot_roundtrip_restores_materialized_figure() {
     let mut app = sample_app();
-    first_plot_mut(&mut app).figure.x.label = "snapshot-only x label".to_owned();
+    let plot = first_plot_mut(&mut app);
+    plot.figure.x.label = "snapshot-only x label".to_owned();
+    plot.figure.x.min = 2.25;
+    plot.figure.x.max = 3.75;
+    plot.viewport.full_x = AxisRange::new(0.0, 10.0);
+    plot.viewport.view_x = AxisRange::new(5.0, 6.0);
     let path = temp_project("snapshot");
     let _ = std::fs::remove_file(&path);
 
@@ -750,4 +778,10 @@ fn snapshot_roundtrip_restores_materialized_figure() {
 
     assert!(loaded.doc.save_include_view_snapshots);
     assert_eq!(first_plot(&loaded).figure.x.label, "snapshot-only x label");
+    assert_eq!(first_plot(&loaded).figure.x.min, 2.25);
+    assert_eq!(first_plot(&loaded).figure.x.max, 3.75);
+    assert_eq!(
+        first_plot(&loaded).viewport.view_x,
+        AxisRange::new(5.0, 6.0)
+    );
 }

@@ -1,3 +1,4 @@
+use super::axis_overrides::AxisOverridesDto;
 use super::convert_recipes::{nmr2d_recipe_extensions, read_regions};
 use super::electrophysiology_convert::{
     electrophysiology_from_object, electrophysiology_to_objects,
@@ -339,6 +340,7 @@ pub fn canvas_to_view(
                 projections: None,
                 frame: FrameDto::from_frame(object.frame),
                 viewport: None,
+                axis_overrides: None,
                 panel: None,
                 title: None,
                 text: None,
@@ -403,6 +405,7 @@ pub fn canvas_to_view(
                         stack,
                         projections: projections_to_dto(&plot.projections, datasets)?,
                         viewport: Some(ViewportDto::from_viewport(&plot.viewport)),
+                        axis_overrides: AxisOverridesDto::from_overrides(&plot.axis_overrides),
                         panel: Some(PanelDto::from_panel(&plot.panel)),
                         ..base(kind)
                     })
@@ -584,12 +587,25 @@ pub fn view_to_canvas(
                 } else {
                     app.build_object_figure(&binding, &chart, &stack, &projections, size_mm)
                 };
-                let viewport = view_object
+                let axis_overrides = view_object
+                    .axis_overrides
+                    .as_ref()
+                    .map(AxisOverridesDto::to_overrides)
+                    .unwrap_or_default();
+                let snapshot_backed = view_object.snapshot.is_some();
+                if !snapshot_backed {
+                    axis_overrides.apply_to(&mut figure);
+                }
+                let mut viewport = view_object
                     .viewport
                     .as_ref()
                     .map(ViewportDto::to_viewport)
                     .unwrap_or_else(|| CanvasViewport::from_figure(&figure));
-                if view_object.snapshot.is_none() {
+                if !snapshot_backed {
+                    if axis_overrides.y_range.is_some() && figure.y.categories.is_none() {
+                        viewport.auto_y = false;
+                    }
+                    viewport.sync_full_from(&figure);
                     viewport.apply_to(&mut figure);
                 }
                 figure.title.clear();
@@ -604,6 +620,7 @@ pub fn view_to_canvas(
                     chart,
                     stack,
                     projections,
+                    axis_overrides,
                     figure,
                     viewport,
                     panel,

@@ -251,12 +251,12 @@ pub(crate) fn commit_data_pan(app: &mut PlotxApp) {
             .object(drag.object)
             .and_then(|object| object.plot())
     {
-        app.execute_action(Action::set_object_viewport(
+        app.commit_object_viewport(
             drag.canvas,
             drag.object,
             drag.before,
             object.viewport.clone(),
-        ));
+        );
     }
 }
 
@@ -302,7 +302,7 @@ pub(crate) fn finish_axis_zoom(
     };
     let mut after = before.clone();
     after.select(fig, x, y);
-    app.execute_action(Action::set_object_viewport(ci, object_id, before, after));
+    app.commit_object_viewport(ci, object_id, before, after);
     app.session.status = "Zoomed axis.".into();
 }
 
@@ -328,7 +328,7 @@ pub(crate) fn reset_plot_viewport(
         HitZone::Plot => after.reset_all(),
         HitZone::None => return,
     }
-    app.execute_action(Action::set_object_viewport(ci, object_id, before, after));
+    app.commit_object_viewport(ci, object_id, before, after);
 }
 
 /// Zoom a plot's data viewport around the cursor. The axis is chosen by hit zone

@@ -22,6 +22,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use zip::write::SimpleFileOptions;
 
+mod axis_overrides;
 mod codec;
 mod convert;
 mod convert_recipes;

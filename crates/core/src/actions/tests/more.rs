@@ -91,32 +91,40 @@ fn single_table_color_override_recolors_bar_polygons() {
 }
 
 #[test]
-fn set_chart_type_switches_table_to_bar_and_undoes() {
-    use crate::state::ChartSpec;
+fn set_chart_type_switches_table_to_categorical_bars_and_undoes() {
+    use crate::state::{AxisOverrides, AxisRange, ChartSpec};
     let (mut app, id) = table_app();
 
     let before = first_plot(&app).chart.clone();
     assert_eq!(before.type_id, "table_line");
     let line_series = first_plot(&app).figure.series.len();
     assert_eq!(line_series, 1, "line chart draws one series per column");
+    let overrides = AxisOverrides {
+        x_range: Some(AxisRange::new(1.0, 8.0)),
+        ..AxisOverrides::default()
+    };
+    app.set_axis_overrides_value(0, id, &overrides);
 
-    let selected_column = app.doc.datasets[0].as_table().unwrap().series_bindings[0].value_column;
     let after = ChartSpec {
-        type_id: "table_bar".to_owned(),
-        column: Some(selected_column),
+        type_id: "table_bar_grouped".to_owned(),
         ..ChartSpec::default()
     };
     app.execute_action(Action::set_chart_type(0, id, before, after.clone()));
     assert_eq!(first_plot(&app).chart, after);
-    // The bar chart draws one filled rectangle per x row (3 rows).
+    // One-series grouped bars draw one filled rectangle per categorical row.
     assert_eq!(first_plot(&app).figure.polygons.len(), 3);
+    assert!(first_plot(&app).figure.x.categories.is_some());
+    assert_eq!(first_plot(&app).figure.x.min, -0.5);
+    assert_eq!(first_plot(&app).figure.x.max, 2.5);
+    assert_eq!(first_plot(&app).axis_overrides.x_range, overrides.x_range);
 
     app.undo();
     assert_eq!(first_plot(&app).chart.type_id, "table_line");
     assert_eq!(first_plot(&app).figure.series.len(), line_series);
+    assert_eq!(first_plot(&app).viewport.full_x, AxisRange::new(1.0, 8.0));
 
     app.redo();
-    assert_eq!(first_plot(&app).chart.type_id, "table_bar");
+    assert_eq!(first_plot(&app).chart.type_id, "table_bar_grouped");
     assert_eq!(first_plot(&app).figure.polygons.len(), 3);
 }
 

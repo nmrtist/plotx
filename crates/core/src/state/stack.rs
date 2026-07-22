@@ -345,6 +345,7 @@ impl PlotxApp {
                 chart,
                 stack,
                 projections: AxisProjections::default(),
+                axis_overrides: AxisOverrides::default(),
                 figure,
                 viewport,
                 panel,

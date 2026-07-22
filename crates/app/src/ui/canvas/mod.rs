@@ -548,6 +548,7 @@ mod tests {
                 chart: plotx_core::state::ChartSpec::default(),
                 stack: plotx_core::state::StackSpec::default(),
                 projections: plotx_core::state::AxisProjections::default(),
+                axis_overrides: plotx_core::state::AxisOverrides::default(),
                 figure: Figure::new("plot", Axis::new("x", 0.0, 1.0), Axis::new("y", 0.0, 1.0)),
                 viewport: CanvasViewport::from_figure(&Figure::new(
                     "plot",
@@ -579,6 +580,7 @@ mod tests {
                 chart: plotx_core::state::ChartSpec::default(),
                 stack: plotx_core::state::StackSpec::default(),
                 projections: plotx_core::state::AxisProjections::default(),
+                axis_overrides: plotx_core::state::AxisOverrides::default(),
                 figure: Figure::new("plot", Axis::new("x", 0.0, 1.0), Axis::new("y", 0.0, 1.0)),
                 viewport: CanvasViewport::from_figure(&Figure::new(
                     "plot",

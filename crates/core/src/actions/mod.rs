@@ -1,8 +1,8 @@
 use crate::layout::PageLayout;
 use crate::state::{
-    AxisProjections, CanvasDocument, CanvasObject, CanvasViewport, ChartSpec, CurveFitReference,
-    DataBinding, Dataset, NamedView, ObjectFrame, ObjectId, ObjectStyle, PanelLabelStyle,
-    PanelMeta, PlotxApp, PrimaryView, Region, Selection, StackSpec, StatAnalysis,
+    AxisOverrides, AxisProjections, CanvasDocument, CanvasObject, CanvasViewport, ChartSpec,
+    CurveFitReference, DataBinding, Dataset, NamedView, ObjectFrame, ObjectId, ObjectStyle,
+    PanelLabelStyle, PanelMeta, PlotxApp, PrimaryView, Region, Selection, StackSpec, StatAnalysis,
     StoredCurveFitAnalysis, StoredLineFit, StoredMultiplet, TableEditDelta, TextBox,
     TypedTableState,
 };
@@ -105,6 +105,12 @@ pub enum Action {
         object: ObjectId,
         before: CanvasViewport,
         after: CanvasViewport,
+    },
+    SetAxisOverrides {
+        canvas: usize,
+        object: ObjectId,
+        before: AxisOverrides,
+        after: AxisOverrides,
     },
     MoveResizeObject {
         canvas: usize,
@@ -426,6 +432,7 @@ impl Action {
             // Inserting or removing a bookmark always changes the list.
             Self::BoardViewInsert { .. } | Self::BoardViewRemove { .. } => false,
             Self::SetDataBinding { before, after, .. } => before == after,
+            Self::SetAxisOverrides { before, after, .. } => before == after,
             Self::SetChartType { before, after, .. } => before == after,
             Self::SetStackSpec { before, after, .. } => before == after,
             Self::SetAxisProjections { before, after, .. } => before == after,

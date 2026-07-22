@@ -205,7 +205,7 @@ pub(crate) fn finish_zoom_drag(
 
     let mut after = before.clone();
     after.select(fig, x, y);
-    app.execute_action(Action::set_object_viewport(ci, object_id, before, after));
+    app.commit_object_viewport(ci, object_id, before, after);
     app.session.status = "Zoomed selection.".into();
 }
 

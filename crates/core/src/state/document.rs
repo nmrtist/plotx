@@ -328,15 +328,10 @@ pub struct PlotObject {
     pub stack: StackSpec,
     /// Marginal 1D axis projections for a 2D contour (empty for other plots).
     pub projections: AxisProjections,
+    pub axis_overrides: AxisOverrides,
     pub figure: Figure,
     pub viewport: CanvasViewport,
     pub panel: PanelMeta,
-}
-
-impl PlotObject {
-    pub fn primary_dataset(&self) -> usize {
-        self.binding.primary_dataset()
-    }
 }
 
 /// Horizontal alignment of a text box's lines within its frame.

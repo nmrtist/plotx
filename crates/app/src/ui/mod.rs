@@ -333,6 +333,9 @@ fn feedback_banner(app: &mut PlotxApp, ui: &mut Ui, dark: bool) {
 
 fn render_sidebars(app: &mut PlotxApp, ui: &mut Ui, dark: bool, workspace_width: f32) {
     let compact = workspace_width < 1200.0;
+    if !app.session.secondary_sidebar_visible {
+        app.finish_axis_overrides_edit();
+    }
     if app.session.primary_sidebar_visible {
         let panel = egui::Panel::left("primary_sidebar")
             .frame(egui::Frame::NONE.inner_margin(egui::Margin {

@@ -4,9 +4,9 @@
 use super::*;
 use crate::layout::PageLayout;
 use crate::state::{
-    CanvasObject, CanvasViewport, ChartSpec, CurveFitReference, DataBinding, Dataset, NamedView,
-    ObjectFrame, ObjectId, ObjectStyle, PanelMeta, PlotxApp, Region, Selection, StackSpec,
-    StoredCurveFitAnalysis, StoredLineFit, StoredMultiplet, TableEditDelta, TextBox,
+    AxisOverrides, CanvasObject, CanvasViewport, ChartSpec, CurveFitReference, DataBinding,
+    Dataset, NamedView, ObjectFrame, ObjectId, ObjectStyle, PanelMeta, PlotxApp, Region, Selection,
+    StackSpec, StoredCurveFitAnalysis, StoredLineFit, StoredMultiplet, TableEditDelta, TextBox,
 };
 use crate::theme::ThemeSnapshot;
 use crate::{Integral2D, IntegralResult};
@@ -31,6 +31,20 @@ impl Action {
         after: CanvasViewport,
     ) -> Self {
         Self::SetObjectViewport {
+            canvas,
+            object,
+            before,
+            after,
+        }
+    }
+
+    pub fn set_axis_overrides(
+        canvas: usize,
+        object: ObjectId,
+        before: AxisOverrides,
+        after: AxisOverrides,
+    ) -> Self {
+        Self::SetAxisOverrides {
             canvas,
             object,
             before,

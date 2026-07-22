@@ -272,12 +272,7 @@ impl PlotxApp {
         object
     }
 
-    pub fn apply_viewport_to_plot_object(
-        &mut self,
-        ci: usize,
-        object_id: ObjectId,
-        mut fig: Figure,
-    ) {
+    pub fn apply_viewport_to_plot_object(&mut self, ci: usize, object_id: ObjectId, fig: Figure) {
         let Some(object) = self
             .doc
             .canvases
@@ -289,9 +284,7 @@ impl PlotxApp {
         let Some(plot) = object.plot_mut() else {
             return;
         };
-        plot.viewport.sync_full_from(&fig);
-        plot.viewport.apply_to(&mut fig);
-        plot.figure = fig;
+        plot.preserve_viewport_on_rebuild(fig);
     }
 
     pub fn rebuild_canvases_for(&mut self, dataset: usize) {
