@@ -132,6 +132,7 @@ fn default_limits_match_the_public_contract() {
     assert_eq!(limits.max_parser_bytes, 128 * 1024 * 1024);
     assert_eq!(limits.max_total_owned_bytes, 384 * 1024 * 1024);
     assert_eq!(limits.max_workbooks, 256);
+    assert_eq!(limits.max_window_records, 1024);
     assert_eq!(limits.max_worksheets_per_workbook, 128);
     assert_eq!(limits.max_columns, 4096);
     assert_eq!(limits.max_metadata_records, 65_536);

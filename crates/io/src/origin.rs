@@ -276,6 +276,8 @@ pub struct OriginLimits {
     pub max_total_owned_bytes: usize,
     /// Maximum workbook count.
     pub max_workbooks: usize,
+    /// Maximum source window records retained for worksheet association.
+    pub max_window_records: usize,
     /// Maximum worksheet count per workbook.
     pub max_worksheets_per_workbook: usize,
     /// Maximum total worksheet data column count.
@@ -301,6 +303,7 @@ impl Default for OriginLimits {
             max_parser_bytes: 128 * MIB,
             max_total_owned_bytes: 384 * MIB,
             max_workbooks: 256,
+            max_window_records: 1024,
             max_worksheets_per_workbook: 128,
             max_columns: 4096,
             max_metadata_records: 65_536,
@@ -323,6 +326,7 @@ impl OriginLimits {
             ("max_parser_bytes", self.max_parser_bytes),
             ("max_total_owned_bytes", self.max_total_owned_bytes),
             ("max_workbooks", self.max_workbooks),
+            ("max_window_records", self.max_window_records),
             (
                 "max_worksheets_per_workbook",
                 self.max_worksheets_per_workbook,

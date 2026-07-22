@@ -113,6 +113,12 @@ fn parse_windows(
             MetadataBlock::Data { offset, payload } => (offset, payload),
         };
         cursor.charge_record()?;
+        let window_count = checked_add(windows.len(), 1, "window records")?;
+        enforce_limit(
+            "window records",
+            window_count,
+            cursor.limits.max_window_records,
+        )?;
 
         // This exact header-plus-layer-list traversal is reimplemented from
         // the pinned MIT OpenOPJ Origin 7.0552 WindowList description:
@@ -539,15 +545,58 @@ pub(super) fn try_reserve<T>(
     limits: &OriginLimits,
     usage: &mut OriginResourceUsage,
 ) -> Result<(), OriginError> {
-    let _requested = checked_add(values.len(), additional, resource)?;
-    let bytes = checked_mul(additional, size_of::<T>(), resource)?;
-    charge_parser(bytes, limits, usage)?;
+    let requested_len = checked_add(values.len(), additional, resource)?;
+    let old_capacity = values.capacity();
+    if requested_len <= old_capacity || size_of::<T>() == 0 {
+        return Ok(());
+    }
+
+    let minimum_delta = requested_len
+        .checked_sub(old_capacity)
+        .ok_or(OriginError::ArithmeticOverflow { resource })?;
+    let minimum_bytes = checked_mul(minimum_delta, size_of::<T>(), resource)?;
+    let mut preflight = usage.clone();
+    charge_parser(minimum_bytes, limits, &mut preflight)?;
+
+    let available_bytes = limits
+        .max_parser_bytes
+        .saturating_sub(usage.parser_bytes)
+        .min(
+            limits
+                .max_total_owned_bytes
+                .saturating_sub(usage.total_owned_bytes),
+        );
+    let geometric_capacity = if old_capacity == 0 {
+        requested_len
+    } else {
+        old_capacity.checked_mul(2).unwrap_or(requested_len)
+    };
+    let desired_capacity = requested_len.max(geometric_capacity);
+    let desired_delta = desired_capacity
+        .checked_sub(old_capacity)
+        .ok_or(OriginError::ArithmeticOverflow { resource })?;
+    let affordable_delta = (available_bytes / size_of::<T>()).min(desired_delta);
+    let target_capacity = checked_add(old_capacity, affordable_delta, resource)?;
+    let reserve_additional = target_capacity
+        .checked_sub(values.len())
+        .ok_or(OriginError::ArithmeticOverflow { resource })?;
+    let planned_delta = target_capacity
+        .checked_sub(old_capacity)
+        .ok_or(OriginError::ArithmeticOverflow { resource })?;
+    let planned_bytes = checked_mul(planned_delta, size_of::<T>(), resource)?;
     values
-        .try_reserve_exact(additional)
+        .try_reserve_exact(reserve_additional)
         .map_err(|_| OriginError::AllocationFailed {
             resource,
-            requested: bytes,
-        })
+            requested: planned_bytes,
+        })?;
+
+    let actual_delta = values
+        .capacity()
+        .checked_sub(old_capacity)
+        .ok_or(OriginError::ArithmeticOverflow { resource })?;
+    let actual_bytes = checked_mul(actual_delta, size_of::<T>(), resource)?;
+    charge_parser(actual_bytes, limits, usage)
 }
 
 pub(super) fn push_diagnostic(

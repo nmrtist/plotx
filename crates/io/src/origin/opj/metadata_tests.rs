@@ -1,7 +1,9 @@
 use crate::origin::{
     OriginCell, OriginDiagnosticCode, OriginError, OriginLimits, OriginMetadataEntry, OriginNote,
-    read_origin,
+    OriginResourceUsage, read_origin,
 };
+
+use std::mem::size_of;
 
 const OPENOPJ_FIXTURE: &[u8] =
     include_bytes!("../../../tests/fixtures/origin/test-origin-7.0552.opj");
@@ -268,6 +270,83 @@ fn enforces_workbook_and_metadata_limits() {
             resource: "string bytes",
             limit: 2,
             ..
+        })
+    ));
+}
+
+#[test]
+fn repeated_single_item_reservations_grow_logarithmically_and_charge_capacity() {
+    let limits = OriginLimits::default();
+    let mut usage = OriginResourceUsage::default();
+    let mut values = Vec::<u64>::new();
+    let mut capacity_changes = 0_usize;
+
+    for value in 0..4096_u64 {
+        let previous_capacity = values.capacity();
+        super::try_reserve(&mut values, 1, "test metadata", &limits, &mut usage).unwrap();
+        if values.capacity() != previous_capacity {
+            capacity_changes += 1;
+        }
+        values.push(value);
+    }
+
+    assert!(
+        capacity_changes <= 16,
+        "single-item appends reallocated {capacity_changes} times"
+    );
+    assert_eq!(usage.parser_bytes, values.capacity() * size_of::<u64>());
+    assert_eq!(usage.total_owned_bytes, usage.parser_bytes);
+}
+
+#[test]
+fn spare_vector_capacity_is_not_charged_as_a_new_allocation() {
+    let limits = OriginLimits::default();
+    let mut usage = OriginResourceUsage::default();
+    let mut values = Vec::<u64>::with_capacity(8);
+    let original_capacity = values.capacity();
+
+    super::try_reserve(&mut values, 1, "test metadata", &limits, &mut usage).unwrap();
+
+    assert_eq!(values.capacity(), original_capacity);
+    assert_eq!(usage.parser_bytes, 0);
+    assert_eq!(usage.total_owned_bytes, 0);
+}
+
+#[test]
+fn existing_capacity_does_not_overflow_an_unbounded_custom_budget() {
+    let limits = OriginLimits {
+        max_parser_bytes: usize::MAX,
+        max_total_owned_bytes: usize::MAX,
+        ..OriginLimits::default()
+    };
+    let mut usage = OriginResourceUsage::default();
+    let mut values = vec![0_u8; 8];
+    let original_capacity = values.capacity();
+
+    super::try_reserve(&mut values, 1, "test metadata", &limits, &mut usage).unwrap();
+
+    assert!(values.capacity() > original_capacity);
+    assert_eq!(usage.parser_bytes, values.capacity() - original_capacity);
+    assert_eq!(usage.total_owned_bytes, usage.parser_bytes);
+}
+
+#[test]
+fn rejects_excess_window_records_before_dataset_association() {
+    let window_names = (0..1025)
+        .map(|index| format!("W{index:04}"))
+        .collect::<Vec<_>>();
+    let window_name_bytes = window_names
+        .iter()
+        .map(|name| name.as_bytes())
+        .collect::<Vec<_>>();
+    let bytes = synthetic_project(&[("W0000_A", true)], &window_name_bytes);
+
+    assert!(matches!(
+        read_origin(&bytes, OriginLimits::default()),
+        Err(OriginError::LimitExceeded {
+            resource: "window records",
+            limit: 1024,
+            actual: 1025,
         })
     ));
 }

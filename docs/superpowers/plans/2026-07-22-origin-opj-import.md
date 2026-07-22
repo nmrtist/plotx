@@ -195,6 +195,7 @@ pub struct OriginLimits {
     pub max_parser_bytes: usize,
     pub max_total_owned_bytes: usize,
     pub max_workbooks: usize,
+    pub max_window_records: usize,
     pub max_worksheets_per_workbook: usize,
     pub max_columns: usize,
     pub max_metadata_records: usize,
@@ -293,7 +294,7 @@ Expected: the named reader tests are discovered and fail to compile because the 
 
 The reader owns an immutable byte slice, current offset, OriginLimits reference, and OriginResourceUsage. All methods return Result and include the current offset in structural errors. It must use checked slices and checked arithmetic. It must not use unsafe, unwrap, or unchecked indexing on external data.
 
-Charge requested capacities before Vec::try_reserve or String allocation. A capacity request that exceeds any parser or cumulative limit returns LimitExceeded without attempting allocation.
+Preflight requested Vec and String capacities against the parser and cumulative budgets before allocation. Incrementally retained metadata vectors grow geometrically within the remaining budget, then charge the actual capacity delta reported after reserve; allocator rounding that crosses a budget fails closed. The parser also rejects more than 1,024 retained source windows before any dataset-to-window association.
 
 - [x] **Step 4: Write profile-framing tests**
 

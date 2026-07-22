@@ -265,6 +265,7 @@ Default limits:
 - maximum parser-decoded allocation: 128 MiB, including vector capacities, strings, and decompression output;
 - maximum total owned Origin-import bytes: 384 MiB across source bytes, parser storage, and final preview table values;
 - maximum workbooks: 256;
+- maximum source window records retained for worksheet association: 1,024;
 - maximum worksheets per workbook: 128;
 - maximum total columns: 4,096;
 - maximum cumulative metadata records: 65,536;
@@ -272,7 +273,9 @@ Default limits:
 - maximum total decoded cells: 2,000,000;
 - maximum metadata nesting depth: 32.
 
-All additions, multiplications, signed-to-unsigned conversions, row-size calculations, offsets, and allocation sizes use checked arithmetic. Reads use checked slices or cursor methods. Parser allocation is charged before reserving memory, using requested capacity and element size. `OriginResourceUsage` records input and parser charges, then core consumes the project by value and charges estimated snapshot capacities against the shared 384 MiB total before allocating. Accounting is conservative and is not refunded in a way that permits repeated allocation churn to bypass the cap. Production parsing code will not use `unwrap()`, unchecked indexing, unchecked allocation from file lengths, or unsafe code.
+All additions, multiplications, signed-to-unsigned conversions, row-size calculations, offsets, and allocation sizes use checked arithmetic. Reads use checked slices or cursor methods. Parser capacity requests are preflighted within the remaining byte budgets. Incrementally retained metadata vectors use bounded geometric growth and, after reserve, charge the actual capacity delta; allocator rounding beyond a budget fails closed. `OriginResourceUsage` records input and parser charges, then core consumes the project by value and charges estimated snapshot capacities against the shared 384 MiB total before allocating. Accounting is conservative and is not refunded in a way that permits repeated allocation churn to bypass the cap. Production parsing code will not use `unwrap()`, unchecked indexing, unchecked allocation from file lengths, or unsafe code.
+
+Window records have an independent default limit of 1,024, enforced while metadata is parsed and before any dataset association. Together with the 4,096 data-section limit and the fixed 25-byte Origin7V552 window-name field, this bounds the fallback longest-prefix scan to at most 4,194,304 short comparisons rather than allowing the broader 65,536-record metadata budget to multiply association work.
 
 Unknown records are skipped only when a validated outer framing supplies a bounded length. If no trustworthy boundary exists, parsing stops with an error. Embedded paths are never joined to the filesystem. Attachments, preview images, OLE payloads, scripts, and embedded XML are never extracted or executed. OPJU compression is not decoded in the first release, so arbitrary compressed output cannot be allocated from that container.
 
