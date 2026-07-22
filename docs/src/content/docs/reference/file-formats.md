@@ -68,10 +68,12 @@ PlotX never silently or heuristically guesses an import. Corrupt or truncated
 files, files above the current 128 MiB input cap, extension/signature-family
 mismatches, and malformed or otherwise unsupported files produce a clear error
 before any table is committed. Inside an otherwise supported OPJ, an
-independently framed unsupported non-table object may be skipped only when its
-outer boundaries are trusted; PlotX then shows warnings. Whether an object can
-be skipped depends on that trusted framing, so unsupported objects do not all
-have to reject the whole file.
+unsupported worksheet column may be omitted, or an unsupported non-table object
+skipped, only when each is independently framed and its outer boundaries are
+trusted. PlotX shows warnings for every such omission; an imported worksheet
+may therefore contain only the supported columns, not every source column. If
+framing is ambiguous or untrusted, PlotX rejects the file rather than guessing
+boundaries or silently shifting data.
 
 Origin need not be installed, launched, or called during import.
 
