@@ -10,6 +10,12 @@ use super::{push_diagnostic, push_summary};
 use crate::origin::reader::checked_add;
 
 const TREE_SPAN_PAYLOAD_LEN: usize = size_of::<u32>();
+
+// The unchanged public OpenOPJ MIT fixture has its first attachment header at
+// absolute byte offset 276,350. Its bytes encode a 52-byte header, type
+// 0x7fca0459, and an OLE compound signature immediately after that header.
+// These Origin7V552 constants are derived directly from those fixture bytes;
+// the pinned source and license are recorded in the fixture README.
 const ATTACHMENT_HEADER_LEN: usize = 52;
 const ATTACHMENT_TYPE_OLE: usize = 0x7fca_0459;
 const OLE_COMPOUND_SIGNATURE: &[u8] = &[0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
@@ -167,4 +173,40 @@ fn enforce_limit(resource: &'static str, actual: usize, limit: usize) -> Result<
         });
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ATTACHMENT_HEADER_LEN, ATTACHMENT_TYPE_OLE, OLE_COMPOUND_SIGNATURE};
+
+    const OPENOPJ_FIXTURE: &[u8] =
+        include_bytes!("../../../../tests/fixtures/origin/test-origin-7.0552.opj");
+    const ATTACHMENT_HEADER_OFFSET: usize = 276_350;
+
+    #[test]
+    fn attachment_constants_match_the_pinned_openopj_fixture_bytes() {
+        let header_end = ATTACHMENT_HEADER_OFFSET
+            .checked_add(ATTACHMENT_HEADER_LEN)
+            .expect("fixture offsets are small");
+        let header = OPENOPJ_FIXTURE
+            .get(ATTACHMENT_HEADER_OFFSET..header_end)
+            .expect("pinned fixture contains the documented attachment header");
+
+        let header_len_bytes = u32::try_from(ATTACHMENT_HEADER_LEN)
+            .expect("attachment header length fits u32")
+            .to_le_bytes();
+        let attachment_type_bytes = u32::try_from(ATTACHMENT_TYPE_OLE)
+            .expect("attachment type fits u32")
+            .to_le_bytes();
+        assert_eq!(header.get(0..4), Some(header_len_bytes.as_slice()));
+        assert_eq!(header.get(4..8), Some(attachment_type_bytes.as_slice()));
+
+        let signature_end = header_end
+            .checked_add(OLE_COMPOUND_SIGNATURE.len())
+            .expect("fixture offsets are small");
+        assert_eq!(
+            OPENOPJ_FIXTURE.get(header_end..signature_end),
+            Some(OLE_COMPOUND_SIGNATURE)
+        );
+    }
 }

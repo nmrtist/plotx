@@ -39,17 +39,46 @@
     <main class="container">
         <div class="intro">
             <h1>Third Party Licenses</h1>
-            <p>This page lists the licenses of the projects used in cargo-about.</p>
+            <p>This page lists licenses for Cargo dependencies and other third-party projects whose material is distributed with or adapted by PlotX.</p>
         </div>
+
+        <h2>Non-Cargo third-party projects:</h2>
+        <ul class="licenses-list">
+            <li class="license">
+                <h3 id="openopj">OpenOPJ</h3>
+                <p>Origin project format documentation and parser structure adapted by PlotX; public test fixture redistributed unchanged.</p>
+                <p><a href="https://github.com/jgonera/openopj">OpenOPJ source repository</a></p>
+                <pre class="license-text">Copyright (c) 2012 Juliusz Gonera, Minor Laboratory, University of Virginia
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.</pre>
+            </li>
+        </ul>
     
-        <h2>Overview of licenses:</h2>
+        <h2>Overview of Cargo dependency licenses:</h2>
         <ul class="licenses-overview">
             {{#each overview}}
             <li><a href="#{{id}}">{{name}}</a> ({{count}})</li>
             {{/each}}
         </ul>
 
-        <h2>All license text:</h2>
+        <h2>All Cargo dependency license text:</h2>
         <ul class="licenses-list">
             {{#each licenses}}
             <li class="license">

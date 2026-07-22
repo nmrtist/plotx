@@ -6,7 +6,7 @@ test fixtures. Neither fixture contains PlotX user data.
 ## `test-origin-7.0552.opj`
 
 - Source URL:
-  <https://raw.githubusercontent.com/jgonera/openopj/master/support/test.opj>
+  <https://raw.githubusercontent.com/jgonera/openopj/42ddcf1eb3a490744c54fca0a4ed6fe7a5e723ca/support/test.opj>
 - Original filename: `test.opj`
 - Byte length: 282,034 bytes
 - SHA-256: `ac7f71c367562e85e9d4bb4ae418cbcaaa1b5dff80436180e8d3331c7e1d6308`

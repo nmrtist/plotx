@@ -4,7 +4,7 @@
 
 **Goal:** Add a bounded, signature-driven Origin project importer that reliably imports the worksheet data proven by the public Origin 7.0552 OPJ fixture, recognizes OPJU and rejects it clearly, integrates with PlotX's existing table preview, and documents the exact experimental support boundary.
 
-**Architecture:** plotx-io owns format probing and an engine-neutral Origin model; plotx-core consumes that model into typed table snapshots; the PlotX application performs one bounded read and reuses the existing preview and commit flow. The OPJ parser is an idiomatic Rust reimplementation of the MIT-licensed OpenOPJ record descriptions with attribution and independent liborigin comparison. Although liborigin's GPL-3.0 is compatible with PlotX's GPL-3.0-or-later license, its code is not copied or translated so it remains a genuinely independent oracle. OPJU remains detection-only until a complete outer container profile can replace heuristic marker scanning.
+**Architecture:** plotx-io owns format probing and an engine-neutral Origin model; plotx-core consumes that model into typed table snapshots; the PlotX application opens an Origin path once, reuses the same regular-file handle for bounded classification and import, and then reuses the existing preview and commit flow. The OPJ parser is an idiomatic Rust reimplementation of the MIT-licensed OpenOPJ record descriptions with attribution. Liborigin source is not copied, translated, or linked; a separate executable was used only for correlated behavioral comparison because OpenOPJ acknowledges shared public reverse-engineering lineage. OPJU remains detection-only until a complete outer container profile can replace heuristic marker scanning.
 
 **Tech Stack:** Rust 2024 workspace, thiserror, PlotX snapshot APIs, egui file-dialog flow, Rust unit and integration tests, Astro/Starlight documentation, GitHub CLI.
 
@@ -17,7 +17,7 @@
 - Basic project parameters and notes are retained as source metadata where their framed records validate.
 - Unsupported records are skipped only when a validated outer length makes them independent of decoded table geometry; otherwise the file is rejected.
 - OPJU is recognized from CPYUA bytes and always returns UnsupportedOpjuVariant in this release. No byte-marker scanner or FPC decoder is enabled.
-- No new direct dependency is planned. In particular, encoding_rs is not added because no verified code-page field exists for the supported profile.
+- The application adds only a Unix-targeted direct `libc` dependency for `O_NONBLOCK` file opening; it is MIT or Apache-2.0 licensed and was already in the lockfile. `encoding_rs` is not added to `plotx-io` because no verified code-page field exists for the supported profile.
 - Every production allocation and offset derived from input is checked against OriginLimits before allocation or slicing.
 
 ## Task 1: Add Publicly Redistributable Fixtures
@@ -44,7 +44,7 @@ Add:
 Run from the repository root:
 
 ~~~bash
-curl -fL https://raw.githubusercontent.com/jgonera/openopj/master/support/test.opj \
+curl -fL https://raw.githubusercontent.com/jgonera/openopj/42ddcf1eb3a490744c54fca0a4ed6fe7a5e723ca/support/test.opj \
   -o crates/io/tests/fixtures/origin/test-origin-7.0552.opj
 curl -fL https://ndownloader.figshare.com/files/52794059 \
   -o crates/io/tests/fixtures/origin/RawData_Locust_Revision1_TIS_Mechanism.opju
@@ -75,6 +75,8 @@ ac7f71c367562e85e9d4bb4ae418cbcaaa1b5dff80436180e8d3331c7e1d6308
 - [x] **Step 4: Document provenance and license**
 
 README.md must state source URL, original filename, byte length, SHA-256, license, attribution, and that neither fixture contains PlotX user data. Copy OpenOPJ's MIT license text to OPENOPJ-LICENSE.txt. Cite the Figshare DOI and CC BY 4.0 terms without adding an Origin logo.
+
+As built, `xtask/about.hbs` also carries a static OpenOPJ notice with the complete MIT text, so generated `dist/THIRD-PARTY-LICENSES.html` includes the non-Cargo attribution. An `xtask` unit test compares the embedded notice with `OPENOPJ-LICENSE.txt` to prevent drift.
 
 - [x] **Step 5: Verify the fixture diff**
 
@@ -457,7 +459,7 @@ mod metadata_tests;
 
 The public integration test file is discovered automatically from crates/io/tests.
 
-The integration test must call only public plotx-io APIs and assert concrete independent values:
+The integration test must call only public plotx-io APIs and assert concrete values published with the OpenOPJ fixture:
 
 ~~~rust
 #[test]
@@ -667,7 +669,7 @@ Cover:
 - OPJU becomes a user-facing unsupported message and creates neither a preview nor a recent entry;
 - an input of exactly 128 MiB is accepted by the bounded reader and 128 MiB plus one byte is rejected;
 - a custom OriginLimits with max_input_bytes equal to usize::MAX returns InvalidLimit without overflow or panic;
-- one selected OPJ file is read once into Arc<[u8]> and shared by all worksheet candidates;
+- one selected OPJ path is opened once, the same regular-file handle is reused from classification through the bounded read, and the resulting `Arc<[u8]>` is shared by all worksheet candidates;
 - no recent entry is added until the user confirms an imported candidate;
 - parser/core failures become OperationReport failure entries;
 - a project with zero supported candidates returns an error without indexing an empty vector.
@@ -692,17 +694,18 @@ Expected: tests fail because Origin routing and the recent-file variant do not e
 
 - [x] **Step 3: Add a focused application adapter**
 
-The new origin.rs module:
+The new origin.rs module, together with the shared classifier:
 
-1. obtains filesystem metadata only as an early rejection hint;
-2. computes max_input_bytes.checked_add(1), converts the result to u64 with a checked conversion, and returns InvalidLimit if either operation fails;
-3. reads through Take(checked_limit) without reserving the metadata length;
-4. rejects an extra byte as too large;
-5. converts the retained Vec once into Arc<[u8]>;
-6. calls plotx_io::origin::probe_origin and read_origin;
-7. calls plotx_core::origin::import_origin_project;
-8. creates TableImportSource values that share the one Arc slice and then creates the existing TableImportPreviewState;
-9. passes warnings and errors to normal application feedback.
+1. treats path metadata only as an early directory or file hint, then opens an apparent regular file once;
+2. uses `O_NONBLOCK` on Unix, validates the opened handle itself as a regular file, and retains its size only as an early rejection hint;
+3. reads the classification header from that handle and transfers the same handle to the Origin adapter without reopening the path;
+4. computes max_input_bytes.checked_add(1), converts the result to u64 with a checked conversion, and returns InvalidLimit if either operation fails;
+5. rewinds the retained handle and reads through Take(checked_limit) without reserving the metadata length;
+6. rejects an extra byte as too large and converts the retained Vec once into Arc<[u8]>;
+7. calls plotx_io::origin::probe_origin and read_origin;
+8. calls plotx_core::origin::import_origin_project;
+9. creates TableImportSource values that share the one Arc slice and then creates the existing TableImportPreviewState;
+10. passes warnings and errors to normal application feedback.
 
 Keep parsing out of file_dialogs.rs. Do not add a new command ID; reuse CommandId::ImportTable and keep stable machine ID file.import_table.
 
@@ -710,7 +713,7 @@ Keep parsing out of file_dialogs.rs. Do not add a new command ID; reuse CommandI
 
 Change the visible command label from Import Table / CSV… to Import Table…. Add Origin projects (experimental) to the import filter. Extend the recent enum with OriginProject for .opj and .opju fallback classification.
 
-The shared classify_open_path helper first checks path.is_dir() and immediately returns Folder without opening the directory, preserving Bruker and folder workflows. For regular files, it reads at most 129 header bytes into a fixed small buffer before extension routing. If those bytes begin with CPYA or CPYUA, it validates them with probe_origin and routes to the Origin adapter regardless of extension. If an .opj or .opju path lacks Origin magic, it routes to the Origin adapter so the user receives a signature-mismatch error. All other headers fall back to the existing extension-based Project, DelimitedTable, XlsxTable, or DataFile route without reading the whole file. File picker, Open File, recent reopen, and drag/drop all call this helper.
+The shared classify_open_path helper first uses path metadata as an early hint and immediately returns Folder for a directory, preserving Bruker and folder workflows. For an apparent regular file, it opens the path once with `O_NONBLOCK` on Unix, rejects a non-regular opened handle using handle metadata (`fstat` on Unix), and reads at most 129 header bytes into a fixed small buffer before extension routing. If those bytes begin with CPYA or CPYUA, it validates them with probe_origin and transfers the still-open handle to the Origin adapter regardless of extension. If an .opj or .opju path lacks Origin magic, it still transfers the handle to the Origin adapter so the user receives a signature-mismatch error. All other headers fall back to the existing extension-based Project, DelimitedTable, XlsxTable, or DataFile route without reading the whole file. File picker, Open File, recent reopen, and drag/drop all call this helper.
 
 Generalize preview copy from Worksheet and worksheet(s) to Table and table(s). The selector changes only which candidate is previewed; the summary explicitly says all candidate tables will be imported, matching the existing commit loop.
 
@@ -878,7 +881,7 @@ git status --short
 git log --oneline upstream/main..HEAD
 ~~~
 
-Inspect every changed file. Confirm there are no credentials, private data, target, dist, docs/dist, docs/node_modules, unrelated edits, false compatibility claims, or GPL-derived source.
+Inspect every changed file. Confirm there are no credentials, private data, target, dist, docs/dist, docs/node_modules, unrelated edits, false compatibility claims, copied or translated liborigin source, or unsupported provenance or legal conclusions.
 
 - [ ] **Step 7: Run an independent final code review**
 
@@ -928,12 +931,12 @@ Expected: gh prints the upstream pull-request URL. Do not merge, release, or cha
 - [x] Every design acceptance criterion maps to at least one implementation step and one verification step.
 - [x] OPJ claims are limited to values present in the OpenOPJ real fixture.
 - [x] OPJU has no success path, marker scan, decompressor, or partial project result.
-- [x] The plan never instructs copying or translating liborigin source, preserving it as an independent oracle even though its GPL-3.0 license is compatible.
+- [x] The plan never instructs copying, translating, or linking liborigin source and characterizes executable comparison as correlated corroboration, not independent proof or a legal conclusion.
 - [x] Every implementation task observes a failing test before production code.
 - [x] Every task ends with focused verification and a small commit.
 - [x] Default and DataFusion configurations are both checked.
 - [x] User-visible errors, preview lifecycle, and recent-file timing are tested.
 - [x] Fixture provenance and license terms are committed.
 - [x] Installation, login, and destructive actions remain explicit permission boundaries.
-- [x] No new direct dependency is added without fresh evidence.
+- [x] The only new direct dependency is the Unix-only `libc` entry needed for `O_NONBLOCK`; it is MIT or Apache-2.0 licensed and was already present in the workspace lockfile. `encoding_rs` remains transitive and unused by `plotx-io`.
 - [x] All Rust files stay below 800 lines.

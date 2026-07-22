@@ -44,9 +44,9 @@ Public implementations and sample files show that classic OPJ is a little-endian
 Relevant evidence:
 
 - OriginLab documents `.opj` and `.opju` as Origin project file types and documents opening and saving projects without describing a public complete binary specification: [Origin file types](https://docs.originlab.com/user-guide/origin-file-types/) and [Origin project files](https://docs.originlab.com/origin-help/origin-project-file/).
-- [liborigin](https://github.com/gerlachs/liborigin) is a mature GPL-3.0 native reader for multiple OPJ generations. GPL-3.0 is compatible with PlotX's GPL-3.0-or-later project license, but this implementation deliberately does not copy, translate, or link liborigin code. Keeping it as an independent behavioral oracle preserves a genuinely separate cross-check while the MIT-licensed OpenOPJ material supplies the attributed structure descriptions used by the Rust implementation.
-- [OpenOPJ](https://github.com/jgonera/openopj) is MIT-licensed and documents OPJ structures with a redistributable Origin 7.0552 fixture. Its documented values provide an independent expected-data source.
-- Local probes parsed an Origin 7.0552 OpenOPJ fixture and separate Origin 8.0 and 9.7 fixtures with an independently compiled liborigin build. The latter probes are feasibility evidence only and do not make Origin 8.0 or 9.7 part of the first release's compatibility claim.
+- [liborigin](https://github.com/gerlachs/liborigin) is a mature GPL-3.0 native reader for multiple OPJ generations. PlotX does not copy, translate, or link its source code; a separately built executable was used only for development-time behavioral comparison. That comparison is corroborating but correlated evidence, not an independent implementation proof, because OpenOPJ's own format document says that some information came from liborigin, liborigin2, and SciDAVis `importOPJ`.
+- [OpenOPJ](https://github.com/jgonera/openopj) is MIT-licensed and documents OPJ structures with a redistributable Origin 7.0552 fixture and published expected values. PlotX treats it as the attributed implementation and fixture source, not as evidence that is independent of the earlier public reverse-engineering lineage it acknowledges.
+- Local probes parsed the Origin 7.0552 OpenOPJ fixture and separate Origin 8.0 and 9.7 fixtures with a separately compiled liborigin build. The latter probes are feasibility evidence only and do not make Origin 8.0 or 9.7 part of the first release's compatibility claim.
 
 OPJ is therefore suitable for a direct, data-first Rust implementation. Compatibility will be based on recognized structures and tests, not on broad version-number claims.
 
@@ -73,7 +73,7 @@ The implementation will be native Rust in PlotX:
 
 This approach keeps parsing out of the UI, avoids a runtime dependency on an external executable, and preserves the existing crate boundaries. The rejected alternatives are linking or copying GPL liborigin code, shipping a Python or C++ sidecar, and pretending OPJU is a standard archive.
 
-The parser design may reimplement documented record layouts and algorithms from license-compatible public projects in idiomatic Rust. OpenOPJ's MIT-licensed structure descriptions may be adapted with attribution. Liborigin remains an independent GPL behavioral oracle only: PlotX contributors will not copy, translate, or derive source code from it. Quantized's Apache-2.0 implementation may inform later clean-room OPJU work with attribution, but its heuristic scanner is not a valid container parser and will not be reproduced in the first release.
+The parser design may reimplement documented record layouts and algorithms from license-compatible public projects in idiomatic Rust. OpenOPJ's MIT-licensed structure descriptions may be adapted with attribution. PlotX does not copy, translate, or link liborigin source code; results from a separate liborigin executable are treated only as correlated behavioral comparison because the public projects share reverse-engineering lineage. Quantized's Apache-2.0 implementation may inform later independently written Rust OPJU work with attribution, but its heuristic scanner is not a valid container parser and will not be reproduced in the first release.
 
 ## Compatibility contract
 
@@ -91,7 +91,7 @@ The probe result records the container kind, raw version text, any parsed versio
 
 ### OPJ profile and supported data
 
-The first implementation will support an `Origin7V552` profile represented by the public Origin 7.0552 OpenOPJ fixture. Version text selects a candidate profile, but it does not grant compatibility by itself. Each profile defines the permitted top-level framing, dataset-header lengths, version-sensitive offsets, value type and width combinations, window-record geometry, and metadata record boundaries. Every required invariant must match the selected profile; walking to end-of-file without an I/O error is not proof of compatibility. Unknown producer versions, including the exploratory Origin 8.0 and 9.7 probes, are rejected until a redistributable fixture and independent expected values justify a separate profile.
+The first implementation will support an `Origin7V552` profile represented by the public Origin 7.0552 OpenOPJ fixture. Version text selects a candidate profile, but it does not grant compatibility by itself. Each profile defines the permitted top-level framing, dataset-header lengths, version-sensitive offsets, value type and width combinations, window-record geometry, and metadata record boundaries. Every required invariant must match the selected profile; walking to end-of-file without an I/O error is not proof of compatibility. Unknown producer versions, including the exploratory Origin 8.0 and 9.7 probes, are rejected until a redistributable fixture and expected values not derived from the parser under test justify a separate profile.
 
 The first-release evidence matrix is intentionally narrower than the type codes described by reverse-engineered parsers:
 
@@ -105,7 +105,7 @@ The first-release evidence matrix is intentionally narrower than the type codes 
 | Mixed numeric/text columns | OpenOPJ `test.opj` and its published expected values | Supported |
 | Missing values and nonzero first-row offsets | OpenOPJ `test.opj` and its published expected values | Supported |
 | Dataset and column names, project parameters, and project notes | OpenOPJ `test.opj` and its published expected values | Supported as basic metadata |
-| 8-bit integers, unsigned integers, long names, units, comments, and column designations | No redistributable real fixture with independent values in the current evidence set | Not advertised or enabled until equivalent evidence is added |
+| 8-bit integers, unsigned integers, long names, units, comments, and column designations | No redistributable real fixture with expected values external to the parser under test | Not advertised or enabled until equivalent evidence is added |
 
 Workbook and worksheet grouping are exposed only where the verified window and dataset records associate them unambiguously. Unequal supported column lengths are allowed and are padded with nulls during core conversion. The project format and detected producer-version text are retained as import provenance.
 
@@ -129,7 +129,7 @@ The investigated `FpcNumericV1` profile is disabled because the available public
 
 The current scanner fails the complete-profile and false-marker conditions, so `FpcNumericV1` stays disabled. The first release detects OPJU by content and returns a clear unsupported-variant error for every OPJU file. This gate result is an explicit successful outcome; no deadline or desire for OPJU support permits marker scanning or ambiguous partial import.
 
-A future FPC implementation may be clean-room Rust based on the public Burtscher algorithm and cross-checked against the Apache-2.0 implementation only after the outer profile is proven. Any directly adapted ideas or test vectors must be attributed in source comments and fixture documentation. PlotX will not depend on the Python package at runtime.
+A future FPC implementation may be written in Rust from the public Burtscher algorithm and cross-checked against the Apache-2.0 implementation only after the outer profile is proven. Any directly adapted ideas or test vectors must be attributed in source comments and fixture documentation. PlotX will not depend on the Python package at runtime.
 
 Numeric columns, text cells, dates, categorical columns, matrices, graphs, formula state, and alternative OPJU record grammars are all unsupported in the first release. The UI and documentation will describe `.opju` as recognized but not currently importable.
 
@@ -195,7 +195,7 @@ UI integration:
 
 - add a file-picker entry named `Origin projects (experimental)` for `.opj` and `.opju`;
 - route file-open, import, drag/drop if already supported by the common path, and recent-file reopen through content probing;
-- read the selected file once after a filesystem metadata size check;
+- open the selected Origin path once, validate the opened handle as a regular file, and reuse that same handle for bounded classification and import reads;
 - display one preview candidate per worksheet and require the normal explicit import action;
 - include skipped-object counts and decoding warnings in the visible operation result;
 - surface corrupt, unsupported, oversized, or version-incompatible files through the normal error state, with no panic and no empty success notification.
@@ -279,15 +279,15 @@ Window records have an independent default limit of 1,024, enforced while metada
 
 Unknown records are skipped only when a validated outer framing supplies a bounded length. If no trustworthy boundary exists, parsing stops with an error. Embedded paths are never joined to the filesystem. Attachments, preview images, OLE payloads, scripts, and embedded XML are never extracted or executed. OPJU compression is not decoded in the first release, so arbitrary compressed output cannot be allocated from that container.
 
-Filesystem metadata is an early rejection hint, not the memory guard. The application computes the bounded-reader cap with `max_input_bytes.checked_add(1)` and a checked conversion to the reader's limit type; an unrepresentable custom limit is rejected before reading. It never reserves the untrusted metadata length, and the extra byte distinguishes an exact-limit file from an oversized or growing file before unbounded allocation occurs. Source bytes are retained once through shared ownership rather than copied and are charged to the shared total. Core conversion consumes worksheet values and releases parser storage as it creates snapshots, while conservative accounting still caps the cumulative owned capacity even where exact allocator liveness cannot be observed. A decoder cancellation check will be included if the existing background import API exposes cancellation.
+Path metadata is only an early directory or file hint. For an apparent regular file, the common classifier opens the path once; on Unix it uses `O_NONBLOCK` so a path-replacement race cannot block on a FIFO. Metadata from the opened handle (`fstat` on Unix) then proves that the actual object is a regular file and supplies the size hint. Classification reads the bounded header from that handle, and an Origin route retains the same handle, rewinds it, and reads through `Take(max_input_bytes + 1)` without reopening the path or reserving the untrusted metadata length. The application computes that cap with `max_input_bytes.checked_add(1)` and a checked conversion to the reader's limit type; an unrepresentable custom limit is rejected before reading. The extra byte distinguishes an exact-limit file from an oversized or growing file before unbounded allocation occurs. Source bytes are retained once through shared ownership rather than copied and are charged to the shared total. Core conversion consumes worksheet values and releases parser storage as it creates snapshots, while conservative accounting still caps the cumulative owned capacity even where exact allocator liveness cannot be observed. A decoder cancellation check will be included if the existing background import API exposes cancellation.
 
 ## Dependencies and licensing
 
-The implementation will not incorporate or link liborigin code. This is an engineering and independent-validation choice, not a claim that GPL-3.0 is incompatible with PlotX. No external Origin installation or runtime parser process will be introduced.
+The implementation does not copy, translate, incorporate, or link liborigin source code. Its development-only behavioral output is correlated corroboration, not proof of independent implementation. This records the implementation provenance and is not a legal conclusion that GPL-3.0 is incompatible with PlotX. No external Origin installation or runtime parser process is introduced.
 
-No new direct crate dependency is planned for the first release. `encoding_rs` already exists transitively in the workspace lockfile, but it will not be added to `plotx-io` until a verified Origin code-page field and redistributable fixture justify a specific decoder. Cargo and `cargo deny` will still verify the resulting dependency graph, licenses, and advisories.
+The application adds `libc` as a direct Unix-only dependency to set `O_NONBLOCK` while opening the single file handle used for Origin classification and import. `libc` is licensed under MIT or Apache-2.0 and was already present in the workspace lockfile. `encoding_rs` also already exists transitively, but it is not added to `plotx-io` because no verified Origin code-page field and redistributable fixture justify a specific decoder. Cargo and `cargo deny` verify the resulting dependency graph, licenses, and advisories.
 
-Fixtures and borrowed test vectors will have a provenance document containing source URL, author or dataset citation, license, original filename, byte length, cryptographic checksum, and any transformation performed by PlotX. If implementation details or structure descriptions are adapted from OpenOPJ or quantized, the relevant MIT or Apache-2.0 attribution will also appear in source comments and the repository's third-party attribution material. No private or merely discoverable Origin project will be committed.
+Fixtures and borrowed test vectors will have a provenance document containing source URL, author or dataset citation, license, original filename, byte length, cryptographic checksum, and any transformation performed by PlotX. OpenOPJ implementation details and structure descriptions are attributed in source comments, and the static OpenOPJ MIT notice in `xtask/about.hbs` ensures that generated `dist/THIRD-PARTY-LICENSES.html` includes its complete license alongside Cargo dependency notices. No private or merely discoverable Origin project will be committed.
 
 ## Test strategy
 
@@ -319,11 +319,11 @@ The repository will include only fixtures whose redistribution terms are explici
 
 The OPJ fixture test will assert workbook or group names, worksheet counts, column names, exact row counts, exact representative numeric and text values, null positions, and selected metadata. The OPJU fixture test will assert reliable OPJU detection and a clear unsupported-variant rejection with no partial result. A fixture README will carry required MIT attribution and CC BY citation details.
 
-### Independent comparison
+### Development comparison and evidence correlation
 
-For OPJ, expected values will come from OpenOPJ's published tests and will be spot-checked with a separately built liborigin executable used only during development. The GPL executable and its outputs will not ship with PlotX.
+For OPJ, expected values come from OpenOPJ's published tests and are spot-checked with a separately built liborigin executable used only during development. Because OpenOPJ acknowledges format information from liborigin and related importers, agreement is useful corroboration but not independent ground truth. The GPL executable and its outputs do not ship with PlotX.
 
-For OPJU, no independent CSV or worksheet-value export has yet been established. Concrete expected values can be cross-checked against the independent but immature Apache-2.0 quantized decoder, and this correlated-parser risk must be stated in code documentation and the pull request. OPJU is not promoted beyond experimental on that evidence. Finding a publisher-provided CSV/XLSX export or a second independent parser would strengthen a later compatibility claim.
+For OPJU, no independent CSV or worksheet-value export has yet been established. Concrete expected values can be compared with the separately implemented but immature Apache-2.0 quantized decoder, but that is not independent ground truth and the correlated-parser risk must be stated in code documentation and the pull request. OPJU is not promoted beyond experimental on that evidence. Finding a publisher-provided CSV/XLSX export or a second parser with clearly separate provenance would strengthen a later compatibility claim.
 
 ### Repository verification
 
@@ -338,7 +338,7 @@ Implementation completion requires:
 - `cargo pr-check`;
 - `npm run build` from `docs/`.
 
-`cargo pr-check` currently cannot complete on this machine because `cargo-deny` and `protoc` are absent. Installation will be requested before the final verification phase, as required by the user's no-install-without-permission rule.
+At design closure, `cargo-deny` is installed and has completed a successful dependency-policy run; a later retry was blocked while fetching the RustSec index by a transient GitHub HTTP/2 error. The full `cargo pr-check` remains pending because `protoc` is absent. Final gate results will be recorded in the pull request after the required installation permission and a fresh run.
 
 ## Documentation
 
@@ -353,7 +353,7 @@ The manual will state:
 - unsupported objects and data types;
 - corrupt, incompatible, recognizably protected, and unsupported-variant behavior, without claiming that every encrypted file can be distinguished from other unknown structures;
 - that Origin does not need to be installed;
-- that compatibility claims are limited to actual regression fixtures and independent checks.
+- that compatibility claims are limited to actual regression fixtures and explicitly characterized corroborating checks.
 
 No Origin trademark icon, logo, or copyrighted visual asset will be added.
 
