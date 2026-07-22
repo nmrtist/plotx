@@ -5,6 +5,7 @@ use super::{
 use plotx_core::operation::{Diagnostic, DiagnosticCode, OperationKind, OperationReport, Severity};
 use plotx_io::origin::{OriginError, OriginFormat};
 use std::fmt;
+use std::fs::{File, OpenOptions};
 use std::io::{self, Read};
 use std::path::Path;
 
@@ -30,6 +31,34 @@ impl RecentOpenKind {
     }
 }
 
+#[derive(Debug)]
+pub(crate) enum ClassifiedOpenPath {
+    Project,
+    DelimitedTable,
+    XlsxTable,
+    OriginProject(origin::OpenOriginSource),
+    Folder,
+    DataFile,
+}
+
+impl ClassifiedOpenPath {
+    pub(crate) fn kind(&self) -> RecentOpenKind {
+        match self {
+            Self::Project => RecentOpenKind::Project,
+            Self::DelimitedTable => RecentOpenKind::DelimitedTable,
+            Self::XlsxTable => RecentOpenKind::XlsxTable,
+            Self::OriginProject(_) => RecentOpenKind::OriginProject,
+            Self::Folder => RecentOpenKind::Folder,
+            Self::DataFile => RecentOpenKind::DataFile,
+        }
+    }
+
+    fn is_table_import(&self) -> bool {
+        self.kind().is_table_import()
+    }
+}
+
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum OpenPathEntryType {
     Directory,
@@ -76,6 +105,14 @@ impl fmt::Display for OpenPathError {
                 formatter,
                 "the selected path could not be inspected: {error}"
             ),
+            Self::Io {
+                stage: "open",
+                error,
+            } => write!(formatter, "the selected file could not be opened: {error}"),
+            Self::Io {
+                stage: "handle_metadata",
+                error,
+            } => write!(formatter, "the opened file could not be inspected: {error}"),
             Self::Io { error, .. } => {
                 write!(
                     formatter,
@@ -110,18 +147,56 @@ impl std::error::Error for OpenPathError {
     }
 }
 
-pub(crate) fn classify_open_path(path: &Path) -> Result<RecentOpenKind, OpenPathError> {
+pub(crate) fn classify_open_path(path: &Path) -> Result<ClassifiedOpenPath, OpenPathError> {
     let metadata = std::fs::metadata(path).map_err(|error| OpenPathError::io("metadata", error))?;
-    let entry_type = if metadata.is_dir() {
-        OpenPathEntryType::Directory
-    } else if metadata.is_file() {
-        OpenPathEntryType::RegularFile
-    } else {
-        OpenPathEntryType::Other
-    };
-    classify_open_path_with_header(path, entry_type, || read_open_header(path))
+    if metadata.is_dir() {
+        return Ok(ClassifiedOpenPath::Folder);
+    }
+    if !metadata.is_file() {
+        return Err(OpenPathError::NonRegularFile);
+    }
+    let file =
+        open_file_for_classification(path).map_err(|error| OpenPathError::io("open", error))?;
+    classify_open_handle(path, file)
 }
 
+pub(crate) fn open_file_for_classification(path: &Path) -> io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NONBLOCK);
+    }
+    options.open(path)
+}
+
+pub(crate) fn classify_open_handle(
+    path: &Path,
+    mut file: File,
+) -> Result<ClassifiedOpenPath, OpenPathError> {
+    let metadata = file
+        .metadata()
+        .map_err(|error| OpenPathError::io("handle_metadata", error))?;
+    if !metadata.is_file() {
+        return Err(OpenPathError::NonRegularFile);
+    }
+    let (header, length) =
+        read_open_header(&mut file).map_err(|error| OpenPathError::io("header", error))?;
+    let kind = classify_open_header(path, &header[..length])?;
+    Ok(match kind {
+        RecentOpenKind::Project => ClassifiedOpenPath::Project,
+        RecentOpenKind::DelimitedTable => ClassifiedOpenPath::DelimitedTable,
+        RecentOpenKind::XlsxTable => ClassifiedOpenPath::XlsxTable,
+        RecentOpenKind::OriginProject => {
+            ClassifiedOpenPath::OriginProject(origin::OpenOriginSource::new(file, metadata.len()))
+        }
+        RecentOpenKind::Folder => ClassifiedOpenPath::Folder,
+        RecentOpenKind::DataFile => ClassifiedOpenPath::DataFile,
+    })
+}
+
+#[cfg(test)]
 pub(crate) fn classify_open_path_with_header<F>(
     path: &Path,
     entry_type: OpenPathEntryType,
@@ -137,7 +212,10 @@ where
     }
 
     let (header, length) = read_header().map_err(|error| OpenPathError::io("header", error))?;
-    let header = &header[..length];
+    classify_open_header(path, &header[..length])
+}
+
+fn classify_open_header(path: &Path, header: &[u8]) -> Result<RecentOpenKind, OpenPathError> {
     if header.starts_with(b"CPYA") || header.starts_with(b"CPYUA") {
         let probe = plotx_io::origin::probe_origin(header).map_err(OpenPathError::OriginProbe)?;
         reject_origin_family_mismatch(path, probe.format)?;
@@ -189,12 +267,11 @@ fn extension_open_kind(path: &Path) -> RecentOpenKind {
     }
 }
 
-fn read_open_header(path: &Path) -> io::Result<OpenHeader> {
-    let mut file = std::fs::File::open(path)?;
+fn read_open_header<R: Read>(mut reader: R) -> io::Result<OpenHeader> {
     let mut header = [0_u8; OPEN_HEADER_BYTES];
     let mut length = 0;
     while length < header.len() {
-        match file.read(&mut header[length..]) {
+        match reader.read(&mut header[length..]) {
             Ok(0) => break,
             Ok(read) => length += read,
             Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
@@ -205,24 +282,34 @@ fn read_open_header(path: &Path) -> io::Result<OpenHeader> {
 }
 
 pub(crate) fn open_recent_path(app: &mut PlotxApp, path: &Path) {
-    let kind = match classify_open_path(path) {
-        Ok(kind) => kind,
+    let classified = match classify_open_path(path) {
+        Ok(classified) => classified,
         Err(error) => {
             record_open_path_failure(app, path, error);
             return;
         }
     };
-    if kind.is_table_import() && app.session.ui.table_import_preview.is_some() {
+    dispatch_classified_path(app, path, classified);
+}
+
+pub(crate) fn dispatch_classified_path(
+    app: &mut PlotxApp,
+    path: &Path,
+    classified: ClassifiedOpenPath,
+) {
+    if classified.is_table_import() && app.session.ui.table_import_preview.is_some() {
         record_pending_table_import(app, path);
         return;
     }
-    match kind {
-        RecentOpenKind::Project => app.load_project_from(path),
-        RecentOpenKind::DelimitedTable => import_delimited_table_path(app, path),
-        RecentOpenKind::XlsxTable => import_xlsx_table_path(app, path),
-        RecentOpenKind::OriginProject => origin::import_origin_project_path(app, path),
-        RecentOpenKind::Folder => open_folder_path(app, path),
-        RecentOpenKind::DataFile => load_and_note(app, path),
+    match classified {
+        ClassifiedOpenPath::Project => app.load_project_from(path),
+        ClassifiedOpenPath::DelimitedTable => import_delimited_table_path(app, path),
+        ClassifiedOpenPath::XlsxTable => import_xlsx_table_path(app, path),
+        ClassifiedOpenPath::OriginProject(source) => {
+            origin::import_origin_project_source(app, path, source);
+        }
+        ClassifiedOpenPath::Folder => open_folder_path(app, path),
+        ClassifiedOpenPath::DataFile => load_and_note(app, path),
     }
 }
 

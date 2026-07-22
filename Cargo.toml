@@ -73,6 +73,7 @@ muda = { version = "0.19.3", default-features = false }
 rfd = "0.17"
 zip = { version = "8.6", default-features = false, features = ["deflate"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "tiff"] }
+libc = "0.2"
 pdf-writer = "0.12"
 resvg = "0.47"
 svg2pdf = "0.13"

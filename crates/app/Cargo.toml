@@ -37,6 +37,9 @@ uuid.workspace = true
 raw-window-handle.workspace = true
 windows-sys.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
 [target.'cfg(target_os = "macos")'.dependencies]
 muda.workspace = true
 

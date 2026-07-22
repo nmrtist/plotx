@@ -1,4 +1,4 @@
-use std::io::{Read, Take};
+use std::io::{Read, Seek, SeekFrom, Take};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -25,6 +25,22 @@ pub(super) const OPEN_FILE_FILTER_EXTENSIONS: &[&str] =
 
 const ORIGIN_MEDIA_TYPE: &str = "application/x-origin-project";
 const UNSUPPORTED_OBJECTS_KEY: &str = "space.nmrtist.plotx.import.origin.unsupported_objects";
+
+#[derive(Debug)]
+pub(super) struct OpenOriginSource {
+    file: std::fs::File,
+    metadata_len: u64,
+}
+
+impl OpenOriginSource {
+    pub(super) fn new(file: std::fs::File, metadata_len: u64) -> Self {
+        Self { file, metadata_len }
+    }
+
+    fn into_parts(self) -> (std::fs::File, u64) {
+        (self.file, self.metadata_len)
+    }
+}
 
 struct OriginFailure {
     stage: &'static str,
@@ -85,9 +101,13 @@ impl OriginFailure {
     }
 }
 
-pub(super) fn import_origin_project_path(app: &mut PlotxApp, path: &Path) {
+pub(super) fn import_origin_project_source(
+    app: &mut PlotxApp,
+    path: &Path,
+    source: OpenOriginSource,
+) {
     let limits = OriginLimits::default();
-    let result = read_origin_source(path, limits).and_then(|source_bytes| {
+    let result = read_origin_source(source, limits).and_then(|source_bytes| {
         probe_origin(&source_bytes).map_err(|error| OriginFailure::parser("probe", error))?;
         let project = read_origin(&source_bytes, limits)
             .map_err(|error| OriginFailure::parser("parse", error))?;
@@ -116,16 +136,21 @@ pub(super) fn import_origin_project_model(
     install_origin_result(app, operation_id, path, result);
 }
 
-fn read_origin_source(path: &Path, limits: OriginLimits) -> Result<Arc<[u8]>, OriginFailure> {
+fn read_origin_source(
+    source: OpenOriginSource,
+    limits: OriginLimits,
+) -> Result<Arc<[u8]>, OriginFailure> {
+    let (mut file, metadata_len) = source.into_parts();
+    read_origin_handle(&mut file, Some(metadata_len), limits)
+}
+
+fn read_origin_handle<R: Read + Seek>(
+    mut reader: R,
+    metadata_len: Option<u64>,
+    limits: OriginLimits,
+) -> Result<Arc<[u8]>, OriginFailure> {
     checked_reader_limit(limits)
         .map_err(|error| OriginFailure::io("limits", limit_message(&error), error))?;
-    let metadata = std::fs::metadata(path).map_err(|error| {
-        OriginFailure::io(
-            "metadata",
-            "The selected Origin project could not be inspected. No data was imported.",
-            error,
-        )
-    })?;
     let maximum = u64::try_from(limits.max_input_bytes).map_err(|_| {
         let error = invalid_limit(
             limits.max_input_bytes,
@@ -133,18 +158,20 @@ fn read_origin_source(path: &Path, limits: OriginLimits) -> Result<Arc<[u8]>, Or
         );
         OriginFailure::io("limits", limit_message(&error), error)
     })?;
-    if metadata.len() > maximum {
-        let error = input_too_large(metadata.len(), limits.max_input_bytes);
+    if let Some(length) = metadata_len
+        && length > maximum
+    {
+        let error = input_too_large(length, limits.max_input_bytes);
         return Err(OriginFailure::io("metadata", limit_message(&error), error));
     }
-    let file = std::fs::File::open(path).map_err(|error| {
+    reader.seek(SeekFrom::Start(0)).map_err(|error| {
         OriginFailure::io(
-            "read",
-            "The selected Origin project could not be opened. No data was imported.",
+            "rewind",
+            "The selected Origin project could not be rewound for import. No data was imported.",
             error,
         )
     })?;
-    read_bounded_origin(file, Some(metadata.len()), limits).map_err(|error| OriginFailure {
+    read_bounded_origin(reader, metadata_len, limits).map_err(|error| OriginFailure {
         stage: "read",
         message: limit_message(&error),
         detail: error,

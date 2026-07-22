@@ -1,13 +1,14 @@
 use super::*;
 use crate::ui::file_dialogs::recent::{
-    OpenPathEntryType, classify_open_path, classify_open_path_with_header,
+    OpenPathEntryType, classify_open_handle, classify_open_path, classify_open_path_with_header,
+    dispatch_classified_path, open_file_for_classification,
 };
 use crate::ui::file_dialogs::{RecentOpenKind, open_recent_path};
 use plotx_core::operation::{OperationId, OperationOutcome};
 use plotx_core::origin::{ImportedOriginWorksheet, ORIGIN_IMPORT_OPERATION};
 use plotx_core::state::PlotxApp;
 use plotx_io::origin::OriginLimits;
-use std::io::{self, Read};
+use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -19,6 +20,34 @@ struct PanicOnRead;
 impl Read for PanicOnRead {
     fn read(&mut self, _buffer: &mut [u8]) -> io::Result<usize> {
         panic!("bounded reader must reject before reading")
+    }
+}
+
+struct SeekFailure;
+
+impl Read for SeekFailure {
+    fn read(&mut self, _buffer: &mut [u8]) -> io::Result<usize> {
+        panic!("a failed rewind must stop before reading")
+    }
+}
+
+impl Seek for SeekFailure {
+    fn seek(&mut self, _position: SeekFrom) -> io::Result<u64> {
+        Err(io::Error::other("injected rewind failure"))
+    }
+}
+
+struct ReadFailure;
+
+impl Read for ReadFailure {
+    fn read(&mut self, _buffer: &mut [u8]) -> io::Result<usize> {
+        Err(io::Error::other("injected full-read failure"))
+    }
+}
+
+impl Seek for ReadFailure {
+    fn seek(&mut self, _position: SeekFrom) -> io::Result<u64> {
+        Ok(0)
     }
 }
 
@@ -82,7 +111,7 @@ fn origin_routing_uses_signature_before_extension() {
     let kind = classify_open_path(&disguised).unwrap();
 
     std::fs::remove_dir_all(root).unwrap();
-    assert_eq!(format!("{kind:?}"), "OriginProject");
+    assert_eq!(kind.kind(), RecentOpenKind::OriginProject);
 }
 
 #[test]
@@ -137,6 +166,97 @@ fn origin_pending_preview_rejects_a_second_table_path_without_replacement() {
             .contains("finish or cancel"),
         "{report:?}"
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn origin_dispatch_reuses_the_classified_handle_after_path_replacement() {
+    use std::os::unix::net::UnixListener;
+
+    let id = uuid::Uuid::new_v4();
+    let path = PathBuf::from("/tmp").join(format!("px-{id}.opj"));
+    let original_path = PathBuf::from("/tmp").join(format!("px-{id}.saved"));
+    std::fs::write(&path, OPENOPJ_FIXTURE).unwrap();
+    let classified = classify_open_path(&path).unwrap();
+    assert_eq!(classified.kind(), RecentOpenKind::OriginProject);
+    std::fs::rename(&path, &original_path).unwrap();
+    let replacement = UnixListener::bind(&path).unwrap();
+    let mut app = PlotxApp::new_with_settings(plotx_core::settings::Settings::default());
+
+    dispatch_classified_path(&mut app, &path, classified);
+
+    drop(replacement);
+    std::fs::remove_file(&path).unwrap();
+    std::fs::remove_file(original_path).unwrap();
+    let preview = app
+        .session
+        .ui
+        .table_import_preview
+        .as_ref()
+        .expect("dispatch must consume the original classified file handle");
+    assert_eq!(preview.recent_path.as_deref(), Some(path.as_path()));
+    assert!(!preview.candidates.is_empty());
+    assert!(app.doc.datasets.is_empty());
+    assert!(app.session.recent_files.is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn origin_classification_rejects_non_regular_handle_metadata() {
+    let device = std::fs::File::open("/dev/null").unwrap();
+
+    let error = classify_open_handle(Path::new("device.opj"), device)
+        .expect_err("a character-device handle must be rejected before header reads");
+
+    assert!(error.to_string().contains("regular file"), "{error}");
+}
+
+#[cfg(unix)]
+#[test]
+fn origin_classification_opens_paths_in_nonblocking_mode() {
+    use std::os::fd::AsRawFd;
+
+    let path = temp_origin_file("opj", OPENOPJ_FIXTURE);
+    let file = open_file_for_classification(&path).unwrap();
+    let flags = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETFL) };
+    std::fs::remove_file(path).unwrap();
+
+    assert_ne!(flags, -1, "F_GETFL must succeed");
+    assert_ne!(flags & libc::O_NONBLOCK, 0);
+}
+
+#[test]
+fn origin_rewind_and_full_read_errors_are_propagated() {
+    let limits = OriginLimits::default();
+    let rewind_error = read_origin_handle(&mut SeekFailure, Some(0), limits)
+        .expect_err("rewind errors must stop the import");
+    assert_eq!(rewind_error.stage, "rewind");
+    assert!(
+        rewind_error.detail.contains("injected rewind failure"),
+        "{}",
+        rewind_error.detail
+    );
+
+    let read_error = read_origin_handle(&mut ReadFailure, Some(0), limits)
+        .expect_err("full-read errors must stop the import");
+    assert_eq!(read_error.stage, "read");
+    assert!(
+        read_error.detail.contains("injected full-read failure"),
+        "{}",
+        read_error.detail
+    );
+}
+
+#[test]
+fn origin_oversized_metadata_is_rejected_before_rewind() {
+    let limits = OriginLimits::default();
+    let oversized = u64::try_from(limits.max_input_bytes).unwrap() + 1;
+
+    let error = read_origin_handle(&mut SeekFailure, Some(oversized), limits)
+        .expect_err("known oversized input must be rejected before rewinding");
+
+    assert_eq!(error.stage, "metadata");
+    assert!(error.detail.contains("input bytes"), "{}", error.detail);
 }
 
 #[cfg(unix)]
@@ -317,7 +437,7 @@ fn origin_signature_mismatch_becomes_a_user_visible_failure_report() {
     let path = temp_origin_file("opj", b"not an Origin project");
     let mut app = PlotxApp::new_with_settings(plotx_core::settings::Settings::default());
 
-    import_origin_project_path(&mut app, &path);
+    open_recent_path(&mut app, &path);
 
     std::fs::remove_file(path).unwrap();
     assert!(app.session.ui.table_import_preview.is_none());
@@ -343,7 +463,7 @@ fn origin_opju_is_unsupported_without_preview_or_recent_entry() {
     let path = temp_origin_file("opju", b"CPYUA 4.3668 178\n");
     let mut app = PlotxApp::new_with_settings(plotx_core::settings::Settings::default());
 
-    import_origin_project_path(&mut app, &path);
+    open_recent_path(&mut app, &path);
 
     std::fs::remove_file(path).unwrap();
     assert!(app.session.ui.table_import_preview.is_none());
@@ -406,7 +526,7 @@ fn origin_recent_file_is_recorded_only_after_confirmed_full_success() {
     let mut app = PlotxApp::new_with_settings(plotx_core::settings::Settings::default());
     let mut noted_paths = Vec::new();
 
-    import_origin_project_path(&mut app, &path);
+    open_recent_path(&mut app, &path);
 
     assert!(app.doc.datasets.is_empty());
     assert!(app.session.recent_files.is_empty());
@@ -442,7 +562,7 @@ fn origin_recent_file_is_recorded_only_after_confirmed_full_success() {
 fn origin_cancel_leaves_tables_and_recent_files_unchanged() {
     let path = temp_origin_file("opj", OPENOPJ_FIXTURE);
     let mut app = PlotxApp::new_with_settings(plotx_core::settings::Settings::default());
-    import_origin_project_path(&mut app, &path);
+    open_recent_path(&mut app, &path);
     assert!(app.session.ui.table_import_preview.take().is_some());
 
     std::fs::remove_file(path).unwrap();
