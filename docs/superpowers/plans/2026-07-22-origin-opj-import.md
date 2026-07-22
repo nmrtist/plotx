@@ -699,9 +699,9 @@ The new origin.rs module, together with the shared classifier:
 1. treats path metadata only as an early directory or file hint, then opens an apparent regular file once;
 2. uses `O_NONBLOCK` on Unix, validates the opened handle itself as a regular file, and retains its size only as an early rejection hint;
 3. reads the classification header from that handle and transfers the same handle to the Origin adapter without reopening the path;
-4. computes max_input_bytes.checked_add(1), converts the result to u64 with a checked conversion, and returns InvalidLimit if either operation fails;
-5. rewinds the retained handle and reads through Take(checked_limit) without reserving the metadata length;
-6. rejects an extra byte as too large and converts the retained Vec once into Arc<[u8]>;
+4. selects the smaller of max_input_bytes and max_total_owned_bytes, computes its one-byte sentinel with checked arithmetic, converts the limit to u64 for the metadata hint with a checked conversion, and returns InvalidLimit if either operation fails;
+5. rewinds the retained handle and reads manually in fixed 16 KiB chunks without reserving the metadata length, using fallible exact reservation and checking actual Vec capacity against the total-owned budget;
+6. rejects an extra byte as too large, checks Vec capacity plus final length as the source-payload peak, and converts the retained Vec once into Arc<[u8]>;
 7. calls plotx_io::origin::probe_origin and read_origin;
 8. calls plotx_core::origin::import_origin_project;
 9. creates TableImportSource values that share the one Arc slice and then creates the existing TableImportPreviewState;
