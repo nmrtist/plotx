@@ -34,8 +34,9 @@ pub(super) fn read(
     bytes: &[u8],
     limits: &OriginLimits,
     probe: OriginProbe,
+    retained_probe_bytes: usize,
 ) -> Result<OriginProject, OriginError> {
-    let raw = parse_raw(bytes, limits)?;
+    let raw = parse_raw(bytes, limits, retained_probe_bytes)?;
     if raw.data_sections.is_empty() && raw.remaining.is_empty() {
         return Err(OriginError::NoSupportedWorksheet);
     }
@@ -348,8 +349,9 @@ fn enforce_count(resource: &'static str, actual: usize, limit: usize) -> Result<
 pub(super) fn parse_raw<'a>(
     bytes: &'a [u8],
     limits: &OriginLimits,
+    initial_parser_bytes: usize,
 ) -> Result<RawOpjProject<'a>, OriginError> {
-    let mut reader = Reader::new(bytes, limits)?;
+    let mut reader = Reader::new_with_parser_bytes(bytes, limits, initial_parser_bytes)?;
     let signature = reader.read_slice(SIGNATURE.len())?;
     if signature != SIGNATURE {
         return Err(OriginError::UnsupportedVersion {

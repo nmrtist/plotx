@@ -26,15 +26,31 @@ pub(super) struct Reader<'bytes, 'limits> {
 }
 
 impl<'bytes, 'limits> Reader<'bytes, 'limits> {
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(super) fn new(
         bytes: &'bytes [u8],
         limits: &'limits OriginLimits,
     ) -> Result<Self, OriginError> {
+        Self::new_with_parser_bytes(bytes, limits, 0)
+    }
+
+    pub(super) fn new_with_parser_bytes(
+        bytes: &'bytes [u8],
+        limits: &'limits OriginLimits,
+        initial_parser_bytes: usize,
+    ) -> Result<Self, OriginError> {
         limits.validate()?;
         enforce_limit("input bytes", bytes.len(), limits.max_input_bytes)?;
         enforce_limit(
+            "parser bytes",
+            initial_parser_bytes,
+            limits.max_parser_bytes,
+        )?;
+        let total_owned_bytes =
+            checked_add(bytes.len(), initial_parser_bytes, "total owned bytes")?;
+        enforce_limit(
             "total owned bytes",
-            bytes.len(),
+            total_owned_bytes,
             limits.max_total_owned_bytes,
         )?;
 
@@ -44,7 +60,8 @@ impl<'bytes, 'limits> Reader<'bytes, 'limits> {
             limits,
             usage: OriginResourceUsage {
                 input_bytes: bytes.len(),
-                total_owned_bytes: bytes.len(),
+                parser_bytes: initial_parser_bytes,
+                total_owned_bytes,
                 ..OriginResourceUsage::default()
             },
         })

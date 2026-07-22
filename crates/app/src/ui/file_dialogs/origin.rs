@@ -1,4 +1,4 @@
-use std::io::{Read, Seek, SeekFrom, Take};
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -24,6 +24,7 @@ pub(super) const OPEN_FILE_FILTER_EXTENSIONS: &[&str] = &["abf", "jdf", "fid", "
 
 const ORIGIN_MEDIA_TYPE: &str = "application/x-origin-project";
 const UNSUPPORTED_OBJECTS_KEY: &str = "space.nmrtist.plotx.import.origin.unsupported_objects";
+const ORIGIN_READ_CHUNK_BYTES: usize = 16 * 1024;
 
 #[derive(Debug)]
 pub(super) struct OpenOriginSource {
@@ -52,7 +53,7 @@ struct SourceByteLimit {
     resource: &'static str,
     limit: usize,
     maximum: u64,
-    read_limit: u64,
+    sentinel: usize,
 }
 
 impl OriginFailure {
@@ -179,7 +180,7 @@ fn read_origin_handle<R: Read + Seek>(
 }
 
 pub(super) fn read_bounded_origin<R: Read>(
-    reader: R,
+    mut reader: R,
     metadata_len: Option<u64>,
     limits: OriginLimits,
 ) -> Result<Arc<[u8]>, String> {
@@ -190,20 +191,105 @@ pub(super) fn read_bounded_origin<R: Read>(
         return Err(source_too_large(length, source_limit));
     }
 
-    let mut bounded: Take<R> = reader.take(source_limit.read_limit);
     let mut bytes = Vec::new();
-    bounded
-        .read_to_end(&mut bytes)
-        .map_err(|error| format!("the bounded Origin project read failed: {error}"))?;
-    if bytes.len() > source_limit.limit {
+    let mut chunk = [0_u8; ORIGIN_READ_CHUNK_BYTES];
+    loop {
+        let remaining = source_limit
+            .sentinel
+            .checked_sub(bytes.len())
+            .ok_or_else(|| {
+                OriginError::ArithmeticOverflow {
+                    resource: "Origin source sentinel bytes",
+                }
+                .to_string()
+            })?;
+        let request = remaining.min(chunk.len());
+        let read = match reader.read(&mut chunk[..request]) {
+            Ok(0) => break,
+            Ok(read) if read <= request => read,
+            Ok(read) => {
+                return Err(format!(
+                    "the bounded Origin project read failed: the reader returned {read} bytes for a {request}-byte buffer"
+                ));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) => {
+                return Err(format!("the bounded Origin project read failed: {error}"));
+            }
+        };
+        let next_len = bytes.len().checked_add(read).ok_or_else(|| {
+            OriginError::ArithmeticOverflow {
+                resource: "Origin source bytes",
+            }
+            .to_string()
+        })?;
+        if next_len > source_limit.limit {
+            return Err(OriginError::LimitExceeded {
+                resource: source_limit.resource,
+                limit: source_limit.limit,
+                actual: next_len,
+            }
+            .to_string());
+        }
+        reserve_source_capacity(&mut bytes, next_len, source_limit, limits)?;
+        let read_bytes = chunk.get(..read).ok_or_else(|| {
+            "the bounded Origin project read failed: the reader exceeded its buffer".to_owned()
+        })?;
+        bytes.extend_from_slice(read_bytes);
+    }
+
+    let conversion_peak = bytes.capacity().checked_add(bytes.len()).ok_or_else(|| {
+        OriginError::ArithmeticOverflow {
+            resource: "Origin source Arc conversion",
+        }
+        .to_string()
+    })?;
+    if conversion_peak > limits.max_total_owned_bytes {
         return Err(OriginError::LimitExceeded {
-            resource: source_limit.resource,
-            limit: source_limit.limit,
-            actual: bytes.len(),
+            resource: "total owned bytes",
+            limit: limits.max_total_owned_bytes,
+            actual: conversion_peak,
         }
         .to_string());
     }
     Ok(Arc::<[u8]>::from(bytes))
+}
+
+fn reserve_source_capacity(
+    bytes: &mut Vec<u8>,
+    required_len: usize,
+    source_limit: SourceByteLimit,
+    limits: OriginLimits,
+) -> Result<(), String> {
+    let old_capacity = bytes.capacity();
+    if required_len <= old_capacity {
+        return Ok(());
+    }
+    let doubled = old_capacity.checked_mul(2).unwrap_or(source_limit.sentinel);
+    let target_capacity = required_len.max(doubled).min(source_limit.limit);
+    let additional = target_capacity.checked_sub(bytes.len()).ok_or_else(|| {
+        OriginError::ArithmeticOverflow {
+            resource: "Origin source allocation",
+        }
+        .to_string()
+    })?;
+    bytes.try_reserve_exact(additional).map_err(|_| {
+        OriginError::AllocationFailed {
+            resource: "Origin source bytes",
+            requested: target_capacity,
+        }
+        .to_string()
+    })?;
+    let actual_capacity = bytes.capacity();
+    if actual_capacity > limits.max_total_owned_bytes {
+        return Err(OriginError::LimitExceeded {
+            resource: "total owned bytes",
+            limit: limits.max_total_owned_bytes,
+            actual: actual_capacity,
+        }
+        .to_string());
+    }
+    Ok(())
 }
 
 fn checked_source_byte_limit(limits: OriginLimits) -> Result<SourceByteLimit, String> {
@@ -233,19 +319,11 @@ fn checked_source_byte_limit(limits: OriginLimits) -> Result<SourceByteLimit, St
         )
         .to_string()
     })?;
-    let read_limit = u64::try_from(sentinel).map_err(|_| {
-        invalid_limit(
-            limit_name,
-            limit,
-            "the source-byte sentinel cannot be represented by the bounded reader",
-        )
-        .to_string()
-    })?;
     Ok(SourceByteLimit {
         resource,
         limit,
         maximum,
-        read_limit,
+        sentinel,
     })
 }
 
@@ -459,6 +537,10 @@ fn install_origin_result(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "origin_allocation_tests.rs"]
+mod origin_allocation_tests;
 
 #[cfg(test)]
 #[path = "origin_tests.rs"]

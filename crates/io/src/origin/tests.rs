@@ -1,5 +1,18 @@
 use super::*;
 
+const OPENOPJ_FIXTURE: &[u8] = include_bytes!("../../tests/fixtures/origin/test-origin-7.0552.opj");
+
+fn long_leading_zero_opju_header() -> Vec<u8> {
+    let mut bytes = b"CPYUA ".to_vec();
+    bytes.extend(std::iter::repeat_n(b'0', 160));
+    bytes.extend_from_slice(b"4.");
+    bytes.extend(std::iter::repeat_n(b'0', 160));
+    bytes.extend_from_slice(b"3668 ");
+    bytes.extend(std::iter::repeat_n(b'0', 160));
+    bytes.extend_from_slice(b"178\n");
+    bytes
+}
+
 #[test]
 fn probes_opj_and_opju_by_content() {
     let opj = probe_origin(b"CPYA 4.2673 552#\n").unwrap();
@@ -97,6 +110,92 @@ fn rejects_input_one_byte_over_a_custom_limit() {
 }
 
 #[test]
+fn long_opju_version_is_bounded_by_the_string_limit_before_detection_returns() {
+    let bytes = long_leading_zero_opju_header();
+    let limits = OriginLimits {
+        max_header_bytes: bytes.len(),
+        max_string_bytes: 64,
+        ..OriginLimits::default()
+    };
+
+    assert!(matches!(
+        read_origin(&bytes, limits),
+        Err(OriginError::LimitExceeded {
+            resource: "string bytes",
+            limit: 64,
+            actual,
+        }) if actual > 64
+    ));
+}
+
+#[test]
+fn long_opju_version_is_bounded_by_the_parser_limit_before_detection_returns() {
+    let bytes = long_leading_zero_opju_header();
+    let raw_version_len = bytes.len() - b"CPYUA \n".len();
+    let limits = OriginLimits {
+        max_header_bytes: bytes.len(),
+        max_string_bytes: raw_version_len,
+        max_parser_bytes: raw_version_len - 1,
+        ..OriginLimits::default()
+    };
+
+    assert!(matches!(
+        read_origin(&bytes, limits),
+        Err(OriginError::LimitExceeded {
+            resource: "parser bytes",
+            limit,
+            actual,
+        }) if limit == raw_version_len - 1 && actual >= raw_version_len
+    ));
+}
+
+#[test]
+fn long_opju_version_is_bounded_by_source_plus_probe_total_bytes() {
+    let bytes = long_leading_zero_opju_header();
+    let raw_version_len = bytes.len() - b"CPYUA \n".len();
+    let total_limit = bytes.len() + raw_version_len - 1;
+    let limits = OriginLimits {
+        max_header_bytes: bytes.len(),
+        max_string_bytes: raw_version_len,
+        max_parser_bytes: raw_version_len,
+        max_total_owned_bytes: total_limit,
+        ..OriginLimits::default()
+    };
+
+    assert!(matches!(
+        read_origin(&bytes, limits),
+        Err(OriginError::LimitExceeded {
+            resource: "total owned bytes",
+            limit,
+            actual,
+        }) if limit == total_limit && actual > total_limit
+    ));
+}
+
+#[test]
+fn supported_opj_usage_covers_the_retained_probe_allocation() {
+    let limits = OriginLimits::default();
+    let accounted = probe_origin_with_limits(OPENOPJ_FIXTURE, &limits, OPENOPJ_FIXTURE.len())
+        .expect("the supported probe must be accounted under the read limits");
+    let retained_probe_bytes = accounted.retained_parser_bytes;
+    assert_eq!(retained_probe_bytes, accounted.probe.raw_version.capacity());
+
+    let unseeded = opj::read(OPENOPJ_FIXTURE, &limits, accounted.probe, 0).unwrap();
+    let project = read_origin(OPENOPJ_FIXTURE, limits).unwrap();
+
+    assert_eq!(retained_probe_bytes, project.probe.raw_version.capacity());
+    assert_eq!(project.resource_usage.input_bytes, OPENOPJ_FIXTURE.len());
+    assert_eq!(
+        project.resource_usage.parser_bytes,
+        unseeded.resource_usage.parser_bytes + retained_probe_bytes
+    );
+    assert_eq!(
+        project.resource_usage.total_owned_bytes,
+        unseeded.resource_usage.total_owned_bytes + retained_probe_bytes
+    );
+}
+
+#[test]
 fn opju_requires_the_exact_verified_header_grammar() {
     for bytes in [
         b"CPYUA  178\n".as_slice(),
@@ -172,6 +271,23 @@ fn invalid_custom_limits_return_an_error_without_panicking() {
             name: "max_header_bytes",
             ..
         })
+    ));
+}
+
+#[test]
+fn rejects_max_string_limit_that_cannot_fit_the_metadata_sentinel() {
+    let limits = OriginLimits {
+        max_string_bytes: usize::MAX,
+        ..OriginLimits::default()
+    };
+
+    assert!(matches!(
+        read_origin(OPENOPJ_FIXTURE, limits),
+        Err(OriginError::InvalidLimit {
+            name: "max_string_bytes",
+            value: usize::MAX,
+            reason,
+        }) if reason.contains("sentinel")
     ));
 }
 

@@ -316,16 +316,47 @@ pub(crate) fn dispatch_classified_path(
 fn record_open_path_failure(app: &mut PlotxApp, path: &Path, error: OpenPathError) {
     let operation_id = app.session.begin_operation();
     let message = error.to_string();
+    let (operation_kind, diagnostic_code) = open_path_failure_classification(path, &error);
     app.session.record_operation(OperationReport::<()>::failure(
         operation_id,
-        OperationKind::DatasetLoad,
+        operation_kind,
         format!("The selected path could not be opened: {message}."),
-        Diagnostic::new(Severity::Error, DiagnosticCode::DatasetLoadFailed, message)
+        Diagnostic::new(Severity::Error, diagnostic_code, message)
             .with_source("app.open_path")
             .with_context("path", path.display().to_string())
             .with_context("stage", error.stage())
             .with_context("error", error.to_string()),
     ));
+}
+
+fn open_path_failure_classification(
+    path: &Path,
+    error: &OpenPathError,
+) -> (OperationKind, DiagnosticCode) {
+    let table_like_extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            ["csv", "tsv", "txt", "xlsx", "opj", "opju"]
+                .iter()
+                .any(|candidate| extension.eq_ignore_ascii_case(candidate))
+        });
+    if table_like_extension
+        || matches!(
+            error,
+            OpenPathError::OriginProbe(_) | OpenPathError::OriginFamilyMismatch { .. }
+        )
+    {
+        (
+            OperationKind::TableImport,
+            DiagnosticCode::TableImportFailed,
+        )
+    } else {
+        (
+            OperationKind::DatasetLoad,
+            DiagnosticCode::DatasetLoadFailed,
+        )
+    }
 }
 
 fn record_pending_table_import(app: &mut PlotxApp, path: &Path) {
@@ -342,3 +373,7 @@ fn record_pending_table_import(app: &mut PlotxApp, path: &Path) {
             .with_context("stage", "preview_pending"),
     ));
 }
+
+#[cfg(test)]
+#[path = "recent_report_tests.rs"]
+mod recent_report_tests;

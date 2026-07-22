@@ -358,6 +358,13 @@ impl OriginLimits {
                 reason: "the limit is too large for bounded header probing",
             });
         }
+        if self.max_string_bytes.checked_add(1).is_none() {
+            return Err(OriginError::InvalidLimit {
+                name: "max_string_bytes",
+                value: self.max_string_bytes,
+                reason: "the limit must leave room for a metadata-line sentinel byte",
+            });
+        }
         Ok(())
     }
 }
@@ -487,9 +494,15 @@ pub enum OriginError {
     NoSupportedWorksheet,
 }
 
+struct AccountedOriginProbe {
+    probe: OriginProbe,
+    retained_parser_bytes: usize,
+}
+
 /// Detects an Origin family and exact supported profile from bounded content.
 pub fn probe_origin(bytes: &[u8]) -> Result<OriginProbe, OriginError> {
-    probe_origin_with_limit(bytes, DEFAULT_MAX_HEADER_BYTES)
+    let limits = OriginLimits::default();
+    Ok(probe_origin_with_limits(bytes, &limits, 0)?.probe)
 }
 
 /// Reads a complete Origin project under explicit resource limits.
@@ -502,10 +515,11 @@ pub fn read_origin(bytes: &[u8], limits: OriginLimits) -> Result<OriginProject, 
         limits.max_total_owned_bytes,
     )?;
 
-    let probe = probe_origin_with_limit(bytes, limits.max_header_bytes)?;
+    let accounted = probe_origin_with_limits(bytes, &limits, bytes.len())?;
+    let probe = accounted.probe;
     match probe.format {
         OriginFormat::Opju => opju::read(probe),
-        OriginFormat::Opj => opj::read(bytes, &limits, probe),
+        OriginFormat::Opj => opj::read(bytes, &limits, probe, accounted.retained_parser_bytes),
     }
 }
 
@@ -520,12 +534,14 @@ fn enforce_limit(resource: &'static str, actual: usize, limit: usize) -> Result<
     Ok(())
 }
 
-fn probe_origin_with_limit(
+fn probe_origin_with_limits(
     bytes: &[u8],
-    max_header_bytes: usize,
-) -> Result<OriginProbe, OriginError> {
+    limits: &OriginLimits,
+    initial_total_owned_bytes: usize,
+) -> Result<AccountedOriginProbe, OriginError> {
+    limits.validate()?;
     let format = identify_family(bytes)?;
-    let line = bounded_first_line(bytes, max_header_bytes)?;
+    let line = bounded_first_line(bytes, limits.max_header_bytes)?;
     if !line.iter().all(|byte| matches!(byte, b' '..=b'~')) {
         return malformed("the version line must contain printable ASCII only");
     }
@@ -544,27 +560,34 @@ fn probe_origin_with_limit(
         })?,
     };
     let version = parse_version(raw_version)?;
-    let raw_version = copy_header_version(raw_version)?;
+    let (raw_version, retained_parser_bytes) =
+        copy_header_version(raw_version, limits, initial_total_owned_bytes)?;
 
     match format {
         OriginFormat::Opj if raw_version != ORIGIN_7_V552_VERSION => {
             Err(OriginError::UnsupportedVersion { raw_version })
         }
-        OriginFormat::Opj => Ok(OriginProbe {
-            format,
-            raw_version,
-            version,
-            byte_order: OriginByteOrder::LittleEndian,
-            profile: Some(OriginProfile::Origin7V552),
-            support: OriginSupport::Supported,
+        OriginFormat::Opj => Ok(AccountedOriginProbe {
+            probe: OriginProbe {
+                format,
+                raw_version,
+                version,
+                byte_order: OriginByteOrder::LittleEndian,
+                profile: Some(OriginProfile::Origin7V552),
+                support: OriginSupport::Supported,
+            },
+            retained_parser_bytes,
         }),
-        OriginFormat::Opju => Ok(OriginProbe {
-            format,
-            raw_version,
-            version,
-            byte_order: OriginByteOrder::LittleEndian,
-            profile: None,
-            support: OriginSupport::RecognizedUnsupported,
+        OriginFormat::Opju => Ok(AccountedOriginProbe {
+            probe: OriginProbe {
+                format,
+                raw_version,
+                version,
+                byte_order: OriginByteOrder::LittleEndian,
+                profile: None,
+                support: OriginSupport::RecognizedUnsupported,
+            },
+            retained_parser_bytes,
         }),
     }
 }
@@ -659,8 +682,22 @@ fn is_ascii_digits(value: &str) -> bool {
     !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 
-fn copy_header_version(raw_version: &str) -> Result<String, OriginError> {
+fn copy_header_version(
+    raw_version: &str,
+    limits: &OriginLimits,
+    initial_total_owned_bytes: usize,
+) -> Result<(String, usize), OriginError> {
     let requested = raw_version.len();
+    enforce_limit("string bytes", requested, limits.max_string_bytes)?;
+    enforce_limit("parser bytes", requested, limits.max_parser_bytes)?;
+    let preflight_total =
+        reader::checked_add(initial_total_owned_bytes, requested, "total owned bytes")?;
+    enforce_limit(
+        "total owned bytes",
+        preflight_total,
+        limits.max_total_owned_bytes,
+    )?;
+
     let mut owned = String::new();
     owned
         .try_reserve_exact(requested)
@@ -668,8 +705,24 @@ fn copy_header_version(raw_version: &str) -> Result<String, OriginError> {
             resource: "header version text",
             requested,
         })?;
+    let retained_parser_bytes = owned.capacity();
+    enforce_limit(
+        "parser bytes",
+        retained_parser_bytes,
+        limits.max_parser_bytes,
+    )?;
+    let actual_total = reader::checked_add(
+        initial_total_owned_bytes,
+        retained_parser_bytes,
+        "total owned bytes",
+    )?;
+    enforce_limit(
+        "total owned bytes",
+        actual_total,
+        limits.max_total_owned_bytes,
+    )?;
     owned.push_str(raw_version);
-    Ok(owned)
+    Ok((owned, retained_parser_bytes))
 }
 
 fn malformed<T>(detail: &str) -> Result<T, OriginError> {
