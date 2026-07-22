@@ -1,5 +1,6 @@
 use super::reader::{FramedBlock, Reader, checked_add, checked_mul};
 use super::{OriginError, OriginLimits};
+use std::mem::size_of;
 
 #[test]
 fn reads_checked_little_endian_primitives() {
@@ -127,6 +128,71 @@ fn parser_budget_is_checked_before_vec_reserve() {
         })
     ));
     assert_eq!(values.capacity(), 0);
+}
+
+#[test]
+fn repeated_single_item_reservations_grow_logarithmically_and_charge_capacity() {
+    let limits = OriginLimits::default();
+    let mut reader = Reader::new(&[], &limits).unwrap();
+    let mut values = Vec::<u64>::new();
+    let mut capacity_changes = 0_usize;
+
+    for value in 0..4096_u64 {
+        let previous_capacity = values.capacity();
+        reader
+            .try_reserve(&mut values, 1, "test reader values")
+            .unwrap();
+        if values.capacity() != previous_capacity {
+            capacity_changes += 1;
+        }
+        values.push(value);
+    }
+
+    let usage = reader.into_usage();
+    assert!(
+        capacity_changes <= 16,
+        "single-item appends reallocated {capacity_changes} times"
+    );
+    assert_eq!(usage.parser_bytes, values.capacity() * size_of::<u64>());
+    assert_eq!(usage.total_owned_bytes, usage.parser_bytes);
+}
+
+#[test]
+fn spare_vector_capacity_is_not_charged_as_a_new_reader_allocation() {
+    let limits = OriginLimits::default();
+    let mut reader = Reader::new(&[], &limits).unwrap();
+    let mut values = Vec::<u64>::with_capacity(8);
+    let original_capacity = values.capacity();
+
+    reader
+        .try_reserve(&mut values, 1, "test reader values")
+        .unwrap();
+
+    let usage = reader.into_usage();
+    assert_eq!(values.capacity(), original_capacity);
+    assert_eq!(usage.parser_bytes, 0);
+    assert_eq!(usage.total_owned_bytes, 0);
+}
+
+#[test]
+fn reader_charges_the_actual_capacity_delta_with_an_unbounded_budget() {
+    let limits = OriginLimits {
+        max_parser_bytes: usize::MAX,
+        max_total_owned_bytes: usize::MAX,
+        ..OriginLimits::default()
+    };
+    let mut reader = Reader::new(&[], &limits).unwrap();
+    let mut values = vec![0_u8; 8];
+    let original_capacity = values.capacity();
+
+    reader
+        .try_reserve(&mut values, 1, "test reader values")
+        .unwrap();
+
+    let usage = reader.into_usage();
+    assert!(values.capacity() > original_capacity);
+    assert_eq!(usage.parser_bytes, values.capacity() - original_capacity);
+    assert_eq!(usage.total_owned_bytes, usage.parser_bytes);
 }
 
 #[test]

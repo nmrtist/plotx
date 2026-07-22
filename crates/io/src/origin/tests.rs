@@ -474,6 +474,21 @@ mod origin7_profile {
     }
 
     #[test]
+    fn rejects_the_4097th_raw_data_section() {
+        let contents = vec![None::<&[u8]>; 4097];
+        let bytes = synthetic_project(&contents);
+
+        assert!(matches!(
+            read_origin(&bytes, OriginLimits::default()),
+            Err(OriginError::LimitExceeded {
+                resource: "data sections",
+                limit: 4096,
+                actual: 4097,
+            })
+        ));
+    }
+
+    #[test]
     fn every_truncated_project_prefix_returns_a_structured_error() {
         let complete = synthetic_project(&[]);
         for prefix_len in 0..complete.len() {

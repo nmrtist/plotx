@@ -192,15 +192,62 @@ impl<'bytes, 'limits> Reader<'bytes, 'limits> {
         additional: usize,
         resource: &'static str,
     ) -> Result<(), OriginError> {
-        let _requested_elements = checked_add(values.len(), additional, resource)?;
-        let requested_bytes = checked_mul(additional, size_of::<T>(), resource)?;
-        self.charge_parser(requested_bytes)?;
-        values
-            .try_reserve_exact(additional)
-            .map_err(|_| OriginError::AllocationFailed {
+        let requested_len = checked_add(values.len(), additional, resource)?;
+        let old_capacity = values.capacity();
+        let element_size = size_of::<T>();
+        if requested_len <= old_capacity || element_size == 0 {
+            return Ok(());
+        }
+
+        let minimum_delta = requested_len
+            .checked_sub(old_capacity)
+            .ok_or(OriginError::ArithmeticOverflow { resource })?;
+        let minimum_bytes = checked_mul(minimum_delta, element_size, resource)?;
+        checked_parser_usage(&self.usage, self.limits, minimum_bytes)?;
+
+        // Bound geometric growth by both remaining budgets. The measured
+        // capacity delta is charged after reserve so allocator rounding cannot
+        // bypass accounting; an over-budget rounded allocation fails closed.
+        let available_bytes = self
+            .limits
+            .max_parser_bytes
+            .saturating_sub(self.usage.parser_bytes)
+            .min(
+                self.limits
+                    .max_total_owned_bytes
+                    .saturating_sub(self.usage.total_owned_bytes),
+            );
+        let geometric_capacity = if old_capacity == 0 {
+            requested_len
+        } else {
+            old_capacity.checked_mul(2).unwrap_or(requested_len)
+        };
+        let desired_capacity = requested_len.max(geometric_capacity);
+        let desired_delta = desired_capacity
+            .checked_sub(old_capacity)
+            .ok_or(OriginError::ArithmeticOverflow { resource })?;
+        let affordable_delta = (available_bytes / element_size).min(desired_delta);
+        let target_capacity = checked_add(old_capacity, affordable_delta, resource)?;
+        let reserve_additional = target_capacity
+            .checked_sub(values.len())
+            .ok_or(OriginError::ArithmeticOverflow { resource })?;
+        let planned_delta = target_capacity
+            .checked_sub(old_capacity)
+            .ok_or(OriginError::ArithmeticOverflow { resource })?;
+        let planned_bytes = checked_mul(planned_delta, element_size, resource)?;
+        values.try_reserve_exact(reserve_additional).map_err(|_| {
+            OriginError::AllocationFailed {
                 resource,
-                requested: requested_bytes,
-            })
+                requested: planned_bytes,
+            }
+        })?;
+
+        let actual_delta = values
+            .capacity()
+            .checked_sub(old_capacity)
+            .ok_or(OriginError::ArithmeticOverflow { resource })?;
+        let actual_bytes = checked_mul(actual_delta, element_size, resource)?;
+        self.charge_parser(actual_bytes)
     }
 
     fn read_array<const N: usize>(&mut self) -> Result<[u8; N], OriginError> {
@@ -240,20 +287,28 @@ impl<'bytes, 'limits> Reader<'bytes, 'limits> {
     }
 
     fn charge_parser(&mut self, bytes: usize) -> Result<(), OriginError> {
-        let parser_bytes = checked_add(self.usage.parser_bytes, bytes, "parser bytes")?;
-        enforce_limit("parser bytes", parser_bytes, self.limits.max_parser_bytes)?;
-        let total_owned_bytes =
-            checked_add(self.usage.total_owned_bytes, bytes, "total owned bytes")?;
-        enforce_limit(
-            "total owned bytes",
-            total_owned_bytes,
-            self.limits.max_total_owned_bytes,
-        )?;
-
+        let (parser_bytes, total_owned_bytes) =
+            checked_parser_usage(&self.usage, self.limits, bytes)?;
         self.usage.parser_bytes = parser_bytes;
         self.usage.total_owned_bytes = total_owned_bytes;
         Ok(())
     }
+}
+
+fn checked_parser_usage(
+    usage: &OriginResourceUsage,
+    limits: &OriginLimits,
+    bytes: usize,
+) -> Result<(usize, usize), OriginError> {
+    let parser_bytes = checked_add(usage.parser_bytes, bytes, "parser bytes")?;
+    enforce_limit("parser bytes", parser_bytes, limits.max_parser_bytes)?;
+    let total_owned_bytes = checked_add(usage.total_owned_bytes, bytes, "total owned bytes")?;
+    enforce_limit(
+        "total owned bytes",
+        total_owned_bytes,
+        limits.max_total_owned_bytes,
+    )?;
+    Ok((parser_bytes, total_owned_bytes))
 }
 
 pub(super) fn checked_add(
