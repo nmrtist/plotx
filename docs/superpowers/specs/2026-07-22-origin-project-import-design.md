@@ -338,7 +338,7 @@ Implementation completion requires:
 - `cargo pr-check`;
 - `npm run build` from `docs/`.
 
-At design closure, `cargo-deny` is installed and has completed a successful dependency-policy run; a later retry was blocked while fetching the RustSec index by a transient GitHub HTTP/2 error. The full `cargo pr-check` remains pending because `protoc` is absent. Final gate results will be recorded in the pull request after the required installation permission and a fresh run.
+At implementation closure, `cargo-deny` and `protoc` are installed with the user's permission. A fresh online `cargo pr-check` completed all seven stages, including dependency policy, both backend configurations, Clippy, and the full test suite. The documentation build also completed successfully; the exact commands and results are recorded in the pull request.
 
 ## Documentation
 

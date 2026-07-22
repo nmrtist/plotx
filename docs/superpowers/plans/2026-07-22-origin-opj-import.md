@@ -828,7 +828,7 @@ cargo check -p plotx --features datafusion --locked
 
 Expected: every command exits successfully.
 
-- [ ] **Step 2: Obtain permission for missing tools when needed**
+- [x] **Step 2: Obtain permission for missing tools when needed**
 
 Check:
 
@@ -839,7 +839,7 @@ command -v protoc
 
 If either is absent, pause once and ask the user for installation permission with the exact proposed commands. Do not claim cargo pr-check passed while a prerequisite is missing. After permission, install the minimum required tools and report what changed.
 
-- [ ] **Step 3: Run the repository gate**
+- [x] **Step 3: Run the repository gate**
 
 ~~~bash
 cargo pr-check
