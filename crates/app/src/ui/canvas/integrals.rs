@@ -222,6 +222,7 @@ fn apply_integral_drag_live(app: &mut PlotxApp, dataset: usize, ppm: f64) {
         }
     }
     n.recompute_integrals();
+    app.sync_integral_curves_for(dataset);
 }
 
 fn finish_integral_drag(app: &mut PlotxApp, dataset: usize, xspan: f64) {
@@ -254,15 +255,15 @@ fn finish_integral_drag(app: &mut PlotxApp, dataset: usize, xspan: f64) {
         {
             let id = n.next_integral_id;
             n.next_integral_id += 1;
-            let is_reference = n.integrals.is_empty();
+            let reference_value = n.integrals.is_empty().then_some(1.0);
             n.integrals.push(IntegralResult {
                 id,
                 start_ppm: lo,
                 end_ppm: hi,
                 area: 0.0,
-                normalized_area: 0.0,
+                normalized_area: reference_value.unwrap_or(0.0),
                 mode: plotx_core::DisplayModeLabel::Real,
-                is_reference,
+                reference_value,
             });
             n.recompute_integrals();
             app.session.ui.selected_integral = Some(id);
@@ -306,8 +307,8 @@ fn integral_context_menu(
             ui.close();
             return;
         }
-        if ui.button("Set as reference (=1)").clicked() {
-            app.set_integral_reference(dataset, id);
+        if ui.button("Use as normalization reference").clicked() {
+            app.set_integral_reference(dataset, id, 1.0);
             ui.close();
         }
         if ui.button("Delete").clicked() {

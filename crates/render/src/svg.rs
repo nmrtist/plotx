@@ -1,8 +1,8 @@
 use crate::{
     AXIS_LINE_WIDTH, Document, DocumentItem, DocumentObject, DocumentOverlay, LegendMark, Margins,
     OUTER_PAD, OverlayAlign, OverlayKind, OverlayShapeKind, Projector, Rect, TICK_LABEL_PAD,
-    TICK_LENGTH, arrow_head, axis_ticks_for, error_bar_segments, heatmap_cells, legend_entries,
-    polygon_outline, projection_points,
+    TICK_LENGTH, arrow_head, axis_ticks_for, error_bar_segments, heatmap_cells, integral,
+    legend_entries, polygon_outline, projection_points,
 };
 use plotx_figure::{AxisFrame, AxisTrace, Figure, SeriesKind};
 use std::fmt::Write as _;
@@ -428,6 +428,27 @@ fn write_figure(s: &mut String, fig: &Figure, outer: Rect, clip_id: &str) {
         }
     }
     write_error_bars(s, fig, &proj, true);
+    for curve in integral::layout(fig, plot, 1.0) {
+        let mut points = String::new();
+        for (x, y) in curve.points {
+            let _ = write!(points, "{x:.2},{y:.2} ");
+        }
+        let _ = write!(
+            s,
+            r#"<polyline class="integral-curve" points="{points}" fill="none" stroke="{color}" stroke-width="{width}"/>"#,
+            color = curve.color.to_hex(),
+            width = curve.width,
+        );
+        let _ = write!(
+            s,
+            r#"<text class="integral-label" x="{x:.2}" y="{y:.2}" text-anchor="middle" dominant-baseline="middle" font-size="{font:.2}" fill="{color}" transform="rotate(-90 {x:.2} {y:.2})">{text}</text>"#,
+            x = curve.label.position.0,
+            y = curve.label.position.1,
+            font = curve.label.font_size,
+            color = curve.label.color.to_hex(),
+            text = escape(&curve.label.text),
+        );
+    }
     for a in &fig.annotations {
         let (px, py) = proj.project(a.at);
         let _ = write!(
@@ -613,7 +634,7 @@ fn escape_id(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plotx_figure::{Axis, AxisFrame, ErrorBar, Figure, Series};
+    use plotx_figure::{Axis, AxisFrame, Color, ErrorBar, Figure, IntegralCurve, Series};
 
     #[test]
     fn exports_wellformed_ish_svg_with_polyline() {
@@ -631,6 +652,35 @@ mod tests {
         assert!(out.trim_end().ends_with("</svg>"));
         assert!(out.contains("<polyline"));
         assert!(out.contains("Demo"));
+    }
+
+    #[test]
+    fn exports_integral_result_curve_and_label() {
+        let mut fig = Figure::new(
+            "",
+            Axis::new("ppm", 0.0, 2.0).reversed(true),
+            Axis::new("intensity", 0.0, 1.0),
+        )
+        .with_series(Series::line(
+            "trace",
+            vec![[0.0, 1.0], [1.0, 2.0], [2.0, 1.0]],
+        ));
+        fig.integral_curves.push(IntegralCurve {
+            start_ppm: 0.0,
+            end_ppm: 2.0,
+            normalized_area: 3.0,
+            label: "3.000".to_owned(),
+            color: Color::rgb(0x22, 0x8b, 0x57),
+            width: 1.5,
+            source_series: 0,
+        });
+        let out = export(&fig);
+        assert!(out.contains("class=\"integral-curve\""));
+        assert!(out.contains("class=\"integral-label\""));
+        assert!(out.contains("3.000"));
+        assert!(!out.contains("(ref)"));
+        assert!(out.contains("rotate(-90"));
+        assert!(!out.contains("integral-selection"));
     }
 
     #[test]

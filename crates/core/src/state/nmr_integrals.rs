@@ -3,19 +3,35 @@
 use super::*;
 
 impl NmrDataset {
-    /// Reassign contiguous ids to the loaded integrals and reseed the id source, so
-    /// bands stay individually addressable after a project round-trip.
-    pub fn normalize_integral_ids(&mut self) {
-        for (i, integ) in self.integrals.iter_mut().enumerate() {
-            integ.id = i as u64;
-        }
-        self.next_integral_id = self.integrals.len() as u64;
+    pub(crate) fn integral_curves(&self) -> Vec<plotx_figure::IntegralCurve> {
+        self.integrals
+            .iter()
+            .map(|integral| plotx_figure::IntegralCurve {
+                start_ppm: integral.start_ppm,
+                end_ppm: integral.end_ppm,
+                normalized_area: integral.normalized_area,
+                label: format!("{:.3}", integral.normalized_area),
+                color: plotx_figure::Color::rgb(0x2b, 0x6c, 0xb0),
+                width: 1.0,
+                source_series: 0,
+            })
+            .collect()
+    }
+
+    /// Rebuild the runtime id source without changing persisted ids.
+    pub fn reseed_integral_ids(&mut self) {
+        self.next_integral_id = self
+            .integrals
+            .iter()
+            .map(|integral| integral.id.saturating_add(1))
+            .max()
+            .unwrap_or(0);
     }
 
     /// Refresh every integral's area from the current spectrum (after a band moved
     /// or resized) and renormalize: with a reference band, values are `area /
-    /// reference-area` (the reference reads 1.000); without one, each keeps its
-    /// total-spectrum fraction.
+    /// reference-area × the reference's user-selected target value; without a
+    /// reference, each keeps its total-spectrum fraction.
     pub fn recompute_integrals(&mut self) {
         let refreshed: Vec<Option<(f64, f64)>> = self
             .integrals
@@ -35,11 +51,10 @@ impl NmrDataset {
                 integ.normalized_area = norm;
             }
         }
-        if let Some(ref_area) = self
+        if let Some((ref_area, reference_value)) = self
             .integrals
             .iter()
-            .find(|integ| integ.is_reference)
-            .map(|integ| integ.area)
+            .find_map(|integ| integ.reference_value.map(|value| (integ.area, value)))
         {
             let ref_area = if ref_area.abs() < f64::MIN_POSITIVE {
                 f64::MIN_POSITIVE
@@ -47,7 +62,7 @@ impl NmrDataset {
                 ref_area
             };
             for integ in &mut self.integrals {
-                integ.normalized_area = integ.area / ref_area;
+                integ.normalized_area = integ.area / ref_area * reference_value;
             }
         }
     }

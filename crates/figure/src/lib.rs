@@ -121,6 +121,20 @@ pub struct Series {
     pub kind: SeriesKind,
 }
 
+/// A stored 1D NMR integral description. Renderers derive the cumulative trace
+/// from `Figure::series[source_series]`, keeping high-resolution spectrum points
+/// in one place in project snapshots.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct IntegralCurve {
+    pub start_ppm: f64,
+    pub end_ppm: f64,
+    pub normalized_area: f64,
+    pub label: String,
+    pub color: Color,
+    pub width: f32,
+    pub source_series: usize,
+}
+
 /// A vertical uncertainty whisker in data-space coordinates. `center` is the
 /// plotted observation and `negative`/`positive` are non-negative distances
 /// below and above it. Cap width is expressed in output-space logical units so
@@ -345,6 +359,9 @@ pub struct Figure {
     pub x: Axis,
     pub y: Axis,
     pub series: Vec<Series>,
+    /// Persistent descriptions of result-bearing 1D NMR integral curves.
+    #[serde(default)]
+    pub integral_curves: Vec<IntegralCurve>,
     /// Filled polygons, painted after the heatmap and before contours/series so
     /// bodies (bars, boxes, violins, wedges) sit under outlines and markers.
     #[serde(default)]
@@ -395,6 +412,7 @@ impl Figure {
             x,
             y,
             series: Vec::new(),
+            integral_curves: Vec::new(),
             polygons: Vec::new(),
             heatmap: None,
             error_bars: Vec::new(),

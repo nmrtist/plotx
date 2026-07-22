@@ -5,8 +5,8 @@
 use crate::{
     AXIS_LINE_WIDTH, Document, DocumentItem, DocumentObject, DocumentOverlay, LegendMark, Margins,
     OUTER_PAD, OverlayAlign, OverlayKind, OverlayShapeKind, Projector, Rect, TICK_LABEL_PAD,
-    TICK_LENGTH, arrow_head, axis_ticks_for, error_bar_segments, heatmap_cells, legend_entries,
-    polygon_outline, projection_points,
+    TICK_LENGTH, arrow_head, axis_ticks_for, error_bar_segments, heatmap_cells, integral,
+    legend_entries, polygon_outline, projection_points,
 };
 use plotx_figure::{AxisFrame, AxisTrace, Color, Figure, SeriesKind};
 use std::collections::HashMap;
@@ -371,6 +371,16 @@ fn write_figure(dc: &mut Dc, fig: &Figure, outer: Rect) {
             }
         }
         write_error_bars(dc, fig, &proj, true);
+        for curve in integral::layout(fig, plot, 1.0) {
+            dc.polyline(&curve.points, curve.color, curve.width);
+            dc.text(
+                &curve.label.text,
+                curve.label.position,
+                TextStyle::new(curve.label.font_size, curve.label.color, TA_CENTER)
+                    .middle()
+                    .rotated(),
+            );
+        }
         for a in &fig.annotations {
             let (px, py) = proj.project(a.at);
             dc.text(

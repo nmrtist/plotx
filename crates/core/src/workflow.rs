@@ -205,6 +205,9 @@ pub fn build_dataset_figure(dataset: &Dataset, chart: &ChartSpec, size_mm: [f32;
     figure.title.clear();
     figure.width = size_mm[0] * MM_TO_PT;
     figure.height = size_mm[1] * MM_TO_PT;
+    if let Some(nmr) = dataset.as_nmr() {
+        figure.integral_curves = nmr.integral_curves();
+    }
     figure
 }
 

@@ -2,7 +2,8 @@ use crate::{
     AXIS_LINE_WIDTH, Document, DocumentItem, DocumentObject, DocumentOverlay, DocumentViewport,
     LegendMark, Margins, OUTER_PAD, OverlayAlign, OverlayKind, OverlayShape, OverlayShapeKind,
     OverlayText, Projector, Rect, TICK_LABEL_PAD, TICK_LENGTH, arrow_head, axis_ticks_for,
-    error_bar_segments, heatmap_cells, legend_entries, polygon_outline, projection_points,
+    error_bar_segments, heatmap_cells, integral, legend_entries, polygon_outline,
+    projection_points,
 };
 use egui::{Align2, Color32, FontId, Pos2, Sense, Shape, Stroke, StrokeKind, Ui, Vec2};
 use plotx_figure::{AxisFrame, AxisTrace, Color, Figure, SeriesKind};
@@ -305,6 +306,30 @@ pub fn paint(painter: &egui::Painter, outer: Rect, fig: &Figure, scale: f32) {
         }
     }
     paint_error_bars(&clipped, &proj, fig, scale, true);
+
+    for curve in integral::layout(fig, plot, scale) {
+        if curve.points.len() >= 2 {
+            let points = curve.points.iter().map(|&(x, y)| to_pos(x, y)).collect();
+            clipped.add(Shape::line(
+                points,
+                Stroke::new(curve.width * scale, col(curve.color)),
+            ));
+        }
+        let galley = clipped.layout_no_wrap(
+            curve.label.text,
+            FontId::proportional(curve.label.font_size),
+            col(curve.label.color),
+        );
+        let size = galley.size();
+        let mut label = egui::epaint::TextShape::new(
+            Pos2::new(-size.x * 0.5, -size.y * 0.5),
+            galley,
+            col(curve.label.color),
+        )
+        .with_angle_and_anchor(-std::f32::consts::FRAC_PI_2, Align2::CENTER_CENTER);
+        label.pos += Vec2::new(curve.label.position.0, curve.label.position.1);
+        clipped.add(label);
+    }
 
     for a in &fig.annotations {
         let (px, py) = proj.project(a.at);

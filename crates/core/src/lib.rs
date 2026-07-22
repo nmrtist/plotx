@@ -40,9 +40,10 @@ pub struct IntegralResult {
     pub area: f64,
     pub normalized_area: f64,
     pub mode: DisplayModeLabel,
-    /// The band whose area normalizes the rest (its normalized value is 1.000).
+    /// `Some(value)` marks this band as the normalization reference and sets its
+    /// displayed target value. `None` is an ordinary integral.
     #[serde(default)]
-    pub is_reference: bool,
+    pub reference_value: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -74,8 +75,10 @@ pub struct Integral2D {
     /// Raw signed volume in intensity·ppm².
     pub volume: f64,
     pub normalized_volume: Option<f64>,
-    pub is_reference: bool,
-    pub reference_value: f64,
+    /// `Some(value)` marks this rectangle as the normalization reference and
+    /// sets its displayed target value.
+    #[serde(default)]
+    pub reference_value: Option<f64>,
     pub mode: DisplayModeLabel,
     pub method: IntegralMethod,
     pub baseline: BaselineMode,
@@ -183,7 +186,7 @@ pub fn integrate_region(
         area,
         normalized_area: area / total_abs_area,
         mode: mode.into(),
-        is_reference: false,
+        reference_value: None,
     })
 }
 

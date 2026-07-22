@@ -9,6 +9,7 @@ mod arithmetic;
 mod authoring;
 mod board;
 mod composite;
+mod integral_curve;
 mod interaction;
 mod linefit;
 mod more;

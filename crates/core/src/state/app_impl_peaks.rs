@@ -71,10 +71,13 @@ impl PlotxApp {
         self.execute_action(Action::set_integrals_2d(dataset, before, after));
     }
 
-    pub fn set_integral_2d_reference(&mut self, dataset: usize, id: u64) {
+    pub fn set_integral_2d_reference(&mut self, dataset: usize, id: u64, value: f64) {
+        if !value.is_finite() {
+            return;
+        }
         self.edit_integrals_2d(dataset, |integrals, _| {
             for integral in integrals {
-                integral.is_reference = integral.id == id;
+                integral.reference_value = (integral.id == id).then_some(value);
             }
         });
     }
@@ -90,6 +93,32 @@ impl PlotxApp {
     pub fn set_integrals(&mut self, dataset: usize, integrals: &[crate::IntegralResult]) {
         if let Some(n) = self.doc.datasets[dataset].as_nmr_mut() {
             n.integrals = integrals.to_vec();
+        }
+        self.sync_integral_curves_for(dataset);
+    }
+
+    /// Refresh only the persistent integral description layer on plots whose
+    /// primary dataset is `dataset`. Overlay-only datasets never contribute
+    /// integral curves.
+    pub fn sync_integral_curves_for(&mut self, dataset: usize) {
+        let curves = self
+            .doc
+            .datasets
+            .get(dataset)
+            .and_then(Dataset::as_nmr)
+            .map(NmrDataset::integral_curves)
+            .unwrap_or_default();
+        for canvas in &mut self.doc.canvases {
+            for object in &mut canvas.objects {
+                let Some(plot) = object.plot_mut() else {
+                    continue;
+                };
+                if plot.binding.primary_dataset() == dataset && plot.binding.primary_visible() {
+                    plot.figure.integral_curves.clone_from(&curves);
+                } else if plot.binding.primary_dataset() == dataset {
+                    plot.figure.integral_curves.clear();
+                }
+            }
         }
     }
 
@@ -117,12 +146,14 @@ impl PlotxApp {
         self.execute_action(Action::set_integrals(dataset, before, after));
     }
 
-    /// Flag one integral as the normalization reference (its value becomes 1.000),
-    /// clearing the flag on the rest.
-    pub fn set_integral_reference(&mut self, dataset: usize, id: u64) {
+    /// Use one integral as the normalization reference at a user-selected value.
+    pub fn set_integral_reference(&mut self, dataset: usize, id: u64, value: f64) {
+        if !value.is_finite() {
+            return;
+        }
         self.edit_integrals(dataset, |integrals, _| {
             for integ in integrals.iter_mut() {
-                integ.is_reference = integ.id == id;
+                integ.reference_value = (integ.id == id).then_some(value);
             }
         });
     }

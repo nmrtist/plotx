@@ -63,7 +63,7 @@ fn recipe_without_multiplets_key_loads_with_empty() {
         }),
     };
 
-    apply_1d_recipe(&mut dataset, &recipe);
+    apply_1d_recipe(&mut dataset, &recipe).unwrap();
 
     assert!(dataset.multiplets.is_empty());
     assert_eq!(dataset.next_multiplet_id, 0);

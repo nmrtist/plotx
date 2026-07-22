@@ -141,7 +141,7 @@ pub(super) fn sample_app() -> PlotxApp {
             area: 3.0,
             normalized_area: 0.5,
             mode: DisplayModeLabel::Real,
-            is_reference: false,
+            reference_value: None,
         });
         n.line_fits.push(sample_line_fit());
         n.next_line_fit_id = 8;

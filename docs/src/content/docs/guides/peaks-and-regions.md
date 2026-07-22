@@ -13,6 +13,32 @@ the plot to adjust detection — peaks are recomputed when you release it.
 Detected peaks can be edited, added, and removed by hand.
 Choose **Export Data…** and **Peak table** to save or copy the current peak list.
 
+## 1D NMR integrals
+
+Choose **Integrate** and drag across a 1D NMR signal. Each completed interval
+is drawn as a cumulative integral curve with a normalized value to three
+decimals. All intervals share one zero line and vertical scale, and positive
+integrals rise while negative integrals fall, so phase or baseline problems
+stay visible instead of being hidden by an absolute value.
+
+The first integral becomes the normalization reference with value `1`. To use
+a different interval, right-click it and choose **Use as normalization
+reference**, or press **set reference** next to it in the **Integrate** panel.
+Type any target value for the reference there — for example `1`, `3`, or
+`100` — and the other values scale against it. The plot itself does not mark
+the reference; the panel shows which integral it is. Without a reference,
+each integral shows its fraction of the total spectrum area.
+
+With **Integrate** active, drag inside an interval to move it or drag an edge
+handle to resize it. The shaded interval and handles are editing aids only;
+outside the tool, the plot shows just the curve and value.
+
+Each value appears as a small vertical label at the right end of its curve,
+and nearby labels shift apart to avoid overlapping. The curves and values are
+part of the figure: SVG, PDF, bitmap, and vector clipboard output match the
+canvas, without selection boxes or drag previews, and reprocessing the
+spectrum recalculates both.
+
 ## Regions
 
 Regions measure the same x-axis interval across every member of a series. This

@@ -242,6 +242,12 @@ impl DataBinding {
         self.series.first().map(|s| s.dataset).unwrap_or(0)
     }
 
+    /// Result overlays belonging to the primary dataset follow the visibility
+    /// of its source trace.
+    pub fn primary_visible(&self) -> bool {
+        self.series.first().is_some_and(|series| series.visible)
+    }
+
     pub fn dataset_indices(&self) -> Vec<usize> {
         self.series.iter().map(|s| s.dataset).collect()
     }

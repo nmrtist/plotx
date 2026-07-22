@@ -3,6 +3,7 @@
 //! share [`Projector`] and [`ticks`].
 
 pub mod contour;
+pub mod integral;
 pub mod svg;
 
 #[cfg(feature = "screen")]
