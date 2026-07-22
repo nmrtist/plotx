@@ -49,6 +49,7 @@ semver = "1"
 sha2 = "0.10"
 ureq = { version = "2", default-features = false, features = ["tls"] }
 thiserror = "2.0"
+unicode-width = "0.2"
 statrs = { version = "0.18", default-features = false }
 tukey_test = "0.2"
 directories = "6"

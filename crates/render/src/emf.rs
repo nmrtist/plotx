@@ -3,9 +3,9 @@
 //! traversal one function per function.
 
 use crate::{
-    AXIS_LINE_WIDTH, Document, DocumentItem, DocumentObject, DocumentOverlay, LegendMark, Margins,
+    AXIS_LINE_WIDTH, Document, DocumentItem, DocumentObject, DocumentOverlay, LegendMark,
     OUTER_PAD, OverlayAlign, OverlayKind, OverlayShapeKind, Projector, Rect, TICK_LABEL_PAD,
-    TICK_LENGTH, arrow_head, axis_ticks_for, error_bar_segments, heatmap_cells, integral,
+    TICK_LENGTH, arrow_head, axis_layout, error_bar_segments, heatmap_cells, integral,
     legend_entries, polygon_outline, projection_points,
 };
 use plotx_figure::{AxisFrame, AxisTrace, Color, Figure, SeriesKind};
@@ -186,7 +186,8 @@ fn write_overlay(dc: &mut Dc, overlay: &DocumentOverlay<'_>) {
 
 fn write_figure(dc: &mut Dc, fig: &Figure, outer: Rect) {
     let ty = fig.typography;
-    let margins = Margins::for_figure(fig);
+    let layout = axis_layout(fig, outer.width, outer.height);
+    let margins = layout.margins;
     let proj = Projector::new(fig, outer, &margins);
     let plot = proj.plot;
 
@@ -204,17 +205,7 @@ fn write_figure(dc: &mut Dc, fig: &Figure, outer: Rect) {
     }
 
     let hidden_frame = fig.axis_frame == AxisFrame::Hidden;
-    // Empty tick sets make every tick/label loop below a no-op for a hidden frame.
-    let empty_ticks = crate::AxisTicks {
-        values: Vec::new(),
-        labels: Vec::new(),
-        scale_exponent: None,
-    };
-    let (x_ticks, y_ticks) = if hidden_frame {
-        (empty_ticks.clone(), empty_ticks)
-    } else {
-        (axis_ticks_for(&fig.x, 8), axis_ticks_for(&fig.y, 5))
-    };
+    let (x_ticks, y_ticks) = (layout.x_ticks, layout.y_ticks);
 
     if fig.show_grid && !hidden_frame {
         for &xt in &x_ticks.values {
