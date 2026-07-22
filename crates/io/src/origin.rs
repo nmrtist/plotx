@@ -567,17 +567,20 @@ fn probe_origin_with_limits(
         OriginFormat::Opj if raw_version != ORIGIN_7_V552_VERSION => {
             Err(OriginError::UnsupportedVersion { raw_version })
         }
-        OriginFormat::Opj => Ok(AccountedOriginProbe {
-            probe: OriginProbe {
-                format,
-                raw_version,
-                version,
-                byte_order: OriginByteOrder::LittleEndian,
-                profile: Some(OriginProfile::Origin7V552),
-                support: OriginSupport::Supported,
-            },
-            retained_parser_bytes,
-        }),
+        OriginFormat::Opj => {
+            opj::validate_initial_structure(bytes, limits.max_block_bytes)?;
+            Ok(AccountedOriginProbe {
+                probe: OriginProbe {
+                    format,
+                    raw_version,
+                    version,
+                    byte_order: OriginByteOrder::LittleEndian,
+                    profile: Some(OriginProfile::Origin7V552),
+                    support: OriginSupport::Supported,
+                },
+                retained_parser_bytes,
+            })
+        }
         OriginFormat::Opju => Ok(AccountedOriginProbe {
             probe: OriginProbe {
                 format,

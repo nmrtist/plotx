@@ -152,16 +152,10 @@ fn chooses_the_longest_validated_window_prefix() {
 #[test]
 fn requires_an_underscore_between_window_and_column_names() {
     let bytes = synthetic_project(&[("BookValue", true)], &[b"Book"]);
-    let project = read_origin(&bytes, OriginLimits::default()).unwrap();
-
-    assert_eq!(project.workbooks[0].name, "Unmatched Origin data");
-    assert_eq!(only_column(&project).name, "BookValue");
-    assert!(
-        project
-            .diagnostics
-            .iter()
-            .any(|diagnostic| { diagnostic.code == OriginDiagnosticCode::DecodingWarning })
-    );
+    assert!(matches!(
+        read_origin(&bytes, OriginLimits::default()),
+        Err(OriginError::NoSupportedWorksheet)
+    ));
 }
 
 #[test]
@@ -182,7 +176,7 @@ fn preserves_non_identifier_column_suffixes_after_an_exact_window_prefix() {
 }
 
 #[test]
-fn ambiguous_or_missing_window_associations_use_a_stable_fallback() {
+fn ambiguous_or_missing_window_associations_are_not_imported() {
     for windows in [
         &[b"Other".as_slice()][..],
         &[b"Book".as_slice(), b"Book".as_slice()][..],
@@ -193,15 +187,37 @@ fn ambiguous_or_missing_window_associations_use_a_stable_fallback() {
             "Book_Value"
         };
         let bytes = synthetic_project(&[(dataset, true)], windows);
-        let project = read_origin(&bytes, OriginLimits::default()).unwrap();
-
-        assert_eq!(project.workbooks[0].name, "Unmatched Origin data");
-        assert_eq!(only_column(&project).name, dataset);
-        assert!(project.diagnostics.iter().any(|diagnostic| {
-            diagnostic.code == OriginDiagnosticCode::DecodingWarning
-                && diagnostic.message == "A worksheet column had no unambiguous Origin window; PlotX kept it in Unmatched Origin data."
-        }));
+        assert!(matches!(
+            read_origin(&bytes, OriginLimits::default()),
+            Err(OriginError::NoSupportedWorksheet)
+        ));
     }
+}
+
+#[test]
+fn unmatched_columns_are_skipped_without_inventing_cross_dataset_alignment() {
+    let bytes = synthetic_project(
+        &[
+            ("Book_Good", true),
+            ("Orphan_Value", true),
+            ("Other_Value", true),
+        ],
+        &[b"Book"],
+    );
+    let project = read_origin(&bytes, OriginLimits::default()).unwrap();
+
+    assert_eq!(project.workbooks.len(), 1);
+    assert_eq!(project.workbooks[0].name, "Book");
+    assert_eq!(project.workbooks[0].worksheets[0].columns.len(), 1);
+    assert_eq!(only_column(&project).name, "Good");
+    assert_eq!(
+        project
+            .unsupported_objects
+            .iter()
+            .find(|summary| summary.kind == "worksheet columns")
+            .map(|summary| summary.count),
+        Some(2)
+    );
 }
 
 #[test]

@@ -13,9 +13,23 @@ fn long_leading_zero_opju_header() -> Vec<u8> {
     bytes
 }
 
+fn supported_opj_probe_bytes() -> Vec<u8> {
+    const ORIGIN_HEADER_LEN: usize = 39;
+    let mut bytes = b"CPYA 4.2673 552#\n".to_vec();
+    bytes.extend_from_slice(&(ORIGIN_HEADER_LEN as u32).to_le_bytes());
+    bytes.push(b'\n');
+    let mut header = [0_u8; ORIGIN_HEADER_LEN];
+    header[0x1b..0x23].copy_from_slice(&7.0552_f64.to_le_bytes());
+    bytes.extend_from_slice(&header);
+    bytes.push(b'\n');
+    bytes.extend_from_slice(&[0, 0, 0, 0, b'\n']);
+    bytes
+}
+
 #[test]
 fn probes_opj_and_opju_by_content() {
-    let opj = probe_origin(b"CPYA 4.2673 552#\n").unwrap();
+    let opj_bytes = supported_opj_probe_bytes();
+    let opj = probe_origin(&opj_bytes).unwrap();
     assert_eq!(opj.format, OriginFormat::Opj);
     assert_eq!(opj.profile, Some(OriginProfile::Origin7V552));
     assert_eq!(opj.support, OriginSupport::Supported);
@@ -28,7 +42,8 @@ fn probes_opj_and_opju_by_content() {
 
 #[test]
 fn parses_header_components_without_floating_point() {
-    let opj = probe_origin(b"CPYA 4.2673 552#\n").unwrap();
+    let opj_bytes = supported_opj_probe_bytes();
+    let opj = probe_origin(&opj_bytes).unwrap();
     assert_eq!(opj.raw_version, "4.2673 552");
     assert_eq!(opj.version.major, 4);
     assert_eq!(opj.version.minor, 2673);
@@ -41,6 +56,14 @@ fn parses_header_components_without_floating_point() {
     assert_eq!(opju.version.minor, 3668);
     assert_eq!(opju.version.build, 178);
     assert_eq!(opju.byte_order, OriginByteOrder::LittleEndian);
+}
+
+#[test]
+fn classic_version_line_without_initial_framing_is_truncated() {
+    assert!(matches!(
+        probe_origin(b"CPYA 4.2673 552#\n"),
+        Err(OriginError::Truncated { .. })
+    ));
 }
 
 #[test]
@@ -294,7 +317,7 @@ fn rejects_max_string_limit_that_cannot_fit_the_metadata_sentinel() {
 #[test]
 fn project_notes_keep_distinct_names_and_content() {
     let project = OriginProject {
-        probe: probe_origin(b"CPYA 4.2673 552#\n").unwrap(),
+        probe: probe_origin(&supported_opj_probe_bytes()).unwrap(),
         parameters: Vec::new(),
         notes: vec![
             OriginNote {

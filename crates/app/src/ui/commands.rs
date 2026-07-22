@@ -324,6 +324,10 @@ pub fn describe(app: &PlotxApp, id: CommandId) -> CommandDescriptor {
             !app.session.recent_files.is_empty(),
             "Open a file or project to build the recent list.",
         ),
+        CommandId::ImportTable => requires(
+            app.session.ui.table_import_preview.is_none(),
+            "Finish or cancel the current table import preview before importing another table.",
+        ),
         CommandId::ExportData => requires(
             dataset().is_some_and(|dataset| {
                 !plotx_core::data_export::DataExportAvailability::for_dataset(dataset).is_empty()

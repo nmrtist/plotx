@@ -62,6 +62,9 @@ fn imports_openopj_origin_7_v552_fixture() {
             .collect::<Vec<_>>(),
         ["Data1", "Data1Coeff", "Data1spline", "TestW"]
     );
+    assert!(project.workbooks.iter().all(|workbook| {
+        workbook.worksheets.len() == 1 && workbook.worksheets[0].name == "Sheet1"
+    }));
     assert_eq!(
         project
             .workbooks
@@ -224,8 +227,12 @@ fn recognizes_public_opju_fixture_without_partial_output() {
     let bytes = include_bytes!("fixtures/origin/RawData_Locust_Revision1_TIS_Mechanism.opju");
     let probe = probe_origin(bytes).expect("the public fixture has a recognized OPJU header");
     assert_eq!(probe.format, OriginFormat::Opju);
-    assert!(matches!(
-        read_origin(bytes, OriginLimits::default()),
-        Err(OriginError::UnsupportedOpjuVariant { .. })
-    ));
+    let error = read_origin(bytes, OriginLimits::default()).unwrap_err();
+    assert_eq!(
+        error,
+        OriginError::UnsupportedOpjuVariant {
+            message: "This OPJU file uses a record layout that PlotX does not support yet. No data was imported."
+                .to_owned(),
+        }
+    );
 }

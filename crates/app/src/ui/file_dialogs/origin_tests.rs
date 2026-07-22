@@ -4,7 +4,7 @@ use crate::ui::file_dialogs::recent::{
     dispatch_classified_path, open_file_for_classification,
 };
 use crate::ui::file_dialogs::{RecentOpenKind, open_recent_path};
-use plotx_core::operation::{OperationId, OperationOutcome};
+use plotx_core::operation::{OperationId, OperationOutcome, Severity};
 use plotx_core::origin::{ImportedOriginWorksheet, ORIGIN_IMPORT_OPERATION};
 use plotx_core::state::PlotxApp;
 use plotx_io::origin::OriginLimits;
@@ -122,7 +122,7 @@ fn origin_routing_uses_signature_before_extension() {
     let root = std::env::temp_dir().join(format!("plotx-origin-route-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir(&root).unwrap();
     let disguised = root.join("project.dat");
-    std::fs::write(&disguised, b"CPYA 4.2673 552#\n").unwrap();
+    std::fs::write(&disguised, OPENOPJ_FIXTURE).unwrap();
 
     let kind = classify_open_path(&disguised).unwrap();
 
@@ -561,7 +561,7 @@ fn origin_opju_is_unsupported_without_preview_or_recent_entry() {
 
 #[test]
 fn origin_core_failure_becomes_a_user_visible_operation_report() {
-    let probe = plotx_io::origin::probe_origin(b"CPYA 4.2673 552#\n").unwrap();
+    let probe = plotx_io::origin::probe_origin(OPENOPJ_FIXTURE).unwrap();
     let project = plotx_io::origin::OriginProject {
         probe,
         parameters: Vec::new(),
@@ -576,7 +576,7 @@ fn origin_core_failure_becomes_a_user_visible_operation_report() {
     import_origin_project_model(
         &mut app,
         Path::new("empty.opj"),
-        Arc::<[u8]>::from(b"CPYA 4.2673 552#\n".as_slice()),
+        Arc::<[u8]>::from(OPENOPJ_FIXTURE),
         project,
         OriginLimits::default(),
     );
@@ -678,6 +678,34 @@ fn origin_candidates_share_source_allocation_and_stable_operation() {
             ORIGIN_IMPORT_OPERATION
         );
     }
+}
+
+#[test]
+fn origin_preview_reports_each_parser_warning_once() {
+    let (store, imported) = duplicated_fixture_import();
+    let expected_warnings = imported[0]
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.severity == OriginDiagnosticSeverity::Warning)
+        .count();
+    assert!(expected_warnings > 0);
+
+    let preview = preview_from_imported(
+        OperationId(43),
+        Path::new("selected-project.opj"),
+        Arc::<[u8]>::from(OPENOPJ_FIXTURE),
+        store,
+        imported,
+    )
+    .unwrap();
+    let actual_warnings = preview
+        .report
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.severity == Severity::Warning)
+        .count();
+
+    assert_eq!(actual_warnings, expected_warnings);
 }
 
 #[test]

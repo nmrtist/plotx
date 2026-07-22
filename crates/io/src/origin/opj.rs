@@ -15,6 +15,8 @@ const ORIGIN_VERSION_OFFSET: usize = 0x1b;
 const DATA_HEADER_LEN: usize = 123;
 const BLOCK_PREFIX_LEN: usize = 5;
 const EXPECTED_ORIGIN_VERSION: f64 = 7.0552;
+const INITIAL_STRUCTURE_LEN: usize =
+    SIGNATURE.len() + BLOCK_PREFIX_LEN + ORIGIN_HEADER_LEN + 1 + BLOCK_PREFIX_LEN;
 
 #[derive(Debug)]
 pub(super) struct RawOpjDataSection<'a> {
@@ -28,6 +30,51 @@ pub(super) struct RawOpjProject<'a> {
     pub(super) data_sections: Vec<RawOpjDataSection<'a>>,
     pub(super) remaining: &'a [u8],
     pub(super) resource_usage: OriginResourceUsage,
+}
+
+pub(super) fn validate_initial_structure(
+    bytes: &[u8],
+    max_block_bytes: usize,
+) -> Result<(), OriginError> {
+    let initial_len = bytes.len().min(INITIAL_STRUCTURE_LEN);
+    let initial = bytes
+        .get(..initial_len)
+        .ok_or(OriginError::ArithmeticOverflow {
+            resource: "initial OPJ probe structure",
+        })?;
+    let limits = OriginLimits {
+        max_input_bytes: INITIAL_STRUCTURE_LEN,
+        max_block_bytes,
+        max_total_owned_bytes: INITIAL_STRUCTURE_LEN,
+        ..OriginLimits::default()
+    };
+    let mut reader = Reader::new(initial, &limits)?;
+    let signature = reader.read_slice(SIGNATURE.len())?;
+    if signature != SIGNATURE {
+        return Err(OriginError::CorruptStructure {
+            offset: 0,
+            detail: "the classic OPJ signature changed inside its initial framing".to_owned(),
+        });
+    }
+    let header_block = reader.read_block()?;
+    let (header_offset, header) =
+        require_data_block(header_block, "the Origin header must be a data block")?;
+    require_exact_length(
+        header_offset,
+        header,
+        ORIGIN_HEADER_LEN,
+        "Origin header payload",
+    )?;
+    validate_embedded_origin_version(header_offset, header)?;
+    let terminator_offset = reader.offset();
+    let terminator = reader.read_slice(BLOCK_PREFIX_LEN)?;
+    if terminator != [0, 0, 0, 0, b'\n'] {
+        return Err(OriginError::CorruptStructure {
+            offset: terminator_offset,
+            detail: "the Origin header must end with a null block".to_owned(),
+        });
+    }
+    Ok(())
 }
 
 pub(super) fn read(
@@ -51,7 +98,6 @@ pub(super) fn read(
                 resource: "OPJ metadata offset",
             })?;
     let mut parsed = metadata::parse(raw.remaining, metadata_offset, limits, &mut usage)?;
-    let mut fallback_columns = Vec::new();
     let mut unsupported_columns = 0_usize;
 
     for section in &raw.data_sections {
@@ -82,23 +128,12 @@ pub(super) fn read(
                             checked_add(unsupported_columns, 1, "unsupported Origin columns")?;
                     }
                     DatasetAssociation::Fallback => {
-                        metadata::push_diagnostic(
-                            &mut parsed.diagnostics,
-                            OriginDiagnosticCode::DecodingWarning,
-                            "A worksheet column had no unambiguous Origin window; PlotX kept it in Unmatched Origin data.",
-                            None,
-                            limits,
-                            &mut usage,
-                        )?;
-                        let column = make_column(decoded, None)?;
-                        metadata::try_reserve(
-                            &mut fallback_columns,
-                            1,
-                            "unmatched Origin worksheet columns",
-                            limits,
-                            &mut usage,
-                        )?;
-                        fallback_columns.push(column);
+                        // A decoded column is still unsafe to expose when no
+                        // verified window record proves its table grouping.
+                        // Combining unrelated unmatched columns would invent
+                        // row alignment that is not present in the source.
+                        unsupported_columns =
+                            checked_add(unsupported_columns, 1, "unsupported Origin columns")?;
                     }
                 }
             }
@@ -155,7 +190,7 @@ pub(super) fn read(
         )?;
     }
 
-    let workbooks = assemble_workbooks(parsed.windows, fallback_columns, limits, &mut usage)?;
+    let workbooks = assemble_workbooks(parsed.windows, limits, &mut usage)?;
     Ok(OriginProject {
         probe,
         parameters: parsed.parameters,
@@ -250,19 +285,13 @@ fn make_column(
 
 fn assemble_workbooks(
     windows: Vec<metadata::WindowInfo>,
-    fallback_columns: Vec<OriginColumn>,
     limits: &OriginLimits,
     usage: &mut OriginResourceUsage,
 ) -> Result<Vec<OriginWorkbook>, OriginError> {
-    let named_workbooks = windows
+    let workbook_count = windows
         .iter()
         .filter(|window| !window.columns.is_empty())
         .count();
-    let workbook_count = checked_add(
-        named_workbooks,
-        usize::from(!fallback_columns.is_empty()),
-        "workbooks",
-    )?;
     if workbook_count == 0 {
         return Err(OriginError::NoSupportedWorksheet);
     }
@@ -274,10 +303,7 @@ fn assemble_workbooks(
     )?;
     let has_supported_rows = windows
         .iter()
-        .any(|window| window.columns.iter().any(|column| !column.cells.is_empty()))
-        || fallback_columns
-            .iter()
-            .any(|column| !column.cells.is_empty());
+        .any(|window| window.columns.iter().any(|column| !column.cells.is_empty()));
     if !has_supported_rows {
         return Err(OriginError::NoSupportedWorksheet);
     }
@@ -300,11 +326,6 @@ fn assemble_workbooks(
         })?;
         push_workbook(&mut workbooks, name, window.columns, limits, usage)?;
     }
-    if !fallback_columns.is_empty() {
-        let name = metadata::copy_generated_text("Unmatched Origin data", limits, usage)?;
-        push_workbook(&mut workbooks, name, fallback_columns, limits, usage)?;
-    }
-
     usage.workbooks = workbook_count;
     usage.worksheets = workbook_count;
     Ok(workbooks)

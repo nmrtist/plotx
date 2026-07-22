@@ -23,7 +23,6 @@ pub(super) const ORIGIN_PROJECT_FILTER_EXTENSIONS: &[&str] = &["opj", "opju"];
 pub(super) const OPEN_FILE_FILTER_EXTENSIONS: &[&str] = &["abf", "jdf", "fid", "ser", "zip", "opj"];
 
 const ORIGIN_MEDIA_TYPE: &str = "application/x-origin-project";
-const UNSUPPORTED_OBJECTS_KEY: &str = "space.nmrtist.plotx.import.origin.unsupported_objects";
 const ORIGIN_READ_CHUNK_BYTES: usize = 16 * 1024;
 
 #[derive(Debug)]
@@ -382,12 +381,6 @@ pub(super) fn preview_from_imported(
         .first()
         .map(|worksheet| worksheet.diagnostics.clone())
         .unwrap_or_default();
-    let unsupported_objects = imported
-        .first()
-        .and_then(|worksheet| worksheet.source_metadata.get(UNSUPPORTED_OBJECTS_KEY))
-        .and_then(serde_json::Value::as_array)
-        .cloned()
-        .unwrap_or_default();
     let file_name = path
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
@@ -430,20 +423,6 @@ pub(super) fn preview_from_imported(
         .iter()
         .map(origin_diagnostic)
         .collect::<Vec<_>>();
-    diagnostics.extend(unsupported_objects.into_iter().filter_map(|object| {
-        let kind = object.get("kind")?.as_str()?;
-        let count = object.get("count")?.as_u64()?;
-        Some(
-            Diagnostic::new(
-                Severity::Warning,
-                DiagnosticCode::TableImportWarning,
-                format!("Skipped {count} unsupported Origin {kind}."),
-            )
-            .with_source("core.origin")
-            .with_context("object_kind", kind)
-            .with_context("count", count.to_string()),
-        )
-    }));
     let warning_count = diagnostics
         .iter()
         .filter(|diagnostic| diagnostic.severity == Severity::Warning)
