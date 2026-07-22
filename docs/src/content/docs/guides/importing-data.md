@@ -22,7 +22,7 @@ PlotX reads vendor NMR and electrophysiology formats directly — no conversion 
 
 Drag a file onto the PlotX window, or use the toolbar's open menu:
 *Open File…*, *Open Folder…* (for acquisition directories such as Bruker
-TopSpin), *Open Project…*, or *Import Table / CSV…*. Each imported dataset
+TopSpin), *Open Project…*, or *Import Table…*. Each imported dataset
 appears in the Primary Side Bar and is placed on the board automatically.
 The file picker accepts several ABF files at once. Opening a folder recursively
 imports every `.abf` below it; each immediate parent folder becomes the initial,
@@ -64,7 +64,7 @@ Excel recalculating them.
 ## Origin project import (experimental)
 
 Origin `.opj` and `.opju` files appear in the file picker for both *Open
-File…* and *Import Table / CSV…*. Both routes identify the format from file
+File…* and *Import Table…*. Both routes identify the format from file
 content and signatures rather than relying only on the extension.
 
 When a supported `.opj` yields worksheets, PlotX opens the existing **Review

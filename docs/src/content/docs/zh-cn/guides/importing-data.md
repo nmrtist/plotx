@@ -22,7 +22,7 @@ PlotX 直接读取厂商 NMR 与电生理格式，无需任何转换步骤。
 
 把文件拖到 PlotX 窗口上，或使用工具栏的打开菜单：*Open File…*、
 *Open Folder…*（用于 Bruker TopSpin 等采集目录）、*Open Project…* 或
-*Import Table / CSV…*。每个导入的数据集会出现在主侧栏中，并自动放置到
+*Import Table…*。每个导入的数据集会出现在主侧栏中，并自动放置到
 画板上。
 文件选择器可以一次选择多个 ABF。打开文件夹时会递归导入其中所有 `.abf`；
 每个文件的直接父目录名会成为可编辑的初始 cell ID。
@@ -54,8 +54,8 @@ PlotX 导出 CSV 或 TSV 时，会在旁边写入一个配套的 `.plotx-schema.
 
 ## Origin 项目导入（实验性）
 
-Origin 的 `.opj` 与 `.opju` 文件会出现在 *Open File…* 和 *Import Table /
-CSV…* 两个入口的文件选择器中。这两个入口均根据文件内容与签名识别格式，
+Origin 的 `.opj` 与 `.opju` 文件会出现在 *Open File…* 和 *Import Table…*
+两个入口的文件选择器中。这两个入口均根据文件内容与签名识别格式，
 而不是只看扩展名。
 
 受支持的 `.opj` 成功生成工作表后，PlotX 会打开现有的 **Review table
