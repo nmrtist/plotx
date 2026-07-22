@@ -338,7 +338,7 @@ Implementation completion requires:
 - `cargo pr-check`;
 - `npm run build` from `docs/`.
 
-At implementation closure, `cargo-deny` and `protoc` are installed with the user's permission. A fresh online `cargo pr-check` completed all seven stages, including dependency policy, both backend configurations, Clippy, and the full test suite. The documentation build also completed successfully; the exact commands and results are recorded in the pull request.
+`cargo-deny` and `protoc` are installed with the user's permission. The final rebased tree must pass a fresh online `cargo pr-check` covering all seven stages, plus the documentation build. The exact final commands and results will be recorded in the pull request after those checks pass.
 
 ## Documentation
 

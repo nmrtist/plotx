@@ -38,13 +38,13 @@ fn push_block(bytes: &mut Vec<u8>, payload: Option<&[u8]>) {
     }
 }
 
-fn data_header(name: &str, supported: bool) -> [u8; DATA_HEADER_LEN] {
+fn data_header(name: &str, supported: bool, row_count: u32) -> [u8; DATA_HEADER_LEN] {
     let mut header = [0_u8; DATA_HEADER_LEN];
     header[0x16..0x18].copy_from_slice(&0x6001_u16.to_le_bytes());
     header[0x18] = 1;
-    header[0x19..0x1d].copy_from_slice(&1_u32.to_le_bytes());
+    header[0x19..0x1d].copy_from_slice(&row_count.to_le_bytes());
     header[0x1d..0x21].copy_from_slice(&0_u32.to_le_bytes());
-    header[0x21..0x25].copy_from_slice(&1_u32.to_le_bytes());
+    header[0x21..0x25].copy_from_slice(&row_count.to_le_bytes());
     header[0x3d] = 8;
     header[0x3f] = u8::from(!supported);
     let name = name.as_bytes();
@@ -61,7 +61,7 @@ fn push_window(bytes: &mut Vec<u8>, name: &[u8]) {
 }
 
 fn synthetic_project_with_parameters(
-    records: &[(&str, bool)],
+    records: &[(&str, bool, u32)],
     windows: &[&[u8]],
     parameters: &[(&[u8], f64)],
 ) -> Vec<u8> {
@@ -71,9 +71,13 @@ fn synthetic_project_with_parameters(
     push_block(&mut bytes, Some(&origin_header));
     push_block(&mut bytes, None);
 
-    for (name, supported) in records {
-        push_block(&mut bytes, Some(&data_header(name, *supported)));
-        push_block(&mut bytes, Some(&1.5_f64.to_le_bytes()));
+    for (name, supported, row_count) in records {
+        push_block(&mut bytes, Some(&data_header(name, *supported, *row_count)));
+        let mut content = Vec::new();
+        for _ in 0..*row_count {
+            content.extend_from_slice(&1.5_f64.to_le_bytes());
+        }
+        push_block(&mut bytes, Some(&content));
         push_block(&mut bytes, None);
     }
     push_block(&mut bytes, None);
@@ -101,7 +105,11 @@ fn synthetic_project_with_parameters(
 }
 
 fn synthetic_project(records: &[(&str, bool)], windows: &[&[u8]]) -> Vec<u8> {
-    synthetic_project_with_parameters(records, windows, &[(b"ERR".as_slice(), 1.0)])
+    let records = records
+        .iter()
+        .map(|(name, supported)| (*name, *supported, 1))
+        .collect::<Vec<_>>();
+    synthetic_project_with_parameters(&records, windows, &[(b"ERR".as_slice(), 1.0)])
 }
 
 fn insert_layer_with_two_nested_lists(bytes: &mut Vec<u8>) {
@@ -223,6 +231,39 @@ fn does_not_treat_an_exact_window_name_as_a_worksheet_column() {
         read_origin(&bytes, OriginLimits::default()),
         Err(OriginError::NoSupportedWorksheet)
     ));
+}
+
+#[test]
+fn rejects_project_with_only_zero_row_supported_columns() {
+    let bytes = synthetic_project_with_parameters(
+        &[("Book_Empty", true, 0)],
+        &[b"Book"],
+        &[(b"ERR".as_slice(), 1.0)],
+    );
+
+    assert!(matches!(
+        read_origin(&bytes, OriginLimits::default()),
+        Err(OriginError::NoSupportedWorksheet)
+    ));
+}
+
+#[test]
+fn keeps_workbook_with_a_nonempty_supported_column() {
+    let bytes = synthetic_project_with_parameters(
+        &[("Book_Empty", true, 0), ("Book_Value", true, 1)],
+        &[b"Book"],
+        &[(b"ERR".as_slice(), 1.0)],
+    );
+
+    let project = read_origin(&bytes, OriginLimits::default()).unwrap();
+
+    assert_eq!(project.workbooks.len(), 1);
+    assert_eq!(project.workbooks[0].worksheets[0].row_count, 1);
+    assert_eq!(project.workbooks[0].worksheets[0].columns.len(), 2);
+    assert_eq!(project.resource_usage.workbooks, 1);
+    assert_eq!(project.resource_usage.worksheets, 1);
+    assert_eq!(project.resource_usage.columns, 2);
+    assert_eq!(project.resource_usage.cells, 1);
 }
 
 #[test]
@@ -354,7 +395,7 @@ fn rejects_excess_window_records_before_dataset_association() {
 #[test]
 fn metadata_records_do_not_consume_the_data_column_limit() {
     let bytes = synthetic_project_with_parameters(
-        &[("Book_A", true)],
+        &[("Book_A", true, 1)],
         &[b"Book"],
         &[
             (b"ERR".as_slice(), 1.0),
@@ -398,7 +439,7 @@ fn skipped_parameters_still_consume_the_metadata_record_budget() {
     let cases: &[(&[u8], f64)] = &[(&[0x80], 2.0), (b"NAN", f64::NAN)];
     for &(name, value) in cases {
         let bytes = synthetic_project_with_parameters(
-            &[("Book_A", true)],
+            &[("Book_A", true, 1)],
             &[b"Book"],
             &[(b"ERR", 1.0), (name, value)],
         );

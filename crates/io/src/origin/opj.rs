@@ -271,6 +271,15 @@ fn assemble_workbooks(
         1,
         limits.max_worksheets_per_workbook,
     )?;
+    let has_supported_rows = windows
+        .iter()
+        .any(|window| window.columns.iter().any(|column| !column.cells.is_empty()))
+        || fallback_columns
+            .iter()
+            .any(|column| !column.cells.is_empty());
+    if !has_supported_rows {
+        return Err(OriginError::NoSupportedWorksheet);
+    }
 
     let mut workbooks = Vec::new();
     metadata::try_reserve(

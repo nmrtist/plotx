@@ -37,7 +37,7 @@ import** dialog. It shows each column's inferred type and unit, whether the
 column allows empty cells, a preview of the first rows, and any import
 diagnostics. Choose **Import table** to add it, or **Cancel** to leave your
 project and recent-file list untouched. An XLSX workbook with several sheets
-adds a **Worksheet** selector so you can preview each one; a single **Import
+adds a **Table** selector so you can preview each worksheet; a single **Import
 table** brings them all in as separate tables.
 
 PlotX keeps Boolean, whole-number, decimal, text, and empty cells distinct. A

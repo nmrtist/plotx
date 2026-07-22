@@ -24,7 +24,7 @@ use xlsx::import_xlsx_table_path;
 pub(crate) fn import_delimited_table(app: &mut PlotxApp) {
     let Some(path) = rfd::FileDialog::new()
         .add_filter(
-            "Table (*.csv, *.tsv, *.txt, *.xlsx, *.opj, *.opju)",
+            "Table (*.csv, *.tsv, *.txt, *.xlsx, *.opj)",
             origin::IMPORT_TABLE_FILTER_EXTENSIONS,
         )
         .add_filter(
@@ -343,7 +343,7 @@ pub(crate) fn load_and_note(app: &mut PlotxApp, path: &std::path::Path) {
 pub(crate) fn open_file(app: &mut PlotxApp) {
     if let Some(paths) = rfd::FileDialog::new()
         .add_filter(
-            "All supported data (*.abf, *.jdf, fid, ser, *.zip, *.opj, *.opju)",
+            "All supported data (*.abf, *.jdf, fid, ser, *.zip, *.opj)",
             origin::OPEN_FILE_FILTER_EXTENSIONS,
         )
         .add_filter(

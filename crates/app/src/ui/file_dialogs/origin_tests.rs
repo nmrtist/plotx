@@ -8,8 +8,10 @@ use plotx_core::operation::{OperationId, OperationOutcome};
 use plotx_core::origin::{ImportedOriginWorksheet, ORIGIN_IMPORT_OPERATION};
 use plotx_core::state::PlotxApp;
 use plotx_io::origin::OriginLimits;
+use std::cell::Cell;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::Arc;
 
 const OPENOPJ_FIXTURE: &[u8] =
@@ -51,6 +53,19 @@ impl Seek for ReadFailure {
     }
 }
 
+struct CountingRepeat {
+    bytes_read: Rc<Cell<usize>>,
+}
+
+impl Read for CountingRepeat {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        buffer.fill(0);
+        self.bytes_read
+            .set(self.bytes_read.get().saturating_add(buffer.len()));
+        Ok(buffer.len())
+    }
+}
+
 fn temp_origin_file(extension: &str, bytes: &[u8]) -> PathBuf {
     let path = std::env::temp_dir().join(format!(
         "plotx-origin-app-{}.{}",
@@ -87,18 +102,19 @@ fn duplicated_fixture_import() -> (
 fn origin_import_filter_retains_tables_and_adds_experimental_projects() {
     assert_eq!(
         IMPORT_TABLE_FILTER_EXTENSIONS,
-        &["csv", "tsv", "txt", "xlsx", "opj", "opju"]
+        &["csv", "tsv", "txt", "xlsx", "opj"]
     );
     assert_eq!(
         ORIGIN_PROJECT_FILTER_LABEL,
-        "Origin projects (experimental)"
+        "Origin projects (experimental: OPJ import; OPJU recognition only)"
     );
+    assert_eq!(ORIGIN_PROJECT_FILTER_EXTENSIONS, &["opj", "opju"]);
 }
 
 #[test]
-fn origin_open_file_filter_accepts_both_project_extensions() {
+fn origin_supported_file_filter_excludes_recognition_only_opju() {
     assert!(OPEN_FILE_FILTER_EXTENSIONS.contains(&"opj"));
-    assert!(OPEN_FILE_FILTER_EXTENSIONS.contains(&"opju"));
+    assert!(!OPEN_FILE_FILTER_EXTENSIONS.contains(&"opju"));
 }
 
 #[test]
@@ -249,14 +265,75 @@ fn origin_rewind_and_full_read_errors_are_propagated() {
 
 #[test]
 fn origin_oversized_metadata_is_rejected_before_rewind() {
-    let limits = OriginLimits::default();
-    let oversized = u64::try_from(limits.max_input_bytes).unwrap() + 1;
+    let limits = OriginLimits {
+        max_input_bytes: 4,
+        max_total_owned_bytes: 8,
+        ..OriginLimits::default()
+    };
+    let oversized = 5;
 
     let error = read_origin_handle(&mut SeekFailure, Some(oversized), limits)
         .expect_err("known oversized input must be rejected before rewinding");
 
     assert_eq!(error.stage, "metadata");
-    assert!(error.detail.contains("input bytes"), "{}", error.detail);
+    assert_eq!(
+        error.detail,
+        OriginError::LimitExceeded {
+            resource: "input bytes",
+            limit: 4,
+            actual: 5,
+        }
+        .to_string()
+    );
+}
+
+#[test]
+fn origin_lower_total_owned_metadata_limit_is_rejected_before_rewind() {
+    let limits = OriginLimits {
+        max_input_bytes: 8,
+        max_total_owned_bytes: 4,
+        ..OriginLimits::default()
+    };
+
+    let error = read_origin_handle(&mut SeekFailure, Some(5), limits)
+        .expect_err("known cumulative oversize must be rejected before rewinding");
+
+    assert_eq!(error.stage, "metadata");
+    assert_eq!(
+        error.detail,
+        OriginError::LimitExceeded {
+            resource: "total owned bytes",
+            limit: 4,
+            actual: 5,
+        }
+        .to_string()
+    );
+}
+
+#[test]
+fn origin_unknown_length_stops_at_the_lower_total_owned_sentinel() {
+    let limits = OriginLimits {
+        max_input_bytes: 8,
+        max_total_owned_bytes: 4,
+        ..OriginLimits::default()
+    };
+    let bytes_read = Rc::new(Cell::new(0));
+    let reader = CountingRepeat {
+        bytes_read: Rc::clone(&bytes_read),
+    };
+
+    let error = read_bounded_origin(reader, None, limits).unwrap_err();
+
+    assert_eq!(bytes_read.get(), 5);
+    assert_eq!(
+        error,
+        OriginError::LimitExceeded {
+            resource: "total owned bytes",
+            limit: 4,
+            actual: 5,
+        }
+        .to_string()
+    );
 }
 
 #[cfg(unix)]

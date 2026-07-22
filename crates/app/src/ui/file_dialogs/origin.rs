@@ -16,12 +16,11 @@ use plotx_io::origin::{
     probe_origin, read_origin,
 };
 
-pub(super) const IMPORT_TABLE_FILTER_EXTENSIONS: &[&str] =
-    &["csv", "tsv", "txt", "xlsx", "opj", "opju"];
-pub(super) const ORIGIN_PROJECT_FILTER_LABEL: &str = "Origin projects (experimental)";
+pub(super) const IMPORT_TABLE_FILTER_EXTENSIONS: &[&str] = &["csv", "tsv", "txt", "xlsx", "opj"];
+pub(super) const ORIGIN_PROJECT_FILTER_LABEL: &str =
+    "Origin projects (experimental: OPJ import; OPJU recognition only)";
 pub(super) const ORIGIN_PROJECT_FILTER_EXTENSIONS: &[&str] = &["opj", "opju"];
-pub(super) const OPEN_FILE_FILTER_EXTENSIONS: &[&str] =
-    &["abf", "jdf", "fid", "ser", "zip", "opj", "opju"];
+pub(super) const OPEN_FILE_FILTER_EXTENSIONS: &[&str] = &["abf", "jdf", "fid", "ser", "zip", "opj"];
 
 const ORIGIN_MEDIA_TYPE: &str = "application/x-origin-project";
 const UNSUPPORTED_OBJECTS_KEY: &str = "space.nmrtist.plotx.import.origin.unsupported_objects";
@@ -46,6 +45,14 @@ struct OriginFailure {
     stage: &'static str,
     message: String,
     detail: String,
+}
+
+#[derive(Clone, Copy)]
+struct SourceByteLimit {
+    resource: &'static str,
+    limit: usize,
+    maximum: u64,
+    read_limit: u64,
 }
 
 impl OriginFailure {
@@ -149,19 +156,12 @@ fn read_origin_handle<R: Read + Seek>(
     metadata_len: Option<u64>,
     limits: OriginLimits,
 ) -> Result<Arc<[u8]>, OriginFailure> {
-    checked_reader_limit(limits)
+    let source_limit = checked_source_byte_limit(limits)
         .map_err(|error| OriginFailure::io("limits", limit_message(&error), error))?;
-    let maximum = u64::try_from(limits.max_input_bytes).map_err(|_| {
-        let error = invalid_limit(
-            limits.max_input_bytes,
-            "the input limit cannot be represented by the bounded reader",
-        );
-        OriginFailure::io("limits", limit_message(&error), error)
-    })?;
     if let Some(length) = metadata_len
-        && length > maximum
+        && length > source_limit.maximum
     {
-        let error = input_too_large(length, limits.max_input_bytes);
+        let error = source_too_large(length, source_limit);
         return Err(OriginFailure::io("metadata", limit_message(&error), error));
     }
     reader.seek(SeekFrom::Start(0)).map_err(|error| {
@@ -183,29 +183,22 @@ pub(super) fn read_bounded_origin<R: Read>(
     metadata_len: Option<u64>,
     limits: OriginLimits,
 ) -> Result<Arc<[u8]>, String> {
-    let read_limit = checked_reader_limit(limits)?;
-    let maximum = u64::try_from(limits.max_input_bytes).map_err(|_| {
-        invalid_limit(
-            limits.max_input_bytes,
-            "the input limit cannot be represented by the bounded reader",
-        )
-        .to_string()
-    })?;
+    let source_limit = checked_source_byte_limit(limits)?;
     if let Some(length) = metadata_len
-        && length > maximum
+        && length > source_limit.maximum
     {
-        return Err(input_too_large(length, limits.max_input_bytes));
+        return Err(source_too_large(length, source_limit));
     }
 
-    let mut bounded: Take<R> = reader.take(read_limit);
+    let mut bounded: Take<R> = reader.take(source_limit.read_limit);
     let mut bytes = Vec::new();
     bounded
         .read_to_end(&mut bytes)
         .map_err(|error| format!("the bounded Origin project read failed: {error}"))?;
-    if bytes.len() > limits.max_input_bytes {
+    if bytes.len() > source_limit.limit {
         return Err(OriginError::LimitExceeded {
-            resource: "input bytes",
-            limit: limits.max_input_bytes,
+            resource: source_limit.resource,
+            limit: source_limit.limit,
             actual: bytes.len(),
         }
         .to_string());
@@ -213,37 +206,62 @@ pub(super) fn read_bounded_origin<R: Read>(
     Ok(Arc::<[u8]>::from(bytes))
 }
 
-fn checked_reader_limit(limits: OriginLimits) -> Result<u64, String> {
+fn checked_source_byte_limit(limits: OriginLimits) -> Result<SourceByteLimit, String> {
     limits.validate().map_err(|error| error.to_string())?;
-    let sentinel = limits.max_input_bytes.checked_add(1).ok_or_else(|| {
+    let (resource, limit_name, limit) = if limits.max_input_bytes <= limits.max_total_owned_bytes {
+        ("input bytes", "max_input_bytes", limits.max_input_bytes)
+    } else {
+        (
+            "total owned bytes",
+            "max_total_owned_bytes",
+            limits.max_total_owned_bytes,
+        )
+    };
+    let sentinel = limit.checked_add(1).ok_or_else(|| {
         invalid_limit(
-            limits.max_input_bytes,
+            limit_name,
+            limit,
             "the limit must leave room for an oversize sentinel byte",
         )
         .to_string()
     })?;
-    u64::try_from(sentinel).map_err(|_| {
+    let maximum = u64::try_from(limit).map_err(|_| {
         invalid_limit(
-            limits.max_input_bytes,
-            "the input limit cannot be represented by the bounded reader",
+            limit_name,
+            limit,
+            "the source-byte limit cannot be represented by the bounded reader",
         )
         .to_string()
+    })?;
+    let read_limit = u64::try_from(sentinel).map_err(|_| {
+        invalid_limit(
+            limit_name,
+            limit,
+            "the source-byte sentinel cannot be represented by the bounded reader",
+        )
+        .to_string()
+    })?;
+    Ok(SourceByteLimit {
+        resource,
+        limit,
+        maximum,
+        read_limit,
     })
 }
 
-fn invalid_limit(value: usize, reason: &'static str) -> OriginError {
+fn invalid_limit(name: &'static str, value: usize, reason: &'static str) -> OriginError {
     OriginError::InvalidLimit {
-        name: "max_input_bytes",
+        name,
         value,
         reason,
     }
 }
 
-fn input_too_large(actual: u64, limit: usize) -> String {
+fn source_too_large(actual: u64, source_limit: SourceByteLimit) -> String {
     let actual = usize::try_from(actual).unwrap_or(usize::MAX);
     OriginError::LimitExceeded {
-        resource: "input bytes",
-        limit,
+        resource: source_limit.resource,
+        limit: source_limit.limit,
         actual,
     }
     .to_string()
