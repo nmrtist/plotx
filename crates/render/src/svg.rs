@@ -7,6 +7,9 @@ use crate::{
 use plotx_figure::{AxisFrame, AxisTrace, Figure, SeriesKind};
 use std::fmt::Write as _;
 
+mod document;
+pub use document::{export_document, export_document_for_bounds, export_document_page};
+
 /// Render a [`Figure`] to a standalone SVG document string.
 pub fn export(fig: &Figure) -> String {
     let w = fig.width;
@@ -17,40 +20,16 @@ pub fn export(fig: &Figure) -> String {
         s,
         r#"<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}" font-family="sans-serif">"#
     );
-    write_figure(&mut s, fig, outer, "plot");
+    write_figure(&mut s, fig, outer, "plot", None);
     let _ = write!(s, "</svg>");
     s
 }
 
-/// Render a page document to SVG using page points as the geometry space.
-pub fn export_document(document: &Document<'_>) -> String {
-    let w = document.width;
-    let h = document.height;
-    let mut s = String::new();
-    let _ = write!(
-        s,
-        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{w}pt" height="{h}pt" viewBox="0 0 {w} {h}" font-family="sans-serif">"#
-    );
-    let _ = write!(
-        s,
-        r#"<rect x="0" y="0" width="{w}" height="{h}" fill="{}"/>"#,
-        document.background.to_hex()
-    );
-    for item in &document.items {
-        match item {
-            DocumentItem::Plot(object) => write_document_object(&mut s, object),
-            DocumentItem::Overlay(overlay) => {
-                if overlay.visible {
-                    write_overlay(&mut s, overlay);
-                }
-            }
-        }
-    }
-    let _ = write!(s, "</svg>");
-    s
-}
-
-fn write_document_object(s: &mut String, object: &DocumentObject<'_>) {
+fn write_document_object(
+    s: &mut String,
+    object: &DocumentObject<'_>,
+    omit_figure_background_matching: Option<plotx_figure::Color>,
+) {
     if !object.visible {
         return;
     }
@@ -66,6 +45,7 @@ fn write_document_object(s: &mut String, object: &DocumentObject<'_>) {
         object.figure,
         Rect::new(0.0, 0.0, object.frame.width, object.frame.height),
         &format!("{id}_clip"),
+        omit_figure_background_matching,
     );
     if let Some(title) = &object.title {
         write_panel_letter(s, &title.text, title.position, title.font_size);
@@ -163,7 +143,13 @@ fn write_overlay(s: &mut String, overlay: &DocumentOverlay<'_>) {
     }
 }
 
-fn write_figure(s: &mut String, fig: &Figure, outer: Rect, clip_id: &str) {
+fn write_figure(
+    s: &mut String,
+    fig: &Figure,
+    outer: Rect,
+    clip_id: &str,
+    omit_background_matching: Option<plotx_figure::Color>,
+) {
     let ty = fig.typography;
     let w = outer.width;
     let h = outer.height;
@@ -172,13 +158,15 @@ fn write_figure(s: &mut String, fig: &Figure, outer: Rect, clip_id: &str) {
     let proj = Projector::new(fig, outer, &margins);
     let plot = proj.plot;
 
-    let _ = write!(
-        s,
-        r#"<rect x="{x}" y="{y}" width="{w}" height="{h}" fill="{}"/>"#,
-        fig.background.to_hex(),
-        x = outer.left,
-        y = outer.top
-    );
+    if omit_background_matching != Some(fig.background) {
+        let _ = write!(
+            s,
+            r#"<rect x="{x}" y="{y}" width="{w}" height="{h}" fill="{}"/>"#,
+            fig.background.to_hex(),
+            x = outer.left,
+            y = outer.top
+        );
+    }
 
     if !fig.title.trim().is_empty() {
         let _ = write!(

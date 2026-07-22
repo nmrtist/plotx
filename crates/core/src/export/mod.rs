@@ -1,6 +1,10 @@
+mod fonts;
 mod precheck;
 mod preset;
 mod raster;
+#[cfg(test)]
+mod state_tests;
+mod trim;
 
 pub use precheck::{
     ComplianceStatus, ComplianceThresholds, PrecheckReport, page_metrics, precheck_report,
@@ -91,6 +95,7 @@ pub struct ExportDialogState {
     pub scope: ExportPageScope,
     pub dpi: u16,
     pub preset: Option<ExportPreset>,
+    pub trim_to_visible_content: bool,
 }
 
 impl ExportDialogState {
@@ -100,7 +105,15 @@ impl ExportDialogState {
             scope: ExportPageScope::Current,
             dpi: DEFAULT_BITMAP_DPI,
             preset: None,
+            trim_to_visible_content: false,
         }
+    }
+
+    pub fn from_defaults(format: ExportFormat, defaults: &crate::settings::ExportDefaults) -> Self {
+        let mut state = Self::new(format);
+        state.dpi = defaults.dpi;
+        state.trim_to_visible_content = defaults.trim_to_visible_content;
+        state
     }
 
     pub fn apply_preset(&mut self, preset: Option<ExportPreset>) {
@@ -155,6 +168,7 @@ pub struct ExportSettings {
     /// When set, each page is scaled (uniformly, preserving aspect ratio) so its
     /// output width equals this many millimetres. `None` keeps the page's size.
     pub target_width_mm: Option<f32>,
+    pub trim_to_visible_content: bool,
 }
 
 impl From<&ExportDialogState> for ExportSettings {
@@ -164,6 +178,7 @@ impl From<&ExportDialogState> for ExportSettings {
             scope: value.scope,
             dpi: value.dpi,
             target_width_mm: value.target_width_mm(),
+            trim_to_visible_content: value.trim_to_visible_content,
         }
     }
 }
@@ -221,23 +236,33 @@ pub fn export_canvases(
     let pages = resolve_page_scope(settings.scope, active_page, canvases.len())?;
     let target = settings.target_width_mm;
     match settings.format {
-        ExportFormat::Svg => export_svg(canvases, &pages, target, base_path),
-        ExportFormat::Pdf => export_pdf(canvases, &pages, target, base_path),
+        ExportFormat::Svg => export_svg(
+            canvases,
+            &pages,
+            target,
+            settings.trim_to_visible_content,
+            base_path,
+        ),
+        ExportFormat::Pdf => export_pdf(
+            canvases,
+            &pages,
+            target,
+            settings.trim_to_visible_content,
+            base_path,
+        ),
         ExportFormat::Png | ExportFormat::Jpeg | ExportFormat::Tiff => export_bitmap(
             canvases,
             &pages,
             settings.format,
             settings.dpi,
             target,
+            settings.trim_to_visible_content,
             base_path,
         ),
     }
 }
 
-/// The page's SVG with its declared physical size scaled to `target_width_mm`
-/// (leaving the `viewBox` — and thus all geometry — untouched, a uniform scale).
-/// `None` keeps the page's own size. Reproduces the exact `width/height` header
-/// `render_document_svg` emits so the rewrite is a single deterministic replace.
+/// Scale the SVG's declared physical size; `None` preserves the authored size.
 fn document_svg(canvas: &CanvasDocument, target_width_mm: Option<f32>) -> String {
     let svg = render_document_svg(canvas);
     let Some(target) = target_width_mm else {
@@ -268,11 +293,17 @@ fn export_svg(
     canvases: &[CanvasDocument],
     pages: &[usize],
     target_width_mm: Option<f32>,
+    trim_to_visible_content: bool,
     base_path: &Path,
 ) -> Result<Vec<PathBuf>, ExportError> {
     let paths = export_output_paths(base_path, ExportFormat::Svg, pages.len());
     for (&page, path) in pages.iter().zip(&paths) {
-        std::fs::write(path, document_svg(&canvases[page], target_width_mm))?;
+        let svg = if trim_to_visible_content {
+            trim::trim_document_svg(&canvases[page], target_width_mm)?
+        } else {
+            document_svg(&canvases[page], target_width_mm)
+        };
+        std::fs::write(path, svg)?;
     }
     Ok(paths)
 }
@@ -281,13 +312,20 @@ fn export_pdf(
     canvases: &[CanvasDocument],
     pages: &[usize],
     target_width_mm: Option<f32>,
+    trim_to_visible_content: bool,
     base_path: &Path,
 ) -> Result<Vec<PathBuf>, ExportError> {
     let path = with_extension(base_path, ExportFormat::Pdf.extension());
     let svgs: Vec<String> = pages
         .iter()
-        .map(|&page| document_svg(&canvases[page], target_width_mm))
-        .collect();
+        .map(|&page| {
+            if trim_to_visible_content {
+                trim::trim_document_svg(&canvases[page], target_width_mm)
+            } else {
+                Ok(document_svg(&canvases[page], target_width_mm))
+            }
+        })
+        .collect::<Result<_, ExportError>>()?;
     let pdf = if svgs.len() == 1 {
         let tree = parse_pdf_svg(&svgs[0])?;
         svg2pdf::to_pdf(
@@ -309,6 +347,7 @@ fn export_bitmap(
     format: ExportFormat,
     dpi: u16,
     target_width_mm: Option<f32>,
+    trim_to_visible_content: bool,
     base_path: &Path,
 ) -> Result<Vec<PathBuf>, ExportError> {
     let paths = export_output_paths(base_path, format, pages.len());
@@ -321,6 +360,16 @@ fn export_bitmap(
                 limits: RasterLimits::default(),
             },
         )?;
+        let raster = if trim_to_visible_content {
+            let background = canvases[page].background;
+            trim::crop_raster(
+                raster,
+                [background.r, background.g, background.b, 255],
+                trim::raster_trim_padding(dpi),
+            )?
+        } else {
+            raster
+        };
         match format {
             ExportFormat::Png => {
                 image::save_buffer_with_format(
@@ -379,7 +428,14 @@ fn render_multi_page_pdf(svgs: &[String]) -> Result<Vec<u8>, ExportError> {
         let svg_id = *ref_map
             .get(&svg_id)
             .ok_or_else(|| ExportError::Pdf("could not renumber SVG PDF object".into()))?;
-        embedded.push((chunk, svg_id, size.width(), size.height()));
+        // usvg reports CSS pixels (96/in), while a PDF MediaBox uses points
+        // (72/in). The SVG XObject is normalized and then placed at this size.
+        embedded.push((
+            chunk,
+            svg_id,
+            size.width() * 72.0 / 96.0,
+            size.height() * 72.0 / 96.0,
+        ));
     }
 
     let mut pdf = Pdf::new();
@@ -419,7 +475,7 @@ fn render_multi_page_pdf(svgs: &[String]) -> Result<Vec<u8>, ExportError> {
 
 fn parse_pdf_svg(svg: &str) -> Result<svg2pdf::usvg::Tree, ExportError> {
     let mut options = svg2pdf::usvg::Options::default();
-    options.fontdb_mut().load_system_fonts();
+    fonts::load_system_fonts(options.fontdb_mut());
     svg2pdf::usvg::Tree::from_str(svg, &options).map_err(|e| ExportError::SvgParse(e.to_string()))
 }
 
@@ -447,7 +503,9 @@ fn numbered_output_path(base_path: &Path, ordinal: usize, extension: &str) -> Pa
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::CanvasDocument;
+    use crate::state::{
+        CanvasDocument, CanvasObject, CanvasObjectKind, ObjectFrame, ShapeKind, ShapeObject,
+    };
 
     fn canvas(name: &str, size_mm: [f32; 2]) -> CanvasDocument {
         CanvasDocument::new(name.to_owned(), size_mm)
@@ -459,31 +517,26 @@ mod tests {
             .unwrap_or_else(|| std::env::temp_dir().join("plotx-export-tests"))
     }
 
+    fn canvas_with_shape(frame: ObjectFrame) -> CanvasDocument {
+        let mut canvas = canvas("page", [100.0, 80.0]);
+        canvas.objects.push(CanvasObject {
+            id: 1,
+            name: "shape".into(),
+            frame,
+            locked: false,
+            visible: true,
+            group: None,
+            kind: CanvasObjectKind::Shape(ShapeObject::new(ShapeKind::Rect)),
+        });
+        canvas
+    }
+
     #[test]
     fn svg_export_is_invariant_to_board_pos() {
         let mut c = canvas("page", [80.0, 60.0]);
         let baseline = document_svg(&c, None);
         c.board_pos = [1234.0, -567.0];
         assert_eq!(document_svg(&c, None), baseline);
-    }
-
-    #[test]
-    fn resolves_page_scopes() {
-        assert_eq!(
-            resolve_page_scope(ExportPageScope::Current, Some(1), 3).unwrap(),
-            vec![1]
-        );
-        assert_eq!(
-            resolve_page_scope(ExportPageScope::All, Some(1), 3).unwrap(),
-            vec![0, 1, 2]
-        );
-        assert_eq!(
-            resolve_page_scope(ExportPageScope::Range { start: 2, end: 3 }, Some(0), 4).unwrap(),
-            vec![1, 2]
-        );
-        assert!(
-            resolve_page_scope(ExportPageScope::Range { start: 3, end: 2 }, Some(0), 4).is_err()
-        );
     }
 
     #[test]
@@ -519,6 +572,7 @@ mod tests {
                 scope: ExportPageScope::Current,
                 dpi: DEFAULT_BITMAP_DPI,
                 target_width_mm: None,
+                trim_to_visible_content: false,
             },
             &out,
         )
@@ -540,6 +594,7 @@ mod tests {
                 scope: ExportPageScope::All,
                 dpi: DEFAULT_BITMAP_DPI,
                 target_width_mm: None,
+                trim_to_visible_content: false,
             },
             &out,
         )
@@ -564,6 +619,7 @@ mod tests {
                     scope: ExportPageScope::Current,
                     dpi: DEFAULT_BITMAP_DPI,
                     target_width_mm: None,
+                    trim_to_visible_content: false,
                 },
                 &out,
             )
@@ -589,6 +645,7 @@ mod tests {
                 scope: ExportPageScope::Current,
                 dpi: 600,
                 target_width_mm: Some(89.0),
+                trim_to_visible_content: false,
             },
             &out,
         )
@@ -609,5 +666,134 @@ mod tests {
         let scaled = document_svg(&doc, Some(100.0));
         assert!(scaled.contains(&format!(r#"width="{}pt" height="{}pt""#, w * 0.5, h * 0.5)));
         assert!(scaled.contains(&format!(r#"viewBox="0 0 {w} {h}""#)));
+    }
+
+    #[test]
+    fn trimmed_svg_uses_painted_bounds_and_keeps_page_background() {
+        let doc = canvas_with_shape(ObjectFrame::new(100.0, 80.0, 40.0, 30.0));
+        let svg = trim::trim_document_svg(&doc, None).unwrap();
+        let [page_width, page_height] = doc.size_pt();
+        assert!(svg.contains("<rect x=\""));
+        assert!(!svg.contains(&format!("viewBox=\"0 0 {page_width} {page_height}\"")));
+        assert!(svg.contains("viewBox=\""));
+    }
+
+    fn svg_number(svg: &str, attribute: &str) -> f32 {
+        let start = svg.find(attribute).unwrap() + attribute.len();
+        let end = svg[start..].find('"').unwrap() + start;
+        svg[start..end].trim_end_matches("pt").parse().unwrap()
+    }
+
+    fn pdf_media_boxes(bytes: &[u8]) -> Vec<[f32; 2]> {
+        let text = String::from_utf8_lossy(bytes);
+        text.match_indices("/MediaBox [")
+            .filter_map(|(start, _)| {
+                let values = text[start + 11..].split_once(']')?.0;
+                let numbers = values
+                    .split_whitespace()
+                    .map(str::parse::<f32>)
+                    .collect::<Result<Vec<_>, _>>()
+                    .ok()?;
+                (numbers.len() == 4).then_some([numbers[2], numbers[3]])
+            })
+            .collect()
+    }
+
+    #[test]
+    fn preset_scale_precedes_trim_without_refitting_and_padding_is_physical_point() {
+        let doc = canvas_with_shape(ObjectFrame::new(100.0, 80.0, 40.0, 30.0));
+        let svg = trim::trim_document_svg(&doc, Some(50.0)).unwrap();
+        let width_pt = svg_number(&svg, "width=\"");
+        let preset_width_pt = 50.0 * 72.0 / 25.4;
+        assert!(width_pt < preset_width_pt);
+
+        let view_box = svg
+            .split_once("viewBox=\"")
+            .unwrap()
+            .1
+            .split_once('"')
+            .unwrap()
+            .0
+            .split_whitespace()
+            .map(|value| value.parse::<f32>().unwrap())
+            .collect::<Vec<_>>();
+        let authored_scale = 0.5;
+        assert!((width_pt - view_box[2] * authored_scale).abs() < 0.01);
+        let bounds_svg = crate::state::render_document_svg_for_bounds(&doc);
+        let mut options = resvg::usvg::Options::default();
+        fonts::load_system_fonts(options.fontdb_mut());
+        let tree = resvg::usvg::Tree::from_str(&bounds_svg, &options).unwrap();
+        let painted = tree.root().abs_stroke_bounding_box();
+        let painted_x = painted.x() * doc.size_pt()[0] / tree.size().width();
+        // Two authored points at 0.5 scale are one physical point.
+        assert!(((painted_x - view_box[0]) * authored_scale - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn empty_trimmed_svg_keeps_original_page() {
+        let doc = canvas("empty", [100.0, 80.0]);
+        assert_eq!(
+            trim::trim_document_svg(&doc, None).unwrap(),
+            document_svg(&doc, None)
+        );
+    }
+
+    #[test]
+    fn bitmap_formats_encode_the_shared_trimmed_dimensions() {
+        let canvases = vec![canvas_with_shape(ObjectFrame::new(100.0, 80.0, 40.0, 30.0))];
+        let dir = test_dir();
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut dimensions = Vec::new();
+        for format in [ExportFormat::Png, ExportFormat::Jpeg, ExportFormat::Tiff] {
+            let out = dir.join(format!("trimmed.{}", format.extension()));
+            let paths = export_canvases(
+                &canvases,
+                Some(0),
+                &ExportSettings {
+                    format,
+                    scope: ExportPageScope::Current,
+                    dpi: 72,
+                    target_width_mm: None,
+                    trim_to_visible_content: true,
+                },
+                &out,
+            )
+            .unwrap();
+            let image = image::open(&paths[0]).unwrap();
+            dimensions.push((image.width(), image.height()));
+            assert!(image.width() < 284 && image.height() < 227);
+        }
+        assert!(dimensions.windows(2).all(|pair| pair[0] == pair[1]));
+    }
+
+    #[test]
+    fn pdf_media_boxes_follow_each_trimmed_svg_page_and_empty_page_stays_full_size() {
+        let shaped = canvas_with_shape(ObjectFrame::new(100.0, 80.0, 40.0, 30.0));
+        let mut wider = canvas_with_shape(ObjectFrame::new(60.0, 50.0, 100.0, 35.0));
+        wider.name = "wider".into();
+        let empty = canvas("empty", [100.0, 80.0]);
+        let canvases = vec![shaped, wider, empty];
+        let dir = test_dir();
+        std::fs::create_dir_all(&dir).unwrap();
+        let out = dir.join("trimmed-pages.pdf");
+        let paths = export_canvases(
+            &canvases,
+            Some(0),
+            &ExportSettings {
+                format: ExportFormat::Pdf,
+                scope: ExportPageScope::All,
+                dpi: DEFAULT_BITMAP_DPI,
+                target_width_mm: None,
+                trim_to_visible_content: true,
+            },
+            &out,
+        )
+        .unwrap();
+        let boxes = pdf_media_boxes(&std::fs::read(&paths[0]).unwrap());
+        assert_eq!(boxes.len(), 3);
+        assert_ne!(boxes[0], boxes[1]);
+        let [page_width, page_height] = canvases[2].size_pt();
+        assert!((boxes[2][0] - page_width).abs() < 0.01);
+        assert!((boxes[2][1] - page_height).abs() < 0.01);
     }
 }

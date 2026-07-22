@@ -84,6 +84,17 @@ pub(super) fn export_options_window(app: &mut PlotxApp, ctx: &egui::Context) {
             });
         }
 
+        ui.add_space(8.0);
+        ui.checkbox(
+            &mut pending.trim_to_visible_content,
+            "Trim page to visible content",
+        )
+        .on_hover_text(
+            "Removes page whitespace around visible content without enlarging the content.\n\
+             With journal/column presets, the final physical page width may be smaller than the preset.\n\
+             Empty pages keep their original size.",
+        );
+
         let preset = pending.preset;
         let scope = pending.scope;
         let dpi = pending.dpi;
@@ -112,10 +123,26 @@ pub(super) fn export_options_window(app: &mut PlotxApp, ctx: &egui::Context) {
     if export {
         app.session.ui.export_options = None;
         if let Some(settings) = settings {
-            crate::ui::file_dialogs::export_with_options(app, settings);
+            let trim = settings.trim_to_visible_content;
+            if let Some(path) = crate::ui::file_dialogs::choose_export_path(&settings) {
+                plotx_core::settings::update(move |settings| {
+                    apply_confirmed_export_default(&mut settings.export, trim, true);
+                });
+                app.export_to(settings, &path);
+            }
         }
     } else if cancel || modal.should_close() {
         app.session.ui.export_options = None;
+    }
+}
+
+fn apply_confirmed_export_default(
+    defaults: &mut plotx_core::settings::ExportDefaults,
+    trim_to_visible_content: bool,
+    path_confirmed: bool,
+) {
+    if path_confirmed {
+        defaults.trim_to_visible_content = trim_to_visible_content;
     }
 }
 
@@ -169,4 +196,24 @@ fn status_dot(ui: &mut Ui, status: ComplianceStatus) {
     };
     let (rect, _) = ui.allocate_exact_size(Vec2::splat(10.0), Sense::hover());
     ui.painter().circle_filled(rect.center(), 4.0, color);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_confirmed_path_updates_trim_and_never_dpi() {
+        let mut defaults = plotx_core::settings::ExportDefaults {
+            dpi: 600,
+            ..Default::default()
+        };
+        apply_confirmed_export_default(&mut defaults, true, false);
+        assert!(!defaults.trim_to_visible_content);
+        assert_eq!(defaults.dpi, 600);
+
+        apply_confirmed_export_default(&mut defaults, true, true);
+        assert!(defaults.trim_to_visible_content);
+        assert_eq!(defaults.dpi, 600);
+    }
 }

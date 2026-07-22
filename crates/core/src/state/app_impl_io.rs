@@ -380,8 +380,8 @@ impl PlotxApp {
             self.record_export_unavailable(format);
             return;
         }
-        let mut state = ExportDialogState::new(format);
-        state.dpi = crate::settings::load().export.dpi;
+        let defaults = crate::settings::load().export;
+        let mut state = ExportDialogState::from_defaults(format, &defaults);
         let canvas = &self.doc.canvases[ci];
         if let Some(preset) = crate::export::ExportPreset::matching_canvas(
             format,
@@ -586,6 +586,7 @@ mod export_operation_tests {
                 scope: crate::export::ExportPageScope::Range { start: 2, end: 1 },
                 dpi: crate::export::DEFAULT_BITMAP_DPI,
                 target_width_mm: None,
+                trim_to_visible_content: false,
             },
             std::path::Path::new("unused.svg"),
         );

@@ -9,8 +9,8 @@ use plotx_core::state::{
     ObjectFrame, ObjectId, PanDrag, PanelLabelDrag, PanelNoteEditState, PhaseDrag, PhaseDragKind,
     PhaseOrient, PlotxApp, Region, RegionDrag, RegionDragKind, ResizeHandle, SHEET_COL_W_PT,
     SHEET_HEADER_H_PT, SHEET_MAX_ROWS, SHEET_ROW_H_PT, Selection, SelectionDrag, TableDataset,
-    TextEditState, TileDropPreview, Tool, ZoomAxis, ZoomDrag, board_frames, frame_board_pos,
-    frame_board_rect, set_frame_board_pos, toggle_frame_selection_synced,
+    TextEditState, TileDropCacheKey, TileDropPreview, Tool, ZoomAxis, ZoomDrag, board_frames,
+    frame_board_pos, frame_board_rect, set_frame_board_pos, toggle_frame_selection_synced,
 };
 use plotx_core::{Integral2D, IntegralResult};
 use plotx_render::Rect as PlotRect;

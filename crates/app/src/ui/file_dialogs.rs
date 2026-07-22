@@ -390,16 +390,12 @@ fn open_folder_path(app: &mut PlotxApp, path: &std::path::Path) {
     }
 }
 
-pub(crate) fn export_with_options(app: &mut PlotxApp, settings: ExportSettings) {
-    let Some(path) = rfd::FileDialog::new()
+pub(crate) fn choose_export_path(settings: &ExportSettings) -> Option<std::path::PathBuf> {
+    rfd::FileDialog::new()
         .add_filter(settings.format.label(), &[settings.format.extension()])
         .set_file_name(settings.format.default_file_name())
         .set_title(settings.format.dialog_title())
         .save_file()
-    else {
-        return;
-    };
-    app.export_to(settings, &path);
 }
 
 pub(crate) fn load_processing_scheme(app: &mut PlotxApp, di: usize) {

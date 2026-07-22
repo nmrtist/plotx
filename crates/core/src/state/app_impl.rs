@@ -731,3 +731,19 @@ pub fn build_render_document(document: &CanvasDocument) -> plotx_render::Documen
 pub fn render_document_svg(document: &CanvasDocument) -> String {
     plotx_render::svg::export_document(&build_render_document(document))
 }
+
+pub(crate) fn render_document_svg_for_bounds(document: &CanvasDocument) -> String {
+    plotx_render::svg::export_document_for_bounds(&build_render_document(document))
+}
+
+pub(crate) fn render_document_svg_page(
+    document: &CanvasDocument,
+    view_box: plotx_render::Rect,
+    physical_size: [f32; 2],
+) -> String {
+    plotx_render::svg::export_document_page(
+        &build_render_document(document),
+        view_box,
+        physical_size,
+    )
+}

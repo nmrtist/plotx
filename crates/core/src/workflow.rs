@@ -145,6 +145,7 @@ pub fn process_file(
         scope: ExportPageScope::Current,
         dpi: DEFAULT_BITMAP_DPI,
         target_width_mm: None,
+        trim_to_visible_content: false,
     };
     let output_paths = export_canvases(&[canvas], Some(0), &settings, output)?;
     Ok(ProcessResult {

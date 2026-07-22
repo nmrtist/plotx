@@ -155,6 +155,8 @@ pub struct ExportDefaults {
     pub include_view_snapshots: bool,
     #[serde(default = "default_export_dpi")]
     pub dpi: u16,
+    #[serde(default)]
+    pub trim_to_visible_content: bool,
 }
 
 /// Sticky choices of the canvas-size popover.
@@ -258,6 +260,7 @@ impl Default for ExportDefaults {
         Self {
             include_view_snapshots: false,
             dpi: default_export_dpi(),
+            trim_to_visible_content: false,
         }
     }
 }

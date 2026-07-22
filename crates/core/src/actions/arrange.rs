@@ -324,14 +324,10 @@ fn simplified_axis_changes(
         .filter_map(|(&id, (keep_x, keep_y))| {
             let before = canvas.object(id)?.plot()?.axis_overrides.clone();
             let mut after = before.clone();
-            if !keep_x {
-                after.x_show_tick_labels = Some(false);
-                after.x_show_label = Some(false);
-            }
-            if !keep_y {
-                after.y_show_tick_labels = Some(false);
-                after.y_show_label = Some(false);
-            }
+            after.x_show_tick_labels = (!keep_x).then_some(false);
+            after.x_show_label = (!keep_x).then_some(false);
+            after.y_show_tick_labels = (!keep_y).then_some(false);
+            after.y_show_label = (!keep_y).then_some(false);
             (after != before).then_some(AxisOverrideChange { id, before, after })
         })
         .collect()

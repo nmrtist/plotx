@@ -14,6 +14,7 @@ fn missing_fields_take_defaults() {
     assert!(settings.general.snap_enabled);
     assert_eq!(settings.general.project_backup_generations, 1);
     assert_eq!(settings.export.dpi, crate::export::DEFAULT_BITMAP_DPI);
+    assert!(!settings.export.trim_to_visible_content);
     assert_eq!(
         settings.appearance.graphics_power,
         GraphicsPowerPreference::LowPower
@@ -96,6 +97,7 @@ fn save_and_load_roundtrip() {
     settings.general.snap_enabled = false;
     settings.general.project_backup_generations = 3;
     settings.export.include_view_snapshots = true;
+    settings.export.trim_to_visible_content = true;
 
     io::save_to_path(&path, &settings).unwrap();
     let loaded = io::load_from_paths(&path, None);
@@ -104,6 +106,7 @@ fn save_and_load_roundtrip() {
     assert!(!loaded.general.snap_enabled);
     assert_eq!(loaded.general.project_backup_generations, 3);
     assert!(loaded.export.include_view_snapshots);
+    assert!(loaded.export.trim_to_visible_content);
 }
 
 #[test]
