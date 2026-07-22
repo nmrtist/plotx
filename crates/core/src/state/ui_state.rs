@@ -751,17 +751,6 @@ pub struct ObjectDrag {
     pub active: bool,
 }
 
-/// A previewed auto-tiling drop, computed each frame a qualifying single-plot
-/// move drag hovers a different canvas. `target` is that canvas; `newcomer` is the
-/// dragged plot's landing frame and `existing` the pushed-aside plots' new frames,
-/// all in the target's page space (pt). Committed as one undoable step on release.
-#[derive(Clone, Debug)]
-pub struct TileDropPreview {
-    pub target: usize,
-    pub newcomer: ObjectFrame,
-    pub existing: Vec<(ObjectId, ObjectFrame)>,
-}
-
 /// In-progress drag of a whole frame (page or sheet) across the board by its
 /// header strip. `before` is the frame's `board_pos` (pt) at grab time and
 /// `start_world` the board-world (pt) pointer position then, so the live position

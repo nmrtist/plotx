@@ -42,6 +42,47 @@ pub struct LayoutItem {
     pub insets: [f32; 4],
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TilingDropRegion {
+    Left,
+    Right,
+    Top,
+    Bottom,
+    /// Retiling three or more objects is independent of pointer direction.
+    Retile,
+}
+
+pub fn tiling_drop_region(
+    page_pt: [f32; 2],
+    existing_count: usize,
+    pointer_page: [f32; 2],
+) -> TilingDropRegion {
+    if existing_count != 1 {
+        return TilingDropRegion::Retile;
+    }
+    let nx = if page_pt[0] > 0.0 {
+        pointer_page[0] / page_pt[0]
+    } else {
+        0.5
+    };
+    let ny = if page_pt[1] > 0.0 {
+        pointer_page[1] / page_pt[1]
+    } else {
+        0.5
+    };
+    if (nx - 0.5).abs() >= (ny - 0.5).abs() {
+        if nx >= 0.5 {
+            TilingDropRegion::Right
+        } else {
+            TilingDropRegion::Left
+        }
+    } else if ny >= 0.5 {
+        TilingDropRegion::Bottom
+    } else {
+        TilingDropRegion::Top
+    }
+}
+
 pub fn layout_item(id: ObjectId, figure: &plotx_figure::Figure, frame: ObjectFrame) -> LayoutItem {
     let margins = plotx_render::axis_layout(figure, frame.width, frame.height).margins;
     LayoutItem {
@@ -53,6 +94,11 @@ pub fn layout_item(id: ObjectId, figure: &plotx_figure::Figure, frame: ObjectFra
 /// Tolerance for the small coordinate drift produced by PlotX auto-layout and
 /// drag-tiling floating-point calculations.
 const GRID_ALIGNMENT_TOLERANCE_PT: f32 = 1.0;
+
+/// `ObjectFrame::new` clamps each extent to at least 1 pt. Gap fitting reserves
+/// that minimum for every row and column so the clamp cannot create overlaps or
+/// push frames outside the page. This is a geometry invariant, not visual padding.
+const MIN_CELL_EXTENT_PT: f32 = 1.0;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OccupiedGrid {
@@ -147,8 +193,14 @@ pub fn arrange_grid(
     let top = mt.clamp(0.0, page_pt[1].max(0.0));
     let available_w = (page_pt[0] - left - mr.max(0.0)).max(0.0);
     let available_h = (page_pt[1] - top - mb.max(0.0)).max(0.0);
-    fit_gaps(&mut col_gaps, (available_w - cols as f32).max(0.0));
-    fit_gaps(&mut row_gaps, (available_h - rows as f32).max(0.0));
+    fit_gaps(
+        &mut col_gaps,
+        (available_w - cols as f32 * MIN_CELL_EXTENT_PT).max(0.0),
+    );
+    fit_gaps(
+        &mut row_gaps,
+        (available_h - rows as f32 * MIN_CELL_EXTENT_PT).max(0.0),
+    );
     let width = available_w - col_gaps.iter().sum::<f32>();
     let height = available_h - row_gaps.iter().sum::<f32>();
     let cell_w = width / cols as f32;
@@ -245,11 +297,9 @@ fn split_plan(
     newcomer: LayoutItem,
     pointer: [f32; 2],
 ) -> TilingPlan {
-    let [w, h] = page_pt;
-    let nx = if w > 0.0 { pointer[0] / w } else { 0.5 };
-    let ny = if h > 0.0 { pointer[1] / h } else { 0.5 };
-    let horizontal = (nx - 0.5).abs() >= (ny - 0.5).abs();
-    let newcomer_last = if horizontal { nx >= 0.5 } else { ny >= 0.5 };
+    let region = tiling_drop_region(page_pt, 1, pointer);
+    let horizontal = matches!(region, TilingDropRegion::Left | TilingDropRegion::Right);
+    let newcomer_last = matches!(region, TilingDropRegion::Right | TilingDropRegion::Bottom);
     let split_layout = PageLayout {
         rows: if horizontal { 1 } else { 2 },
         cols: if horizontal { 2 } else { 1 },
@@ -340,8 +390,92 @@ mod tests {
         assert!(
             frames
                 .iter()
-                .all(|(_, frame)| frame.x >= 0.0 && frame.x + frame.width <= 100.001)
+                .all(|(_, frame)| frame.width >= MIN_CELL_EXTENT_PT
+                    && frame.height >= MIN_CELL_EXTENT_PT
+                    && frame.x >= 0.0
+                    && frame.y >= 0.0
+                    && frame.x + frame.width <= 100.001
+                    && frame.y + frame.height <= 50.001)
         );
+    }
+
+    #[test]
+    fn near_minimum_page_reserves_cell_extents_before_frame_construction() {
+        let layout = PageLayout {
+            rows: 2,
+            cols: 3,
+            gutter_mm: 100.0,
+            ..PageLayout::default()
+        };
+        let items: Vec<_> = (1..=6).map(|id| item(id, 0.0)).collect();
+        let frames = arrange_grid([3.0, 2.0], &layout, &items);
+        assert!(frames.iter().all(|(_, frame)| {
+            frame.width == MIN_CELL_EXTENT_PT && frame.height == MIN_CELL_EXTENT_PT
+        }));
+        assert!(frames.windows(2).all(|pair| {
+            pair[0].1.y < pair[1].1.y || pair[0].1.x + pair[0].1.width <= pair[1].1.x + f32::EPSILON
+        }));
+    }
+
+    #[test]
+    fn ordinary_visual_spacing_geometry_is_unchanged() {
+        let layout = PageLayout {
+            rows: 1,
+            cols: 2,
+            gutter_mm: 5.0,
+            ..PageLayout::default()
+        };
+        let frames = arrange_grid([400.0, 300.0], &layout, &[item(1, 0.0), item(2, 0.0)]);
+        let expected_gap = 5.0 * crate::state::MM_TO_PT;
+        let expected_width = (400.0 - expected_gap) * 0.5;
+        assert!((frames[0].1.width - expected_width).abs() < 0.001);
+        assert!((frames[1].1.x - (expected_width + expected_gap)).abs() < 0.001);
+    }
+
+    #[test]
+    fn split_region_is_explicit_and_newcomer_insets_affect_its_own_preview() {
+        let page = [400.0, 300.0];
+        assert_eq!(
+            tiling_drop_region(page, 1, [10.0, 150.0]),
+            TilingDropRegion::Left
+        );
+        assert_eq!(
+            tiling_drop_region(page, 1, [390.0, 150.0]),
+            TilingDropRegion::Right
+        );
+        assert_eq!(
+            tiling_drop_region(page, 1, [200.0, 10.0]),
+            TilingDropRegion::Top
+        );
+        assert_eq!(
+            tiling_drop_region(page, 1, [200.0, 290.0]),
+            TilingDropRegion::Bottom
+        );
+        assert_eq!(
+            tiling_drop_region(page, 2, [10.0, 10.0]),
+            TilingDropRegion::Retile
+        );
+
+        let layout = PageLayout {
+            rows: 1,
+            cols: 2,
+            ..PageLayout::default()
+        };
+        let narrow = compute_tiling_plan_for_items(
+            page,
+            &layout,
+            &[item(1, 2.0)],
+            item(2, 2.0),
+            [390.0, 150.0],
+        );
+        let wide = compute_tiling_plan_for_items(
+            page,
+            &layout,
+            &[item(1, 2.0)],
+            item(3, 40.0),
+            [390.0, 150.0],
+        );
+        assert_ne!(narrow.newcomer, wide.newcomer);
     }
 
     fn frame(id: ObjectId, col: u32, row: u32) -> (ObjectId, ObjectFrame) {

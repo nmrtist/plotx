@@ -5,8 +5,9 @@ use crate::state::{MM_TO_PT, ObjectFrame, ObjectId};
 
 mod visual_spacing;
 pub use visual_spacing::{
-    GutterPreset, LayoutItem, OccupiedGrid, SpacingMode, arrange_grid,
+    GutterPreset, LayoutItem, OccupiedGrid, SpacingMode, TilingDropRegion, arrange_grid,
     compute_tiling_plan_for_items, infer_occupied_grid, layout_item, outer_axis_cells,
+    tiling_drop_region,
 };
 
 /// Grid presets offered in the Arrange menu, as `(label, rows, cols)`.

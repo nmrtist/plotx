@@ -532,6 +532,7 @@ fn execute_export(app: &PlotxApp, plan: &ToolPlan) -> Result<ToolResult, Automat
                 scope: ExportPageScope::Current,
                 dpi: params.dpi,
                 target_width_mm: None,
+                trim_to_visible_content: false,
             },
             &base,
         )

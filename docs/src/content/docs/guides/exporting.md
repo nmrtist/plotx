@@ -20,6 +20,19 @@ font-size and line-width violations against the chosen preset before you
 export, so problems are fixed on the board rather than discovered by the
 journal.
 
+### Trim page whitespace
+
+Enable **Trim page to visible content** in the Export dialog to remove page
+whitespace around the final rendered content. PNG, JPEG, TIFF, SVG, and PDF
+support this option, and PlotX remembers the choice for later exports.
+
+Trimming happens after the target-width preset establishes the page's physical
+scale. It changes only the page boundary and does not enlarge or fit the content
+again. A journal or column preset can therefore produce a final physical page
+width smaller than the preset width. Every supported format retains a 1-point
+physical safety edge; bitmap exports round that edge up to a whole output pixel.
+Empty pages keep their original dimensions.
+
 ## Copy figure
 
 *Copy figure* (`Ctrl` + `C`, also in the export menu, the command palette,

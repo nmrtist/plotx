@@ -66,8 +66,42 @@ pub struct RasterImage {
 }
 
 impl RasterImage {
+    pub(crate) fn from_rgba(width: u32, height: u32, rgba: Vec<u8>) -> Result<Self, RasterError> {
+        let expected = usize::try_from(width)
+            .ok()
+            .and_then(|width| {
+                usize::try_from(height)
+                    .ok()
+                    .and_then(|height| width.checked_mul(height))
+            })
+            .and_then(|pixels| pixels.checked_mul(4))
+            .ok_or(RasterError::PixelDimensionsOverflow)?;
+        if rgba.len() != expected {
+            return Err(RasterError::InvalidBufferLength {
+                width,
+                height,
+                expected,
+                actual: rgba.len(),
+            });
+        }
+        Ok(Self {
+            width,
+            height,
+            rgba,
+        })
+    }
+
     pub fn width(&self) -> u32 {
         self.width
+    }
+
+    #[cfg(test)]
+    pub(crate) fn from_invalid_buffer(width: u32, height: u32, rgba: Vec<u8>) -> Self {
+        Self {
+            width,
+            height,
+            rgba,
+        }
     }
 
     pub fn height(&self) -> u32 {
@@ -140,6 +174,15 @@ pub enum RasterError {
     PixmapAllocation { width: u32, height: u32 },
     #[error("could not allocate {bytes} bytes for the RGBA result")]
     OutputAllocation { bytes: u64 },
+    #[error(
+        "RGBA buffer length {actual} does not match {width}x{height} image (expected {expected})"
+    )]
+    InvalidBufferLength {
+        width: u32,
+        height: u32,
+        expected: usize,
+        actual: usize,
+    },
 }
 
 /// Render a canvas into memory without performing filesystem I/O.

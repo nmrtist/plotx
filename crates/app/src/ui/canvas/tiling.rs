@@ -42,15 +42,19 @@ pub(crate) fn update_tile_drop(
     let page_pt = app.doc.canvases[target].size_pt();
     let layout = app.doc.canvases[target].layout;
     let existing_ids = app.doc.canvases[target].plot_object_ids();
-    if app.session.ui.tile_drop.as_ref().is_some_and(|preview| {
-        preview.target == target
-            && preview
-                .existing
-                .iter()
-                .map(|(id, _)| *id)
-                .eq(existing_ids.iter().copied())
-            && preview_cell_matches(preview, page_pt, existing_ids.len(), pointer_page)
-    }) {
+    let region = plotx_core::layout::tiling_drop_region(
+        page_pt,
+        existing_ids.len(),
+        [pointer_page.x, pointer_page.y],
+    );
+    let cache_key = tile_cache_key(drag, target, page_pt, layout, &existing_ids, region);
+    if app
+        .session
+        .ui
+        .tile_drop
+        .as_ref()
+        .is_some_and(|preview| preview.cache_key == cache_key)
+    {
         return true;
     }
     let existing_items: Vec<_> = existing_ids
@@ -69,11 +73,31 @@ pub(crate) fn update_tile_drop(
         [pointer_page.x, pointer_page.y],
     );
     app.session.ui.tile_drop = Some(TileDropPreview {
+        cache_key,
         target,
         newcomer: plan.newcomer,
         existing: plan.existing,
     });
     true
+}
+
+fn tile_cache_key(
+    drag: &ObjectDrag,
+    target_canvas: usize,
+    target_page_pt: [f32; 2],
+    target_layout: plotx_core::layout::PageLayout,
+    target_existing_ids: &[ObjectId],
+    region: plotx_core::layout::TilingDropRegion,
+) -> TileDropCacheKey {
+    TileDropCacheKey {
+        source_canvas: drag.canvas,
+        source_object: drag.object,
+        target_canvas,
+        target_page_pt,
+        target_layout,
+        target_existing_ids: target_existing_ids.to_vec(),
+        region,
+    }
 }
 
 fn layout_item(canvas: &CanvasDocument, id: ObjectId) -> Option<plotx_core::layout::LayoutItem> {
@@ -84,41 +108,6 @@ fn layout_item(canvas: &CanvasDocument, id: ObjectId) -> Option<plotx_core::layo
         &plot.figure,
         object.frame,
     ))
-}
-
-fn preview_cell_matches(
-    preview: &TileDropPreview,
-    page: [f32; 2],
-    existing_count: usize,
-    pointer: Pos2,
-) -> bool {
-    if existing_count != 1 {
-        return true;
-    }
-    let Some((_, existing)) = preview.existing.first() else {
-        return false;
-    };
-    let nx = if page[0] > 0.0 {
-        pointer.x / page[0]
-    } else {
-        0.5
-    };
-    let ny = if page[1] > 0.0 {
-        pointer.y / page[1]
-    } else {
-        0.5
-    };
-    let horizontal = (nx - 0.5).abs() >= (ny - 0.5).abs();
-    let newcomer_last = if horizontal { nx >= 0.5 } else { ny >= 0.5 };
-    let dx = preview.newcomer.x - existing.x;
-    let dy = preview.newcomer.y - existing.y;
-    let preview_horizontal = dx.abs() >= dy.abs();
-    let preview_last = if preview_horizontal {
-        dx >= 0.0
-    } else {
-        dy >= 0.0
-    };
-    horizontal == preview_horizontal && newcomer_last == preview_last
 }
 
 /// Falls back to a plain move if the atomic action cannot be built.
@@ -183,5 +172,114 @@ pub(crate) fn paint_tile_preview(
     ];
     for segment in egui::Shape::dashed_line(&outline, chrome.tile_target_stroke(), 6.0, 4.0) {
         painter.add(segment);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn drag(canvas: usize, object: ObjectId) -> ObjectDrag {
+        ObjectDrag {
+            canvas,
+            object,
+            kind: ObjectDragKind::Move,
+            before: ObjectFrame::new(0.0, 0.0, 10.0, 10.0),
+            start_pointer: [0.0; 2],
+            start_pointer_screen: [0.0; 2],
+            others: Vec::new(),
+            active: true,
+        }
+    }
+
+    #[test]
+    fn tile_cache_identity_tracks_source_region_target_and_existing_order() {
+        let layout = plotx_core::layout::PageLayout::default();
+        let page = [400.0, 300.0];
+        let base = tile_cache_key(
+            &drag(0, 10),
+            2,
+            page,
+            layout,
+            &[20, 21],
+            plotx_core::layout::TilingDropRegion::Left,
+        );
+        assert_eq!(
+            base,
+            tile_cache_key(
+                &drag(0, 10),
+                2,
+                page,
+                layout,
+                &[20, 21],
+                plotx_core::layout::TilingDropRegion::Left,
+            )
+        );
+        assert_ne!(
+            base,
+            tile_cache_key(
+                &drag(1, 11),
+                2,
+                page,
+                layout,
+                &[20, 21],
+                plotx_core::layout::TilingDropRegion::Left,
+            )
+        );
+        assert_ne!(
+            base,
+            tile_cache_key(
+                &drag(0, 10),
+                3,
+                page,
+                layout,
+                &[20, 21],
+                plotx_core::layout::TilingDropRegion::Left,
+            )
+        );
+        assert_ne!(
+            base,
+            tile_cache_key(
+                &drag(0, 10),
+                2,
+                [401.0, 300.0],
+                layout,
+                &[20, 21],
+                plotx_core::layout::TilingDropRegion::Left,
+            )
+        );
+        assert_ne!(
+            base,
+            tile_cache_key(
+                &drag(0, 10),
+                2,
+                page,
+                plotx_core::layout::PageLayout { cols: 2, ..layout },
+                &[20, 21],
+                plotx_core::layout::TilingDropRegion::Left,
+            )
+        );
+        assert_ne!(
+            base,
+            tile_cache_key(
+                &drag(0, 10),
+                2,
+                page,
+                layout,
+                &[20, 21],
+                plotx_core::layout::TilingDropRegion::Right,
+            )
+        );
+        assert_ne!(
+            base,
+            tile_cache_key(
+                &drag(0, 10),
+                2,
+                page,
+                layout,
+                &[21, 20],
+                plotx_core::layout::TilingDropRegion::Left,
+            )
+        );
     }
 }

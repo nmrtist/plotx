@@ -1,7 +1,7 @@
 use crate::actions::Action;
 use crate::actions::tests::{push_canvas, sample_app};
 use crate::layout::compute_tiling_plan;
-use crate::state::{AxisOverrides, AxisRange, ObjectFrame};
+use crate::state::{AxisOverrides, AxisRange, ObjectFrame, TileDropCacheKey, TileDropPreview};
 
 /// A drop of canvas 0's plot onto canvas 1 (which already has one plot) transfers
 /// ownership and reframes both into a two-way split, undoably.
@@ -53,6 +53,27 @@ fn tile_drop_transfers_reframes_and_round_trips() {
 }
 
 #[test]
+fn cancelling_interaction_clears_tile_preview_cache() {
+    let mut app = sample_app();
+    app.session.ui.tile_drop = Some(TileDropPreview {
+        cache_key: TileDropCacheKey {
+            source_canvas: 0,
+            source_object: 1,
+            target_canvas: 1,
+            target_page_pt: [100.0, 80.0],
+            target_layout: crate::layout::PageLayout::default(),
+            target_existing_ids: vec![2],
+            region: crate::layout::TilingDropRegion::Left,
+        },
+        target: 1,
+        newcomer: ObjectFrame::new(0.0, 0.0, 50.0, 80.0),
+        existing: Vec::new(),
+    });
+    app.cancel_interaction();
+    assert!(app.session.ui.tile_drop.is_none());
+}
+
+#[test]
 fn simplify_grid_is_one_undo_step_and_preserves_other_axis_overrides() {
     let mut app = sample_app();
     let second_id = app.doc.canvases[0].allocate_object_id();
@@ -80,7 +101,7 @@ fn simplify_grid_is_one_undo_step_and_preserves_other_axis_overrides() {
         .axis_overrides;
     assert_eq!(simplified.x_label, original.x_label);
     assert_eq!(simplified.y_range, original.y_range);
-    assert_eq!(simplified.y_show_label, Some(false));
+    assert_eq!(simplified.y_show_label, None);
     assert_eq!(simplified.x_show_tick_labels, Some(false));
     assert_eq!(simplified.x_show_label, Some(false));
 
@@ -105,6 +126,100 @@ fn simplify_grid_is_one_undo_step_and_preserves_other_axis_overrides() {
             .x_show_label,
         Some(false)
     );
+}
+
+fn add_plots(app: &mut crate::state::PlotxApp, count: usize) {
+    let template = app.doc.canvases[0].objects[0].clone();
+    while app.doc.canvases[0].objects.len() < count {
+        let mut object = template.clone();
+        object.id = app.doc.canvases[0].allocate_object_id();
+        app.doc.canvases[0].objects.push(object);
+    }
+}
+
+fn visibility(app: &crate::state::PlotxApp) -> Vec<[Option<bool>; 4]> {
+    app.doc.canvases[0]
+        .objects
+        .iter()
+        .map(|object| {
+            let axes = &object.plot().unwrap().axis_overrides;
+            [
+                axes.x_show_tick_labels,
+                axes.x_show_label,
+                axes.y_show_tick_labels,
+                axes.y_show_label,
+            ]
+        })
+        .collect()
+}
+
+#[test]
+fn repeated_simplify_rebuilds_complete_visibility_for_each_grid() {
+    let mut app = sample_app();
+    add_plots(&mut app, 4);
+    let first = app.doc.canvases[0].objects[0].id;
+    let non_visibility = AxisOverrides {
+        x_label: Some("chemical shift".into()),
+        y_range: Some(AxisRange::new(-3.0, 8.0)),
+        ..AxisOverrides::default()
+    };
+    app.set_axis_overrides_value(0, first, &non_visibility);
+
+    app.arrange_active_canvas_grid_with_simplify(2, 2, true);
+    app.arrange_active_canvas_grid_with_simplify(1, 4, true);
+    assert_eq!(
+        visibility(&app),
+        vec![
+            [None, None, None, None],
+            [None, None, Some(false), Some(false)],
+            [None, None, Some(false), Some(false)],
+            [None, None, Some(false), Some(false)],
+        ]
+    );
+    let before_column = visibility(&app);
+
+    app.arrange_active_canvas_grid_with_simplify(4, 1, true);
+    assert_eq!(
+        visibility(&app),
+        vec![
+            [Some(false), Some(false), None, None],
+            [Some(false), Some(false), None, None],
+            [Some(false), Some(false), None, None],
+            [None, None, None, None],
+        ]
+    );
+    let axes = &app.doc.canvases[0]
+        .object(first)
+        .unwrap()
+        .plot()
+        .unwrap()
+        .axis_overrides;
+    assert_eq!(axes.x_label, non_visibility.x_label);
+    assert_eq!(axes.y_range, non_visibility.y_range);
+
+    app.undo();
+    assert_eq!(visibility(&app), before_column);
+}
+
+#[test]
+fn apply_grid_and_standalone_simplify_share_complete_visibility_semantics() {
+    let mut app = sample_app();
+    add_plots(&mut app, 4);
+    app.arrange_active_canvas_grid_with_simplify(2, 2, true);
+    let expected = visibility(&app);
+
+    for object in &mut app.doc.canvases[0].objects {
+        let axes = &mut object.plot_mut().unwrap().axis_overrides;
+        axes.x_show_tick_labels = Some(false);
+        axes.x_show_label = Some(false);
+        axes.y_show_tick_labels = Some(false);
+        axes.y_show_label = Some(false);
+    }
+    app.simplify_inner_axes();
+    assert_eq!(visibility(&app), expected);
+    let history = app.session.undo_stack.len();
+    app.simplify_inner_axes();
+    assert_eq!(app.session.undo_stack.len(), history);
 }
 
 #[test]
