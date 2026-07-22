@@ -1,4 +1,5 @@
 use super::*;
+use crate::ticks::estimated_text_width;
 use plotx_figure::{Axis, Figure};
 
 #[test]
@@ -166,6 +167,184 @@ fn categorical_axis_labels_slots_and_thins_when_dense() {
     axis.max = 2.5;
     let zoomed = axis_ticks_for(&axis, 8);
     assert_eq!(zoomed.labels, vec!["b", "c"]);
+}
+
+#[test]
+fn adaptive_x_labels_do_not_overlap_at_any_supported_width() {
+    let fig = Figure::new(
+        "",
+        Axis::new("chemical shift", -12_345.0, 98_765.0).reversed(true),
+        Axis::new("intensity", -1.0, 1.0),
+    );
+    for width in [24.0, 48.0, 72.0, 100.0, 160.0, 240.0, 400.0, 800.0] {
+        let layout = axis_layout(&fig, width, 300.0);
+        let proj = Projector::new(&fig, Rect::new(0.0, 0.0, width, 300.0), &layout.margins);
+        let mut intervals: Vec<(f32, f32)> = layout
+            .x_ticks
+            .values
+            .iter()
+            .zip(&layout.x_ticks.labels)
+            .map(|(&value, label)| {
+                let (center, _) = proj.project([value, fig.y.min]);
+                let half = estimated_text_width(label, fig.typography.tick_pt) * 0.5;
+                (center - half, center + half)
+            })
+            .collect();
+        intervals.sort_by(|a, b| a.0.total_cmp(&b.0));
+        assert!(
+            intervals.windows(2).all(|pair| pair[0].1 <= pair[1].0),
+            "overlapping labels at width {width}: {intervals:?}"
+        );
+    }
+}
+
+#[test]
+fn left_x_endpoint_stays_clear_when_y_ticks_are_dropped() {
+    let fig = Figure::new(
+        "",
+        Axis::new("x", -8_000.0, 0.0),
+        Axis::new("intensity", 0.0, 10.0),
+    );
+    let layout = axis_layout(&fig, 400.0, 55.0);
+    assert!(layout.y_ticks.labels.is_empty());
+
+    let proj = Projector::new(&fig, Rect::new(0.0, 0.0, 400.0, 55.0), &layout.margins);
+    let leftmost_label_edge = layout
+        .x_ticks
+        .values
+        .iter()
+        .zip(&layout.x_ticks.labels)
+        .map(|(&value, label)| {
+            let (center, _) = proj.project([value, fig.y.min]);
+            center - estimated_text_width(label, fig.typography.tick_pt) * 0.5
+        })
+        .fold(f32::INFINITY, f32::min);
+    let y_title_lane_right = OUTER_PAD + fig.typography.label_pt;
+    assert!(
+        leftmost_label_edge >= y_title_lane_right + AXIS_LABEL_GAP - 1e-3,
+        "x label edge {leftmost_label_edge} entered y-title lane ending at {y_title_lane_right}"
+    );
+}
+
+#[test]
+fn categorical_y_first_pass_covers_labels_selected_by_later_strides() {
+    let longest = "a very long category selected only by the second pass";
+    let fig = Figure::new(
+        "",
+        Axis::new("x", -8_000.0, 0.0),
+        Axis::categorical(
+            "group",
+            vec![
+                "a".into(),
+                "b".into(),
+                "c".into(),
+                longest.into(),
+                "e".into(),
+                "f".into(),
+            ],
+        ),
+    );
+    let layout = axis_layout(&fig, 160.0, 65.0);
+
+    assert!(layout.y_ticks.labels.iter().any(|label| label == longest));
+    assert!(
+        layout.x_ticks.labels.is_empty(),
+        "the conservative first pass must reject x labels before the later y stride widens margins"
+    );
+}
+
+#[test]
+fn adaptive_tick_counts_grow_monotonically_and_reach_the_old_wide_budget() {
+    let fig = Figure::new("", Axis::new("x", 0.0, 10.0), Axis::new("y", 0.0, 10.0));
+    let counts: Vec<usize> = [24.0, 60.0, 100.0, 160.0, 240.0, 400.0, 800.0]
+        .into_iter()
+        .map(|width| axis_layout(&fig, width, 600.0).x_ticks.values.len())
+        .collect();
+    assert!(
+        counts.windows(2).all(|pair| pair[0] <= pair[1]),
+        "tick counts were not monotonic: {counts:?}"
+    );
+
+    let wide = axis_layout(&fig, 800.0, 600.0);
+    assert_eq!(wide.x_ticks, axis_ticks_for(&fig.x, 8));
+    assert_eq!(wide.y_ticks, axis_ticks_for(&fig.y, 5));
+}
+
+#[test]
+fn tiny_figures_drop_ticks_but_keep_a_finite_axis_rect() {
+    let fig = Figure::new("", Axis::new("x", 0.0, 10.0), Axis::new("y", 0.0, 10.0));
+    let layout = axis_layout(&fig, 24.0, 24.0);
+    assert!(layout.x_ticks.values.is_empty());
+    assert!(layout.y_ticks.values.is_empty());
+
+    let plot = Projector::new(&fig, Rect::new(0.0, 0.0, 24.0, 24.0), &layout.margins).plot;
+    assert!(plot.left.is_finite() && plot.top.is_finite());
+    assert!(plot.width > 0.0 && plot.height > 0.0);
+}
+
+#[test]
+fn categorical_layout_accounts_for_long_names() {
+    let short = Figure::new(
+        "",
+        Axis::categorical("group", (0..8).map(|i| format!("c{i}")).collect()),
+        Axis::new("y", 0.0, 1.0),
+    );
+    let long = Figure::new(
+        "",
+        Axis::categorical(
+            "group",
+            (0..8).map(|i| format!("long category name {i}")).collect(),
+        ),
+        Axis::new("y", 0.0, 1.0),
+    );
+    let short_ticks = axis_layout(&short, 420.0, 300.0).x_ticks;
+    let long_ticks = axis_layout(&long, 420.0, 300.0).x_ticks;
+    assert_eq!(short_ticks.values.len(), 8);
+    assert!(long_ticks.values.len() < short_ticks.values.len());
+}
+
+#[test]
+fn east_asian_wide_categories_use_full_em_width_for_thinning() {
+    let fig = Figure::new(
+        "",
+        Axis::categorical(
+            "group",
+            ["分类一", "分类二", "分类三", "分类四", "分类五", "分类六"]
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
+        ),
+        Axis::new("y", 0.0, 1.0),
+    );
+    let layout = axis_layout(&fig, 165.0, 150.0);
+    assert!(
+        layout.x_ticks.labels.len() < 6,
+        "full-width category labels must be thinned: {:?}",
+        layout.x_ticks.labels
+    );
+
+    let tick_pt = fig.typography.tick_pt;
+    assert!((estimated_text_width("分类一", tick_pt) - 3.0 * tick_pt).abs() < 1e-3);
+    assert!((estimated_text_width("𠀀", tick_pt) - tick_pt).abs() < 1e-3);
+    assert!((estimated_text_width("e\u{301}", tick_pt) - 0.58 * tick_pt).abs() < 1e-3);
+}
+
+#[test]
+fn aspect_lock_and_projection_bands_constrain_the_adaptive_budget() {
+    use plotx_figure::AxisTrace;
+
+    let base = Figure::new("", Axis::new("x", 0.0, 10.0), Axis::new("y", 0.0, 10.0));
+    let base_count = axis_layout(&base, 600.0, 140.0).x_ticks.values.len();
+
+    let mut constrained = base.clone();
+    constrained.lock_aspect = true;
+    constrained.left_projection = Some(AxisTrace {
+        points: vec![[0.0, 0.0], [10.0, 1.0]],
+        color: Color::TRACE,
+        width: 1.0,
+    });
+    let constrained_count = axis_layout(&constrained, 600.0, 140.0).x_ticks.values.len();
+    assert!(constrained_count < base_count);
 }
 
 #[test]

@@ -1,9 +1,8 @@
 use crate::{
     AXIS_LINE_WIDTH, Document, DocumentItem, DocumentObject, DocumentOverlay, DocumentViewport,
-    LegendMark, Margins, OUTER_PAD, OverlayAlign, OverlayKind, OverlayShape, OverlayShapeKind,
-    OverlayText, Projector, Rect, TICK_LABEL_PAD, TICK_LENGTH, arrow_head, axis_ticks_for,
-    error_bar_segments, heatmap_cells, integral, legend_entries, polygon_outline,
-    projection_points,
+    LegendMark, OUTER_PAD, OverlayAlign, OverlayKind, OverlayShape, OverlayShapeKind, OverlayText,
+    Projector, Rect, TICK_LABEL_PAD, TICK_LENGTH, arrow_head, axis_layout, error_bar_segments,
+    heatmap_cells, integral, legend_entries, polygon_outline, projection_points,
 };
 use egui::{Align2, Color32, FontId, Pos2, Sense, Shape, Stroke, StrokeKind, Ui, Vec2};
 use plotx_figure::{AxisFrame, AxisTrace, Color, Figure, SeriesKind};
@@ -33,7 +32,8 @@ pub fn show(ui: &mut Ui, fig: &Figure) {
 /// it here, so the whole figure stays proportional at any zoom.
 pub fn paint(painter: &egui::Painter, outer: Rect, fig: &Figure, scale: f32) {
     let ty = fig.typography;
-    let margins = Margins::for_figure(fig).scaled(scale);
+    let layout = axis_layout(fig, outer.width / scale, outer.height / scale);
+    let margins = layout.margins.scaled(scale);
     let proj = Projector::new(fig, outer, &margins);
     let plot = proj.plot;
 
@@ -62,18 +62,7 @@ pub fn paint(painter: &egui::Painter, outer: Rect, fig: &Figure, scale: f32) {
     }
 
     let hidden_frame = fig.axis_frame == AxisFrame::Hidden;
-    // A hidden frame draws no ticks, so empty tick sets let every tick/label
-    // loop below no-op without further guards.
-    let empty_ticks = crate::AxisTicks {
-        values: Vec::new(),
-        labels: Vec::new(),
-        scale_exponent: None,
-    };
-    let (x_ticks, y_ticks) = if hidden_frame {
-        (empty_ticks.clone(), empty_ticks)
-    } else {
-        (axis_ticks_for(&fig.x, 8), axis_ticks_for(&fig.y, 5))
-    };
+    let (x_ticks, y_ticks) = (layout.x_ticks, layout.y_ticks);
 
     if fig.show_grid && !hidden_frame {
         let grid_stroke = Stroke::new(1.0 * scale, col(Color::GRID));

@@ -53,11 +53,12 @@ as a color overlay.
 ## Plot styling and typography
 
 PlotX styles plots for print automatically: clean bottom-and-left axes with
-outward ticks, tick precision that follows the zoom, and NMR isotope numbers
-set as superscripts. New dataset pages start at the 89 × 60 mm single-column
-size, so a plot spanning the page already shows text at its printed journal
-size; assemble multi-panel figures on a wider page later, keeping each panel
-at its natural size.
+outward ticks, tick precision that follows the data range, tick density that
+automatically thins as a panel narrows, and NMR isotope numbers set as
+superscripts. New dataset pages start at the 89 × 60 mm single-column size, so
+a plot spanning the page already shows text at its printed journal size;
+assemble multi-panel figures on a wider page later, keeping each panel at its
+natural size.
 
 What you control directly:
 

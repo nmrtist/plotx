@@ -19,6 +19,7 @@ emf = ["dep:windows-sys"]
 
 [dependencies]
 plotx-figure.workspace = true
+unicode-width.workspace = true
 egui = { workspace = true, optional = true }
 
 [target.'cfg(windows)'.dependencies]

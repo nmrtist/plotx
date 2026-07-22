@@ -4173,6 +4173,7 @@ version = "0.1.0"
 dependencies = [
  "egui",
  "plotx-figure",
+ "unicode-width",
  "windows-sys 0.61.2",
 ]
 

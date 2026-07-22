@@ -216,11 +216,9 @@ pub fn render_central(app: &mut PlotxApp, ui: &mut Ui) {
             .and_then(|object| object.plot())
             .unwrap()
             .figure;
-        let proj = plotx_render::Projector::new(
-            fig,
-            outer,
-            &plotx_render::Margins::for_figure(fig).scaled(app.session.board.zoom),
-        );
+        let zoom = app.session.board.zoom;
+        let layout = plotx_render::axis_layout(fig, outer.width / zoom, outer.height / zoom);
+        let proj = plotx_render::Projector::new(fig, outer, &layout.margins.scaled(zoom));
         proj.plot
     };
 

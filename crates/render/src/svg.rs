@@ -1,7 +1,7 @@
 use crate::{
-    AXIS_LINE_WIDTH, Document, DocumentItem, DocumentObject, DocumentOverlay, LegendMark, Margins,
+    AXIS_LINE_WIDTH, Document, DocumentItem, DocumentObject, DocumentOverlay, LegendMark,
     OUTER_PAD, OverlayAlign, OverlayKind, OverlayShapeKind, Projector, Rect, TICK_LABEL_PAD,
-    TICK_LENGTH, arrow_head, axis_ticks_for, error_bar_segments, heatmap_cells, integral,
+    TICK_LENGTH, arrow_head, axis_layout, error_bar_segments, heatmap_cells, integral,
     legend_entries, polygon_outline, projection_points,
 };
 use plotx_figure::{AxisFrame, AxisTrace, Figure, SeriesKind};
@@ -167,7 +167,8 @@ fn write_figure(s: &mut String, fig: &Figure, outer: Rect, clip_id: &str) {
     let ty = fig.typography;
     let w = outer.width;
     let h = outer.height;
-    let margins = Margins::for_figure(fig);
+    let layout = axis_layout(fig, outer.width, outer.height);
+    let margins = layout.margins;
     let proj = Projector::new(fig, outer, &margins);
     let plot = proj.plot;
 
@@ -192,17 +193,7 @@ fn write_figure(s: &mut String, fig: &Figure, outer: Rect, clip_id: &str) {
     }
 
     let hidden_frame = fig.axis_frame == AxisFrame::Hidden;
-    // Empty tick sets make every tick/label loop below a no-op for a hidden frame.
-    let empty_ticks = crate::AxisTicks {
-        values: Vec::new(),
-        labels: Vec::new(),
-        scale_exponent: None,
-    };
-    let (x_ticks, y_ticks) = if hidden_frame {
-        (empty_ticks.clone(), empty_ticks)
-    } else {
-        (axis_ticks_for(&fig.x, 8), axis_ticks_for(&fig.y, 5))
-    };
+    let (x_ticks, y_ticks) = (layout.x_ticks, layout.y_ticks);
 
     if fig.show_grid && !hidden_frame {
         let grid = plotx_figure::Color::GRID.to_hex();
@@ -275,7 +266,7 @@ fn write_figure(s: &mut String, fig: &Figure, outer: Rect, clip_id: &str) {
             width = AXIS_LINE_WIDTH,
             y = plot.bottom() + TICK_LENGTH + TICK_LABEL_PAD + ty.tick_pt,
             font = ty.tick_pt,
-            lab = label,
+            lab = escape(label),
         );
     }
     let y_tick_x = y_axis_x - TICK_LENGTH - TICK_LABEL_PAD;
@@ -289,7 +280,7 @@ fn write_figure(s: &mut String, fig: &Figure, outer: Rect, clip_id: &str) {
             width = AXIS_LINE_WIDTH,
             x = y_tick_x,
             font = ty.tick_pt,
-            lab = label,
+            lab = escape(label),
         );
     }
     if let Some(multiplier) = y_ticks.multiplier() {
@@ -687,11 +678,17 @@ mod tests {
     fn escapes_xml_special_chars() {
         let fig = Figure::new(
             "A & B <test>",
-            Axis::new("x", 0.0, 1.0),
-            Axis::new("y", 0.0, 1.0),
+            Axis::categorical("x", vec!["A & B".into(), "<ctrl>".into()]),
+            Axis::categorical("y", vec!["north & south".into(), "<root>".into()]),
         );
         let out = export(&fig);
         assert!(out.contains("A &amp; B &lt;test&gt;"));
+        assert!(out.contains("A &amp; B"));
+        assert!(out.contains("&lt;ctrl&gt;"));
+        assert!(out.contains("north &amp; south"));
+        assert!(out.contains("&lt;root&gt;"));
+        assert!(!out.contains(">A & B<"));
+        assert!(!out.contains("><ctrl><"));
     }
 
     #[test]
@@ -741,5 +738,29 @@ mod tests {
         );
         assert_eq!(boxed.matches("<rect ").count(), open_rects + 1);
         assert!(boxed.contains("fill=\"none\" stroke=\"#272727\""));
+    }
+
+    #[test]
+    fn tiny_figure_keeps_axis_lines_after_ticks_are_dropped() {
+        let mut fig = Figure::new("", Axis::new("x", 0.0, 1.0), Axis::new("y", 0.0, 1.0));
+        fig.width = 24.0;
+        fig.height = 24.0;
+        let outer = Rect::new(0.0, 0.0, fig.width, fig.height);
+        let layout = axis_layout(&fig, fig.width, fig.height);
+        assert!(layout.x_ticks.labels.is_empty() && layout.y_ticks.labels.is_empty());
+        let plot = Projector::new(&fig, outer, &layout.margins).plot;
+        let axis_path = format!(
+            r##"<path d="M{l:.2} {b:.2}H{r:.2}M{l:.2} {t:.2}V{b:.2}" fill="none" stroke="#272727""##,
+            l = plot.left,
+            r = plot.right(),
+            t = plot.top,
+            b = plot.bottom(),
+        );
+        let svg = export(&fig);
+        assert!(
+            svg.contains(&axis_path),
+            "missing open-axis path: {axis_path}"
+        );
+        assert_eq!(svg.matches("stroke=\"#272727\"").count(), 1);
     }
 }

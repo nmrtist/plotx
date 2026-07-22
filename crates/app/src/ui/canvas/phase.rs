@@ -70,12 +70,9 @@ pub(crate) fn handle_phase_before_paint(
     else {
         return;
     };
-    let plot = plotx_render::Projector::new(
-        figure,
-        outer,
-        &plotx_render::Margins::for_figure(figure).scaled(app.session.board.zoom),
-    )
-    .plot;
+    let zoom = app.session.board.zoom;
+    let layout = plotx_render::axis_layout(figure, outer.width / zoom, outer.height / zoom);
+    let plot = plotx_render::Projector::new(figure, outer, &layout.margins.scaled(zoom)).plot;
     let axis = app.doc.datasets[di].active_phase_axis(app.session.ui.phase_axis);
     let Some(pivot_ppm) = displayed_phase_pivot_ppm(app, di, axis) else {
         return;
