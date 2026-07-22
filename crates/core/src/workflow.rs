@@ -9,9 +9,9 @@ use crate::export::{
     DEFAULT_BITMAP_DPI, ExportError, ExportFormat, ExportPageScope, ExportSettings, export_canvases,
 };
 use crate::state::{
-    AxisProjections, CanvasDocument, CanvasObject, CanvasObjectKind, CanvasViewport, ChartSpec,
-    DEFAULT_CANVAS_SIZE_MM, DataBinding, Dataset, MM_TO_PT, Nmr2DDataset, NmrDataset, ObjectFrame,
-    ObjectId, PanelMeta, PlotObject, StackSpec, default_chart_type,
+    AxisOverrides, AxisProjections, CanvasDocument, CanvasObject, CanvasObjectKind, CanvasViewport,
+    ChartSpec, DEFAULT_CANVAS_SIZE_MM, DataBinding, Dataset, MM_TO_PT, Nmr2DDataset, NmrDataset,
+    ObjectFrame, ObjectId, PanelMeta, PlotObject, StackSpec, default_chart_type,
 };
 use plotx_figure::{Axis, Figure};
 use plotx_io::{Acquisition, DataFormat, Domain, LoadWarning, LoadWarningCode, Provenance};
@@ -235,6 +235,7 @@ pub fn build_plot_object(
             chart,
             stack: StackSpec::default(),
             projections: AxisProjections::default(),
+            axis_overrides: AxisOverrides::default(),
             figure,
             viewport,
             panel,

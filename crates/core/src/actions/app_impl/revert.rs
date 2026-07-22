@@ -22,6 +22,14 @@ impl PlotxApp {
             } => {
                 self.set_object_viewport(*canvas, *object, before);
             }
+            Action::SetAxisOverrides {
+                canvas,
+                object,
+                before,
+                ..
+            } => {
+                self.set_axis_overrides_value(*canvas, *object, before);
+            }
             Action::MoveResizeObject {
                 canvas,
                 object,

@@ -83,6 +83,7 @@ pub(super) fn validate_action(
             shape.canvases += 1;
         }
         Action::SetObjectViewport { canvas, object, .. }
+        | Action::SetAxisOverrides { canvas, object, .. }
         | Action::MoveResizeObject { canvas, object, .. }
         | Action::SetPanelMeta { canvas, object, .. }
         | Action::SetObjectFlags { canvas, object, .. }

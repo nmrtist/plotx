@@ -53,15 +53,21 @@ as a color overlay.
 ## Plot styling and typography
 
 PlotX styles plots for print automatically: clean bottom-and-left axes with
-outward ticks, tick precision that follows the data range, tick density that
-automatically thins as a panel narrows, and NMR isotope numbers set as
-superscripts. New dataset pages start at the 89 × 60 mm single-column size, so
-a plot spanning the page already shows text at its printed journal size;
-assemble multi-panel figures on a wider page later, keeping each panel at its
-natural size.
+outward ticks, tick precision that follows the displayed range, tick density
+that thins as a panel narrows, and NMR isotope numbers set as superscripts.
+New dataset pages start at the 89 × 60 mm single-column size, so a plot
+spanning the page already shows text at its printed journal size; assemble
+multi-panel figures on a wider page later, keeping each panel at its natural
+size.
 
 What you control directly:
 
+- Select one plot and use **Axes** in the Object inspector to override its X
+  and Y titles or numeric ranges. Leave a title blank, or keep a range on
+  **Auto**, to use the value derived from the data. A manual range becomes that
+  axis's full range: zooming and panning stay inside it, and a double-click on
+  the plot returns to it. Charts without visible axes offer no axis settings,
+  and categorical axes have no range controls.
 - **Figure Typography…** on the Figure Ribbon tab sets the axis text sizes
   (tick labels, axis titles, and the figure title) for every plot at once, in
   absolute points — a document-level style, so resizing a panel never changes

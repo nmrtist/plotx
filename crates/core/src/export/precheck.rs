@@ -198,8 +198,8 @@ fn threshold_status(value: f32, min: f32) -> ComplianceStatus {
 mod tests {
     use super::*;
     use crate::state::{
-        AxisProjections, CanvasObject, CanvasObjectKind, CanvasViewport, ChartSpec, DataBinding,
-        ObjectFrame, PanelMeta, PlotObject, StackSpec,
+        AxisOverrides, AxisProjections, CanvasObject, CanvasObjectKind, CanvasViewport, ChartSpec,
+        DataBinding, ObjectFrame, PanelMeta, PlotObject, StackSpec,
     };
     use plotx_figure::{Axis, Figure};
 
@@ -278,6 +278,7 @@ mod tests {
                 chart: ChartSpec::default(),
                 stack: StackSpec::default(),
                 projections: AxisProjections::default(),
+                axis_overrides: AxisOverrides::default(),
                 figure,
                 viewport,
                 panel,

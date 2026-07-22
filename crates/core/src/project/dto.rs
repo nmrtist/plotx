@@ -1,3 +1,4 @@
+use super::axis_overrides::AxisOverridesDto;
 use super::*;
 
 #[derive(Serialize, Deserialize)]
@@ -358,6 +359,8 @@ pub struct ViewCanvasObject {
     pub frame: FrameDto,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub viewport: Option<ViewportDto>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub axis_overrides: Option<AxisOverridesDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub panel: Option<PanelDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

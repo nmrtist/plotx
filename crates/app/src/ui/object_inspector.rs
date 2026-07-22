@@ -1,9 +1,11 @@
 //! The Object inspector: geometry + per-kind style editing for the current
 //! page-space selection, at the top of the Secondary Side Bar.
 
+mod axes;
 mod chart_gallery;
 mod panel_note;
 
+use axes::{axes_section, commit_if_target_changed};
 use chart_gallery::chart_gallery;
 use egui::{DragValue, Ui};
 use egui_phosphor::regular as icon;
@@ -16,13 +18,24 @@ use plotx_core::state::{
 use plotx_figure::Color;
 
 pub(crate) fn render(app: &mut PlotxApp, ui: &mut Ui) {
+    let ids: Vec<ObjectId> = app.session.ui.selection.objects().to_vec();
+    let axis_target = app.session.active_canvas.and_then(|ci| {
+        (ids.len() == 1
+            && app
+                .doc
+                .canvases
+                .get(ci)?
+                .object(ids[0])
+                .is_some_and(|object| object.plot().is_some()))
+        .then(|| (ci, ids[0]))
+    });
+    commit_if_target_changed(app, axis_target);
     let Some(ci) = app.session.active_canvas else {
         return;
     };
     if ci >= app.doc.canvases.len() {
         return;
     }
-    let ids: Vec<ObjectId> = app.session.ui.selection.objects().to_vec();
     if ids.is_empty() {
         commit_panel_note_edit(app);
         return;
@@ -40,12 +53,15 @@ pub(crate) fn render(app: &mut PlotxApp, ui: &mut Ui) {
     geometry_section(app, ci, &ids, ui);
 
     let mut note_focused = false;
+    let mut axes_focused = false;
     if ids.len() == 1
         && app.doc.canvases[ci]
             .object(ids[0])
             .map(|o| o.plot().is_some())
             .unwrap_or(false)
     {
+        ui.separator();
+        axes_focused = axes_section(app, ci, ids[0], ui);
         ui.separator();
         note_focused = panel_note_section(app, ci, ids[0], ui);
         data_section(app, ci, ids[0], ui);
@@ -74,7 +90,7 @@ pub(crate) fn render(app: &mut PlotxApp, ui: &mut Ui) {
         format_once_section(app, ci, primary, ui);
     }
 
-    flush_inspector_edit(app, ui, text_focused || note_focused);
+    flush_inspector_edit(app, ui, text_focused || note_focused || axes_focused);
     ui.separator();
     ui.add_space(2.0);
 }
@@ -700,4 +716,20 @@ fn rgb_of(c: Color) -> [u8; 3] {
 
 fn color_of(rgb: [u8; 3]) -> Color {
     Color::rgb(rgb[0], rgb[1], rgb[2])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn renders_safely_during_active_canvas_transition() {
+        let mut app = PlotxApp::new();
+        app.session.active_canvas = Some(0);
+        assert!(app.doc.canvases.is_empty());
+        assert!(app.session.ui.selection.objects().is_empty());
+
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| render(&mut app, ui));
+    }
 }

@@ -321,11 +321,9 @@ pub struct FitEditorValidation {
 }
 
 pub struct UiState {
-    /// The single in-flight direct-manipulation gesture (drag/select/phase/etc.);
-    /// see [`Interaction`].
+    /// The single in-flight direct-manipulation gesture; see [`Interaction`].
     pub interaction: Interaction,
-    /// Which 2D axis the Phase panel and canvas drag target. Re-clamped to a valid
-    /// axis for the active dataset each time the phase panel renders.
+    /// 2D axis targeted by the Phase panel and canvas drag; re-clamped when rendered.
     pub phase_axis: PhaseAxis,
     pub analysis_selection: Option<AnalysisSelection>,
     /// Which table column the Peaks tool targets (ignored by single-trace domains).
@@ -336,6 +334,8 @@ pub struct UiState {
     pub processing_edit: Option<PendingProcessingEdit>,
     pub processing_session: Option<PendingProcessingEdit>,
     pub inspector_edit: Option<PendingInspectorEdit>,
+    /// Pre-edit snapshot for a plot-local axis text/range gesture.
+    pub axis_overrides_before: Option<(usize, ObjectId, AxisOverrides)>,
     pub canvas_settings: Option<usize>,
     /// Whether the document-level Figure Typography window is open.
     pub figure_typography_open: bool,
@@ -346,9 +346,7 @@ pub struct UiState {
     /// (canvas index, caption, visibility), coalescing a typing run into one undo
     /// step committed on focus loss.
     pub caption_edit_before: Option<(usize, String, bool)>,
-    /// Pre-edit snapshot for an in-progress per-panel note edit
-    /// (canvas index, object id, panel metadata), coalescing a typing run into
-    /// one undo step.
+    /// Pre-edit panel note, coalescing a typing run into one undo step.
     pub note_edit_before: Option<(usize, ObjectId, PanelMeta)>,
     pub sheet_open: Option<usize>,
     pub rename: Option<RenameState>,
@@ -504,6 +502,7 @@ impl Default for UiState {
             processing_edit: None,
             processing_session: None,
             inspector_edit: None,
+            axis_overrides_before: None,
             canvas_settings: None,
             figure_typography_open: false,
             figure_typography_before: None,

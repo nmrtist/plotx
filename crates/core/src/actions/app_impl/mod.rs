@@ -1,5 +1,6 @@
 use super::*;
 
+mod axis_overrides;
 mod meta_edits;
 mod processing;
 mod revert;
@@ -11,6 +12,7 @@ use validate::{ValidationShape, validate_action};
 
 impl PlotxApp {
     pub fn execute_action(&mut self, action: Action) {
+        self.finish_axis_overrides_edit();
         if let Err(error) = self.try_execute_action(action) {
             self.session.status = error.to_string();
         }
@@ -36,6 +38,7 @@ impl PlotxApp {
     }
 
     pub fn undo(&mut self) {
+        self.finish_axis_overrides_edit();
         self.reset_interaction();
         let Some(action) = self.session.undo_stack.pop() else {
             return;
@@ -48,6 +51,7 @@ impl PlotxApp {
     }
 
     pub fn redo(&mut self) {
+        self.finish_axis_overrides_edit();
         self.reset_interaction();
         let Some(action) = self.session.redo_stack.pop() else {
             return;
@@ -76,6 +80,7 @@ impl PlotxApp {
         self.session.ui.processing_edit = None;
         self.session.ui.processing_session = None;
         self.session.ui.inspector_edit = None;
+        self.session.ui.axis_overrides_before = None;
         self.session.ui.selection = Selection::None;
         self.session.ui.panel_note_inline_edit = None;
         self.session.ui.panel_note_edit = None;
@@ -118,12 +123,12 @@ impl PlotxApp {
             else {
                 return;
             };
-            self.execute_action(Action::set_object_viewport(
+            self.commit_object_viewport(
                 pending.canvas,
                 pending.object,
                 pending.before,
                 object.viewport.clone(),
-            ));
+            );
         }
     }
 
@@ -144,6 +149,14 @@ impl PlotxApp {
                 ..
             } => {
                 self.set_object_viewport(*canvas, *object, after);
+            }
+            Action::SetAxisOverrides {
+                canvas,
+                object,
+                after,
+                ..
+            } => {
+                self.set_axis_overrides_value(*canvas, *object, after);
             }
             Action::MoveResizeObject {
                 canvas,
@@ -349,6 +362,7 @@ impl PlotxApp {
                     self.session.ui.selection = Selection::None;
                     self.session.ui.panel_note_inline_edit = None;
                     self.session.ui.panel_note_edit = None;
+                    self.session.ui.axis_overrides_before = None;
                     self.session.ui.canvas_settings = None;
                     self.session.ui.rename = None;
                 }
@@ -421,22 +435,6 @@ impl PlotxApp {
             Action::TransferObjects { .. } => self.apply_transfer(action),
             Action::TileDrop { .. } => self.apply_tile_drop(action),
         }
-    }
-
-    fn set_object_viewport(&mut self, canvas: usize, object: ObjectId, viewport: &CanvasViewport) {
-        let Some(object) = self
-            .doc
-            .canvases
-            .get_mut(canvas)
-            .and_then(|canvas| canvas.object_mut(object))
-        else {
-            return;
-        };
-        let Some(plot) = object.plot_mut() else {
-            return;
-        };
-        plot.viewport = viewport.clone();
-        plot.viewport.apply_to(&mut plot.figure);
     }
 
     pub fn set_object_frame(&mut self, canvas: usize, object: ObjectId, frame: ObjectFrame) {
@@ -604,6 +602,10 @@ impl PlotxApp {
         {
             self.session.ui.panel_note_inline_edit = None;
         }
+        if matches!(self.session.ui.axis_overrides_before, Some((ci, object, _)) if ci == canvas && object == id)
+        {
+            self.session.ui.axis_overrides_before = None;
+        }
     }
 
     pub fn set_object_styles(&mut self, canvas: usize, styles: &[(ObjectId, ObjectStyle)]) {
@@ -650,7 +652,7 @@ impl PlotxApp {
             frame.width / crate::state::MM_TO_PT,
             frame.height / crate::state::MM_TO_PT,
         ];
-        let mut fig = self.build_object_figure(binding, &chart, &stack, &projections, size);
+        let fig = self.build_object_figure(binding, &chart, &stack, &projections, size);
         if let Some(plot) = self
             .doc
             .canvases
@@ -658,9 +660,7 @@ impl PlotxApp {
             .and_then(|c| c.object_mut(object))
             .and_then(|o| o.plot_mut())
         {
-            plot.viewport = CanvasViewport::from_figure(&fig);
-            plot.viewport.apply_to(&mut fig);
-            plot.figure = fig;
+            plot.reset_viewport_on_rebuild(fig);
         }
     }
 
@@ -692,7 +692,7 @@ impl PlotxApp {
             frame.width / crate::state::MM_TO_PT,
             frame.height / crate::state::MM_TO_PT,
         ];
-        let mut fig = self.build_object_figure(&binding, chart, &stack, &projections, size);
+        let fig = self.build_object_figure(&binding, chart, &stack, &projections, size);
         if let Some(plot) = self
             .doc
             .canvases
@@ -700,9 +700,7 @@ impl PlotxApp {
             .and_then(|c| c.object_mut(object))
             .and_then(|o| o.plot_mut())
         {
-            plot.viewport = CanvasViewport::from_figure(&fig);
-            plot.viewport.apply_to(&mut fig);
-            plot.figure = fig;
+            plot.reset_viewport_on_rebuild(fig);
         }
     }
 
@@ -734,7 +732,7 @@ impl PlotxApp {
             frame.width / crate::state::MM_TO_PT,
             frame.height / crate::state::MM_TO_PT,
         ];
-        let mut fig = self.build_object_figure(&binding, &chart, stack, &projections, size);
+        let fig = self.build_object_figure(&binding, &chart, stack, &projections, size);
         if let Some(plot) = self
             .doc
             .canvases
@@ -742,9 +740,7 @@ impl PlotxApp {
             .and_then(|c| c.object_mut(object))
             .and_then(|o| o.plot_mut())
         {
-            plot.viewport = CanvasViewport::from_figure(&fig);
-            plot.viewport.apply_to(&mut fig);
-            plot.figure = fig;
+            plot.reset_viewport_on_rebuild(fig);
         }
     }
 
@@ -776,7 +772,7 @@ impl PlotxApp {
             frame.width / crate::state::MM_TO_PT,
             frame.height / crate::state::MM_TO_PT,
         ];
-        let mut fig = self.build_object_figure(&binding, &chart, &stack, projections, size);
+        let fig = self.build_object_figure(&binding, &chart, &stack, projections, size);
         if let Some(plot) = self
             .doc
             .canvases
@@ -784,8 +780,7 @@ impl PlotxApp {
             .and_then(|c| c.object_mut(object))
             .and_then(|o| o.plot_mut())
         {
-            plot.viewport.apply_to(&mut fig);
-            plot.figure = fig;
+            plot.preserve_viewport_on_rebuild(fig);
         }
     }
 }
