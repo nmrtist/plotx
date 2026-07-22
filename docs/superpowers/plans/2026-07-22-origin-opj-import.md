@@ -655,7 +655,7 @@ git commit -m "feat(core): convert Origin worksheets to tables"
 - Modify: crates/app/src/ui/shortcuts.rs
 - Modify: crates/app/src/ui/canvas/mod.rs
 
-- [ ] **Step 1: Write routing and user-error tests before implementation**
+- [x] **Step 1: Write routing and user-error tests before implementation**
 
 Cover:
 
@@ -681,7 +681,7 @@ mod origin_tests;
 
 After GREEN, list the tests with cargo test -p plotx origin -- --list and verify the expected names appear.
 
-- [ ] **Step 2: Run tests and observe RED**
+- [x] **Step 2: Run tests and observe RED**
 
 ~~~bash
 cargo test -p plotx origin -- --nocapture
@@ -689,7 +689,7 @@ cargo test -p plotx origin -- --nocapture
 
 Expected: tests fail because Origin routing and the recent-file variant do not exist.
 
-- [ ] **Step 3: Add a focused application adapter**
+- [x] **Step 3: Add a focused application adapter**
 
 The new origin.rs module:
 
@@ -705,7 +705,7 @@ The new origin.rs module:
 
 Keep parsing out of file_dialogs.rs. Do not add a new command ID; reuse CommandId::ImportTable and keep stable machine ID file.import_table.
 
-- [ ] **Step 4: Extend filters and common routing**
+- [x] **Step 4: Extend filters and common routing**
 
 Change the visible command label from Import Table / CSV… to Import Table…. Add Origin projects (experimental) to the import filter. Extend the recent enum with OriginProject for .opj and .opju fallback classification.
 
@@ -713,11 +713,11 @@ The shared classify_open_path helper first checks path.is_dir() and immediately 
 
 Generalize preview copy from Worksheet and worksheet(s) to Table and table(s). The selector changes only which candidate is previewed; the summary explicitly says all candidate tables will be imported, matching the existing commit loop.
 
-- [ ] **Step 5: Verify the normal import lifecycle**
+- [x] **Step 5: Verify the normal import lifecycle**
 
 The preview must appear before table state changes. Confirming imports all candidates using TypedTableState::imported_with_operation with plotx.import.origin.v1 and only then records the path in recent files. Cancellation changes neither tables nor recent files.
 
-- [ ] **Step 6: Run focused and feature checks**
+- [x] **Step 6: Run focused and feature checks**
 
 ~~~bash
 cargo test -p plotx origin -- --nocapture
@@ -732,7 +732,7 @@ wc -l crates/app/src/ui/file_dialogs.rs \
 
 Expected: tests and checks pass, every Rust source file remains below 800 lines, and the existing default and DataFusion frontends compile.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ~~~bash
 git add crates/app/src
