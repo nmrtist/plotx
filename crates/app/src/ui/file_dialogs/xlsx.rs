@@ -45,8 +45,8 @@ pub(super) fn import_xlsx_table_path(app: &mut PlotxApp, path: &std::path::Path)
                 operation_id,
                 path,
                 "worksheet_selection",
-                "The workbook has no visible data worksheets.",
-                "no visible non-empty worksheet".into(),
+                "The workbook has no visible data tables.",
+                "no visible non-empty table".into(),
             );
             return;
         }
@@ -68,7 +68,7 @@ pub(super) fn import_xlsx_table_path(app: &mut PlotxApp, path: &std::path::Path)
     let mut report = OperationReport::success(
         operation_id,
         OperationKind::TableImport,
-        format!("Imported {sheet_count} worksheet(s) from an XLSX workbook."),
+        format!("Imported {sheet_count} table(s) from an XLSX workbook."),
         (),
     );
     let mut candidates = Vec::with_capacity(sheet_count);
@@ -125,10 +125,7 @@ pub(super) fn import_xlsx_table_path(app: &mut PlotxApp, path: &std::path::Path)
             Diagnostic::new(
                 Severity::Info,
                 DiagnosticCode::TableImportSucceeded,
-                format!(
-                    "Imported worksheet '{}' with {row_count} row(s).",
-                    sheet.name
-                ),
+                format!("Imported table '{}' with {row_count} row(s).", sheet.name),
             )
             .with_source("core.xlsx")
             .with_context("path", path.display().to_string())
@@ -150,7 +147,7 @@ pub(super) fn import_xlsx_table_path(app: &mut PlotxApp, path: &std::path::Path)
     if warning_count > 0 {
         report.outcome = plotx_core::operation::OperationOutcome::Warning;
         report.summary =
-            format!("Imported {sheet_count} XLSX worksheet(s) with {warning_count} warning(s).");
+            format!("Imported {sheet_count} XLSX table(s) with {warning_count} warning(s).");
     }
     app.session.ui.table_import_preview = Some(TableImportPreviewState {
         candidates,

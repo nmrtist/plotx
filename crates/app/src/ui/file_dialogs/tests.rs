@@ -159,6 +159,14 @@ fn recent_entries_route_to_their_import_path() {
     assert_eq!(recent_open_kind(&file("run.abf")), RecentOpenKind::DataFile);
     assert_eq!(recent_open_kind(&file("fid")), RecentOpenKind::DataFile);
     assert_eq!(
+        format!("{:?}", recent_open_kind(&file("project.opj"))),
+        "OriginProject"
+    );
+    assert_eq!(
+        format!("{:?}", recent_open_kind(&file("project.OPJU"))),
+        "OriginProject"
+    );
+    assert_eq!(
         recent_open_kind(&std::env::temp_dir()),
         RecentOpenKind::Folder
     );

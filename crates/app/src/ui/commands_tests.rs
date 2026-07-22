@@ -109,6 +109,16 @@ fn stable_ids_cover_static_and_dynamic_commands() {
 }
 
 #[test]
+fn origin_import_reuses_import_table_command_identity() {
+    let app = app();
+    assert_eq!(CommandId::ImportTable.stable_id(), "file.import_table");
+    assert_eq!(
+        describe(&app, CommandId::ImportTable).label,
+        "Import Table…"
+    );
+}
+
+#[test]
 fn automation_is_a_global_menu_and_palette_command() {
     let app = app();
     let command = describe(&app, CommandId::RunBatchWorkflow);

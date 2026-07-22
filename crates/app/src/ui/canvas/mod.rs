@@ -345,7 +345,7 @@ fn welcome_start(app: &mut PlotxApp, ui: &mut Ui) {
     if welcome_action(ui, icon::FOLDER_OPEN, "Open project…") {
         crate::ui::file_dialogs::open_project(app);
     }
-    if welcome_action(ui, icon::TABLE, "Import table / CSV…") {
+    if welcome_action(ui, icon::TABLE, "Import table…") {
         crate::ui::file_dialogs::import_delimited_table(app);
     }
     if welcome_action(ui, icon::FILE_PLUS, "New empty data table") {
