@@ -28,9 +28,6 @@ dist/
 # Local agent instructions and scratch state.
 .agents/
 
-# Local Git worktrees used to isolate feature development.
-.worktrees/
-
 # Local environment and secret files (keep examples explicitly named).
 .env
 .env.*
