@@ -752,7 +752,7 @@ git commit -m "feat(app): add experimental Origin project import"
 - Modify: docs/src/content/docs/reference/file-formats.md
 - Modify: docs/src/content/docs/zh-cn/reference/file-formats.md
 
-- [ ] **Step 1: Confirm the paired pages still exist**
+- [x] **Step 1: Confirm the paired pages still exist**
 
 ~~~bash
 test -f docs/src/content/docs/guides/importing-data.md
@@ -763,7 +763,7 @@ test -f docs/src/content/docs/zh-cn/reference/file-formats.md
 
 Expected: all four commands succeed. Edit these existing owners rather than creating duplicate navigation pages.
 
-- [ ] **Step 2: Update English documentation**
+- [x] **Step 2: Update English documentation**
 
 State all of these facts:
 
@@ -778,11 +778,11 @@ State all of these facts:
 
 Use PlotX for human-readable product text and lowercase plotx only for machine identifiers or URLs.
 
-- [ ] **Step 3: Mirror the content in Simplified Chinese**
+- [x] **Step 3: Mirror the content in Simplified Chinese**
 
 Keep claims and limitations aligned with English. Translate the user-facing error behavior plainly. Do not imply all OPJ files work and do not present OPJU as partially supported.
 
-- [ ] **Step 4: Build documentation**
+- [x] **Step 4: Build documentation**
 
 Run from docs:
 
@@ -792,7 +792,7 @@ npm run build
 
 Expected: Astro/Starlight build completes with no broken links or missing pages. Do not commit docs/dist or docs/node_modules.
 
-- [ ] **Step 5: Scan terminology**
+- [x] **Step 5: Scan terminology**
 
 ~~~bash
 rg -n "\bPlotx\b|full Origin|完全兼容|OPJU.*importable|OPJU.*可导入" docs/src
@@ -801,7 +801,7 @@ git status --short
 
 Expected: no incorrect product spelling or exaggerated support claim, and no generated directory is staged.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ~~~bash
 git add docs/src
@@ -815,7 +815,7 @@ git commit -m "docs: describe experimental Origin import"
 - Review all files changed from upstream/main
 - Update fixture README or docs only if verification reveals a factual mismatch
 
-- [ ] **Step 1: Run formatting and focused test suites**
+- [x] **Step 1: Run formatting and focused test suites**
 
 ~~~bash
 cargo fmt --all -- --check
@@ -849,7 +849,7 @@ Expected: formatting, source-size, dependency license/advisory, default frontend
 
 If a failure is caused by the implementation, use superpowers:systematic-debugging, add or refine a failing regression test, fix it, and rerun the failed command followed by cargo pr-check. If the failure is external and cannot be fixed without new authority, preserve the evidence and explain the blocker.
 
-- [ ] **Step 4: Rebuild documentation from a clean source state**
+- [x] **Step 4: Rebuild documentation from a clean source state**
 
 ~~~bash
 cd docs
@@ -860,7 +860,7 @@ git status --short
 
 Expected: build passes and generated directories remain ignored and unstaged.
 
-- [ ] **Step 5: Perform the final hostile-input audit**
+- [x] **Step 5: Perform the final hostile-input audit**
 
 ~~~bash
 rg -n "unwrap\(|expect\(|unsafe\s*\{|read_to_end|with_capacity|reserve" \
@@ -872,7 +872,7 @@ find crates -name "*.rs" -print0 | xargs -0 wc -l | sort -nr | head -20
 
 Manually verify every match involving external bytes is bounded or locally invariant, all capacity requests are checked, no embedded path is opened, and no source file exceeds 800 lines.
 
-- [ ] **Step 6: Review the complete diff**
+- [x] **Step 6: Review the complete diff**
 
 ~~~bash
 git diff --check upstream/main...HEAD
@@ -883,7 +883,7 @@ git log --oneline upstream/main..HEAD
 
 Inspect every changed file. Confirm there are no credentials, private data, target, dist, docs/dist, docs/node_modules, unrelated edits, false compatibility claims, copied or translated liborigin source, or unsupported provenance or legal conclusions.
 
-- [ ] **Step 7: Run an independent final code review**
+- [x] **Step 7: Run an independent final code review**
 
 Use superpowers:requesting-code-review on upstream/main...HEAD. Resolve every critical or important finding through a failing test and a focused fix, then rerun the relevant focused tests and cargo pr-check.
 
