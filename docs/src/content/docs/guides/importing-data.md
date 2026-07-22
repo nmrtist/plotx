@@ -14,6 +14,7 @@ PlotX reads vendor NMR and electrophysiology formats directly — no conversion 
 | JCAMP-DX | `.dx` / `.jdx` / `.jcamp` | 1D frequency-domain NMR spectra |
 | Axon Binary Format 2 | `.abf` | int16/float32, multiple channels and sweeps, embedded DAC/epoch stimuli |
 | Tabular data | `.csv`, `.tsv`, `.txt`, `.xlsx` | Column types and empty cells preserved; one table per XLSX worksheet |
+| Origin project (experimental) | `.opj`, `.opju` | Worksheets from the verified classic OPJ profile; `.opju` is detected but not importable. See [compatibility details](/reference/file-formats/). |
 | Zip archive | `.zip` | An archived dataset folder |
 | PlotX project | `.plotx` | Full project: data, processing, and layout |
 
@@ -59,6 +60,22 @@ Excel cached for each formula but does not recalculate formulas itself; a
 formula cell with no cached value imports as empty and is listed in the
 diagnostics. Exported XLSX files hold plain values, so they never depend on
 Excel recalculating them.
+
+## Origin project import (experimental)
+
+Origin `.opj` and `.opju` files appear in the file picker for both *Open
+File…* and *Import Table / CSV…*. Both routes identify the format from file
+content and signatures rather than relying only on the extension.
+
+When a supported `.opj` yields worksheets, PlotX opens the existing **Review
+table import** preview so you can inspect every candidate table. Confirm once
+to import all candidates, or cancel to leave the current project and recent-file
+list unchanged. While a preview is pending, selecting a second table path is
+rejected with a clear message; finish or cancel the current preview first.
+
+Origin does not need to be installed or launched, and PlotX does not automate
+or invoke it. See [File formats](/reference/file-formats/) for the exact,
+evidence-limited compatibility boundary.
 
 ## Pseudo-2D experiments
 
