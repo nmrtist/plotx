@@ -127,16 +127,18 @@ pub fn paint(painter: &egui::Painter, outer: Rect, fig: &Figure, scale: f32) {
             ],
             axis_stroke,
         );
-        painter.text(
-            Pos2::new(
-                px,
-                plot.bottom() + (TICK_LENGTH + TICK_LABEL_PAD + ty.tick_pt * 0.5) * scale,
-            ),
-            Align2::CENTER_CENTER,
-            label,
-            FontId::proportional(ty.tick_pt * scale),
-            col(Color::AXIS),
-        );
+        if fig.x.show_tick_labels {
+            painter.text(
+                Pos2::new(
+                    px,
+                    plot.bottom() + (TICK_LENGTH + TICK_LABEL_PAD + ty.tick_pt * 0.5) * scale,
+                ),
+                Align2::CENTER_CENTER,
+                label,
+                FontId::proportional(ty.tick_pt * scale),
+                col(Color::AXIS),
+            );
+        }
     }
     // A left projection band sits between the contour and its ppm scale, so nudge
     // the F1 tick numbers out past the band to keep them clear of the trace.
@@ -150,16 +152,20 @@ pub fn paint(painter: &egui::Painter, outer: Rect, fig: &Figure, scale: f32) {
             ],
             axis_stroke,
         );
-        painter.text(
-            Pos2::new(y_tick_x, py),
-            Align2::RIGHT_CENTER,
-            label,
-            FontId::proportional(ty.tick_pt * scale),
-            col(Color::AXIS),
-        );
+        if fig.y.show_tick_labels {
+            painter.text(
+                Pos2::new(y_tick_x, py),
+                Align2::RIGHT_CENTER,
+                label,
+                FontId::proportional(ty.tick_pt * scale),
+                col(Color::AXIS),
+            );
+        }
     }
 
-    if let Some(multiplier) = y_ticks.multiplier() {
+    if fig.y.show_tick_labels
+        && let Some(multiplier) = y_ticks.multiplier()
+    {
         painter.text(
             Pos2::new(y_axis_x, plot.top - TICK_LABEL_PAD * scale),
             Align2::LEFT_BOTTOM,
@@ -168,7 +174,9 @@ pub fn paint(painter: &egui::Painter, outer: Rect, fig: &Figure, scale: f32) {
             col(Color::AXIS),
         );
     }
-    if let Some(multiplier) = x_ticks.multiplier() {
+    if fig.x.show_tick_labels
+        && let Some(multiplier) = x_ticks.multiplier()
+    {
         painter.text(
             Pos2::new(
                 plot.right(),
@@ -181,19 +189,24 @@ pub fn paint(painter: &egui::Painter, outer: Rect, fig: &Figure, scale: f32) {
         );
     }
 
-    if !hidden_frame {
+    if !hidden_frame && fig.x.show_label {
+        let multiplier_clearance = if fig.x.show_tick_labels {
+            x_ticks.multiplier_clearance(ty.tick_pt)
+        } else {
+            0.0
+        };
         painter.text(
             Pos2::new(
                 (plot.left + plot.right()) / 2.0,
-                outer.bottom()
-                    - (OUTER_PAD + x_ticks.multiplier_clearance(ty.tick_pt) + ty.label_pt * 0.5)
-                        * scale,
+                outer.bottom() - (OUTER_PAD + multiplier_clearance + ty.label_pt * 0.5) * scale,
             ),
             Align2::CENTER_CENTER,
             &fig.x.label,
             FontId::proportional(ty.label_pt * scale),
             col(Color::AXIS),
         );
+    }
+    if !hidden_frame && fig.y.show_label {
         let galley = painter.layout_no_wrap(
             fig.y.label.clone(),
             FontId::proportional(ty.label_pt * scale),
@@ -584,6 +597,41 @@ pub fn paint_document(
                 paint_document_overlay(painter, page, overlay, viewport)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod visibility_tests {
+    use super::*;
+    use plotx_figure::Axis;
+
+    #[test]
+    fn hidden_axis_text_keeps_screen_axis_and_tick_shapes() {
+        let mut fig = Figure::new(
+            "",
+            Axis::new("UNIQUE_X_TITLE", 0.0, 90_000.0),
+            Axis::new("UNIQUE_Y_TITLE", -90_000.0, 90_000.0),
+        );
+        fig.x.show_tick_labels = false;
+        fig.x.show_label = false;
+        fig.y.show_tick_labels = false;
+        fig.y.show_label = false;
+        let ctx = egui::Context::default();
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            paint(ui.painter(), Rect::new(0.0, 0.0, 400.0, 300.0), &fig, 1.0);
+        });
+        let text = output
+            .shapes
+            .iter()
+            .filter(|shape| matches!(shape.shape, egui::Shape::Text(_)))
+            .count();
+        let lines = output
+            .shapes
+            .iter()
+            .filter(|shape| matches!(shape.shape, egui::Shape::LineSegment { .. }))
+            .count();
+        assert_eq!(text, 0);
+        assert!(lines > 2, "axis and tick marks remain on screen");
     }
 }
 

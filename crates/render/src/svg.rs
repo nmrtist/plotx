@@ -260,30 +260,44 @@ fn write_figure(s: &mut String, fig: &Figure, outer: Rect, clip_id: &str) {
         let (px, _) = proj.project([xt, fig.y.min]);
         let _ = write!(
             s,
-            r#"<path d="M{px:.2} {b:.2}v{tick}" stroke="{axis}" stroke-width="{width}"/><text x="{px:.2}" y="{y:.2}" text-anchor="middle" font-size="{font}" fill="{axis}">{lab}</text>"#,
+            r#"<path d="M{px:.2} {b:.2}v{tick}" stroke="{axis}" stroke-width="{width}"/>"#,
             b = plot.bottom(),
             tick = TICK_LENGTH,
             width = AXIS_LINE_WIDTH,
-            y = plot.bottom() + TICK_LENGTH + TICK_LABEL_PAD + ty.tick_pt,
-            font = ty.tick_pt,
-            lab = escape(label),
         );
+        if fig.x.show_tick_labels {
+            let _ = write!(
+                s,
+                r#"<text x="{px:.2}" y="{y:.2}" text-anchor="middle" font-size="{font}" fill="{axis}">{lab}</text>"#,
+                y = plot.bottom() + TICK_LENGTH + TICK_LABEL_PAD + ty.tick_pt,
+                font = ty.tick_pt,
+                lab = escape(label)
+            );
+        }
     }
     let y_tick_x = y_axis_x - TICK_LENGTH - TICK_LABEL_PAD;
     for (&yt, label) in y_ticks.values.iter().zip(&y_ticks.labels) {
         let (_, py) = proj.project([fig.x.min, yt]);
         let _ = write!(
             s,
-            r#"<path d="M{yl:.2} {py:.2}h{tick}" stroke="{axis}" stroke-width="{width}"/><text x="{x:.2}" y="{py:.2}" text-anchor="end" font-size="{font}" fill="{axis}" dominant-baseline="middle">{lab}</text>"#,
+            r#"<path d="M{yl:.2} {py:.2}h{tick}" stroke="{axis}" stroke-width="{width}"/>"#,
             yl = y_axis_x - TICK_LENGTH,
             tick = TICK_LENGTH,
             width = AXIS_LINE_WIDTH,
-            x = y_tick_x,
-            font = ty.tick_pt,
-            lab = escape(label),
         );
+        if fig.y.show_tick_labels {
+            let _ = write!(
+                s,
+                r#"<text x="{x:.2}" y="{py:.2}" text-anchor="end" font-size="{font}" fill="{axis}" dominant-baseline="middle">{lab}</text>"#,
+                x = y_tick_x,
+                font = ty.tick_pt,
+                lab = escape(label)
+            );
+        }
     }
-    if let Some(multiplier) = y_ticks.multiplier() {
+    if fig.y.show_tick_labels
+        && let Some(multiplier) = y_ticks.multiplier()
+    {
         let _ = write!(
             s,
             r#"<text x="{x:.2}" y="{y:.2}" text-anchor="start" font-size="{font}" fill="{axis}">{label}</text>"#,
@@ -293,7 +307,9 @@ fn write_figure(s: &mut String, fig: &Figure, outer: Rect, clip_id: &str) {
             label = escape(&multiplier),
         );
     }
-    if let Some(multiplier) = x_ticks.multiplier() {
+    if fig.x.show_tick_labels
+        && let Some(multiplier) = x_ticks.multiplier()
+    {
         let _ = write!(
             s,
             r#"<text x="{x:.2}" y="{y:.2}" text-anchor="end" font-size="{font}" fill="{axis}">{label}</text>"#,
@@ -304,15 +320,22 @@ fn write_figure(s: &mut String, fig: &Figure, outer: Rect, clip_id: &str) {
         );
     }
 
-    if !hidden_frame {
+    if !hidden_frame && fig.x.show_label {
+        let multiplier_clearance = if fig.x.show_tick_labels {
+            x_ticks.multiplier_clearance(ty.tick_pt)
+        } else {
+            0.0
+        };
         let _ = write!(
             s,
             r#"<text x="{cx:.2}" y="{y:.2}" text-anchor="middle" font-size="{font}" fill="{axis}">{lab}</text>"#,
             cx = (plot.left + plot.right()) / 2.0,
-            y = outer.top + h - OUTER_PAD - x_ticks.multiplier_clearance(ty.tick_pt),
+            y = outer.top + h - OUTER_PAD - multiplier_clearance,
             font = ty.label_pt,
             lab = escape(&fig.x.label),
         );
+    }
+    if !hidden_frame && fig.y.show_label {
         let _ = write!(
             s,
             r#"<text transform="translate({x:.2},{cy:.2}) rotate(-90)" text-anchor="middle" font-size="{font}" fill="{axis}">{lab}</text>"#,

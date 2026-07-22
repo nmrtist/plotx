@@ -263,6 +263,29 @@ fn render_category(
                 Some("Light, dark, or follow the system appearance."),
                 |ui| theme_combo(ui, &mut draft.appearance.theme),
             );
+            setting_row(
+                ui,
+                "Canvas accent",
+                Some("Editor guides and selections only; figure and export colours are unchanged."),
+                |ui| {
+                    let theme = ui.visuals().selection.bg_fill;
+                    let mut rgb =
+                        draft
+                            .appearance
+                            .canvas_accent
+                            .unwrap_or([theme.r(), theme.g(), theme.b()]);
+                    if ui.color_edit_button_srgb(&mut rgb).changed() {
+                        draft.appearance.canvas_accent = Some(rgb);
+                    }
+                    if ui
+                        .button("Follow theme")
+                        .on_hover_text("Reset the canvas accent to the active theme")
+                        .clicked()
+                    {
+                        draft.appearance.canvas_accent = None;
+                    }
+                },
+            );
             ui_scale_row(ui, draft, monitor);
             setting_row(
                 ui,

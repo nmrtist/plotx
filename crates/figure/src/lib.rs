@@ -56,6 +56,10 @@ impl Default for FigureTypography {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Axis {
     pub label: String,
+    #[serde(default = "default_true")]
+    pub show_tick_labels: bool,
+    #[serde(default = "default_true")]
+    pub show_label: bool,
     pub min: f64,
     pub max: f64,
     /// If true, larger values draw toward the lower screen coordinate (left for
@@ -73,6 +77,8 @@ impl Axis {
     pub fn new(label: impl Into<String>, min: f64, max: f64) -> Self {
         Self {
             label: label.into(),
+            show_tick_labels: true,
+            show_label: true,
             min,
             max,
             reversed: false,
@@ -86,6 +92,8 @@ impl Axis {
         let n = names.len().max(1) as f64;
         Self {
             label: label.into(),
+            show_tick_labels: true,
+            show_label: true,
             min: -0.5,
             max: n - 0.5,
             reversed: false,
@@ -109,6 +117,10 @@ impl Axis {
         let t = (v - self.min) / self.span();
         if self.reversed { 1.0 - t } else { t }
     }
+}
+
+const fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -459,5 +471,25 @@ impl Figure {
     pub fn with_axis_frame(mut self, frame: AxisFrame) -> Self {
         self.axis_frame = frame;
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Axis;
+
+    #[test]
+    fn axis_text_visibility_defaults_to_visible() {
+        let axis = Axis::new("x", 0.0, 1.0);
+        assert!(axis.show_tick_labels);
+        assert!(axis.show_label);
+    }
+
+    #[test]
+    fn missing_axis_visibility_fields_deserialize_as_visible() {
+        let axis: Axis =
+            serde_json::from_str(r#"{"label":"x","min":0.0,"max":1.0,"reversed":false}"#).unwrap();
+        assert!(axis.show_tick_labels);
+        assert!(axis.show_label);
     }
 }

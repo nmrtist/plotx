@@ -86,6 +86,7 @@ impl PlotxApp {
     /// egui concern and is applied separately by the app shell.
     pub fn apply_settings(&mut self, settings: &crate::settings::Settings) {
         self.session.ui.snap_enabled = settings.general.snap_enabled;
+        self.session.canvas_accent = settings.appearance.canvas_accent;
         if !settings.general.snap_enabled {
             self.session.ui.snap_guides.clear();
         }

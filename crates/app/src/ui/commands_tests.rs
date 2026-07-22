@@ -106,6 +106,63 @@ fn stable_ids_cover_static_and_dynamic_commands() {
     assert_eq!(CommandId::ClearRecentFiles.stable_id(), "file.clear_recent");
     assert_eq!(CommandId::HelpManual.stable_id(), "help.manual");
     assert_eq!(CommandId::RunBatchWorkflow.stable_id(), "tools.automation");
+    assert_eq!(
+        CommandId::SimplifyInnerAxes.stable_id(),
+        "arrange.simplify_inner_axes"
+    );
+    assert_eq!(
+        CommandId::SetSpacingMode(plotx_core::layout::SpacingMode::Visual).stable_id(),
+        "arrange.spacing_mode.visual"
+    );
+    assert_eq!(
+        CommandId::SetGutterPreset(plotx_core::layout::GutterPreset::Tight).stable_id(),
+        "arrange.gutter.tight"
+    );
+}
+
+#[test]
+fn spacing_commands_are_registered_checked_and_execute() {
+    let mut app = app_with_nmr();
+    assert!(
+        catalog(&app)
+            .iter()
+            .any(|entry| entry.id == CommandId::SimplifyInnerAxes)
+    );
+    let ctx = egui::Context::default();
+    let mut clipboard = crate::ui::clipboard_table::ClipboardTablePaste::default();
+    execute(
+        CommandId::SetSpacingMode(plotx_core::layout::SpacingMode::Frame),
+        &mut app,
+        &mut clipboard,
+        &ctx,
+    );
+    assert_eq!(
+        app.doc.canvases[0].layout.spacing_mode,
+        plotx_core::layout::SpacingMode::Frame
+    );
+    assert_eq!(
+        describe(
+            &app,
+            CommandId::SetSpacingMode(plotx_core::layout::SpacingMode::Frame)
+        )
+        .checked,
+        Some(true)
+    );
+    execute(
+        CommandId::SetGutterPreset(plotx_core::layout::GutterPreset::Tight),
+        &mut app,
+        &mut clipboard,
+        &ctx,
+    );
+    assert_eq!(app.doc.canvases[0].layout.gutter_mm, 2.0);
+    assert_eq!(
+        describe(
+            &app,
+            CommandId::SetGutterPreset(plotx_core::layout::GutterPreset::Tight)
+        )
+        .checked,
+        Some(true)
+    );
 }
 
 #[test]

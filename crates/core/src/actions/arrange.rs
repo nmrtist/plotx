@@ -5,6 +5,15 @@ impl PlotxApp {
     /// (row-major, current object order) as one undoable step. Objects beyond
     /// the cell count keep their frame.
     pub fn arrange_active_canvas_grid(&mut self, rows: u32, cols: u32) {
+        self.arrange_active_canvas_grid_with_simplify(rows, cols, false);
+    }
+
+    pub fn arrange_active_canvas_grid_with_simplify(
+        &mut self,
+        rows: u32,
+        cols: u32,
+        simplify_inner_axes: bool,
+    ) {
         let Some(ci) = self.session.active_canvas else {
             return;
         };
@@ -17,20 +26,38 @@ impl PlotxApp {
         after_layout.cols = cols.max(1);
         let page = canvas.size_pt();
         let ids = canvas.plot_object_ids();
-        let after = crate::layout::assign_grid(page, &after_layout, &ids);
+        let axis_changes = if simplify_inner_axes {
+            simplified_axis_changes(canvas, &ids, rows, cols)
+        } else {
+            Vec::new()
+        };
+        let items = layout_items(canvas, &ids, &[], &axis_changes);
+        let first_pass = crate::layout::arrange_grid(page, &after_layout, &items);
+        // Axis tick selection depends on the resized frame. One bounded
+        // refinement keeps Visual spacing object-aware without convergence
+        // loops, and measures the post-simplification figure when requested.
+        let refined_items = layout_items(canvas, &ids, &first_pass, &axis_changes);
+        let after = crate::layout::arrange_grid(page, &after_layout, &refined_items);
         let before: Vec<(ObjectId, ObjectFrame)> = after
             .iter()
             .filter_map(|(id, _)| canvas.object(*id).map(|o| (*id, o.frame)))
             .collect();
         let placed = after.len();
         let total = ids.len();
-        self.execute_action(Action::ArrangeObjects {
+        let arrange = Action::ArrangeObjects {
             canvas: ci,
             before_layout,
             after_layout,
             before,
             after,
-        });
+        };
+        if simplify_inner_axes {
+            let mut actions = vec![arrange];
+            actions.extend(axis_change_actions(ci, axis_changes));
+            self.execute_action(Action::Composite(actions));
+        } else {
+            self.execute_action(arrange);
+        }
         self.session.status = if placed < total {
             format!(
                 "Arranged {placed} of {total} objects into {rows}×{cols}; {} kept in place.",
@@ -39,6 +66,62 @@ impl PlotxApp {
         } else {
             format!("Arranged {placed} object(s) into a {rows}×{cols} grid.")
         };
+    }
+
+    /// Hide inner axis text for the current grid without changing frames.
+    pub fn simplify_inner_axes(&mut self) {
+        let Some(ci) = self.session.active_canvas else {
+            return;
+        };
+        let Some(canvas) = self.doc.canvases.get(ci) else {
+            return;
+        };
+        let frames: Vec<_> = canvas
+            .objects
+            .iter()
+            .filter(|object| object.plot().is_some())
+            .map(|object| (object.id, object.frame))
+            .collect();
+        if frames.len() < 2 {
+            self.session.status =
+                "Could not simplify axes: at least two plots are required.".to_owned();
+            return;
+        }
+        let Some(grid) = crate::layout::infer_occupied_grid(&frames) else {
+            self.session.status =
+                "Could not simplify axes: arrange plots into a grid first.".to_owned();
+            return;
+        };
+        let actions = axis_change_actions(
+            ci,
+            simplified_axis_changes(canvas, &grid.ids, grid.rows, grid.cols),
+        );
+        if actions.is_empty() {
+            self.session.status = "Axes are already simplified.".to_owned();
+            return;
+        }
+        self.execute_action(Action::Composite(actions));
+        self.session.status = "Simplified inner axes.".to_owned();
+    }
+
+    pub fn set_spacing_mode(&mut self, mode: crate::layout::SpacingMode) {
+        let Some(ci) = self.session.active_canvas else {
+            return;
+        };
+        let before = self.doc.canvases[ci].layout;
+        let mut after = before;
+        after.spacing_mode = mode;
+        self.commit_page_layout(ci, before, after);
+    }
+
+    pub fn set_gutter_preset(&mut self, preset: crate::layout::GutterPreset) {
+        let Some(ci) = self.session.active_canvas else {
+            return;
+        };
+        let before = self.doc.canvases[ci].layout;
+        let mut after = before;
+        after.gutter_mm = preset.millimetres();
+        self.commit_page_layout(ci, before, after);
     }
 
     /// Re-flow every board frame (pages and sheets) into an aligned grid with a
@@ -197,4 +280,68 @@ impl PlotxApp {
             settings.general.snap_enabled = enabled;
         });
     }
+}
+
+fn layout_items(
+    canvas: &crate::state::CanvasDocument,
+    ids: &[ObjectId],
+    frames: &[(ObjectId, ObjectFrame)],
+    axis_changes: &[AxisOverrideChange],
+) -> Vec<crate::layout::LayoutItem> {
+    ids.iter()
+        .filter_map(|&id| {
+            let object = canvas.object(id)?;
+            let plot = object.plot()?;
+            let frame = frames
+                .iter()
+                .find_map(|(candidate, frame)| (*candidate == id).then_some(*frame))
+                .unwrap_or(object.frame);
+            if let Some(change) = axis_changes.iter().find(|change| change.id == id) {
+                let mut figure = plot.figure.clone();
+                change.after.apply_to(&mut figure);
+                Some(crate::layout::layout_item(id, &figure, frame))
+            } else {
+                Some(crate::layout::layout_item(id, &plot.figure, frame))
+            }
+        })
+        .collect()
+}
+
+struct AxisOverrideChange {
+    id: ObjectId,
+    before: crate::state::AxisOverrides,
+    after: crate::state::AxisOverrides,
+}
+
+fn simplified_axis_changes(
+    canvas: &crate::state::CanvasDocument,
+    ids: &[ObjectId],
+    rows: u32,
+    cols: u32,
+) -> Vec<AxisOverrideChange> {
+    ids.iter()
+        .zip(crate::layout::outer_axis_cells(ids.len(), rows, cols))
+        .filter_map(|(&id, (keep_x, keep_y))| {
+            let before = canvas.object(id)?.plot()?.axis_overrides.clone();
+            let mut after = before.clone();
+            if !keep_x {
+                after.x_show_tick_labels = Some(false);
+                after.x_show_label = Some(false);
+            }
+            if !keep_y {
+                after.y_show_tick_labels = Some(false);
+                after.y_show_label = Some(false);
+            }
+            (after != before).then_some(AxisOverrideChange { id, before, after })
+        })
+        .collect()
+}
+
+fn axis_change_actions(canvas_index: usize, changes: Vec<AxisOverrideChange>) -> Vec<Action> {
+    changes
+        .into_iter()
+        .map(|change| {
+            Action::set_axis_overrides(canvas_index, change.id, change.before, change.after)
+        })
+        .collect()
 }

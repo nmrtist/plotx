@@ -21,22 +21,15 @@ const PIVOT_GRAB_PX: f32 = 6.0;
 const SELECT_MIN_PX: f32 = 6.0;
 const DRAG_START_PX: f32 = 5.0;
 const WHEEL_ZOOM_SPEED: f32 = 0.0015;
-const PIVOT_COLOR: Color32 = Color32::from_rgb(0xE0, 0x6C, 0x22);
-const SELECT_FILL: Color32 = Color32::from_rgba_premultiplied(0x1f, 0x6f, 0xeb, 32);
-const SELECT_STROKE: Color32 = Color32::from_rgb(0x1f, 0x6f, 0xeb);
-const SELECT_ACCENT: Color32 = Color32::from_rgb(0x1f, 0x9d, 0x74);
 const HANDLE_SIZE_PX: f32 = 8.0;
 const MIN_OBJECT_SIZE_PT: f32 = 24.0;
 const PANEL_LABEL_HIT_PAD_PX: f32 = 4.0;
 const SNAP_PX: f32 = 6.0;
-const GRID_COLOR: Color32 = Color32::from_rgb(0x5a, 0xa9, 0xc4);
-const GUIDE_COLOR: Color32 = Color32::from_rgb(0xff, 0x2d, 0x92);
-const INTEGRAL_COLOR: Color32 = Color32::from_rgb(0x2b, 0x6c, 0xb0);
-const PEAK_COLOR: Color32 = Color32::from_rgb(0x8a, 0x1c, 0x1c);
 
 mod authoring;
 mod board;
 mod board_notes;
+mod chrome;
 mod geometry;
 mod integrals;
 mod integrals2d;
@@ -54,6 +47,7 @@ mod tiling;
 pub(crate) use authoring::*;
 pub(crate) use board::*;
 pub(crate) use board_notes::*;
+pub(crate) use chrome::*;
 pub(crate) use geometry::*;
 pub(crate) use integrals::*;
 pub(crate) use integrals2d::*;
@@ -84,6 +78,7 @@ pub fn render_central(app: &mut PlotxApp, ui: &mut Ui) {
     let avail = ui.available_rect_before_wrap();
     let (resp, painter) = ui.allocate_painter(avail.size(), Sense::click_and_drag());
     let rect = resp.rect;
+    let chrome = ChromeStyle::from_visuals(ui.visuals(), app.session.canvas_accent);
     ensure_board_view(app, rect);
     drive_board_fit(app, ui, rect);
 
@@ -178,13 +173,13 @@ pub fn render_central(app: &mut PlotxApp, ui: &mut Ui) {
     paint_frame_captions(app, rect, ui, &painter);
     render_inline_panel_note_editor(app, rect, ui);
     paint_sheet_frames(app, rect, ui, &painter);
-    paint_layout_overlay(app, ci, rect, &painter);
-    paint_axis_zoom(app, ci, rect, &painter);
-    paint_author_drag(app, ci, rect, &painter);
-    paint_marquee(app, ci, rect, &painter);
-    paint_panel_label_selection(app, ci, rect, &painter);
-    paint_object_selection(app, ci, rect, page, &painter);
-    paint_tile_preview(app, rect, &painter);
+    paint_layout_overlay(app, ci, rect, &painter, chrome);
+    paint_axis_zoom(app, ci, rect, &painter, chrome);
+    paint_author_drag(app, ci, rect, &painter, chrome);
+    paint_marquee(app, ci, rect, &painter, chrome);
+    paint_panel_label_selection(app, ci, rect, &painter, chrome);
+    paint_object_selection(app, ci, rect, page, &painter, chrome);
+    paint_tile_preview(app, rect, &painter, chrome);
     super::canvas_size::page_size_chrome(app, ci, page, rect, ui);
     if pointer_owned {
         canvas_cursor(app, ci, rect, ui);
@@ -245,7 +240,7 @@ pub fn render_central(app: &mut PlotxApp, ui: &mut Ui) {
                                 .clamp(plot.left, plot.right());
                             painter.line_segment(
                                 [Pos2::new(px, plot.top), Pos2::new(px, plot.bottom())],
-                                Stroke::new(1.5_f32, PIVOT_COLOR),
+                                Stroke::new(1.5_f32, chrome.pivot),
                             );
                         }
                         PhaseOrient::Horizontal => {
@@ -254,7 +249,7 @@ pub fn render_central(app: &mut PlotxApp, ui: &mut Ui) {
                                 .clamp(plot.top, plot.bottom());
                             painter.line_segment(
                                 [Pos2::new(plot.left, py), Pos2::new(plot.right(), py)],
-                                Stroke::new(1.5_f32, PIVOT_COLOR),
+                                Stroke::new(1.5_f32, chrome.pivot),
                             );
                         }
                     }
@@ -290,14 +285,14 @@ pub fn render_central(app: &mut PlotxApp, ui: &mut Ui) {
         }
     }
 
-    paint_zoom_drag(app, ci, object_id, plot, &painter);
-    paint_regions(app, ci, object_id, di, plot, &painter);
-    paint_integrals(app, ci, object_id, di, plot, &painter);
-    paint_integrals_2d(app, ci, object_id, di, plot, &painter);
-    paint_peaks(app, ci, object_id, di, plot, &painter);
+    paint_zoom_drag(app, ci, object_id, plot, &painter, chrome);
+    paint_regions(app, ci, object_id, di, plot, &painter, chrome);
+    paint_integrals(app, ci, object_id, di, plot, &painter, chrome);
+    paint_integrals_2d(app, ci, object_id, di, plot, &painter, chrome);
+    paint_peaks(app, ci, object_id, di, plot, &painter, chrome);
     paint_slice(app, ci, object_id, di, plot, &painter);
-    paint_analysis_selection(app, ci, object_id, plot, &painter);
-    paint_selection_drag(app, ci, object_id, plot, &painter);
+    paint_analysis_selection(app, ci, object_id, plot, &painter, chrome);
+    paint_selection_drag(app, ci, object_id, plot, &painter, chrome);
 }
 
 fn welcome_page(app: &mut PlotxApp, ui: &mut Ui) {

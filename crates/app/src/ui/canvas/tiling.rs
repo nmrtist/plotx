@@ -42,10 +42,30 @@ pub(crate) fn update_tile_drop(
     let page_pt = app.doc.canvases[target].size_pt();
     let layout = app.doc.canvases[target].layout;
     let existing_ids = app.doc.canvases[target].plot_object_ids();
-    let plan = plotx_core::layout::compute_tiling_plan(
+    if app.session.ui.tile_drop.as_ref().is_some_and(|preview| {
+        preview.target == target
+            && preview
+                .existing
+                .iter()
+                .map(|(id, _)| *id)
+                .eq(existing_ids.iter().copied())
+            && preview_cell_matches(preview, page_pt, existing_ids.len(), pointer_page)
+    }) {
+        return true;
+    }
+    let existing_items: Vec<_> = existing_ids
+        .iter()
+        .filter_map(|&id| layout_item(&app.doc.canvases[target], id))
+        .collect();
+    let Some(newcomer_item) = layout_item(&app.doc.canvases[drag.canvas], drag.object) else {
+        app.session.ui.tile_drop = None;
+        return false;
+    };
+    let plan = plotx_core::layout::compute_tiling_plan_for_items(
         page_pt,
         &layout,
-        &existing_ids,
+        &existing_items,
+        newcomer_item,
         [pointer_page.x, pointer_page.y],
     );
     app.session.ui.tile_drop = Some(TileDropPreview {
@@ -54,6 +74,51 @@ pub(crate) fn update_tile_drop(
         existing: plan.existing,
     });
     true
+}
+
+fn layout_item(canvas: &CanvasDocument, id: ObjectId) -> Option<plotx_core::layout::LayoutItem> {
+    let object = canvas.object(id)?;
+    let plot = object.plot()?;
+    Some(plotx_core::layout::layout_item(
+        id,
+        &plot.figure,
+        object.frame,
+    ))
+}
+
+fn preview_cell_matches(
+    preview: &TileDropPreview,
+    page: [f32; 2],
+    existing_count: usize,
+    pointer: Pos2,
+) -> bool {
+    if existing_count != 1 {
+        return true;
+    }
+    let Some((_, existing)) = preview.existing.first() else {
+        return false;
+    };
+    let nx = if page[0] > 0.0 {
+        pointer.x / page[0]
+    } else {
+        0.5
+    };
+    let ny = if page[1] > 0.0 {
+        pointer.y / page[1]
+    } else {
+        0.5
+    };
+    let horizontal = (nx - 0.5).abs() >= (ny - 0.5).abs();
+    let newcomer_last = if horizontal { nx >= 0.5 } else { ny >= 0.5 };
+    let dx = preview.newcomer.x - existing.x;
+    let dy = preview.newcomer.y - existing.y;
+    let preview_horizontal = dx.abs() >= dy.abs();
+    let preview_last = if preview_horizontal {
+        dx >= 0.0
+    } else {
+        dy >= 0.0
+    };
+    horizontal == preview_horizontal && newcomer_last == preview_last
 }
 
 /// Falls back to a plain move if the atomic action cannot be built.
@@ -81,7 +146,12 @@ pub(crate) fn commit_tile_drop(
     app.session.status = format!("Tiled plot into “{target}”.");
 }
 
-pub(crate) fn paint_tile_preview(app: &PlotxApp, rect: egui::Rect, painter: &egui::Painter) {
+pub(crate) fn paint_tile_preview(
+    app: &PlotxApp,
+    rect: egui::Rect,
+    painter: &egui::Painter,
+    chrome: ChromeStyle,
+) {
     let Some(preview) = &app.session.ui.tile_drop else {
         return;
     };
@@ -97,18 +167,21 @@ pub(crate) fn paint_tile_preview(app: &PlotxApp, rect: egui::Rect, painter: &egu
             Vec2::new(f.width * zoom, f.height * zoom),
         )
     };
-    let existing_fill = Color32::from_rgba_premultiplied(0x5a, 0xa9, 0xc4, 40);
     for (_, f) in &preview.existing {
         let r = to_screen(f);
-        painter.rect_filled(r, 0.0, existing_fill);
-        painter.rect_stroke(r, 0.0, Stroke::new(1.0_f32, GRID_COLOR), StrokeKind::Inside);
+        painter.rect_filled(r, 0.0, chrome.tile_existing_fill);
+        painter.rect_stroke(r, 0.0, chrome.tile_existing_stroke(), StrokeKind::Inside);
     }
     let r = to_screen(&preview.newcomer);
-    painter.rect_filled(r, 0.0, SELECT_FILL);
-    painter.rect_stroke(
-        r,
-        0.0,
-        Stroke::new(2.0_f32, SELECT_STROKE),
-        StrokeKind::Inside,
-    );
+    painter.rect_filled(r, 0.0, chrome.tile_target_fill);
+    let outline = [
+        r.left_top(),
+        r.right_top(),
+        r.right_bottom(),
+        r.left_bottom(),
+        r.left_top(),
+    ];
+    for segment in egui::Shape::dashed_line(&outline, chrome.tile_target_stroke(), 6.0, 4.0) {
+        painter.add(segment);
+    }
 }

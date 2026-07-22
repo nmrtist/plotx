@@ -496,6 +496,38 @@ pub(crate) fn arrange_context_menu(app: &mut PlotxApp, ci: usize, ui: &mut Ui) {
             }
         }
     });
+    if ui.button("Simplify inner axes").clicked() {
+        app.simplify_inner_axes();
+        ui.close();
+    }
+    ui.menu_button("Spacing basis", |ui| {
+        for (label, mode) in [
+            ("Frame", layout::SpacingMode::Frame),
+            ("Visual", layout::SpacingMode::Visual),
+        ] {
+            let checked = app.doc.canvases[ci].layout.spacing_mode == mode;
+            if ui.selectable_label(checked, label).clicked() {
+                app.set_spacing_mode(mode);
+                ui.close();
+            }
+        }
+    });
+    ui.menu_button("Minimum spacing", |ui| {
+        for preset in layout::GutterPreset::ALL {
+            let checked =
+                (app.doc.canvases[ci].layout.gutter_mm - preset.millimetres()).abs() < 0.001;
+            if ui
+                .selectable_label(
+                    checked,
+                    format!("{} ({} mm)", preset.label(), preset.millimetres()),
+                )
+                .clicked()
+            {
+                app.set_gutter_preset(preset);
+                ui.close();
+            }
+        }
+    });
     if !app.session.ui.selection.objects().is_empty() {
         ui.menu_button("Order", |ui| {
             for (label, op) in [

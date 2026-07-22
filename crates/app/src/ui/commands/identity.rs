@@ -4,7 +4,7 @@
 
 use egui_phosphor::regular as icon;
 use plotx_core::actions::ZOrder;
-use plotx_core::layout::{Align, Distribute};
+use plotx_core::layout::{Align, Distribute, GutterPreset, SpacingMode};
 use plotx_core::state::{PlotxApp, Tool};
 
 use super::CommandId;
@@ -16,6 +16,8 @@ impl CommandId {
             Self::NewCanvas(i) => format!("file.new_canvas.{i}"),
             Self::Export(f) => format!("file.export.{}", f.extension()),
             Self::ArrangeGrid(r, c) => format!("arrange.grid.{r}x{c}"),
+            Self::SetSpacingMode(mode) => format!("arrange.spacing_mode.{}", spacing_slug(mode)),
+            Self::SetGutterPreset(preset) => format!("arrange.gutter.{}", gutter_slug(preset)),
             Self::Align(mode) => format!("arrange.align.{}", align_slug(mode)),
             Self::Distribute(Distribute::Horizontal) => "arrange.distribute.horizontal".into(),
             Self::Distribute(Distribute::Vertical) => "arrange.distribute.vertical".into(),
@@ -177,6 +179,32 @@ pub(super) fn command_identity(
             Some(icon::SQUARES_FOUR),
             None,
         ),
+        CommandId::SimplifyInnerAxes => plain("Simplify Inner Axes", Some(icon::SQUARES_FOUR)),
+        CommandId::SetSpacingMode(mode) => {
+            let checked = app
+                .session
+                .active_canvas
+                .is_some_and(|ci| app.doc.canvases[ci].layout.spacing_mode == mode);
+            (
+                format!("Spacing: {}", spacing_label(mode)),
+                Some(icon::ARROWS_LEFT_RIGHT),
+                Some(checked),
+            )
+        }
+        CommandId::SetGutterPreset(preset) => {
+            let checked = app.session.active_canvas.is_some_and(|ci| {
+                (app.doc.canvases[ci].layout.gutter_mm - preset.millimetres()).abs() < 0.001
+            });
+            (
+                format!(
+                    "Minimum spacing: {} ({} mm)",
+                    preset.label(),
+                    preset.millimetres()
+                ),
+                Some(icon::ARROWS_LEFT_RIGHT),
+                Some(checked),
+            )
+        }
         CommandId::Align(mode) => (
             format!("Align {}", align_label(mode)),
             Some(align_icon(mode)),
@@ -328,7 +356,30 @@ fn simple_stable_id(id: CommandId) -> &'static str {
         CommandId::Multiplets => "analysis.multiplets",
         CommandId::TidyBoard => "arrange.tidy",
         CommandId::CanvasSettings => "figure.canvas_settings",
+        CommandId::SimplifyInnerAxes => "arrange.simplify_inner_axes",
         _ => unreachable!("dynamic commands have formatted stable IDs"),
+    }
+}
+
+fn spacing_slug(mode: SpacingMode) -> &'static str {
+    match mode {
+        SpacingMode::Frame => "frame",
+        SpacingMode::Visual => "visual",
+    }
+}
+
+fn spacing_label(mode: SpacingMode) -> &'static str {
+    match mode {
+        SpacingMode::Frame => "Frame",
+        SpacingMode::Visual => "Visual",
+    }
+}
+
+fn gutter_slug(preset: GutterPreset) -> &'static str {
+    match preset {
+        GutterPreset::Tight => "tight",
+        GutterPreset::Normal => "normal",
+        GutterPreset::Spacious => "spacious",
     }
 }
 

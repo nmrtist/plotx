@@ -13,3 +13,6 @@ path = "src/lib.rs"
 [dependencies]
 colorous.workspace = true
 serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

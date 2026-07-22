@@ -231,6 +231,7 @@ fn project_roundtrip_preserves_data_recipe_and_view() {
         rows: 2,
         cols: 3,
         show_grid: true,
+        spacing_mode: crate::layout::SpacingMode::Visual,
     };
     app.doc.canvases[0].board_pos = [780.0, 123.0];
     app.doc.canvases[0].caption = "Fig 1. Sample spectrum.".to_owned();
@@ -261,6 +262,7 @@ fn project_roundtrip_preserves_data_recipe_and_view() {
         y_label: Some("Response".to_owned()),
         x_range: Some(AxisRange::new(1.0, 8.0)),
         y_range: Some(AxisRange::new(-2.0, 12.0)),
+        ..AxisOverrides::default()
     };
     let plot_id = app.doc.canvases[0].objects[0].id;
     app.set_axis_overrides_value(0, plot_id, &axis_overrides);
@@ -332,6 +334,7 @@ fn project_roundtrip_preserves_data_recipe_and_view() {
             rows: 2,
             cols: 3,
             show_grid: true,
+            spacing_mode: crate::layout::SpacingMode::Visual,
         }
     );
     assert_eq!(

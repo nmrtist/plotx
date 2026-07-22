@@ -4,7 +4,7 @@
 
 use plotx_core::actions::ZOrder;
 use plotx_core::export::ExportFormat;
-use plotx_core::layout::{Align, Distribute};
+use plotx_core::layout::{Align, Distribute, GutterPreset, SpacingMode};
 use plotx_core::state::{Dataset, ObjectId, PlotxApp, Tool, WorkflowTab};
 
 pub use super::command_exec::execute;
@@ -101,6 +101,9 @@ pub enum CommandId {
     /// palette-searchable.
     SetCanvasSizePreset(&'static str),
     ArrangeGrid(u32, u32),
+    SimplifyInnerAxes,
+    SetSpacingMode(SpacingMode),
+    SetGutterPreset(GutterPreset),
     Align(Align),
     Distribute(Distribute),
     ZOrder(ZOrder),
@@ -206,6 +209,7 @@ pub fn catalog(app: &PlotxApp) -> Vec<CommandDescriptor> {
         CommandId::Multiplets,
         CommandId::TidyBoard,
         CommandId::CanvasSettings,
+        CommandId::SimplifyInnerAxes,
     ];
     ids.extend((0..app.session.recent_files.len()).map(CommandId::OpenRecent));
     ids.extend(
@@ -214,6 +218,8 @@ pub fn catalog(app: &PlotxApp) -> Vec<CommandDescriptor> {
             .enumerate()
             .map(|(i, _)| CommandId::NewCanvas(i)),
     );
+    ids.extend([SpacingMode::Frame, SpacingMode::Visual].map(CommandId::SetSpacingMode));
+    ids.extend(GutterPreset::ALL.map(CommandId::SetGutterPreset));
     ids.extend(
         [
             ExportFormat::Svg,
@@ -475,7 +481,10 @@ pub fn describe(app: &PlotxApp, id: CommandId) -> CommandDescriptor {
         CommandId::SetCanvasSizePreset(_) => {
             requires(has_canvas, "Open a canvas before changing its size.")
         }
-        CommandId::ArrangeGrid(_, _) => {
+        CommandId::ArrangeGrid(_, _)
+        | CommandId::SimplifyInnerAxes
+        | CommandId::SetSpacingMode(_)
+        | CommandId::SetGutterPreset(_) => {
             requires(has_canvas, "Open a canvas before arranging its plots.")
         }
         CommandId::ApplyTheme(_) => requires(has_canvas, "Open a canvas before applying a theme."),
@@ -581,6 +590,9 @@ fn ribbon_placement(id: CommandId) -> Option<RibbonPlacement> {
         CommandId::Tool(Tool::Select)
         | CommandId::ArrangeGrid(1, 2)
         | CommandId::ArrangeGrid(2, 2)
+        | CommandId::SimplifyInnerAxes
+        | CommandId::SetSpacingMode(_)
+        | CommandId::SetGutterPreset(_)
         | CommandId::TidyBoard => (Arrange, "Layout", 0, Always),
         CommandId::Align(_) => (Arrange, "Align", 1, Always),
         CommandId::Distribute(_) => (Arrange, "Distribute", 2, Always),

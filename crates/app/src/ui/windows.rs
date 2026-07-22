@@ -175,9 +175,34 @@ pub(super) fn canvas_settings_window(app: &mut PlotxApp, ctx: &egui::Context) {
             });
 
             ui.horizontal(|ui| {
-                ui.label("Gutter");
+                ui.label("Minimum spacing");
                 gutter_drag(app, ci, ui, unit);
                 ui.label(unit.label());
+            });
+            ui.weak("Visual spacing is a minimum request; axis furniture may make it larger.");
+
+            ui.horizontal(|ui| {
+                ui.label("Spacing basis");
+                for (label, mode) in [
+                    ("Frame", plotx_core::layout::SpacingMode::Frame),
+                    ("Visual", plotx_core::layout::SpacingMode::Visual),
+                ] {
+                    let selected = app.doc.canvases[ci].layout.spacing_mode == mode;
+                    if ui.selectable_label(selected, label).clicked() {
+                        app.set_spacing_mode(mode);
+                    }
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.label("Presets");
+                for preset in plotx_core::layout::GutterPreset::ALL {
+                    let selected = (app.doc.canvases[ci].layout.gutter_mm - preset.millimetres())
+                        .abs()
+                        < 0.001;
+                    if ui.selectable_label(selected, preset.label()).clicked() {
+                        app.set_gutter_preset(preset);
+                    }
+                }
             });
 
             ui.horizontal(|ui| {
@@ -190,12 +215,19 @@ pub(super) fn canvas_settings_window(app: &mut PlotxApp, ctx: &egui::Context) {
                     let l = app.doc.canvases[ci].layout;
                     (l.rows, l.cols)
                 };
+                let simplify_id = egui::Id::new(("apply_grid_simplify", ci));
+                let mut simplify = ui
+                    .data_mut(|data| data.get_temp::<bool>(simplify_id))
+                    .unwrap_or(false);
+                if ui.checkbox(&mut simplify, "Simplify inner axes").changed() {
+                    ui.data_mut(|data| data.insert_temp(simplify_id, simplify));
+                }
                 if ui
                     .button("Apply grid")
                     .on_hover_text("Reposition all plots into these cells")
                     .clicked()
                 {
-                    app.arrange_active_canvas_grid(rows, cols);
+                    app.arrange_active_canvas_grid_with_simplify(rows, cols, simplify);
                 }
             });
 

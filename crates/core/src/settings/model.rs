@@ -69,6 +69,9 @@ pub struct AppearanceSettings {
     pub ui_scale: UiScaleSettings,
     #[serde(default)]
     pub graphics_power: GraphicsPowerPreference,
+    /// Optional editor-chrome accent. Figure colours and exports are unaffected.
+    #[serde(default)]
+    pub canvas_accent: Option<[u8; 3]>,
 }
 
 /// GPU adapter class requested at the next application start. The platform may

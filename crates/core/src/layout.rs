@@ -3,6 +3,12 @@
 
 use crate::state::{MM_TO_PT, ObjectFrame, ObjectId};
 
+mod visual_spacing;
+pub use visual_spacing::{
+    GutterPreset, LayoutItem, OccupiedGrid, SpacingMode, arrange_grid,
+    compute_tiling_plan_for_items, infer_occupied_grid, layout_item, outer_axis_cells,
+};
+
 /// Grid presets offered in the Arrange menu, as `(label, rows, cols)`.
 pub const GRID_PRESETS: &[(&str, u32, u32)] = &[
     ("1 × 1", 1, 1),
@@ -26,6 +32,7 @@ pub struct PageLayout {
     pub rows: u32,
     pub cols: u32,
     pub show_grid: bool,
+    pub spacing_mode: SpacingMode,
 }
 
 impl Default for PageLayout {
@@ -36,6 +43,7 @@ impl Default for PageLayout {
             rows: 1,
             cols: 1,
             show_grid: false,
+            spacing_mode: SpacingMode::Visual,
         }
     }
 }
@@ -517,6 +525,7 @@ mod tests {
             rows: 2,
             cols: 2,
             show_grid: false,
+            spacing_mode: SpacingMode::Visual,
         };
         let frames = grid_frames([200.0, 100.0], &layout);
         assert_eq!(frames.len(), 4);
@@ -535,6 +544,7 @@ mod tests {
             rows: 1,
             cols: 2,
             show_grid: false,
+            spacing_mode: SpacingMode::Visual,
         };
         let no_gutter = grid_frames([200.0, 100.0], &layout)[0].width;
         let with_gutter = grid_frames(
@@ -546,6 +556,124 @@ mod tests {
         )[0]
         .width;
         assert!(with_gutter < no_gutter);
+    }
+
+    #[test]
+    fn outer_axis_cells_cover_full_and_partial_two_by_three_grids() {
+        assert_eq!(
+            outer_axis_cells(6, 2, 3),
+            vec![
+                (false, true),
+                (false, false),
+                (false, false),
+                (true, true),
+                (true, false),
+                (true, false)
+            ]
+        );
+        assert_eq!(
+            outer_axis_cells(5, 2, 3),
+            vec![
+                (false, true),
+                (false, false),
+                (true, false),
+                (true, true),
+                (true, false)
+            ]
+        );
+    }
+
+    #[test]
+    fn frame_mode_keeps_frame_gutter_semantics() {
+        let layout = PageLayout {
+            rows: 1,
+            cols: 2,
+            gutter_mm: 5.0,
+            spacing_mode: SpacingMode::Frame,
+            ..PageLayout::default()
+        };
+        let items = [
+            LayoutItem {
+                id: 1,
+                insets: [20.0; 4],
+            },
+            LayoutItem {
+                id: 2,
+                insets: [30.0; 4],
+            },
+        ];
+        let frames = arrange_grid([400.0, 200.0], &layout, &items);
+        let gap = frames[1].1.x - (frames[0].1.x + frames[0].1.width);
+        assert!((gap - 5.0 * MM_TO_PT).abs() < 0.01);
+    }
+
+    #[test]
+    fn visual_mode_keeps_frames_disjoint_and_data_gap_at_least_requested() {
+        let layout = PageLayout {
+            rows: 1,
+            cols: 2,
+            gutter_mm: 10.0,
+            spacing_mode: SpacingMode::Visual,
+            ..PageLayout::default()
+        };
+        let items = [
+            LayoutItem {
+                id: 1,
+                insets: [10.0, 4.0, 18.0, 24.0],
+            },
+            LayoutItem {
+                id: 2,
+                insets: [8.0, 5.0, 16.0, 6.0],
+            },
+        ];
+        let frames = arrange_grid([400.0, 200.0], &layout, &items);
+        let frame_gap = frames[1].1.x - (frames[0].1.x + frames[0].1.width);
+        let data_gap = frame_gap + items[0].insets[1] + items[1].insets[3];
+        assert!(frame_gap >= -0.001);
+        assert!(data_gap + 0.001 >= 10.0 * MM_TO_PT);
+        assert!(
+            frames
+                .iter()
+                .all(|(_, frame)| frame.x >= 0.0 && frame.x + frame.width <= 400.01)
+        );
+    }
+
+    #[test]
+    fn smaller_axis_insets_never_increase_visual_frame_gap() {
+        let layout = PageLayout {
+            rows: 1,
+            cols: 2,
+            gutter_mm: 2.0,
+            ..PageLayout::default()
+        };
+        let full = [
+            LayoutItem {
+                id: 1,
+                insets: [20.0; 4],
+            },
+            LayoutItem {
+                id: 2,
+                insets: [20.0; 4],
+            },
+        ];
+        let simple = [
+            LayoutItem {
+                id: 1,
+                insets: [5.0; 4],
+            },
+            LayoutItem {
+                id: 2,
+                insets: [5.0; 4],
+            },
+        ];
+        let full_frames = arrange_grid([400.0, 200.0], &layout, &full);
+        let simple_frames = arrange_grid([400.0, 200.0], &layout, &simple);
+        let data_gap = |frames: &[(ObjectId, ObjectFrame)], items: &[LayoutItem; 2]| {
+            frames[1].1.x - frames[0].1.x - frames[0].1.width
+                + items[0].insets[1]
+                + items[1].insets[3]
+        };
+        assert!(data_gap(&simple_frames, &simple) <= data_gap(&full_frames, &full) + 0.001);
     }
 
     #[test]

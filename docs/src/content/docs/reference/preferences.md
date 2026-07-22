@@ -24,6 +24,11 @@ restores everything except your recent-files list.
 - **Chrome theme** — light, dark, or follow the system appearance. This
   styles the application window; the look of your figures is set per canvas
   with canvas themes.
+- **Canvas accent** — the color of selection outlines and handles, the layout
+  grid, margin guides, and drag-to-tile previews. Pick a color, or use **Follow
+  theme** to take it from the chrome theme. Snap guides keep a contrasting
+  color of their own so they stay distinct, and figure content and exported
+  colors are never affected.
 - **UI scale** — the size of all interface text and controls, per display.
   Automatic picks a physically legible size from the display's reported pixel
   density; the manual choices and the `Ctrl` + `+` / `Ctrl` + `-` shortcuts
