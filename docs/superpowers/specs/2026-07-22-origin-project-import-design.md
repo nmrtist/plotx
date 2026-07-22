@@ -10,13 +10,13 @@
 
 PlotX will import worksheet data directly from supported Origin project files without installing, launching, or automating Origin. The first release will provide a native Rust importer for a verified older binary `.opj` profile. It will recognize `.opju` by content and return a clear unsupported-variant error, but it will not offer a successful OPJU import because the available public implementation does not prove complete container boundaries. Both paths will use file signatures and structural validation rather than trusting filename extensions.
 
-The importer will recover workbook and worksheet structure, supported numeric and text cells, column names, and basic column metadata. It will not claim full Origin project compatibility. Graphs, formula execution, scripts, analysis recomputation, matrices, embedded objects, attachments, and password-protected projects remain unsupported. Unknown structures will produce explicit warnings or errors; they will never be silently interpreted as valid table data.
+The importer will recover validated Origin window or group associations as workbook-like groups, supported numeric and text cells, column names, and basic column metadata. The Origin7V552 profile represents each supported group with one generated worksheet name, `Sheet1`; it does not claim to decode an original worksheet label. It will not claim full Origin project compatibility. Graphs, formula execution, scripts, analysis recomputation, matrices, embedded objects, attachments, and password-protected projects remain unsupported. Unknown structures will produce explicit warnings or errors; they will never be silently interpreted as valid table data.
 
 ## Goals
 
 - Import useful worksheet data from supported `.opj` files on macOS without Origin or any proprietary runtime.
 - Recognize `.opju` without misidentifying it as OPJ, and explain that its container variant is not supported yet.
-- Preserve workbook and worksheet identity, column names, values, nulls, and metadata that can be structurally validated.
+- Preserve validated window or group identity, column names, values, nulls, and metadata that can be structurally validated; disclose generated worksheet names.
 - Reuse PlotX's existing table import preview, typed snapshot conversion, source provenance, recent-file routing, and operation-reporting paths.
 - Fail safely on malformed, truncated, oversized, encrypted, unknown, or unsupported input.
 - Keep `plotx-data` engine-free and keep both the default and `datafusion` feature configurations compiling.
@@ -107,7 +107,7 @@ The first-release evidence matrix is intentionally narrower than the type codes 
 | Dataset and column names, project parameters, and project notes | OpenOPJ `test.opj` and its published expected values | Supported as basic metadata |
 | 8-bit integers, unsigned integers, long names, units, comments, and column designations | No redistributable real fixture with expected values external to the parser under test | Not advertised or enabled until equivalent evidence is added |
 
-Workbook and worksheet grouping are exposed only where the verified window and dataset records associate them unambiguously. Unequal supported column lengths are allowed and are padded with nulls during core conversion. The project format and detected producer-version text are retained as import provenance.
+Workbook-like grouping is exposed only where the verified window and dataset records associate them unambiguously. Each supported group contains one generated `Sheet1` worksheet because the current evidence does not establish a separate source worksheet-label field. Unequal supported column lengths are allowed and are padded with nulls during core conversion. The project format and detected producer-version text are retained as import provenance.
 
 The public `Origin7V552` evidence does not expose a trustworthy project code-page field, so the first release guarantees ASCII text only. Non-ASCII bytes are never guessed as Windows-1252 or another legacy encoding merely because every byte could be mapped. Non-ASCII text cell data causes an unsupported-encoding error. Independent non-ASCII metadata may be skipped with a warning only when its omission cannot affect table geometry or cell alignment. Embedded NUL padding is removed only within the declared fixed-width cell. A later profile may add a legacy encoding only when a redistributable fixture and a validated code-page field establish it.
 
@@ -317,7 +317,7 @@ The repository will include only fixtures whose redistribution terms are explici
 - OPJ: OpenOPJ's MIT-licensed `support/test.opj`, Origin 7.0552, 282,034 bytes, SHA-256 `ac7f71c367562e85e9d4bb4ae418cbcaaa1b5dff80436180e8d3331c7e1d6308`.
 - OPJU detection-only regression: Figshare `RawData_Locust_Revision1_TIS_Mechanism.opju`, CC BY 4.0, 64,954 bytes, SHA-256 `13c47a6a5daaf14493da59c8f1b284d9efb08129c8320b6ad9fd0b5191faa55f`, from DOI `10.6084/m9.figshare.28535426.v1`.
 
-The OPJ fixture test will assert workbook or group names, worksheet counts, column names, exact row counts, exact representative numeric and text values, null positions, and selected metadata. The OPJU fixture test will assert reliable OPJU detection and a clear unsupported-variant rejection with no partial result. A fixture README will carry required MIT attribution and CC BY citation details.
+The OPJ fixture test will assert window or group names, generated worksheet names and counts, column names, exact row counts, exact representative numeric and text values, null positions, and selected metadata. The OPJU fixture test will assert reliable OPJU detection and a clear unsupported-variant rejection with no partial result. A fixture README will carry required MIT attribution and CC BY citation details.
 
 ### Development comparison and evidence correlation
 
@@ -361,7 +361,7 @@ No Origin trademark icon, logo, or copyrighted visual asset will be added.
 
 The implementation is ready for an upstream pull request only when all of the following are true:
 
-- a valid supported OPJ fixture produces the expected worksheets, names, types, values, nulls, and metadata through the visible import preview and final table import;
+- a valid supported OPJ fixture produces the expected window or group names, generated worksheet names, types, values, nulls, and metadata through the visible import preview and final table import;
 - the public OPJU fixture and synthetic `CPYUA` inputs are recognized and rejected with a clear unsupported-variant error and no partial table data;
 - invalid extensions cannot override content detection;
 - every negative fixture returns a stable error or warning without panic, excessive allocation, path access, script execution, or silent data corruption;

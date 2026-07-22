@@ -43,18 +43,21 @@ workflow describes a whole run and may reference a recipe as one of its steps.
 
 Origin project import is experimental. Successful import is limited to the
 classic OPJ profile verified against a real Origin 7.0552 fixture.
-Compatibility claims are limited to that committed regression fixture and
-independent verification evidence, and expand only when new evidence is added.
+Compatibility claims are limited to that committed regression fixture, its
+published expected values, and explicitly correlated development checks. They
+expand only when new external evidence is added.
 
 Verified worksheet cell forms are `f64`, `f32`, signed `i32`, signed `i16`,
 fixed-width ASCII text, mixed numeric/text cells, nulls, and nonzero row
 offsets. Mixed columns are retained as text, and unequal column lengths are
 padded with nulls.
 
-PlotX preserves workbook and worksheet names and column names. Project
-parameters and notes are retained as source metadata, not inserted as table
-cells. There is no verified-support claim for long names, units, comments,
-column designations, dates, categorical values, or code pages.
+PlotX preserves validated Origin window or group names and column names. Each
+supported window is represented as one table under the generated worksheet
+name `Sheet1`; this release does not claim to decode original worksheet labels.
+Project parameters and notes are retained as source metadata, not inserted as
+table cells. There is no verified-support claim for long names, units,
+comments, column designations, dates, categorical values, or code pages.
 
 An `.opju` file is recognized from its CPYUA content signature, but `.opju` is
 not importable in this release and PlotX creates no partial OPJU result.

@@ -512,7 +512,7 @@ Expected: the named metadata unit tests are discovered and fail because metadata
 
 - [x] **Step 4: Implement window and dataset association**
 
-Reimplement the MIT OpenOPJ Origin 7.0552 window traversal in Rust with a source citation. Dataset names use the validated workbook prefix and column suffix. Choose the longest validated matching window prefix. If no unambiguous association exists, create a deterministic fallback worksheet name and emit a stable warning; never attach a column to a nearby name by byte proximity.
+Reimplement the MIT OpenOPJ Origin 7.0552 window traversal in Rust with a source citation. Dataset names use the validated window or group prefix and column suffix. Choose the longest validated matching prefix. Each associated group uses one generated `Sheet1` worksheet because this profile does not decode a separately verified source worksheet label. If no unambiguous association exists, create a deterministic fallback group name and emit a stable warning; never attach a column to a nearby name by byte proximity.
 
 Enforce workbook, worksheet, column, row, cell, decoded-text, parser-allocation,
 cumulative metadata-record, and nesting limits while assembling. Metadata records
