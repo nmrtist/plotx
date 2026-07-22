@@ -7,6 +7,7 @@ pub(crate) fn paint_zoom_drag(
     object_id: ObjectId,
     plot: PlotRect,
     painter: &egui::Painter,
+    chrome: ChromeStyle,
 ) {
     let drag = match &app.session.ui.interaction {
         Interaction::Zoom(d) if d.axis == ZoomAxis::Box => *d,
@@ -19,11 +20,11 @@ pub(crate) fn paint_zoom_drag(
     if r.width() < 1.0 || r.height() < 1.0 {
         return;
     }
-    painter.rect_filled(r, 0.0, SELECT_FILL);
+    painter.rect_filled(r, 0.0, chrome.selection_fill);
     painter.rect_stroke(
         r,
         0.0,
-        Stroke::new(1.0_f32, SELECT_STROKE),
+        Stroke::new(1.0_f32, chrome.selection_stroke),
         StrokeKind::Inside,
     );
 }
@@ -35,6 +36,7 @@ pub(crate) fn paint_axis_zoom(
     ci: usize,
     rect: egui::Rect,
     painter: &egui::Painter,
+    chrome: ChromeStyle,
 ) {
     let drag = match &app.session.ui.interaction {
         Interaction::Zoom(d) if d.axis != ZoomAxis::Box => *d,
@@ -62,11 +64,11 @@ pub(crate) fn paint_axis_zoom(
     if r.width() < 1.0 || r.height() < 1.0 {
         return;
     }
-    painter.rect_filled(r, 0.0, SELECT_FILL);
+    painter.rect_filled(r, 0.0, chrome.selection_fill);
     painter.rect_stroke(
         r,
         0.0,
-        Stroke::new(1.0_f32, SELECT_STROKE),
+        Stroke::new(1.0_f32, chrome.selection_stroke),
         StrokeKind::Inside,
     );
 }
@@ -77,6 +79,7 @@ pub(crate) fn paint_analysis_selection(
     object_id: ObjectId,
     plot: PlotRect,
     painter: &egui::Painter,
+    chrome: ChromeStyle,
 ) {
     let Some(selection) = &app.session.ui.analysis_selection else {
         return;
@@ -113,11 +116,11 @@ pub(crate) fn paint_analysis_selection(
     if r.width() < 1.0 {
         return;
     }
-    painter.rect_filled(r, 0.0, SELECT_FILL);
+    painter.rect_filled(r, 0.0, chrome.selection_fill);
     painter.rect_stroke(
         r,
         0.0,
-        Stroke::new(1.0_f32, SELECT_STROKE),
+        Stroke::new(1.0_f32, chrome.selection_stroke),
         StrokeKind::Inside,
     );
 }
@@ -131,6 +134,7 @@ pub(crate) fn paint_regions(
     dataset: usize,
     plot: PlotRect,
     painter: &egui::Painter,
+    chrome: ChromeStyle,
 ) {
     let Some(fig) = app.doc.canvases[ci]
         .object(object_id)
@@ -206,11 +210,11 @@ pub(crate) fn paint_regions(
         )
         .intersect(plot_rect(plot));
         if r.width() >= 1.0 {
-            painter.rect_filled(r, 0.0, SELECT_FILL);
+            painter.rect_filled(r, 0.0, chrome.selection_fill);
             painter.rect_stroke(
                 r,
                 0.0,
-                Stroke::new(1.0_f32, SELECT_STROKE),
+                Stroke::new(1.0_f32, chrome.selection_stroke),
                 StrokeKind::Inside,
             );
         }
@@ -224,6 +228,7 @@ pub(crate) fn paint_integrals(
     dataset: usize,
     plot: PlotRect,
     painter: &egui::Painter,
+    chrome: ChromeStyle,
 ) {
     if app.session.tool != Tool::Integrate {
         return;
@@ -263,7 +268,7 @@ pub(crate) fn paint_integrals(
         if r.width() < 1.0 {
             continue;
         }
-        let color = INTEGRAL_COLOR;
+        let color = chrome.integral;
         let [cr, cg, cb, _] = color.to_array();
         let is_sel = selected == Some(integ.id);
         let is_hovered = hover_x.is_some_and(|x| x >= r.left() && x <= r.right());
@@ -318,11 +323,11 @@ pub(crate) fn paint_integrals(
         )
         .intersect(plot_rect(plot));
         if r.width() >= 1.0 {
-            painter.rect_filled(r, 0.0, SELECT_FILL);
+            painter.rect_filled(r, 0.0, chrome.selection_fill);
             painter.rect_stroke(
                 r,
                 0.0,
-                Stroke::new(1.0_f32, SELECT_STROKE),
+                Stroke::new(1.0_f32, chrome.selection_stroke),
                 StrokeKind::Inside,
             );
         }
@@ -338,6 +343,7 @@ pub(crate) fn paint_peaks(
     dataset: usize,
     plot: PlotRect,
     painter: &egui::Painter,
+    chrome: ChromeStyle,
 ) {
     if app.session.tool != Tool::Peaks {
         return;
@@ -380,7 +386,7 @@ pub(crate) fn paint_peaks(
     if ly >= plot.top && ly <= plot.bottom() {
         for seg in egui::Shape::dashed_line(
             &[Pos2::new(plot.left, ly), Pos2::new(plot.right(), ly)],
-            Stroke::new(1.0_f32, PEAK_COLOR),
+            Stroke::new(1.0_f32, chrome.peak),
             6.0,
             4.0,
         ) {
@@ -392,7 +398,7 @@ pub(crate) fn paint_peaks(
         for (px, py) in PeakSet::detect_at(&trace, Some(y), peaks.detector.max_count) {
             let at = Pos2::new(sx(px), sy(py));
             if plot_contains(plot, at) {
-                painter.circle_stroke(at, 3.0, Stroke::new(1.5_f32, PEAK_COLOR));
+                painter.circle_stroke(at, 3.0, Stroke::new(1.5_f32, chrome.peak));
             }
         }
     }
@@ -405,11 +411,13 @@ pub(crate) fn paint_peaks(
             continue;
         }
         match peak.origin {
-            PeakOrigin::Manual => painter.circle_filled(p, 3.0, PEAK_COLOR),
-            PeakOrigin::Detected => painter.circle_stroke(p, 3.0, Stroke::new(1.5_f32, PEAK_COLOR)),
+            PeakOrigin::Manual => painter.circle_filled(p, 3.0, chrome.peak),
+            PeakOrigin::Detected => {
+                painter.circle_stroke(p, 3.0, Stroke::new(1.5_f32, chrome.peak))
+            }
         };
         if peak.mark_id.is_some() && peak.mark_id == selected {
-            painter.circle_stroke(p, 5.5, Stroke::new(2.0_f32, SELECT_ACCENT));
+            painter.circle_stroke(p, 5.5, Stroke::new(2.0_f32, chrome.selection_active));
         }
     }
 
@@ -423,11 +431,11 @@ pub(crate) fn paint_peaks(
         )
         .intersect(plot_rect(plot));
         if r.width() >= 1.0 {
-            painter.rect_filled(r, 0.0, SELECT_FILL);
+            painter.rect_filled(r, 0.0, chrome.selection_fill);
             painter.rect_stroke(
                 r,
                 0.0,
-                Stroke::new(1.0_f32, SELECT_STROKE),
+                Stroke::new(1.0_f32, chrome.selection_stroke),
                 StrokeKind::Inside,
             );
         }
@@ -455,8 +463,8 @@ pub(crate) fn paint_peaks(
     let (px, py) = trace.snap(hover_x);
     let at = Pos2::new(sx(px), sy(py));
     if plot_contains(plot, at) {
-        painter.circle_stroke(at, 4.0, Stroke::new(1.5_f32, SELECT_ACCENT));
-        painter.circle_filled(at, 1.5, SELECT_ACCENT);
+        painter.circle_stroke(at, 4.0, Stroke::new(1.5_f32, chrome.selection_active));
+        painter.circle_filled(at, 1.5, chrome.selection_active);
     }
 }
 
@@ -466,6 +474,7 @@ pub(crate) fn paint_selection_drag(
     object_id: ObjectId,
     plot: PlotRect,
     painter: &egui::Painter,
+    chrome: ChromeStyle,
 ) {
     let drag = match &app.session.ui.interaction {
         Interaction::Selection(d) => *d,
@@ -484,11 +493,11 @@ pub(crate) fn paint_selection_drag(
     if r.width() < 1.0 {
         return;
     }
-    painter.rect_filled(r, 0.0, SELECT_FILL);
+    painter.rect_filled(r, 0.0, chrome.selection_fill);
     painter.rect_stroke(
         r,
         0.0,
-        Stroke::new(1.0_f32, SELECT_STROKE),
+        Stroke::new(1.0_f32, chrome.selection_stroke),
         StrokeKind::Inside,
     );
 }
@@ -523,14 +532,43 @@ pub(crate) fn paint_layout_overlay(
     ci: usize,
     rect: egui::Rect,
     painter: &egui::Painter,
+    chrome: ChromeStyle,
 ) {
     let canvas = &app.doc.canvases[ci];
     let bt = BoardTransform::from_board(app.session.board, rect);
     let page = bt.page_screen_rect(canvas);
     let zoom = bt.zoom;
 
-    if canvas.layout.show_grid && app.session.tool.is_layout_tool() {
-        let stroke = Stroke::new(1.0_f32, GRID_COLOR);
+    let layout_tool = app.session.tool.is_layout_tool();
+    if layout_tool {
+        let [top, right, bottom, left] = canvas.layout.margin_mm;
+        let mm = plotx_core::state::MM_TO_PT * zoom;
+        let stroke = Stroke::new(1.0_f32, chrome.margin_guide);
+        let dashed = |points: [Pos2; 2]| {
+            for segment in egui::Shape::dashed_line(&points, stroke, 5.0, 4.0) {
+                painter.add(segment);
+            }
+        };
+        if top > 0.0 {
+            let y = page.top() + top * mm;
+            dashed([Pos2::new(page.left(), y), Pos2::new(page.right(), y)]);
+        }
+        if right > 0.0 {
+            let x = page.right() - right * mm;
+            dashed([Pos2::new(x, page.top()), Pos2::new(x, page.bottom())]);
+        }
+        if bottom > 0.0 {
+            let y = page.bottom() - bottom * mm;
+            dashed([Pos2::new(page.left(), y), Pos2::new(page.right(), y)]);
+        }
+        if left > 0.0 {
+            let x = page.left() + left * mm;
+            dashed([Pos2::new(x, page.top()), Pos2::new(x, page.bottom())]);
+        }
+    }
+
+    if canvas.layout.show_grid && layout_tool {
+        let stroke = Stroke::new(1.0_f32, chrome.layout_grid);
         for cell in layout::grid_frames(canvas.size_pt(), &canvas.layout) {
             let r = EguiRect::from_min_size(
                 Pos2::new(page.left() + cell.x * zoom, page.top() + cell.y * zoom),
@@ -540,7 +578,7 @@ pub(crate) fn paint_layout_overlay(
         }
     }
 
-    let stroke = Stroke::new(1.0_f32, GUIDE_COLOR);
+    let stroke = Stroke::new(1.0_f32, chrome.snap_guide);
     for guide in &app.session.ui.snap_guides {
         if guide.vertical {
             let x = page.left() + guide.pos * zoom;
@@ -563,6 +601,7 @@ pub(crate) fn paint_author_drag(
     ci: usize,
     rect: egui::Rect,
     painter: &egui::Painter,
+    chrome: ChromeStyle,
 ) {
     let drag = match &app.session.ui.interaction {
         Interaction::Author(d) => *d,
@@ -576,11 +615,11 @@ pub(crate) fn paint_author_drag(
     let zoom = bt.zoom;
     let to_screen = |p: [f32; 2]| Pos2::new(page.left() + p[0] * zoom, page.top() + p[1] * zoom);
     let r = EguiRect::from_two_pos(to_screen(drag.start), to_screen(drag.current));
-    painter.rect_filled(r, 0.0, SELECT_FILL);
+    painter.rect_filled(r, 0.0, chrome.selection_fill);
     painter.rect_stroke(
         r,
         0.0,
-        Stroke::new(1.0_f32, SELECT_STROKE),
+        Stroke::new(1.0_f32, chrome.selection_stroke),
         StrokeKind::Inside,
     );
 }
@@ -590,6 +629,7 @@ pub(crate) fn paint_panel_label_selection(
     ci: usize,
     rect: egui::Rect,
     painter: &egui::Painter,
+    chrome: ChromeStyle,
 ) {
     let Some((canvas, object_id)) = app.panel_label_selection() else {
         return;
@@ -605,7 +645,7 @@ pub(crate) fn paint_panel_label_selection(
     painter.rect_stroke(
         r,
         0.0,
-        Stroke::new(1.0_f32, Color32::from_rgb(0x7a, 0x4d, 0xff)),
+        Stroke::new(1.0_f32, chrome.selection_active),
         StrokeKind::Inside,
     );
 }
@@ -616,6 +656,7 @@ pub(crate) fn paint_object_selection(
     rect: egui::Rect,
     _page: egui::Rect,
     painter: &egui::Painter,
+    chrome: ChromeStyle,
 ) {
     let selection = &app.session.ui.selection;
     let mut ids = selection.objects().to_vec();
@@ -630,9 +671,9 @@ pub(crate) fn paint_object_selection(
         };
         let r = plot_rect(frame);
         let stroke = if data_edit_target(app, ci) == Some(id) {
-            Stroke::new(2.0_f32, SELECT_ACCENT)
+            Stroke::new(2.0_f32, chrome.selection_active)
         } else {
-            Stroke::new(1.5_f32, SELECT_STROKE)
+            Stroke::new(1.5_f32, chrome.selection_stroke)
         };
         painter.rect_stroke(r, 0.0, stroke, StrokeKind::Inside);
         if handles {
@@ -645,14 +686,20 @@ pub(crate) fn paint_object_selection(
                 painter.rect_filled(
                     egui::Rect::from_center_size(p, egui::vec2(HANDLE_SIZE_PX, HANDLE_SIZE_PX)),
                     0.0,
-                    SELECT_STROKE,
+                    chrome.selection_stroke,
                 );
             }
         }
     }
 }
 
-pub(crate) fn paint_marquee(app: &PlotxApp, ci: usize, rect: egui::Rect, painter: &egui::Painter) {
+pub(crate) fn paint_marquee(
+    app: &PlotxApp,
+    ci: usize,
+    rect: egui::Rect,
+    painter: &egui::Painter,
+    chrome: ChromeStyle,
+) {
     let marq = match &app.session.ui.interaction {
         Interaction::Marquee(d) => *d,
         _ => return,
@@ -665,11 +712,11 @@ pub(crate) fn paint_marquee(app: &PlotxApp, ci: usize, rect: egui::Rect, painter
     let zoom = bt.zoom;
     let to_screen = |p: [f32; 2]| Pos2::new(page.left() + p[0] * zoom, page.top() + p[1] * zoom);
     let r = EguiRect::from_two_pos(to_screen(marq.start), to_screen(marq.current));
-    painter.rect_filled(r, 0.0, SELECT_FILL);
+    painter.rect_filled(r, 0.0, chrome.selection_fill);
     painter.rect_stroke(
         r,
         0.0,
-        Stroke::new(1.0_f32, SELECT_STROKE),
+        Stroke::new(1.0_f32, chrome.selection_stroke),
         StrokeKind::Inside,
     );
 }

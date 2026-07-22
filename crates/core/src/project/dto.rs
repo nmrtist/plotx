@@ -301,6 +301,8 @@ pub struct PageLayoutDto {
     pub cols: u32,
     #[serde(default)]
     pub show_grid: bool,
+    #[serde(default)]
+    pub spacing_mode: crate::layout::SpacingMode,
 }
 
 impl PageLayoutDto {
@@ -311,6 +313,7 @@ impl PageLayoutDto {
             rows: l.rows,
             cols: l.cols,
             show_grid: l.show_grid,
+            spacing_mode: l.spacing_mode,
         }
     }
 
@@ -321,7 +324,28 @@ impl PageLayoutDto {
             rows: self.rows.max(1),
             cols: self.cols.max(1),
             show_grid: self.show_grid,
+            spacing_mode: self.spacing_mode,
         }
+    }
+}
+
+#[cfg(test)]
+mod page_layout_tests {
+    use super::*;
+
+    #[test]
+    fn missing_spacing_mode_defaults_to_visual_and_writes_explicitly() {
+        let dto: PageLayoutDto = serde_json::from_str(
+            r#"{"margin_mm":[0.0,0.0,0.0,0.0],"gutter_mm":5.0,"rows":1,"cols":2}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            dto.into_layout().spacing_mode,
+            crate::layout::SpacingMode::Visual
+        );
+        let encoded =
+            serde_json::to_string(&PageLayoutDto::from_layout(&PageLayout::default())).unwrap();
+        assert!(encoded.contains("\"spacing_mode\":\"visual\""));
     }
 }
 

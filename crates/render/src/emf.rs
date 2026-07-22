@@ -256,14 +256,16 @@ fn write_figure(dc: &mut Dc, fig: &Figure, outer: Rect) {
             Color::AXIS,
             AXIS_LINE_WIDTH,
         );
-        dc.text(
-            label,
-            (
-                px,
-                plot.bottom() + TICK_LENGTH + TICK_LABEL_PAD + ty.tick_pt,
-            ),
-            TextStyle::new(ty.tick_pt, Color::AXIS, TA_CENTER),
-        );
+        if fig.x.show_tick_labels {
+            dc.text(
+                label,
+                (
+                    px,
+                    plot.bottom() + TICK_LENGTH + TICK_LABEL_PAD + ty.tick_pt,
+                ),
+                TextStyle::new(ty.tick_pt, Color::AXIS, TA_CENTER),
+            );
+        }
     }
     let y_tick_x = y_axis_x - TICK_LENGTH - TICK_LABEL_PAD;
     for (&yt, label) in y_ticks.values.iter().zip(&y_ticks.labels) {
@@ -274,20 +276,26 @@ fn write_figure(dc: &mut Dc, fig: &Figure, outer: Rect) {
             Color::AXIS,
             AXIS_LINE_WIDTH,
         );
-        dc.text(
-            label,
-            (y_tick_x, py),
-            TextStyle::new(ty.tick_pt, Color::AXIS, TA_RIGHT).middle(),
-        );
+        if fig.y.show_tick_labels {
+            dc.text(
+                label,
+                (y_tick_x, py),
+                TextStyle::new(ty.tick_pt, Color::AXIS, TA_RIGHT).middle(),
+            );
+        }
     }
-    if let Some(multiplier) = y_ticks.multiplier() {
+    if fig.y.show_tick_labels
+        && let Some(multiplier) = y_ticks.multiplier()
+    {
         dc.text(
             &multiplier,
             (y_axis_x, plot.top - TICK_LABEL_PAD),
             TextStyle::new(ty.tick_pt, Color::AXIS, TA_LEFT),
         );
     }
-    if let Some(multiplier) = x_ticks.multiplier() {
+    if fig.x.show_tick_labels
+        && let Some(multiplier) = x_ticks.multiplier()
+    {
         dc.text(
             &multiplier,
             (plot.right(), outer.top + outer.height - OUTER_PAD),
@@ -295,15 +303,22 @@ fn write_figure(dc: &mut Dc, fig: &Figure, outer: Rect) {
         );
     }
 
-    if !hidden_frame {
+    if !hidden_frame && fig.x.show_label {
+        let multiplier_clearance = if fig.x.show_tick_labels {
+            x_ticks.multiplier_clearance(ty.tick_pt)
+        } else {
+            0.0
+        };
         dc.text(
             &fig.x.label,
             (
                 (plot.left + plot.right()) / 2.0,
-                outer.top + outer.height - OUTER_PAD - x_ticks.multiplier_clearance(ty.tick_pt),
+                outer.top + outer.height - OUTER_PAD - multiplier_clearance,
             ),
             TextStyle::new(ty.label_pt, Color::AXIS, TA_CENTER),
         );
+    }
+    if !hidden_frame && fig.y.show_label {
         dc.text(
             &fig.y.label,
             (

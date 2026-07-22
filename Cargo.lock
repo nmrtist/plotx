@@ -4141,6 +4141,7 @@ version = "0.1.0"
 dependencies = [
  "colorous",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

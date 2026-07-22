@@ -159,6 +159,10 @@ pub struct AxisOverrides {
     pub y_label: Option<String>,
     pub x_range: Option<AxisRange>,
     pub y_range: Option<AxisRange>,
+    pub x_show_tick_labels: Option<bool>,
+    pub x_show_label: Option<bool>,
+    pub y_show_tick_labels: Option<bool>,
+    pub y_show_label: Option<bool>,
 }
 
 impl AxisOverrides {
@@ -180,6 +184,18 @@ impl AxisOverrides {
         {
             figure.y.min = range.min;
             figure.y.max = range.max;
+        }
+        if let Some(show) = self.x_show_tick_labels {
+            figure.x.show_tick_labels = show;
+        }
+        if let Some(show) = self.x_show_label {
+            figure.x.show_label = show;
+        }
+        if let Some(show) = self.y_show_tick_labels {
+            figure.y.show_tick_labels = show;
+        }
+        if let Some(show) = self.y_show_label {
+            figure.y.show_label = show;
         }
     }
 
@@ -211,6 +227,7 @@ mod tests {
                 min: 5.0,
                 max: -5.0,
             }),
+            ..AxisOverrides::default()
         }
         .normalized();
         assert_eq!(overrides.x_label, None);

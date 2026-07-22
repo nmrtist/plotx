@@ -57,6 +57,7 @@ impl PlotxApp {
                     files.truncate(crate::settings::MAX_RECENT_FILES);
                     files
                 },
+                canvas_accent: settings.appearance.canvas_accent,
                 ui: UiState {
                     snap_enabled: settings.general.snap_enabled,
                     ..Default::default()

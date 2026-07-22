@@ -133,6 +133,9 @@ pub fn execute(
         CommandId::ArrangeGrid(rows, columns) => {
             app.arrange_active_canvas_grid(rows, columns);
         }
+        CommandId::SimplifyInnerAxes => app.simplify_inner_axes(),
+        CommandId::SetSpacingMode(mode) => app.set_spacing_mode(mode),
+        CommandId::SetGutterPreset(preset) => app.set_gutter_preset(preset),
         CommandId::Align(mode) => app.align_selected(mode),
         CommandId::Distribute(mode) => app.distribute_selected(mode),
         CommandId::ZOrder(mode) => app.z_order_selected(mode),

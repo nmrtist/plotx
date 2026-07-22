@@ -31,6 +31,7 @@ impl CanvasTemplate {
                 name: "Single-column figure (89 mm)",
                 size_mm: [89.0, 60.0],
                 layout: PageLayout {
+                    spacing_mode: crate::layout::SpacingMode::Visual,
                     margin_mm: [4.0, 4.0, 4.0, 4.0],
                     gutter_mm: 3.0,
                     rows: 1,
@@ -44,6 +45,7 @@ impl CanvasTemplate {
                 name: "Double-column figure (183 mm)",
                 size_mm: [183.0, 120.0],
                 layout: PageLayout {
+                    spacing_mode: crate::layout::SpacingMode::Visual,
                     margin_mm: [6.0, 6.0, 6.0, 6.0],
                     gutter_mm: 5.0,
                     rows: 1,
@@ -57,6 +59,7 @@ impl CanvasTemplate {
                 name: "Poster panel",
                 size_mm: [300.0, 400.0],
                 layout: PageLayout {
+                    spacing_mode: crate::layout::SpacingMode::Visual,
                     margin_mm: [14.0, 14.0, 14.0, 14.0],
                     gutter_mm: 10.0,
                     rows: 3,

@@ -662,6 +662,7 @@ pub struct Session {
     /// from settings at construction and kept in sync by `note_recent_file` /
     /// `clear_recent_files` / `apply_settings`. Not serialized with projects.
     pub recent_files: Vec<std::path::PathBuf>,
+    pub canvas_accent: Option<[u8; 3]>,
     pub ui: UiState,
     /// Complete previous project files to retain after a successful save.
     pub project_backup_generations: u8,

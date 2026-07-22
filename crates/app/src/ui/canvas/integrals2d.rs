@@ -455,6 +455,7 @@ pub(crate) fn paint_integrals_2d(
     dataset: usize,
     plot: PlotRect,
     painter: &egui::Painter,
+    chrome: ChromeStyle,
 ) {
     let Some(n) = app
         .doc
@@ -487,7 +488,7 @@ pub(crate) fn paint_integrals_2d(
         if r.width() < 1.0 || r.height() < 1.0 {
             continue;
         }
-        let color = INTEGRAL_COLOR;
+        let color = chrome.integral;
         let [red, green, blue, _] = color.to_array();
         painter.rect_filled(
             r,
@@ -548,11 +549,11 @@ pub(crate) fn paint_integrals_2d(
             baseline: BaselineMode::None,
         };
         let r = integral_screen_rect(&preview, plot, x, y).intersect(plot_rect(plot));
-        painter.rect_filled(r, 0.0, SELECT_FILL);
+        painter.rect_filled(r, 0.0, chrome.selection_fill);
         painter.rect_stroke(
             r,
             0.0,
-            Stroke::new(1.0_f32, SELECT_STROKE),
+            Stroke::new(1.0_f32, chrome.selection_stroke),
             StrokeKind::Inside,
         );
     }

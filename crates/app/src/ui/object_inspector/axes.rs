@@ -106,8 +106,77 @@ pub(super) fn axes_section(
         y_reason,
         ui,
     );
+    visibility_row(app, canvas, object, AxisKind::X, "X text", ui);
+    visibility_row(app, canvas, object, AxisKind::Y, "Y text", ui);
 
     focused
+}
+
+fn visibility_row(
+    app: &mut PlotxApp,
+    canvas: usize,
+    object: ObjectId,
+    axis: AxisKind,
+    label: &str,
+    ui: &mut Ui,
+) {
+    let Some((mut ticks, mut title)) = app.doc.canvases[canvas]
+        .object(object)
+        .and_then(|object| object.plot())
+        .map(|plot| match axis {
+            AxisKind::X => (plot.figure.x.show_tick_labels, plot.figure.x.show_label),
+            AxisKind::Y => (plot.figure.y.show_tick_labels, plot.figure.y.show_label),
+        })
+    else {
+        return;
+    };
+    ui.horizontal(|ui| {
+        ui.label(label);
+        let tick_changed = ui.checkbox(&mut ticks, "Tick labels").changed();
+        let title_changed = ui.checkbox(&mut title, "Title").changed();
+        if tick_changed || title_changed {
+            let before = current_overrides(app, canvas, object);
+            let mut after = before.clone();
+            match axis {
+                AxisKind::X => {
+                    if tick_changed {
+                        after.x_show_tick_labels = Some(ticks);
+                    }
+                    if title_changed {
+                        after.x_show_label = Some(title);
+                    }
+                }
+                AxisKind::Y => {
+                    if tick_changed {
+                        after.y_show_tick_labels = Some(ticks);
+                    }
+                    if title_changed {
+                        after.y_show_label = Some(title);
+                    }
+                }
+            }
+            app.execute_action(Action::set_axis_overrides(canvas, object, before, after));
+        }
+        if ui
+            .button("Automatic")
+            .on_hover_text("Clear visibility overrides")
+            .clicked()
+        {
+            let before = current_overrides(app, canvas, object);
+            let mut after = before.clone();
+            match axis {
+                AxisKind::X => {
+                    after.x_show_tick_labels = None;
+                    after.x_show_label = None;
+                }
+                AxisKind::Y => {
+                    after.y_show_tick_labels = None;
+                    after.y_show_label = None;
+                }
+            }
+            app.execute_action(Action::set_axis_overrides(canvas, object, before, after));
+        }
+    });
 }
 
 #[allow(clippy::too_many_arguments)]

@@ -44,6 +44,59 @@ Two helpers automate the rest:
 The export dialog pre-selects the matching journal preset, so a page
 authored at a column width exports at that width by default.
 
+## Spacing between panels
+
+Panels of a multi-panel figure read best when their data areas are evenly
+spaced — but each plot reserves a different amount of room for its tick
+labels and axis titles, so equal frame gaps rarely look equal.
+**Canvas Size & Settings…** sets both the spacing you want and how it is
+measured.
+
+**Minimum spacing** is the gap itself, in the canvas unit; the **Tight**
+(2 mm), **Normal** (5 mm), and **Spacious** (10 mm) presets fill in common
+values.
+
+**Spacing basis** decides what that gap is measured between:
+
+- **Visual** (the default) measures between the data areas of neighboring
+  plots, counting the tick labels and axis titles that sit between them, so a
+  panel with a long y title is given the room it needs. The value is a
+  minimum: the gap you see can end up wider, never narrower, and frames never
+  overlap.
+- **Frame** measures between the plot frames and ignores axis text. Frames
+  then sit exactly the requested distance apart, and the visible space between
+  data areas varies from pair to pair.
+
+The basis applies wherever PlotX places plots for you — **Apply grid**, and
+dragging a plot onto a page that already holds one.
+
+With the Select tool active, each non-zero page margin is drawn as a dashed
+line across the page, showing the content area you are laying out into; a
+margin of zero draws no line. Turning on the layout grid adds the cell
+outlines, and snapping guides appear in a contrasting color while you drag.
+
+## Simplify inner axes
+
+In a grid of panels that share the same axes, repeating the tick numbers and
+axis titles on every panel wastes space. **Simplify inner axes** keeps the
+x-axis text only on the bottom plot of each column and the y-axis text only on
+the leftmost plot of each row. Axis lines and tick marks stay on every panel.
+
+There are two ways in:
+
+- Tick **Simplify inner axes** beside **Apply grid** in Canvas settings to
+  arrange and simplify as one undoable step. The frames are then measured
+  against the simplified axes, so the panels grow into the space the hidden
+  text used to take.
+- Run **Simplify Inner Axes** — on the Arrange Ribbon tab, in the canvas
+  right-click Arrange menu, or from the command palette — to simplify plots
+  that are already in place. It needs at least two plots aligned in a grid;
+  otherwise the status bar says what to fix.
+
+To bring text back on one panel, select it and use **Axes** in the Object
+inspector: the **X text** and **Y text** rows toggle **Tick labels** and
+**Title** individually, and **Automatic** returns that axis to showing both.
+
 ## Stacked and multi-dataset plots
 
 A single plot frame can display several 1D datasets — superimposed, or
@@ -63,7 +116,8 @@ size.
 What you control directly:
 
 - Select one plot and use **Axes** in the Object inspector to override its X
-  and Y titles or numeric ranges. Leave a title blank, or keep a range on
+  and Y titles or numeric ranges, or to hide either axis's tick labels and
+  title. Leave a title blank, or keep a range on
   **Auto**, to use the value derived from the data. A manual range becomes that
   axis's full range: zooming and panning stay inside it, and a double-click on
   the plot returns to it. Charts without visible axes offer no axis settings,

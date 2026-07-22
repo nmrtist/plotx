@@ -181,38 +181,62 @@ fn margins_for_ticks_with_widths(
         };
     }
 
-    let y_tick_clearance = if y_ticks.labels.is_empty() {
+    let y_tick_clearance = if y_ticks.values.is_empty() {
         0.0
-    } else {
+    } else if fig.y.show_tick_labels {
         widths.y + TICK_LENGTH + TICK_LABEL_PAD
-    };
-    let x_tick_clearance = if x_ticks.labels.is_empty() {
-        0.0
     } else {
+        TICK_LENGTH
+    };
+    let x_tick_clearance = if x_ticks.values.is_empty() {
+        0.0
+    } else if fig.x.show_tick_labels {
         ty.tick_pt + TICK_LABEL_PAD + TICK_LENGTH
+    } else {
+        TICK_LENGTH
     };
 
     // Keep a left-end x label out of the rotated y-title lane even when the
     // y ticks themselves have been dropped on a short panel.
-    let x_endpoint_clearance = if x_ticks.labels.is_empty() {
+    let x_endpoint_clearance = if !fig.x.show_tick_labels || x_ticks.labels.is_empty() {
         0.0
     } else {
         widths.x * 0.5
     };
-    let axis_title_clearance = OUTER_PAD + ty.label_pt + AXIS_LABEL_GAP;
-    let left = axis_title_clearance + y_tick_clearance.max(x_endpoint_clearance);
-    let right = (OUTER_PAD + widths.x * 0.5).max(8.0);
+    let y_title_clearance = if fig.y.show_label {
+        ty.label_pt + AXIS_LABEL_GAP
+    } else {
+        0.0
+    };
+    let left = OUTER_PAD + y_title_clearance + y_tick_clearance.max(x_endpoint_clearance);
+    let x_width = if fig.x.show_tick_labels {
+        widths.x
+    } else {
+        0.0
+    };
+    let right = (OUTER_PAD + x_width * 0.5).max(8.0);
     let title_clearance = if fig.title.trim().is_empty() {
         0.0
     } else {
         ty.title_pt + AXIS_LABEL_GAP
     };
-    let top = OUTER_PAD + title_clearance + y_ticks.multiplier_clearance(ty.tick_pt);
-    let bottom = OUTER_PAD
-        + x_ticks.multiplier_clearance(ty.tick_pt)
-        + ty.label_pt
-        + AXIS_LABEL_GAP
-        + x_tick_clearance;
+    let y_multiplier = if fig.y.show_tick_labels {
+        y_ticks.multiplier_clearance(ty.tick_pt)
+    } else {
+        0.0
+    };
+    let x_multiplier = if fig.x.show_tick_labels {
+        x_ticks.multiplier_clearance(ty.tick_pt)
+    } else {
+        0.0
+    };
+    let x_title_clearance = if fig.x.show_label {
+        ty.label_pt + AXIS_LABEL_GAP
+    } else {
+        0.0
+    };
+    let top = OUTER_PAD + title_clearance + y_multiplier;
+    let bottom = OUTER_PAD + x_multiplier + x_title_clearance + x_tick_clearance;
 
     Margins {
         left,

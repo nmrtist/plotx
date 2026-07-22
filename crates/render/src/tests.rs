@@ -84,6 +84,53 @@ fn multipliers_get_their_own_text_rows() {
 }
 
 #[test]
+fn hidden_axis_text_reduces_margins_but_keeps_tick_space() {
+    let visible = Figure::new(
+        "",
+        Axis::new("Long horizontal title", 0.0, 90_000.0),
+        Axis::new("Long vertical title", -90_000.0, 90_000.0),
+    );
+    let mut hidden = visible.clone();
+    hidden.x.show_tick_labels = false;
+    hidden.x.show_label = false;
+    hidden.y.show_tick_labels = false;
+    hidden.y.show_label = false;
+    let visible = Margins::for_figure(&visible);
+    let hidden = Margins::for_figure(&hidden);
+    assert!(hidden.left < visible.left && hidden.bottom < visible.bottom);
+    assert!(hidden.left >= OUTER_PAD + TICK_LENGTH);
+    assert!(hidden.bottom >= OUTER_PAD + TICK_LENGTH);
+}
+
+#[test]
+fn empty_adaptive_ticks_do_not_reserve_tick_mark_space() {
+    let mut fig = Figure::new("", Axis::new("", 0.0, 1.0), Axis::new("", 0.0, 1.0));
+    fig.x.show_label = false;
+    fig.y.show_label = false;
+    let layout = axis_layout(&fig, 1.0, 1.0);
+    assert!(layout.x_ticks.values.is_empty() && layout.y_ticks.values.is_empty());
+    assert_eq!(layout.margins.left, OUTER_PAD);
+    assert_eq!(layout.margins.bottom, OUTER_PAD);
+}
+
+#[test]
+fn svg_hidden_axis_text_omits_labels_and_multiplier_but_keeps_ticks() {
+    let mut fig = Figure::new(
+        "",
+        Axis::new("UNIQUE_X_TITLE", 0.0, 90_000.0),
+        Axis::new("UNIQUE_Y_TITLE", -90_000.0, 90_000.0),
+    );
+    fig.x.show_tick_labels = false;
+    fig.x.show_label = false;
+    fig.y.show_tick_labels = false;
+    fig.y.show_label = false;
+    let out = crate::svg::export(&fig);
+    assert!(!out.contains("UNIQUE_X_TITLE") && !out.contains("UNIQUE_Y_TITLE"));
+    assert!(!out.contains("×10"));
+    assert!(out.matches("stroke=\"#272727\"").count() > 1);
+}
+
+#[test]
 fn projection_bands_shrink_plot_and_share_edges() {
     use plotx_figure::AxisTrace;
     let mut fig = Figure::new(

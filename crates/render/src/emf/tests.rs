@@ -57,3 +57,28 @@ fn round_trips_through_set_enh_meta_file_bits() {
         DeleteEnhMetaFile(hemf);
     }
 }
+
+#[test]
+fn hidden_axis_text_is_absent_from_emf_while_drawing_records_remain() {
+    let mut fig = Figure::new(
+        "",
+        Axis::new("UNIQUE_X_TITLE", 0.0, 90_000.0),
+        Axis::new("UNIQUE_Y_TITLE", -90_000.0, 90_000.0),
+    );
+    fig.x.show_tick_labels = false;
+    fig.x.show_label = false;
+    fig.y.show_tick_labels = false;
+    fig.y.show_label = false;
+    let bytes = export_document_emf(&demo_document(&fig)).expect("export");
+    let contains_utf16 = |needle: &str| {
+        let encoded: Vec<u8> = needle.encode_utf16().flat_map(u16::to_le_bytes).collect();
+        bytes.windows(encoded.len()).any(|window| window == encoded)
+    };
+    assert!(!contains_utf16("UNIQUE_X_TITLE"));
+    assert!(!contains_utf16("UNIQUE_Y_TITLE"));
+    assert!(!contains_utf16("×10"));
+    assert!(
+        bytes.len() > 88,
+        "EMF still contains axis and tick drawing records"
+    );
+}

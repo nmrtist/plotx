@@ -140,6 +140,7 @@ fn axis_overrides_survive_rebuild_and_roundtrip_through_undo() {
         y_label: Some("Response".to_owned()),
         x_range: Some(AxisRange::new(1.0, 8.0)),
         y_range: Some(AxisRange::new(-2.0, 12.0)),
+        ..AxisOverrides::default()
     };
 
     app.execute_action(Action::set_axis_overrides(
