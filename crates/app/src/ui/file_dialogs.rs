@@ -16,9 +16,9 @@ mod xlsx;
 pub(crate) use delimited::DelimitedTableSource;
 use path::{ensure_extension, ensure_plotx_extension, io_error_category};
 pub(crate) use preview::table_import_preview_window;
-pub(crate) use recent::open_recent_path;
 #[cfg(test)]
-use recent::{RecentOpenKind, recent_open_kind};
+use recent::RecentOpenKind;
+pub(crate) use recent::open_recent_path;
 use xlsx::import_xlsx_table_path;
 
 pub(crate) fn import_delimited_table(app: &mut PlotxApp) {
@@ -288,6 +288,16 @@ pub(crate) fn import_delimited_text_with_schema(
 }
 
 pub(crate) fn commit_table_import_preview(app: &mut PlotxApp) -> bool {
+    commit_table_import_preview_with_recent(app, PlotxApp::note_recent_file)
+}
+
+pub(crate) fn commit_table_import_preview_with_recent<F>(
+    app: &mut PlotxApp,
+    mut note_recent_file: F,
+) -> bool
+where
+    F: FnMut(&mut PlotxApp, &std::path::Path),
+{
     let Some(preview) = app.session.ui.table_import_preview.take() else {
         return false;
     };
@@ -316,7 +326,7 @@ pub(crate) fn commit_table_import_preview(app: &mut PlotxApp) -> bool {
         );
     }
     if let Some(path) = preview.recent_path {
-        app.note_recent_file(&path);
+        note_recent_file(app, &path);
     }
     app.session.record_operation(preview.report);
     true

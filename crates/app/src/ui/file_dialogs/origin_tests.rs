@@ -1,5 +1,8 @@
 use super::*;
-use crate::ui::file_dialogs::{RecentOpenKind, recent_open_kind};
+use crate::ui::file_dialogs::recent::{
+    OpenPathEntryType, classify_open_path, classify_open_path_with_header,
+};
+use crate::ui::file_dialogs::{RecentOpenKind, open_recent_path};
 use plotx_core::operation::{OperationId, OperationOutcome};
 use plotx_core::origin::{ImportedOriginWorksheet, ORIGIN_IMPORT_OPERATION};
 use plotx_core::state::PlotxApp;
@@ -16,51 +19,6 @@ struct PanicOnRead;
 impl Read for PanicOnRead {
     fn read(&mut self, _buffer: &mut [u8]) -> io::Result<usize> {
         panic!("bounded reader must reject before reading")
-    }
-}
-
-struct PersistedSettingsGuard {
-    path: PathBuf,
-    original: Option<Vec<u8>>,
-}
-
-impl PersistedSettingsGuard {
-    fn capture() -> Self {
-        let path = plotx_core::settings::config_dir()
-            .unwrap_or_else(std::env::temp_dir)
-            .join("settings.json");
-        let original = match std::fs::read(&path) {
-            Ok(contents) => Some(contents),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => None,
-            Err(error) => panic!("could not capture PlotX settings before test: {error}"),
-        };
-        Self { path, original }
-    }
-}
-
-impl Drop for PersistedSettingsGuard {
-    fn drop(&mut self) {
-        let result = match &self.original {
-            Some(contents) => std::fs::write(&self.path, contents),
-            None => match std::fs::remove_file(&self.path) {
-                Ok(()) => Ok(()),
-                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-                Err(error) => Err(error),
-            },
-        };
-        if let Err(error) = result {
-            eprintln!("Could not restore PlotX settings after Origin import test: {error}");
-        }
-        if self.original.is_none()
-            && let Some(parent) = self.path.parent()
-            && parent
-                .read_dir()
-                .is_ok_and(|mut entries| entries.next().is_none())
-            && let Err(error) = std::fs::remove_dir(parent)
-            && error.kind() != io::ErrorKind::NotFound
-        {
-            eprintln!("Could not remove empty PlotX test settings directory: {error}");
-        }
     }
 }
 
@@ -121,7 +79,7 @@ fn origin_routing_uses_signature_before_extension() {
     let disguised = root.join("project.dat");
     std::fs::write(&disguised, b"CPYA 4.2673 552#\n").unwrap();
 
-    let kind = recent_open_kind(&disguised);
+    let kind = classify_open_path(&disguised).unwrap();
 
     std::fs::remove_dir_all(root).unwrap();
     assert_eq!(format!("{kind:?}"), "OriginProject");
@@ -130,7 +88,181 @@ fn origin_routing_uses_signature_before_extension() {
 #[test]
 fn origin_extension_routes_signature_mismatch_to_origin_adapter() {
     let path = PathBuf::from("not-origin.opj");
-    assert_eq!(format!("{:?}", recent_open_kind(&path)), "OriginProject");
+    let kind = classify_open_path_with_header(&path, OpenPathEntryType::RegularFile, || {
+        Ok(([0_u8; 129], 0))
+    })
+    .unwrap();
+    assert_eq!(format!("{kind:?}"), "OriginProject");
+}
+
+#[test]
+fn origin_pending_preview_rejects_a_second_table_path_without_replacement() {
+    let first = temp_origin_file("opj", OPENOPJ_FIXTURE);
+    let second = temp_origin_file("csv", b"time,value\n0,1\n");
+    let mut app = PlotxApp::new_with_settings(plotx_core::settings::Settings::default());
+
+    open_recent_path(&mut app, &first);
+    let first_preview_path = app
+        .session
+        .ui
+        .table_import_preview
+        .as_ref()
+        .expect("the first table path should create a preview")
+        .recent_path
+        .clone();
+    open_recent_path(&mut app, &second);
+
+    std::fs::remove_file(first).unwrap();
+    std::fs::remove_file(second).unwrap();
+    let preview = app
+        .session
+        .ui
+        .table_import_preview
+        .as_ref()
+        .expect("the first preview must remain pending");
+    assert_eq!(preview.recent_path, first_preview_path);
+    assert!(app.doc.datasets.is_empty());
+    assert!(app.session.recent_files.is_empty());
+    let report = app
+        .session
+        .operation_history
+        .operations()
+        .next_back()
+        .expect("the rejected second import should be reported");
+    assert_eq!(report.outcome, OperationOutcome::Failure);
+    assert!(
+        report
+            .summary
+            .to_ascii_lowercase()
+            .contains("finish or cancel"),
+        "{report:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn origin_routing_metadata_errors_are_not_silently_discarded() {
+    use std::os::unix::fs::symlink;
+
+    let path = std::env::temp_dir().join(format!(
+        "plotx-origin-metadata-loop-{}.opj",
+        uuid::Uuid::new_v4()
+    ));
+    symlink(&path, &path).unwrap();
+
+    let result = classify_open_path(&path);
+    let mut app = PlotxApp::new_with_settings(plotx_core::settings::Settings::default());
+    open_recent_path(&mut app, &path);
+
+    std::fs::remove_file(path).unwrap();
+    assert!(
+        result.is_err(),
+        "metadata errors must be propagated: {result:?}"
+    );
+    let report = app
+        .session
+        .operation_history
+        .operations()
+        .next_back()
+        .expect("routing metadata errors must be user-visible");
+    assert_eq!(report.outcome, OperationOutcome::Failure);
+    assert!(
+        report
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.source.as_deref() == Some("app.open_path")),
+        "{report:?}"
+    );
+}
+
+#[test]
+fn origin_header_read_errors_are_propagated_by_the_shared_classifier() {
+    let result = classify_open_path_with_header(
+        Path::new("unreadable.bin"),
+        OpenPathEntryType::RegularFile,
+        || {
+            Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "injected header read failure",
+            ))
+        },
+    );
+
+    let error = result.expect_err("header read errors must not fall back to an extension route");
+    assert!(error.to_string().contains("header"), "{error}");
+    assert!(
+        error.to_string().contains("injected header read failure"),
+        "{error}"
+    );
+}
+
+#[test]
+fn origin_non_regular_file_classification_never_reads_a_header() {
+    let result =
+        classify_open_path_with_header(Path::new("stream.opj"), OpenPathEntryType::Other, || {
+            panic!("non-regular paths must be rejected before header reads")
+        });
+
+    let error = result.expect_err("non-regular paths must be rejected");
+    assert!(error.to_string().contains("regular file"), "{error}");
+}
+
+#[cfg(unix)]
+#[test]
+fn origin_routing_rejects_non_regular_files_without_opening_them() {
+    use std::os::unix::net::UnixListener;
+
+    let path = PathBuf::from("/tmp").join(format!("px-{}.opj", uuid::Uuid::new_v4()));
+    let listener = UnixListener::bind(&path).unwrap();
+
+    let result = classify_open_path(&path);
+
+    drop(listener);
+    std::fs::remove_file(path).unwrap();
+    assert!(
+        result.is_err(),
+        "non-regular files must be rejected before opening: {result:?}"
+    );
+}
+
+#[test]
+fn origin_opj_extension_rejects_an_opju_signature() {
+    let path = temp_origin_file("opj", b"CPYUA 4.3668 178\n");
+    let mut app = PlotxApp::new_with_settings(plotx_core::settings::Settings::default());
+
+    open_recent_path(&mut app, &path);
+
+    std::fs::remove_file(path).unwrap();
+    assert!(app.session.ui.table_import_preview.is_none());
+    assert!(app.session.recent_files.is_empty());
+    let report = app
+        .session
+        .operation_history
+        .operations()
+        .next_back()
+        .expect("the extension/signature mismatch must be reported");
+    assert_eq!(report.outcome, OperationOutcome::Failure);
+    assert!(report.summary.contains("does not match"), "{report:?}");
+}
+
+#[test]
+fn origin_opju_extension_rejects_an_opj_signature() {
+    let path = temp_origin_file("opju", OPENOPJ_FIXTURE);
+    let mut app = PlotxApp::new_with_settings(plotx_core::settings::Settings::default());
+
+    open_recent_path(&mut app, &path);
+
+    std::fs::remove_file(path).unwrap();
+    assert!(app.session.ui.table_import_preview.is_none());
+    assert!(app.session.recent_files.is_empty());
+    let report = app
+        .session
+        .operation_history
+        .operations()
+        .next_back()
+        .expect("the extension/signature mismatch must be reported");
+    assert_eq!(report.outcome, OperationOutcome::Failure);
+    assert!(report.summary.contains("does not match"), "{report:?}");
 }
 
 #[test]
@@ -167,14 +299,17 @@ fn origin_usize_max_input_limit_is_rejected_before_reading() {
 
 #[test]
 fn recent_entries_route_to_origin_project_import() {
+    let classify = |path: &Path| {
+        classify_open_path_with_header(path, OpenPathEntryType::RegularFile, || {
+            Ok(([0_u8; 129], 0))
+        })
+        .unwrap()
+    };
     assert_eq!(
-        format!("{:?}", recent_open_kind(&PathBuf::from("project.OPJU"))),
+        format!("{:?}", classify(Path::new("project.OPJU"))),
         "OriginProject"
     );
-    assert_ne!(
-        recent_open_kind(&PathBuf::from("project.opj")),
-        RecentOpenKind::DataFile
-    );
+    assert_ne!(classify(Path::new("project.opj")), RecentOpenKind::DataFile);
 }
 
 #[test]
@@ -267,9 +402,9 @@ fn origin_core_failure_becomes_a_user_visible_operation_report() {
 
 #[test]
 fn origin_recent_file_is_recorded_only_after_confirmed_full_success() {
-    let _settings = PersistedSettingsGuard::capture();
     let path = temp_origin_file("opj", OPENOPJ_FIXTURE);
     let mut app = PlotxApp::new_with_settings(plotx_core::settings::Settings::default());
+    let mut noted_paths = Vec::new();
 
     import_origin_project_path(&mut app, &path);
 
@@ -286,15 +421,20 @@ fn origin_recent_file_is_recorded_only_after_confirmed_full_success() {
         .len();
     assert!(candidate_count > 0);
 
-    assert!(crate::ui::file_dialogs::commit_table_import_preview(
-        &mut app
-    ));
+    assert!(
+        crate::ui::file_dialogs::commit_table_import_preview_with_recent(&mut app, |app, path| {
+            let path = std::path::absolute(path).unwrap();
+            noted_paths.push(path.clone());
+            app.session.recent_files.push(path);
+        },)
+    );
     assert_eq!(app.doc.datasets.len(), candidate_count);
     assert_eq!(app.session.recent_files.len(), 1);
     assert_eq!(
         app.session.recent_files[0],
         std::path::absolute(&path).unwrap()
     );
+    assert_eq!(noted_paths, app.session.recent_files);
     std::fs::remove_file(path).unwrap();
 }
 
@@ -374,9 +514,11 @@ fn origin_selector_changes_preview_only_and_confirmation_imports_all_tables() {
     let mut app = PlotxApp::new_with_settings(plotx_core::settings::Settings::default());
     app.session.ui.table_import_preview = Some(preview);
 
-    assert!(crate::ui::file_dialogs::commit_table_import_preview(
-        &mut app
-    ));
+    assert!(
+        crate::ui::file_dialogs::commit_table_import_preview_with_recent(&mut app, |_, _| panic!(
+            "a preview without a recent path must not persist settings"
+        ),)
+    );
     assert_eq!(app.doc.datasets.len(), 2);
     assert!(app.session.recent_files.is_empty());
 }

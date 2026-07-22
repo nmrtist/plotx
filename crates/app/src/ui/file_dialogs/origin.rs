@@ -104,16 +104,6 @@ pub(super) fn import_origin_project_path(app: &mut PlotxApp, path: &Path) {
     }
 }
 
-pub(super) fn record_origin_probe_failure(app: &mut PlotxApp, path: &Path, error: OriginError) {
-    let operation_id = app.session.begin_operation();
-    install_origin_result(
-        app,
-        operation_id,
-        path,
-        Err(OriginFailure::parser("probe", error)),
-    );
-}
-
 pub(super) fn import_origin_project_model(
     app: &mut PlotxApp,
     path: &Path,
