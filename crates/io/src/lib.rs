@@ -6,6 +6,7 @@ pub mod bruker;
 pub mod delimited;
 pub mod jcamp_dx;
 pub mod jeol;
+pub mod origin;
 pub mod xlsx;
 
 use num_complex::Complex64;

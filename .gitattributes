@@ -2,3 +2,5 @@
 
 *.ico binary
 *.png binary
+*.opj binary
+*.opju binary

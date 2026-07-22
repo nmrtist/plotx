@@ -424,3 +424,25 @@ fn format_duration(duration: Duration) -> String {
         format!("{seconds:.0}s")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    const ABOUT_TEMPLATE: &str = include_str!("../about.hbs");
+    const OPENOPJ_LICENSE: &str =
+        include_str!("../../crates/io/tests/fixtures/origin/OPENOPJ-LICENSE.txt");
+
+    #[test]
+    fn license_template_includes_the_complete_openopj_notice() {
+        assert!(ABOUT_TEMPLATE.contains("OpenOPJ"));
+        assert!(ABOUT_TEMPLATE.contains(
+            "Copyright (c) 2012 Juliusz Gonera, Minor Laboratory, University of Virginia"
+        ));
+        assert!(ABOUT_TEMPLATE.contains(OPENOPJ_LICENSE.trim()));
+    }
+
+    #[test]
+    fn license_template_describes_cargo_and_non_cargo_projects() {
+        assert!(ABOUT_TEMPLATE.contains("Cargo dependencies"));
+        assert!(ABOUT_TEMPLATE.contains("other third-party projects"));
+    }
+}

@@ -8,6 +8,13 @@ pub mod export;
 pub mod fit_model_library;
 pub mod layout;
 pub mod operation;
+pub mod origin;
+#[cfg(test)]
+#[path = "origin_hardening_tests.rs"]
+mod origin_hardening_tests;
+#[cfg(test)]
+#[path = "origin_tests.rs"]
+mod origin_tests;
 pub mod project;
 pub mod settings;
 pub mod state;

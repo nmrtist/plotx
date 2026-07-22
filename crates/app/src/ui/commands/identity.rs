@@ -47,7 +47,7 @@ pub(super) fn command_identity(
         ),
         CommandId::ClearRecentFiles => plain("Clear Recent Files", None),
         CommandId::HelpManual => plain("User Manual", Some(icon::BOOK_OPEN)),
-        CommandId::ImportTable => plain("Import Table / CSV…", Some(icon::TABLE)),
+        CommandId::ImportTable => plain("Import Table…", Some(icon::TABLE)),
         CommandId::PasteTable => plain("Paste Table from Clipboard", Some(icon::CLIPBOARD_TEXT)),
         CommandId::SaveProject => plain("Save Project", Some(icon::FLOPPY_DISK)),
         CommandId::NewTable => plain("New Empty Data Table", Some(icon::TABLE)),

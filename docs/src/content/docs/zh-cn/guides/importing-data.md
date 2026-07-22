@@ -14,6 +14,7 @@ PlotX 直接读取厂商 NMR 与电生理格式，无需任何转换步骤。
 | JCAMP-DX | `.dx` / `.jdx` / `.jcamp` | 1D 频域 NMR 谱 |
 | Axon Binary Format 2 | `.abf` | int16/float32、多通道、多 sweep，以及文件内 DAC/epoch 刺激 |
 | 表格数据 | `.csv`、`.tsv`、`.txt`、`.xlsx` | 保留列类型与空单元格；每个 XLSX 工作表导入为独立数据表 |
+| Origin 项目（实验性） | `.opj`、`.opju` | 经验证的经典 OPJ 配置中的工作表；可以识别 `.opju`，但不能导入。见[兼容性详情](/zh-cn/reference/file-formats/)。 |
 | Zip 压缩包 | `.zip` | 打包的数据文件夹 |
 | PlotX 项目 | `.plotx` | 完整项目：数据、处理与排版 |
 
@@ -21,7 +22,7 @@ PlotX 直接读取厂商 NMR 与电生理格式，无需任何转换步骤。
 
 把文件拖到 PlotX 窗口上，或使用工具栏的打开菜单：*Open File…*、
 *Open Folder…*（用于 Bruker TopSpin 等采集目录）、*Open Project…* 或
-*Import Table / CSV…*。每个导入的数据集会出现在主侧栏中，并自动放置到
+*Import Table…*。每个导入的数据集会出现在主侧栏中，并自动放置到
 画板上。
 文件选择器可以一次选择多个 ABF。打开文件夹时会递归导入其中所有 `.abf`；
 每个文件的直接父目录名会成为可编辑的初始 cell ID。
@@ -32,8 +33,8 @@ PlotX 直接读取厂商 NMR 与电生理格式，无需任何转换步骤。
 无论从文件还是剪贴板导入表格，都会先打开 **Review table import** 对话框。它会
 列出每列推断出的类型和单位、该列是否允许空单元格、前几行的预览，以及任何导入
 诊断。选择 **Import table** 导入，或选择 **Cancel** 保持项目与最近文件列表不变。
-含多个工作表的 XLSX 会额外提供 **Worksheet** 选择器，可逐一预览各工作表；一次
-**Import table** 会把它们作为独立数据表全部导入。
+含多个工作表的 XLSX 会额外提供 **Table** 选择器，可逐一预览工作簿中的各工作表；
+一次 **Import table** 会把它们作为独立数据表全部导入。
 
 PlotX 会区分布尔、整数、小数、文本和空单元格。混合了不同类型、或取值含糊的列会
 保留为文本而不会被丢弃。除非文件自带 PlotX 的类型信息（见下），只有毫不含糊的
@@ -50,6 +51,20 @@ PlotX 导出 CSV 或 TSV 时，会在旁边写入一个配套的 `.plotx-schema.
 一个隐藏工作表中。PlotX 读取 Excel 为每个公式缓存的结果，但不会自行重新计算公式；
 没有缓存值的公式单元格会以空导入，并列入诊断。导出的 XLSX 文件只包含确定值，
 因此不依赖 Excel 重新计算。
+
+## Origin 项目导入（实验性）
+
+Origin 的 `.opj` 与 `.opju` 文件会出现在 *Open File…* 和 *Import Table…*
+两个入口的文件选择器中。这两个入口均根据文件内容与签名识别格式，
+而不是只看扩展名。
+
+受支持的 `.opj` 成功生成工作表后，PlotX 会打开现有的 **Review table
+import** 预览，可先检查每个候选数据表。确认一次会导入全部候选数据表；
+取消则保持当前项目和最近文件列表不变。预览尚未处理完时，若再选择第二个
+表格路径，PlotX 会给出明确提示并拒绝该操作；请先完成或取消当前预览。
+
+无需安装或启动 Origin，PlotX 也不会自动化或调用 Origin。严格且以证据为限的
+兼容范围见[文件格式](/zh-cn/reference/file-formats/)。
 
 ## 伪 2D 实验
 

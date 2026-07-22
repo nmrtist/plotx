@@ -166,6 +166,34 @@ fn spacing_commands_are_registered_checked_and_execute() {
 }
 
 #[test]
+fn origin_import_reuses_import_table_command_identity() {
+    let app = app();
+    assert_eq!(CommandId::ImportTable.stable_id(), "file.import_table");
+    assert_eq!(
+        describe(&app, CommandId::ImportTable).label,
+        "Import Table…"
+    );
+}
+
+#[test]
+fn import_table_is_disabled_while_a_table_preview_is_pending() {
+    let mut app = app();
+    crate::ui::file_dialogs::import_delimited_text(
+        &mut app,
+        "x,y\n0,1\n",
+        crate::ui::file_dialogs::DelimitedTableSource::Clipboard,
+    );
+    assert!(app.session.ui.table_import_preview.is_some());
+
+    let command = describe(&app, CommandId::ImportTable);
+    assert!(!command.enabled);
+    assert_eq!(
+        command.disabled_reason,
+        Some("Finish or cancel the current table import preview before importing another table.")
+    );
+}
+
+#[test]
 fn automation_is_a_global_menu_and_palette_command() {
     let app = app();
     let command = describe(&app, CommandId::RunBatchWorkflow);

@@ -14,6 +14,7 @@ PlotX reads vendor NMR and electrophysiology formats directly — no conversion 
 | JCAMP-DX | `.dx` / `.jdx` / `.jcamp` | 1D frequency-domain NMR spectra |
 | Axon Binary Format 2 | `.abf` | int16/float32, multiple channels and sweeps, embedded DAC/epoch stimuli |
 | Tabular data | `.csv`, `.tsv`, `.txt`, `.xlsx` | Column types and empty cells preserved; one table per XLSX worksheet |
+| Origin project (experimental) | `.opj`, `.opju` | Worksheets from the verified classic OPJ profile; `.opju` is detected but not importable. See [compatibility details](/reference/file-formats/). |
 | Zip archive | `.zip` | An archived dataset folder |
 | PlotX project | `.plotx` | Full project: data, processing, and layout |
 
@@ -21,7 +22,7 @@ PlotX reads vendor NMR and electrophysiology formats directly — no conversion 
 
 Drag a file onto the PlotX window, or use the toolbar's open menu:
 *Open File…*, *Open Folder…* (for acquisition directories such as Bruker
-TopSpin), *Open Project…*, or *Import Table / CSV…*. Each imported dataset
+TopSpin), *Open Project…*, or *Import Table…*. Each imported dataset
 appears in the Primary Side Bar and is placed on the board automatically.
 The file picker accepts several ABF files at once. Opening a folder recursively
 imports every `.abf` below it; each immediate parent folder becomes the initial,
@@ -36,7 +37,7 @@ import** dialog. It shows each column's inferred type and unit, whether the
 column allows empty cells, a preview of the first rows, and any import
 diagnostics. Choose **Import table** to add it, or **Cancel** to leave your
 project and recent-file list untouched. An XLSX workbook with several sheets
-adds a **Worksheet** selector so you can preview each one; a single **Import
+adds a **Table** selector so you can preview each worksheet; a single **Import
 table** brings them all in as separate tables.
 
 PlotX keeps Boolean, whole-number, decimal, text, and empty cells distinct. A
@@ -59,6 +60,22 @@ Excel cached for each formula but does not recalculate formulas itself; a
 formula cell with no cached value imports as empty and is listed in the
 diagnostics. Exported XLSX files hold plain values, so they never depend on
 Excel recalculating them.
+
+## Origin project import (experimental)
+
+Origin `.opj` and `.opju` files appear in the file picker for both *Open
+File…* and *Import Table…*. Both routes identify the format from file
+content and signatures rather than relying only on the extension.
+
+When a supported `.opj` yields worksheets, PlotX opens the existing **Review
+table import** preview so you can inspect every candidate table. Confirm once
+to import all candidates, or cancel to leave the current project and recent-file
+list unchanged. While a preview is pending, selecting a second table path is
+rejected with a clear message; finish or cancel the current preview first.
+
+Origin does not need to be installed or launched, and PlotX does not automate
+or invoke it. See [File formats](/reference/file-formats/) for the exact,
+evidence-limited compatibility boundary.
 
 ## Pseudo-2D experiments
 

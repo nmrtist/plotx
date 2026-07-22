@@ -136,30 +136,43 @@ fn clipboard_schema_restores_typed_contract_and_is_retained() {
 #[test]
 fn recent_entries_route_to_their_import_path() {
     let file = |name: &str| PathBuf::from(format!("C:/data/{name}"));
+    let regular = |path: &std::path::Path| {
+        recent::classify_open_path_with_header(path, recent::OpenPathEntryType::RegularFile, || {
+            Ok(([0_u8; 129], 0))
+        })
+        .unwrap()
+    };
+    assert_eq!(regular(&file("session.PLOTX")), RecentOpenKind::Project);
     assert_eq!(
-        recent_open_kind(&file("session.PLOTX")),
-        RecentOpenKind::Project
-    );
-    assert_eq!(
-        recent_open_kind(&file("results.csv")),
+        regular(&file("results.csv")),
         RecentOpenKind::DelimitedTable
     );
     assert_eq!(
-        recent_open_kind(&file("results.tsv")),
+        regular(&file("results.tsv")),
         RecentOpenKind::DelimitedTable
     );
     assert_eq!(
-        recent_open_kind(&file("results.txt")),
+        regular(&file("results.txt")),
         RecentOpenKind::DelimitedTable
     );
+    assert_eq!(regular(&file("results.XLSX")), RecentOpenKind::XlsxTable);
+    assert_eq!(regular(&file("run.abf")), RecentOpenKind::DataFile);
+    assert_eq!(regular(&file("fid")), RecentOpenKind::DataFile);
     assert_eq!(
-        recent_open_kind(&file("results.XLSX")),
-        RecentOpenKind::XlsxTable
+        format!("{:?}", regular(&file("project.opj"))),
+        "OriginProject"
     );
-    assert_eq!(recent_open_kind(&file("run.abf")), RecentOpenKind::DataFile);
-    assert_eq!(recent_open_kind(&file("fid")), RecentOpenKind::DataFile);
     assert_eq!(
-        recent_open_kind(&std::env::temp_dir()),
+        format!("{:?}", regular(&file("project.OPJU"))),
+        "OriginProject"
+    );
+    assert_eq!(
+        recent::classify_open_path_with_header(
+            &std::env::temp_dir(),
+            recent::OpenPathEntryType::Directory,
+            || panic!("directories must not be opened for header reads"),
+        )
+        .unwrap(),
         RecentOpenKind::Folder
     );
 
@@ -176,8 +189,8 @@ fn recent_entries_route_to_their_import_path() {
     std::fs::create_dir(&csv_directory).expect("create CSV-named directory");
     std::fs::create_dir(&plotx_directory).expect("create PlotX-named directory");
     let kinds = (
-        recent_open_kind(&csv_directory),
-        recent_open_kind(&plotx_directory),
+        recent::classify_open_path(&csv_directory).unwrap().kind(),
+        recent::classify_open_path(&plotx_directory).unwrap().kind(),
     );
     std::fs::remove_dir_all(&root).expect("remove recent-open test directory");
     assert_eq!(kinds, (RecentOpenKind::Folder, RecentOpenKind::Folder));
