@@ -31,11 +31,7 @@ pub(super) fn line_fit_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) -> bool
         .on_hover_text("Deconvolve a region into overlapping lineshape components.")
         .clicked()
     {
-        app.set_tool(if active {
-            Tool::BrowseZoom
-        } else {
-            Tool::LineFit
-        });
+        app.toggle_tool(Tool::LineFit);
     }
     if active {
         ui.small(

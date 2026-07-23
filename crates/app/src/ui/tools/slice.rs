@@ -31,11 +31,7 @@ pub(super) fn slice_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
         .on_hover_text("Turn on, then hover the plot to position the cut (S).")
         .clicked()
     {
-        app.set_tool(if active {
-            Tool::BrowseZoom
-        } else {
-            Tool::Slice
-        });
+        app.toggle_tool(Tool::Slice);
     }
 
     if is_true_2d {

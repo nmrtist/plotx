@@ -11,6 +11,9 @@ show/hide/disable behavior regardless of who adds them.
   command palette, and shortcuts share one enabled/placement decision. Do not
   add ad-hoc business-action buttons that bypass the catalog. Panel-local
   widget interactions (rename fields, tree-row toggles) are exempt.
+- A command whose checked state derives from `session.tool` is a toggle and
+  must execute through `toggle_tool`; reserve `set_tool` for navigation and
+  other ensure-on flows.
 
 ## Hide vs disable
 

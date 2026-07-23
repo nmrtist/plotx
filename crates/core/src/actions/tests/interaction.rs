@@ -164,6 +164,44 @@ fn switching_to_data_tool_resets_in_flight_interaction() {
 }
 
 #[test]
+fn toggling_manual_phase_cancels_the_in_flight_drag() {
+    use crate::actions::DatasetProcessingState;
+    use crate::state::{Interaction, PhaseAxis, PhaseDrag, PhaseDragKind, Tool};
+
+    let mut app = sample_app();
+    app.set_tool(Tool::ManualPhase);
+    let before = DatasetProcessingState::from_dataset(&app.doc.datasets[0]);
+    let original_phase0 = app.doc.datasets[0]
+        .phase_params_mut(PhaseAxis::Direct)
+        .unwrap()
+        .phase0;
+    app.doc.datasets[0]
+        .phase_params_mut(PhaseAxis::Direct)
+        .unwrap()
+        .phase0 = original_phase0 + 0.5;
+    app.apply_dataset_edit(0);
+    app.set_interaction(Interaction::Phase(PhaseDrag {
+        kind: PhaseDragKind::Ph0,
+        dataset: 0,
+        axis: PhaseAxis::Direct,
+        preview_pivot_ppm: None,
+        gesture_before: before,
+    }));
+
+    app.toggle_tool(Tool::ManualPhase);
+
+    assert_eq!(app.session.tool, Tool::BrowseZoom);
+    assert!(!app.interaction().is_active());
+    assert_eq!(
+        app.doc.datasets[0]
+            .phase_params_mut(PhaseAxis::Direct)
+            .unwrap()
+            .phase0,
+        original_phase0
+    );
+}
+
+#[test]
 fn switching_tools_preserves_selection() {
     use crate::state::{Selection, Tool};
     let mut app = sample_app();

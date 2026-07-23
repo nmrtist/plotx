@@ -185,6 +185,14 @@ impl Tool {
         )
     }
 
+    pub fn rest(self) -> Self {
+        if self.is_data_tool() {
+            Self::BrowseZoom
+        } else {
+            Self::Select
+        }
+    }
+
     pub fn is_layout_tool(self) -> bool {
         matches!(self, Tool::Select)
     }
@@ -197,6 +205,19 @@ impl Tool {
             Self::Arrow => Some(ShapeKind::Arrow),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tool_tests {
+    use super::Tool;
+
+    #[test]
+    fn rest_uses_the_tool_family_neutral_tool() {
+        assert_eq!(Tool::Integrate.rest(), Tool::BrowseZoom);
+        assert_eq!(Tool::Text.rest(), Tool::Select);
+        assert_eq!(Tool::BrowseZoom.rest(), Tool::BrowseZoom);
+        assert_eq!(Tool::Select.rest(), Tool::Select);
     }
 }
 

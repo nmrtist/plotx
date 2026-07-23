@@ -373,6 +373,63 @@ fn live_checked_and_enabled_state_comes_from_one_descriptor() {
     assert_eq!(describe(&app, CommandId::CurveFit).label, "Fit Curves");
 }
 
+#[test]
+fn commands_that_activate_tools_toggle_back_to_their_rest_tool() {
+    let catalog_app = app_with_nmr();
+    let command_ids: Vec<_> = catalog(&catalog_app)
+        .into_iter()
+        // Plain actions may open native dialogs or external URLs; the checked
+        // contract is what identifies catalog toggles without enumerating tools.
+        .filter(|command| command.checked.is_some())
+        .map(|command| command.id)
+        .collect();
+
+    for id in command_ids {
+        let mut app = app_with_nmr();
+        let before = app.session.tool;
+        let ctx = egui::Context::default();
+        let mut clipboard = crate::ui::clipboard_table::ClipboardTablePaste::default();
+
+        execute(id, &mut app, &mut clipboard, &ctx);
+        let activated = app.session.tool;
+        if activated == before {
+            continue;
+        }
+
+        execute(id, &mut app, &mut clipboard, &ctx);
+        assert_eq!(
+            app.session.tool,
+            activated.rest(),
+            "command {id:?} activated {activated:?} but did not toggle to its rest tool"
+        );
+    }
+}
+
+#[test]
+fn active_tool_can_be_deactivated_after_its_requirements_become_unmet() {
+    let mut app = app_with_nmr();
+    let ctx = egui::Context::default();
+    let mut clipboard = crate::ui::clipboard_table::ClipboardTablePaste::default();
+    execute(CommandId::Integrate, &mut app, &mut clipboard, &ctx);
+    assert_eq!(app.session.tool, Tool::Integrate);
+
+    let mut table_app = app_with_table(0);
+    let table = table_app.doc.datasets.remove(0);
+    let action = Action::insert_dataset_with_default_canvas(
+        &app,
+        table,
+        "Canvas — table".to_owned(),
+        DEFAULT_CANVAS_SIZE_MM,
+    );
+    app.execute_action(action);
+    let integrate = describe(&app, CommandId::Integrate);
+    assert!(integrate.enabled);
+    assert_eq!(integrate.checked, Some(true));
+
+    execute(CommandId::Integrate, &mut app, &mut clipboard, &ctx);
+    assert_eq!(app.session.tool, Tool::BrowseZoom);
+}
+
 /// The disabled tooltip must name the requirement that actually blocked the
 /// command, not one fixed sentence per command.
 #[test]
