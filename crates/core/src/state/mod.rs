@@ -12,13 +12,14 @@ use plotx_analysis::diffusion::{DiffusionMap, diffusion_map};
 use plotx_analysis::ilt::{IltResult, ilt_map, log_grid};
 use plotx_figure::{Axis, Color, Figure};
 use plotx_io::{
-    Domain, ElectricalQuantity, ElectricalUnit, ElectrophysiologyData, NmrData, NmrData2D,
+    AfmData, Domain, ElectricalQuantity, ElectricalUnit, ElectrophysiologyData, NmrData, NmrData2D,
 };
 use plotx_processing::{
     AxisPipeline, DisplayMode, Params2D, PhaseParams, Preset2D, Processed2D, Spectrum, StepId,
     StepKind, fft, process_2d, reapply, reapply_2d, recommend_preset,
 };
 
+mod afm;
 mod app_impl;
 mod app_impl_align;
 mod app_impl_analysis;
@@ -77,6 +78,7 @@ mod ui_state;
 mod units;
 mod workflow_tab;
 
+pub use afm::*;
 pub use app_impl::*;
 pub use app_impl_align::*;
 pub use app_impl_linefit::LineFitJob;

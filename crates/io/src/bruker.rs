@@ -130,6 +130,7 @@ pub fn load_raw(path: &Path) -> Result<LoadResult, IoError> {
             selected_path: path.to_path_buf(),
             data_path,
             parameter_paths,
+            companion_paths: Vec::new(),
         },
         warnings: Vec::new(),
     })
@@ -621,6 +622,7 @@ mod tests {
             Acquisition::D1(d) => d,
             Acquisition::D2(_) => panic!("expected 1D"),
             Acquisition::Electrophysiology(_) => panic!("expected NMR"),
+            Acquisition::Afm(_) => panic!("expected NMR"),
         };
         let from_dir = unwrap1d(read_bruker(&dir).unwrap());
         let from_file = unwrap1d(read_bruker(&dir.join("fid")).unwrap());
@@ -668,6 +670,7 @@ mod tests {
             Acquisition::D2(d) => *d,
             Acquisition::D1(_) => panic!("expected 2D"),
             Acquisition::Electrophysiology(_) => panic!("expected NMR"),
+            Acquisition::Afm(_) => panic!("expected NMR"),
         };
         assert_eq!((two.cols, two.rows), (2, 2));
         assert_eq!(

@@ -198,6 +198,7 @@ fn processed_data_available(dataset: &Dataset) -> bool {
                     })
         }
         Dataset::Table(_) => false,
+        Dataset::Afm(_) => false,
     }
 }
 
@@ -450,6 +451,7 @@ fn capture_processed(dataset: &Dataset) -> Result<SnapshotData, DataExportError>
             })
         }
         Dataset::Table(_) => Err(DataExportError::ContentUnavailable),
+        Dataset::Afm(_) => Err(DataExportError::ContentUnavailable),
     }
 }
 

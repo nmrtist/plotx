@@ -227,6 +227,9 @@ pub fn apply_scheme(
         Dataset::Electrophysiology(_) => Err(incompatible(
             "this processing scheme contains no steps applicable to the selected dataset",
         )),
+        Dataset::Afm(_) => Err(incompatible(
+            "an AFM dataset has no spectral processing pipeline",
+        )),
     }
 }
 
@@ -242,6 +245,7 @@ pub fn reset_processing(dataset: &Dataset) -> Option<DatasetProcessingState> {
         }),
         Dataset::Table(_) => None,
         Dataset::Electrophysiology(_) => None,
+        Dataset::Afm(_) => None,
     }
 }
 
@@ -273,6 +277,7 @@ fn scheme_from_dataset(dataset: &Dataset) -> Option<ProcessingScheme> {
         }
         Dataset::Table(_) => None,
         Dataset::Electrophysiology(_) => None,
+        Dataset::Afm(_) => None,
     }
 }
 

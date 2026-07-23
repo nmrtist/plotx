@@ -20,6 +20,7 @@ impl Dataset {
                 .unwrap_or_default(),
             Self::Nmr2D(_) => String::new(),
             Self::Electrophysiology(_) => "s".into(),
+            Self::Afm(_) => String::new(),
         }
     }
 
@@ -37,6 +38,7 @@ impl Dataset {
             }
             Self::Nmr2D(_) => false,
             Self::Electrophysiology(data) => !data.data.sweeps.is_empty(),
+            Self::Afm(_) => false,
         }
     }
 
@@ -60,6 +62,7 @@ impl Dataset {
                     x_reversed: false,
                 })
             }
+            Self::Afm(_) => None,
         }
     }
 }

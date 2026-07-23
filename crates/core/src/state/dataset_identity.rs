@@ -7,6 +7,7 @@ impl Dataset {
             Dataset::Nmr2D(dataset) => &dataset.resource_id,
             Dataset::Table(dataset) => &dataset.resource_id,
             Dataset::Electrophysiology(dataset) => &dataset.resource_id,
+            Dataset::Afm(dataset) => &dataset.resource_id,
         }
     }
 
@@ -16,6 +17,7 @@ impl Dataset {
             Dataset::Nmr2D(dataset) => dataset.resource_id = id,
             Dataset::Table(dataset) => dataset.resource_id = id,
             Dataset::Electrophysiology(dataset) => dataset.resource_id = id,
+            Dataset::Afm(dataset) => dataset.resource_id = id,
         }
     }
 }

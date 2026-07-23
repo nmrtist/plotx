@@ -36,6 +36,7 @@ pub enum DatasetProcessingState {
     /// through their own actions.
     Table,
     Electrophysiology(crate::state::ElectrophysiologyProcessing),
+    Afm,
 }
 
 #[derive(Clone)]

@@ -3,7 +3,7 @@ title: Importing data
 description: Supported file formats and how to open them.
 ---
 
-PlotX reads vendor NMR and electrophysiology formats directly — no conversion step is needed.
+PlotX reads vendor NMR, AFM, and electrophysiology formats directly — no conversion step is needed.
 
 ## Supported formats
 
@@ -11,6 +11,7 @@ PlotX reads vendor NMR and electrophysiology formats directly — no conversion 
 | --- | --- | --- |
 | JEOL Delta | `.jdf` | 1D, 2D, and pseudo-2D (DOSY / T1 / T2) |
 | Bruker TopSpin | `fid` / `ser` directories | 1D and 2D |
+| Bruker NanoScope AFM | `.spm` / `.pfc` | Images, force curves, force-volume and PeakForce Capture cubes |
 | JCAMP-DX | `.dx` / `.jdx` / `.jcamp` | 1D frequency-domain NMR spectra |
 | Axon Binary Format 2 | `.abf` | int16/float32, multiple channels and sweeps, embedded DAC/epoch stimuli |
 | Tabular data | `.csv`, `.tsv`, `.txt`, `.xlsx` | Column types and empty cells preserved; one table per XLSX worksheet |
@@ -24,8 +25,8 @@ Drag a file onto the PlotX window, or use the toolbar's open menu:
 TopSpin), *Open Project…*, or *Import Table / CSV…*. Each imported dataset
 appears in the Primary Side Bar and is placed on the board automatically.
 The file picker accepts several ABF files at once. Opening a folder recursively
-imports every `.abf` below it; each immediate parent folder becomes the initial,
-editable cell ID.
+imports every `.abf`, `.spm`, and `.pfc` below it; for ABF files, each immediate
+parent folder becomes the initial, editable cell ID.
 
 Tables can also be pasted straight from the clipboard with
 `Ctrl` + `Shift` + `V` — comma-, tab-, or semicolon-delimited text becomes a
@@ -68,3 +69,26 @@ parameters and get their own analysis tools — see
 
 For patch-clamp sweeps, filtering, time-window statistics, stimulus handling,
 and IV analysis, see [Electrophysiology](/guides/electrophysiology/).
+
+## Bruker NanoScope AFM
+
+PlotX imports NanoScope `.spm` images, force curves, and force-volume grids,
+plus PeakForce Capture `.pfc` data cubes. Image channels plot as maps at the
+recorded scan size, in the file's physical units, with the aspect ratio locked.
+Force curves plot as separate approach and retract branches; when the file
+records a deflection sensitivity, the vertical axis is deflection in
+nanometres, otherwise the curve stays in the unit stored in the file. PlotX
+shows the acquired data as is — it does not infer a contact point, indentation,
+or modulus, and does not fit a contact-mechanics model.
+
+A PeakForce Capture file usually has an AllImages `.spm` export saved beside
+it. PlotX finds that companion, checks that its image grid matches the force
+grid, and imports the pair as one dataset; opening a folder also imports the
+pair once, not as two datasets. The default canvas places the channel map
+beside a force curve from the centre pixel of the grid. If no companion is
+found, or its grid does not match, the `.pfc` file still imports with its
+force curves alone.
+
+PeakForce Capture curves are the per-pixel signals as acquired. Derived QNM
+maps such as modulus arrive as their own image channels; PlotX does not
+recompute them from the curves.

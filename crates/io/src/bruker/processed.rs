@@ -147,6 +147,7 @@ pub fn load_processed(path: &Path) -> Result<LoadResult, IoError> {
             selected_path: path.to_path_buf(),
             data_path: resolved.data_path,
             parameter_paths,
+            companion_paths: Vec::new(),
         },
         warnings,
     })

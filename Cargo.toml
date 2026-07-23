@@ -43,7 +43,7 @@ repository = "https://github.com/nmrtist/plotx"
 colorous = "1"
 num-complex = "0.4"
 rustfft = "6.4"
-serde = { version = "1.0", features = ["derive"] }
+serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
 semver = "1"
 sha2 = "0.10"

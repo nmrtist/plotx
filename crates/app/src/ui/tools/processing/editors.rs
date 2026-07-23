@@ -492,6 +492,7 @@ fn raw_point_count(dataset: &Dataset) -> usize {
             .and_then(|s| s.channels.first())
             .map(Vec::len)
             .unwrap_or(0),
+        Dataset::Afm(_) => 0,
     }
 }
 

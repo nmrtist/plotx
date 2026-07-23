@@ -320,9 +320,10 @@ pub(crate) fn load_and_note(app: &mut PlotxApp, path: &std::path::Path) {
 pub(crate) fn open_file(app: &mut PlotxApp) {
     if let Some(paths) = rfd::FileDialog::new()
         .add_filter(
-            "All supported data (*.abf, *.jdf, fid, ser, *.zip)",
-            &["abf", "jdf", "fid", "ser", "zip"],
+            "All supported data (*.spm, *.pfc, *.abf, *.jdf, fid, ser, *.zip)",
+            &["spm", "pfc", "abf", "jdf", "fid", "ser", "zip"],
         )
+        .add_filter("Bruker NanoScope AFM (*.spm, *.pfc)", &["spm", "pfc"])
         .add_filter("Axon Binary Format 2 (*.abf)", &["abf"])
         .add_filter("JEOL Delta (*.jdf)", &["jdf"])
         .add_filter("Bruker TopSpin (fid, ser)", &["fid", "ser"])
@@ -362,7 +363,7 @@ pub(crate) fn save_project_as(app: &mut PlotxApp, include_view_snapshots: bool) 
 
 pub(crate) fn open_folder(app: &mut PlotxApp) {
     if let Some(path) = rfd::FileDialog::new()
-        .set_title("Open a data folder (Bruker acquisition or recursive ABF2 import)")
+        .set_title("Open a data folder (Bruker acquisition or recursive AFM/ABF2 import)")
         .pick_folder()
     {
         open_folder_path(app, &path);
@@ -375,13 +376,23 @@ pub(crate) fn open_folder(app: &mut PlotxApp) {
 /// any file of the batch loaded, not just the last one.
 fn open_folder_path(app: &mut PlotxApp, path: &std::path::Path) {
     let before = app.doc.datasets.len();
-    let mut abf_files = Vec::new();
-    discovery::collect_abf_files(path, &mut abf_files);
-    if abf_files.is_empty() {
+    let mut data_files = Vec::new();
+    discovery::collect_data_files(path, &mut data_files);
+    if data_files.is_empty() {
         app.load_from(path);
     } else {
-        abf_files.sort();
-        for file in abf_files {
+        data_files.sort();
+        let companion_paths: std::collections::HashSet<std::path::PathBuf> = data_files
+            .iter()
+            .filter(|file| {
+                file.extension()
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("pfc"))
+            })
+            .filter_map(|file| plotx_io::load_path(file).ok())
+            .flat_map(|loaded| loaded.provenance.companion_paths)
+            .collect();
+        data_files.retain(|file| !companion_paths.contains(file));
+        for file in data_files {
             app.load_from(&file);
         }
     }

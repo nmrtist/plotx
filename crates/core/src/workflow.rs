@@ -30,6 +30,16 @@ pub struct InspectionReport {
     pub warnings: Vec<WarningReport>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub electrophysiology: Option<ElectrophysiologyReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub afm: Option<AfmReport>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct AfmReport {
+    pub channels: Vec<String>,
+    pub grid: Option<[usize; 2]>,
+    pub curve_count: usize,
+    pub samples_per_curve: Option<usize>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -47,6 +57,7 @@ pub struct ProvenanceReport {
     pub selected_path: PathBuf,
     pub data_path: PathBuf,
     pub parameter_paths: Vec<PathBuf>,
+    pub companion_paths: Vec<PathBuf>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -175,6 +186,13 @@ pub fn dataset_from_acquisition(acquisition: Acquisition) -> (Dataset, String) {
                 source,
             )
         }
+        Acquisition::Afm(data) => {
+            let source = data.source.clone();
+            (
+                Dataset::Afm(Box::new(crate::state::AfmDataset::load(*data))),
+                source,
+            )
+        }
     }
 }
 
@@ -190,6 +208,10 @@ pub fn dataset_title(dataset: &Dataset) -> String {
             .unwrap_or_else(|| short_name(&nmr.data.source)),
         Dataset::Table(table) => table.name.clone().unwrap_or_else(|| table.summary()),
         Dataset::Electrophysiology(data) => data
+            .name
+            .clone()
+            .unwrap_or_else(|| short_name(&data.data.source)),
+        Dataset::Afm(data) => data
             .name
             .clone()
             .unwrap_or_else(|| short_name(&data.data.source)),
@@ -220,7 +242,11 @@ pub fn build_plot_object(
     name: String,
 ) -> CanvasObject {
     let size_mm = [frame.width / MM_TO_PT, frame.height / MM_TO_PT];
-    let chart = ChartSpec::default_for(dataset.domain());
+    let mut chart = ChartSpec::default_for(dataset.domain());
+    if matches!(dataset, Dataset::Afm(afm) if afm.data.images.is_empty() && afm.data.forces.is_some())
+    {
+        chart.type_id = "afm_force_curve".to_owned();
+    }
     let figure = build_dataset_figure(dataset, &chart, size_mm);
     let viewport = CanvasViewport::from_figure(&figure);
     let panel = PanelMeta::new(dataset_title(dataset), frame.width);
@@ -246,16 +272,68 @@ pub fn build_plot_object(
 
 pub fn build_default_canvas(dataset: &Dataset, source: &str) -> CanvasDocument {
     let title = short_name(source);
-    let mut canvas = CanvasDocument::new(format!("Canvas 1 - {title}"), DEFAULT_CANVAS_SIZE_MM);
-    let [width, height] = canvas.size_pt();
-    let id = canvas.allocate_object_id();
-    canvas.objects.push(build_plot_object(
+    build_default_canvas_for_dataset(
         dataset,
         0,
-        ObjectFrame::new(0.0, 0.0, width, height),
+        format!("Canvas 1 - {title}"),
+        DEFAULT_CANVAS_SIZE_MM,
+    )
+}
+
+/// Build the canonical initial layout for one dataset. GUI insertion, CLI,
+/// automation, and export use this same layout policy; callers supply only the
+/// document-local dataset index and canvas identity.
+pub fn build_default_canvas_for_dataset(
+    dataset: &Dataset,
+    dataset_index: usize,
+    canvas_name: String,
+    size_mm: [f32; 2],
+) -> CanvasDocument {
+    let has_map_and_force = matches!(dataset, Dataset::Afm(afm) if !afm.data.images.is_empty() && afm.data.forces.is_some());
+    let size_mm = if has_map_and_force && size_mm == DEFAULT_CANVAS_SIZE_MM {
+        [crate::state::NATURE_DOUBLE_COLUMN.width_mm, size_mm[1]]
+    } else {
+        size_mm
+    };
+    let mut canvas = CanvasDocument::new(canvas_name, size_mm);
+    if has_map_and_force && size_mm[0] == crate::state::NATURE_DOUBLE_COLUMN.width_mm {
+        canvas.size_preset_id = Some(crate::state::NATURE_DOUBLE_COLUMN.id.to_owned());
+    }
+    let [width, height] = canvas.size_pt();
+    let id = canvas.allocate_object_id();
+    let first_width = if has_map_and_force {
+        width / 2.0
+    } else {
+        width
+    };
+    let first = build_plot_object(
+        dataset,
+        dataset_index,
+        ObjectFrame::new(0.0, 0.0, first_width, height),
         id,
         "Plot 1".to_owned(),
-    ));
+    );
+    canvas.objects.push(first);
+    if has_map_and_force {
+        let second_id = canvas.allocate_object_id();
+        let mut second = build_plot_object(
+            dataset,
+            dataset_index,
+            ObjectFrame::new(width / 2.0, 0.0, width / 2.0, height),
+            second_id,
+            "Force Curve".to_owned(),
+        );
+        if let CanvasObjectKind::Plot(plot) = &mut second.kind {
+            plot.chart.type_id = "afm_force_curve".to_owned();
+            plot.figure = build_dataset_figure(
+                dataset,
+                &plot.chart,
+                [width / 2.0 / MM_TO_PT, height / MM_TO_PT],
+            );
+            plot.viewport = CanvasViewport::from_figure(&plot.figure);
+        }
+        canvas.objects.push(second);
+    }
     canvas
 }
 
@@ -283,6 +361,7 @@ fn inspection_report(
                     selected_path: provenance.selected_path.clone(),
                     data_path: provenance.data_path.clone(),
                     parameter_paths: provenance.parameter_paths.clone(),
+                    companion_paths: provenance.companion_paths.clone(),
                 },
                 dimension: DimensionReport {
                     count: 3,
@@ -306,6 +385,43 @@ fn inspection_report(
                     sweep_count: data.sweeps.len(),
                     protocol: data.protocol.clone(),
                 }),
+                afm: None,
+            };
+        }
+        Acquisition::Afm(data) => {
+            let force = data.forces.as_ref();
+            let shape = force.map_or_else(
+                || {
+                    data.images
+                        .first()
+                        .map_or_else(Vec::new, |image| vec![image.height, image.width])
+                },
+                |force| vec![force.grid_height, force.grid_width, force.samples_per_curve],
+            );
+            return InspectionReport {
+                schema: INSPECTION_SCHEMA,
+                format: format.as_str().to_owned(),
+                provenance: ProvenanceReport {
+                    selected_path: provenance.selected_path.clone(),
+                    data_path: provenance.data_path.clone(),
+                    parameter_paths: provenance.parameter_paths.clone(),
+                    companion_paths: provenance.companion_paths.clone(),
+                },
+                dimension: DimensionReport {
+                    count: shape.len(),
+                    shape,
+                },
+                domain: "afm".to_owned(),
+                warnings: warnings.iter().map(warning_report).collect(),
+                electrophysiology: None,
+                afm: Some(AfmReport {
+                    channels: data.images.iter().map(|image| image.name.clone()).collect(),
+                    grid: force.map(|force| [force.grid_width, force.grid_height]),
+                    curve_count: force.map_or(0, |force| {
+                        force.grid_width.saturating_mul(force.grid_height)
+                    }),
+                    samples_per_curve: force.map(|force| force.samples_per_curve),
+                }),
             };
         }
     };
@@ -316,11 +432,13 @@ fn inspection_report(
             selected_path: provenance.selected_path.clone(),
             data_path: provenance.data_path.clone(),
             parameter_paths: provenance.parameter_paths.clone(),
+            companion_paths: provenance.companion_paths.clone(),
         },
         dimension: DimensionReport { count, shape },
         domain: domain_label(domain).to_owned(),
         warnings: warnings.iter().map(warning_report).collect(),
         electrophysiology: None,
+        afm: None,
     }
 }
 
@@ -330,6 +448,10 @@ fn warning_report(warning: &LoadWarning) -> WarningReport {
         LoadWarningCode::OptionalImaginaryMissing => "optional-imaginary-missing",
         LoadWarningCode::MissingStimulus => "missing-stimulus",
         LoadWarningCode::InvalidMetadata => "invalid-metadata",
+        LoadWarningCode::MissingCalibration => "missing-calibration",
+        LoadWarningCode::MissingCompanion => "missing-companion",
+        LoadWarningCode::CompanionMismatch => "companion-mismatch",
+        LoadWarningCode::OptionalChannelSkipped => "optional-channel-skipped",
     };
     WarningReport {
         code,
@@ -388,6 +510,7 @@ mod tests {
                 selected_path: "sample.dx".into(),
                 data_path: "sample.dx".into(),
                 parameter_paths: Vec::new(),
+                companion_paths: Vec::new(),
             },
             &[],
             &acquisition(),

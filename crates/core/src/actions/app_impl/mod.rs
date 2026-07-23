@@ -414,18 +414,19 @@ impl PlotxApp {
                     if *canvas_index != self.doc.canvases.len() {
                         return;
                     }
-                    let mut canvas = CanvasDocument::new(canvas_name.clone(), *size_mm);
+                    let mut canvas = crate::workflow::build_default_canvas_for_dataset(
+                        &self.doc.datasets[*dataset_index],
+                        *dataset_index,
+                        canvas_name.clone(),
+                        *size_mm,
+                    );
                     canvas.resource_id.clone_from(canvas_resource_id);
                     canvas.board_pos = crate::state::next_page_board_pos(self);
-                    let page = canvas.size_pt();
-                    let id = canvas.allocate_object_id();
-                    let object = self.build_plot_object(
-                        *dataset_index,
-                        ObjectFrame::new(0.0, 0.0, page[0], page[1]),
-                        id,
-                        "Plot 1".to_owned(),
-                    );
-                    canvas.objects.push(object);
+                    for object in &mut canvas.objects {
+                        if let Some(plot) = object.plot_mut() {
+                            plot.figure.typography = self.doc.style_library.figure_typography;
+                        }
+                    }
                     self.doc.canvases.push(canvas);
                     self.session.active_canvas = Some(*canvas_index);
                 }

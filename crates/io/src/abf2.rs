@@ -72,6 +72,7 @@ pub fn load(path: &Path) -> Result<LoadResult, IoError> {
             selected_path: path.to_owned(),
             data_path: path.to_owned(),
             parameter_paths: Vec::new(),
+            companion_paths: Vec::new(),
         },
         warnings,
     })

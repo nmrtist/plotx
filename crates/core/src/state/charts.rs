@@ -10,6 +10,7 @@ pub enum DataDomain {
     PseudoNmr,
     Table,
     Electrophysiology,
+    Afm,
 }
 
 /// How a domain's datasets combine when several are stacked onto one plot:
@@ -31,7 +32,7 @@ impl DataDomain {
                 Some(StackKind::Line)
             }
             DataDomain::Nmr2d => Some(StackKind::Field),
-            DataDomain::PseudoNmr => None,
+            DataDomain::PseudoNmr | DataDomain::Afm => None,
         }
     }
 }
@@ -63,6 +64,20 @@ pub struct ChartType {
 /// The catalog. The first entry for a domain is that domain's default chart, so
 /// old `.plotx` files (no recorded chart type) map to it.
 static CHART_TYPES: &[ChartType] = &[
+    ChartType {
+        id: "afm_map",
+        name: "AFM Map",
+        domains: &[DataDomain::Afm],
+        needs_column: false,
+        build: build_afm_map,
+    },
+    ChartType {
+        id: "afm_force_curve",
+        name: "Force Curve",
+        domains: &[DataDomain::Afm],
+        needs_column: false,
+        build: build_afm_force,
+    },
     ChartType {
         id: "electrophysiology_sweeps",
         name: "Sweeps",
@@ -243,6 +258,14 @@ fn build_nmr_spectrum(dataset: &Dataset, _ctx: &ChartContext) -> Option<Figure> 
 
 fn build_electrophysiology(dataset: &Dataset, _ctx: &ChartContext) -> Option<Figure> {
     Some(dataset.as_electrophysiology()?.figure())
+}
+
+fn build_afm_map(dataset: &Dataset, ctx: &ChartContext) -> Option<Figure> {
+    dataset.as_afm()?.map_figure(ctx.colormap)
+}
+
+fn build_afm_force(dataset: &Dataset, _ctx: &ChartContext) -> Option<Figure> {
+    dataset.as_afm()?.force_figure()
 }
 
 fn build_nmr_2d(dataset: &Dataset, _ctx: &ChartContext) -> Option<Figure> {

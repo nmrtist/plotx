@@ -299,15 +299,31 @@ pub enum Dataset {
     Nmr2D(Box<Nmr2DDataset>),
     Table(Box<TableDataset>),
     Electrophysiology(Box<ElectrophysiologyDataset>),
+    Afm(Box<AfmDataset>),
 }
 
 impl Dataset {
+    pub fn as_afm(&self) -> Option<&AfmDataset> {
+        match self {
+            Dataset::Afm(data) => Some(data),
+            _ => None,
+        }
+    }
+
+    pub fn as_afm_mut(&mut self) -> Option<&mut AfmDataset> {
+        match self {
+            Dataset::Afm(data) => Some(data),
+            _ => None,
+        }
+    }
+
     pub fn kind_label(&self) -> &'static str {
         match self {
             Dataset::Nmr(_) => "NMR 1D",
             Dataset::Nmr2D(_) => "NMR 2D",
             Dataset::Table(_) => "Data Table",
             Dataset::Electrophysiology(_) => "Electrophysiology",
+            Dataset::Afm(_) => "AFM",
         }
     }
 
@@ -321,6 +337,7 @@ impl Dataset {
             Dataset::Nmr2D(_) => DataDomain::Nmr2d,
             Dataset::Table(_) => DataDomain::Table,
             Dataset::Electrophysiology(_) => DataDomain::Electrophysiology,
+            Dataset::Afm(_) => DataDomain::Afm,
         }
     }
 
@@ -332,6 +349,7 @@ impl Dataset {
             Dataset::Nmr2D(d) => d.name.clone(),
             Dataset::Table(d) => d.name.clone(),
             Dataset::Electrophysiology(d) => d.name.clone(),
+            Dataset::Afm(d) => d.name.clone(),
         };
         custom.unwrap_or_else(|| format!("[{}] {}", self.kind_label(), self.summary()))
     }
@@ -342,6 +360,7 @@ impl Dataset {
             Dataset::Nmr2D(d) => d.name = name,
             Dataset::Table(d) => d.name = name,
             Dataset::Electrophysiology(d) => d.name = name,
+            Dataset::Afm(d) => d.name = name,
         }
     }
 
@@ -351,6 +370,7 @@ impl Dataset {
             Dataset::Nmr2D(d) => d.name.clone(),
             Dataset::Table(d) => d.name.clone(),
             Dataset::Electrophysiology(d) => d.name.clone(),
+            Dataset::Afm(d) => d.name.clone(),
         }
     }
 
@@ -370,6 +390,14 @@ impl Dataset {
                 d.data.sweeps.len(),
                 d.data.sample_rate_hz / 1_000.0
             ),
+            Dataset::Afm(d) => {
+                let curves = d
+                    .data
+                    .forces
+                    .as_ref()
+                    .map_or(0, |f| f.grid_width * f.grid_height);
+                format!("{} channels · {curves} force curves", d.data.images.len())
+            }
         }
     }
 
@@ -422,6 +450,7 @@ impl Dataset {
             Dataset::Table(d) => Some(&d.peaks),
             Dataset::Nmr2D(_) => None,
             Dataset::Electrophysiology(_) => None,
+            Dataset::Afm(_) => None,
         }
     }
 
@@ -431,6 +460,7 @@ impl Dataset {
             Dataset::Table(d) => Some(&mut d.peaks),
             Dataset::Nmr2D(_) => None,
             Dataset::Electrophysiology(_) => None,
+            Dataset::Afm(_) => None,
         }
     }
 
@@ -441,6 +471,7 @@ impl Dataset {
             Dataset::Table(d) => &d.line_fits,
             Dataset::Nmr2D(_) => &[],
             Dataset::Electrophysiology(_) => &[],
+            Dataset::Afm(_) => &[],
         }
     }
 
@@ -450,6 +481,7 @@ impl Dataset {
             Dataset::Table(d) => Some(&mut d.line_fits),
             Dataset::Nmr2D(_) => None,
             Dataset::Electrophysiology(_) => None,
+            Dataset::Afm(_) => None,
         }
     }
 
@@ -459,6 +491,7 @@ impl Dataset {
             Dataset::Table(d) => Some(&mut d.next_line_fit_id),
             Dataset::Nmr2D(_) => None,
             Dataset::Electrophysiology(_) => None,
+            Dataset::Afm(_) => None,
         }
     }
 
@@ -510,6 +543,7 @@ impl Dataset {
                 ToolGroup::Statistics,
             ],
             Dataset::Electrophysiology(_) => &[ToolGroup::Electrophysiology],
+            Dataset::Afm(_) => &[],
         }
     }
 
@@ -523,6 +557,7 @@ impl Dataset {
             Dataset::Nmr2D(_) => &[PhaseAxis::F2],
             Dataset::Table(_) => &[],
             Dataset::Electrophysiology(_) => &[],
+            Dataset::Afm(_) => &[],
         }
     }
 
