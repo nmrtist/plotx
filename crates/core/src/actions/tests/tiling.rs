@@ -21,7 +21,8 @@ fn tile_drop_transfers_reframes_and_round_trips() {
     // Pointer in the right region of the target page.
     let plan = compute_tiling_plan(page, &layout, &ids, [page[0] * 0.9, page[1] * 0.5]);
     let existing_after_frame = plan.existing[0].1;
-    let action = Action::tile_drop(&app, 0, newcomer, 1, plan.newcomer, plan.existing).unwrap();
+    let action =
+        Action::tile_drop(&app, 0, newcomer, 1, plan.newcomer, plan.existing, false).unwrap();
     app.execute_action(action);
 
     assert_eq!(app.doc.canvases[0].objects.len(), src_before - 1);
@@ -52,6 +53,61 @@ fn tile_drop_transfers_reframes_and_round_trips() {
     assert_eq!(app.doc.canvases[1].object(existing).unwrap().frame, ex);
 }
 
+fn assert_empty_source_removal_round_trip(from: usize, to: usize) {
+    let mut app = sample_app();
+    push_canvas(&mut app, 0, "second", [120.0, 80.0]);
+    app.session.active_canvas = Some(from);
+    let source_snapshot = app.doc.canvases[from].clone();
+    let newcomer = source_snapshot.objects[0].id;
+    let target_name = app.doc.canvases[to].name.clone();
+    let page = app.doc.canvases[to].size_pt();
+    let plan = compute_tiling_plan(
+        page,
+        &app.doc.canvases[to].layout,
+        &app.doc.canvases[to].plot_object_ids(),
+        [page[0] * 0.9, page[1] * 0.5],
+    );
+    let action =
+        Action::tile_drop(&app, from, newcomer, to, plan.newcomer, plan.existing, true).unwrap();
+    app.execute_action(action);
+    assert_eq!(app.doc.canvases.len(), 1);
+    assert_eq!(app.doc.canvases[0].name, target_name);
+    assert_eq!(app.session.active_canvas, Some(0));
+
+    app.undo();
+    assert_eq!(app.doc.canvases.len(), 2);
+    assert_eq!(app.doc.canvases[from].name, source_snapshot.name);
+    assert_eq!(
+        app.doc.canvases[from].objects.len(),
+        source_snapshot.objects.len()
+    );
+    assert_eq!(
+        app.doc.canvases[from].objects[0].id,
+        source_snapshot.objects[0].id
+    );
+    assert_eq!(
+        app.doc.canvases[from].objects[0].frame,
+        source_snapshot.objects[0].frame
+    );
+    assert_eq!(app.doc.canvases[from].board_pos, source_snapshot.board_pos);
+    assert_eq!(app.session.active_canvas, Some(from));
+
+    app.redo();
+    assert_eq!(app.doc.canvases.len(), 1);
+    assert_eq!(app.doc.canvases[0].name, target_name);
+    assert_eq!(app.session.active_canvas, Some(0));
+}
+
+#[test]
+fn tile_drop_removes_empty_source_before_target_atomically() {
+    assert_empty_source_removal_round_trip(0, 1);
+}
+
+#[test]
+fn tile_drop_removes_empty_source_after_target_atomically() {
+    assert_empty_source_removal_round_trip(1, 0);
+}
+
 #[test]
 fn cancelling_interaction_clears_tile_preview_cache() {
     let mut app = sample_app();
@@ -64,10 +120,13 @@ fn cancelling_interaction_clears_tile_preview_cache() {
             target_layout: crate::layout::PageLayout::default(),
             target_existing_ids: vec![2],
             region: crate::layout::TilingDropRegion::Left,
+            pointer_cell: None,
         },
         target: 1,
         newcomer: ObjectFrame::new(0.0, 0.0, 50.0, 80.0),
         existing: Vec::new(),
+        pointer_screen: [0.0; 2],
+        anchor: [0.5; 2],
     });
     app.cancel_interaction();
     assert!(app.session.ui.tile_drop.is_none());

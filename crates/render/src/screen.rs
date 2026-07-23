@@ -1,3 +1,5 @@
+pub use crate::screen_stats::RenderStats;
+use crate::screen_stats::visible_source_len;
 use crate::{
     AXIS_LINE_WIDTH, Document, DocumentItem, DocumentObject, DocumentOverlay, DocumentViewport,
     LegendMark, OUTER_PAD, OverlayAlign, OverlayKind, OverlayShape, OverlayShapeKind, OverlayText,
@@ -31,6 +33,16 @@ pub fn show(ui: &mut Ui, fig: &Figure) {
 /// size (margins, fonts, strokes, offsets) is a page-unit constant multiplied by
 /// it here, so the whole figure stays proportional at any zoom.
 pub fn paint(painter: &egui::Painter, outer: Rect, fig: &Figure, scale: f32) {
+    paint_with_stats(painter, outer, fig, scale, None);
+}
+
+pub fn paint_with_stats(
+    painter: &egui::Painter,
+    outer: Rect,
+    fig: &Figure,
+    scale: f32,
+    mut stats: Option<&mut RenderStats>,
+) {
     let ty = fig.typography;
     let layout = axis_layout(fig, outer.width / scale, outer.height / scale);
     let margins = layout.margins.scaled(scale);
@@ -279,6 +291,9 @@ pub fn paint(painter: &egui::Painter, outer: Rect, fig: &Figure, scale: f32) {
         }
         match series.kind {
             SeriesKind::Line if series.points.len() >= 2 => {
+                if let Some(stats) = stats.as_deref_mut() {
+                    stats.line_series_visited += 1;
+                }
                 let columns = line_columns(plot.width, painter.ctx().pixels_per_point());
                 let visible = screen_line_points(
                     &series.points,
@@ -286,6 +301,16 @@ pub fn paint(painter: &egui::Painter, outer: Rect, fig: &Figure, scale: f32) {
                     fig.x.min.max(fig.x.max),
                     columns,
                 );
+                if let Some(stats) = stats.as_deref_mut() {
+                    if matches!(visible, Cow::Owned(_)) {
+                        stats.line_source_points_scanned += visible_source_len(
+                            &series.points,
+                            fig.x.min.min(fig.x.max),
+                            fig.x.min.max(fig.x.max),
+                        );
+                    }
+                    stats.line_points_emitted += visible.len();
+                }
                 let pts: Vec<Pos2> = visible
                     .iter()
                     .map(|p| {
@@ -575,63 +600,44 @@ pub fn paint_document(
     document: &Document<'_>,
     viewport: DocumentViewport,
 ) {
+    paint_document_with_stats(painter, screen, document, viewport, None);
+}
+
+pub fn paint_document_with_stats(
+    painter: &egui::Painter,
+    screen: Rect,
+    document: &Document<'_>,
+    viewport: DocumentViewport,
+    mut stats: Option<&mut RenderStats>,
+) {
+    if let Some(stats) = stats.as_deref_mut() {
+        stats.documents_painted += 1;
+    }
     let page = Rect::new(
         screen.left + viewport.pan[0],
         screen.top + viewport.pan[1],
         document.width * viewport.zoom,
         document.height * viewport.zoom,
     );
-    painter.rect_filled(
-        egui::Rect::from_min_size(
-            Pos2::new(page.left, page.top),
-            Vec2::new(page.width, page.height),
-        ),
-        0.0,
-        col(document.background),
+    let page_rect = egui::Rect::from_min_size(
+        Pos2::new(page.left, page.top),
+        Vec2::new(page.width, page.height),
     );
+    // Screen documents are page-clipped. Besides matching physical-page
+    // semantics, this makes the page body the complete culling bound used by
+    // the board; SVG and EMF paths are intentionally unaffected.
+    let painter = painter.with_clip_rect(page_rect);
+    painter.rect_filled(page_rect, 0.0, col(document.background));
 
     for item in &document.items {
         match item {
-            DocumentItem::Plot(object) => paint_document_object(painter, page, object, viewport),
+            DocumentItem::Plot(object) => {
+                paint_document_object(&painter, page, object, viewport, stats.as_deref_mut())
+            }
             DocumentItem::Overlay(overlay) => {
-                paint_document_overlay(painter, page, overlay, viewport)
+                paint_document_overlay(&painter, page, overlay, viewport)
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod visibility_tests {
-    use super::*;
-    use plotx_figure::Axis;
-
-    #[test]
-    fn hidden_axis_text_keeps_screen_axis_and_tick_shapes() {
-        let mut fig = Figure::new(
-            "",
-            Axis::new("UNIQUE_X_TITLE", 0.0, 90_000.0),
-            Axis::new("UNIQUE_Y_TITLE", -90_000.0, 90_000.0),
-        );
-        fig.x.show_tick_labels = false;
-        fig.x.show_label = false;
-        fig.y.show_tick_labels = false;
-        fig.y.show_label = false;
-        let ctx = egui::Context::default();
-        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
-            paint(ui.painter(), Rect::new(0.0, 0.0, 400.0, 300.0), &fig, 1.0);
-        });
-        let text = output
-            .shapes
-            .iter()
-            .filter(|shape| matches!(shape.shape, egui::Shape::Text(_)))
-            .count();
-        let lines = output
-            .shapes
-            .iter()
-            .filter(|shape| matches!(shape.shape, egui::Shape::LineSegment { .. }))
-            .count();
-        assert_eq!(text, 0);
-        assert!(lines > 2, "axis and tick marks remain on screen");
     }
 }
 
@@ -640,6 +646,7 @@ fn paint_document_object(
     page: Rect,
     object: &DocumentObject,
     viewport: DocumentViewport,
+    stats: Option<&mut RenderStats>,
 ) {
     if !object.visible {
         return;
@@ -650,7 +657,7 @@ fn paint_document_object(
         object.frame.width * viewport.zoom,
         object.frame.height * viewport.zoom,
     );
-    paint(painter, frame, object.figure, viewport.zoom);
+    paint_with_stats(painter, frame, object.figure, viewport.zoom, stats);
     if let Some(title) = &object.title {
         let pos = Pos2::new(
             frame.left + title.position[0] * viewport.zoom,

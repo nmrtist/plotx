@@ -48,7 +48,7 @@ pub enum TilingDropRegion {
     Right,
     Top,
     Bottom,
-    /// Retiling three or more objects is independent of pointer direction.
+    /// Retiling multiple objects; the selected grid cell is tracked separately.
     Retile,
 }
 
@@ -81,6 +81,51 @@ pub fn tiling_drop_region(
     } else {
         TilingDropRegion::Top
     }
+}
+
+/// Return the row-major cell nearest the pointer in the grid that can hold the
+/// existing plots plus the newcomer. The grid intentionally retains spare cells
+/// (for example, a 2 × 2 grid for three plots) so a drop can choose any quadrant
+/// instead of being forced into the next occupied cell.
+pub fn tiling_drop_cell(
+    page_pt: [f32; 2],
+    layout: &PageLayout,
+    total_count: usize,
+    pointer_page: [f32; 2],
+) -> Option<usize> {
+    if total_count < 2 {
+        return None;
+    }
+    let (rows, cols) = even_grid_dims(total_count);
+    let grid_layout = PageLayout {
+        rows,
+        cols,
+        ..*layout
+    };
+    let pointer = [
+        if pointer_page[0].is_finite() {
+            pointer_page[0]
+        } else {
+            page_pt[0] * 0.5
+        },
+        if pointer_page[1].is_finite() {
+            pointer_page[1]
+        } else {
+            page_pt[1] * 0.5
+        },
+    ];
+    grid_frames(page_pt, &grid_layout)
+        .iter()
+        .enumerate()
+        .min_by(|(_, left), (_, right)| {
+            let distance = |frame: &ObjectFrame| {
+                let dx = pointer[0] - (frame.x + frame.width * 0.5);
+                let dy = pointer[1] - (frame.y + frame.height * 0.5);
+                dx * dx + dy * dy
+            };
+            distance(left).total_cmp(&distance(right))
+        })
+        .map(|(index, _)| index)
 }
 
 pub fn layout_item(id: ObjectId, figure: &plotx_figure::Figure, frame: ObjectFrame) -> LayoutItem {
@@ -165,27 +210,52 @@ pub fn arrange_grid(
     layout: &PageLayout,
     items: &[LayoutItem],
 ) -> Vec<(ObjectId, ObjectFrame)> {
-    if layout.spacing_mode == SpacingMode::Frame {
-        let ids: Vec<ObjectId> = items.iter().map(|item| item.id).collect();
-        return assign_grid(page_pt, layout, &ids);
+    let capacity = (layout.rows.max(1) as usize).saturating_mul(layout.cols.max(1) as usize);
+    let mut slots = vec![None; capacity];
+    for (slot, item) in slots.iter_mut().zip(items.iter().copied()) {
+        *slot = Some(item);
     }
+    arrange_grid_slots(page_pt, layout, &slots)
+        .into_iter()
+        .flatten()
+        .collect()
+}
+
+fn arrange_grid_slots(
+    page_pt: [f32; 2],
+    layout: &PageLayout,
+    slots: &[Option<LayoutItem>],
+) -> Vec<Option<(ObjectId, ObjectFrame)>> {
     let rows = layout.rows.max(1) as usize;
     let cols = layout.cols.max(1) as usize;
-    let occupied = items.len().min(rows * cols);
+    let capacity = rows * cols;
+    let slots = &slots[..slots.len().min(capacity)];
+    if layout.spacing_mode == SpacingMode::Frame {
+        let cells = grid_frames(page_pt, layout);
+        return slots
+            .iter()
+            .enumerate()
+            .map(|(index, item)| item.map(|item| (item.id, cells[index])))
+            .collect();
+    }
     let gutter = layout.gutter_pt();
     let mut col_gaps = vec![0.0_f32; cols.saturating_sub(1)];
     let mut row_gaps = vec![0.0_f32; rows.saturating_sub(1)];
-    for index in 0..occupied {
+    for index in 0..slots.len() {
         let row = index / cols;
         let col = index % cols;
-        if col + 1 < cols && index + 1 < occupied {
-            col_gaps[col] = col_gaps[col]
-                .max((gutter - items[index].insets[1] - items[index + 1].insets[3]).max(0.0));
+        if col + 1 < cols
+            && let (Some(left), Some(right)) = (slots[index], slots[index + 1])
+        {
+            col_gaps[col] = col_gaps[col].max((gutter - left.insets[1] - right.insets[3]).max(0.0));
         }
         let below = index + cols;
-        if row + 1 < rows && below < occupied {
-            row_gaps[row] = row_gaps[row]
-                .max((gutter - items[index].insets[2] - items[below].insets[0]).max(0.0));
+        if row + 1 < rows
+            && below < slots.len()
+            && let (Some(above), Some(below)) = (slots[index], slots[below])
+        {
+            row_gaps[row] =
+                row_gaps[row].max((gutter - above.insets[2] - below.insets[0]).max(0.0));
         }
     }
     let [mt, mr, mb, ml] = layout.margins_pt();
@@ -213,14 +283,13 @@ pub fn arrange_grid(
     for row in 1..rows {
         y[row] = y[row - 1] + cell_h + row_gaps[row - 1];
     }
-    items
+    slots
         .iter()
-        .take(occupied)
         .enumerate()
         .map(|(index, item)| {
             let row = index / cols;
             let col = index % cols;
-            (item.id, ObjectFrame::new(x[col], y[row], cell_w, cell_h))
+            item.map(|item| (item.id, ObjectFrame::new(x[col], y[row], cell_w, cell_h)))
         })
         .collect()
 }
@@ -275,17 +344,36 @@ pub fn compute_tiling_plan_for_items(
                 cols,
                 ..*layout
             };
-            let mut items = existing_items.to_vec();
-            items.push(newcomer);
-            let mut frames = arrange_grid(page_pt, &grid_layout, &items);
+            let newcomer_cell = tiling_drop_cell(
+                page_pt,
+                &grid_layout,
+                existing_items.len() + 1,
+                pointer_page,
+            )
+            .unwrap_or(existing_items.len());
+            let capacity = (rows as usize).saturating_mul(cols as usize);
+            let mut slots = vec![None; capacity];
+            let mut existing = existing_items.iter().copied();
+            for (index, slot) in slots.iter_mut().enumerate() {
+                *slot = if index == newcomer_cell {
+                    Some(newcomer)
+                } else {
+                    existing.next()
+                };
+            }
+            let frames = arrange_grid_slots(page_pt, &grid_layout, &slots);
             let newcomer = frames
-                .pop()
+                .get(newcomer_cell)
+                .and_then(|frame| *frame)
                 .map(|(_, frame)| frame)
                 .unwrap_or_else(|| ObjectFrame::new(0.0, 0.0, page_pt[0], page_pt[1]));
-            TilingPlan {
-                newcomer,
-                existing: frames,
-            }
+            let existing = frames
+                .into_iter()
+                .enumerate()
+                .filter(|(index, _)| *index != newcomer_cell)
+                .filter_map(|(_, frame)| frame)
+                .collect();
+            TilingPlan { newcomer, existing }
         }
     }
 }
@@ -352,21 +440,23 @@ mod tests {
         assert_eq!(split.newcomer, apply[1].1);
 
         let third = item(3, 6.0);
-        let retile = compute_tiling_plan_for_items(
-            page,
-            &layout,
-            &[existing, newcomer],
-            third,
-            [10.0, 10.0],
-        );
-        let grid = PageLayout {
-            rows: 2,
-            cols: 2,
-            ..layout
-        };
-        let apply = arrange_grid(page, &grid, &[existing, newcomer, third]);
-        assert_eq!(retile.existing, apply[..2]);
-        assert_eq!(retile.newcomer, apply[2].1);
+        for (pointer, right, bottom) in [
+            ([10.0, 10.0], false, false),
+            ([390.0, 10.0], true, false),
+            ([10.0, 290.0], false, true),
+            ([390.0, 290.0], true, true),
+        ] {
+            let retile =
+                compute_tiling_plan_for_items(page, &layout, &[existing, newcomer], third, pointer);
+            assert_eq!(retile.existing.len(), 2);
+            assert_eq!(retile.newcomer.x > page[0] * 0.5, right);
+            assert_eq!(retile.newcomer.y > page[1] * 0.5, bottom);
+            assert!(retile.newcomer.x >= 0.0 && retile.newcomer.y >= 0.0);
+            assert!(
+                retile.newcomer.x + retile.newcomer.width <= page[0] + 0.01
+                    && retile.newcomer.y + retile.newcomer.height <= page[1] + 0.01
+            );
+        }
     }
 
     #[test]

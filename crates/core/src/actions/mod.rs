@@ -392,8 +392,10 @@ pub enum Action {
     /// with the newcomer's landing frame baked into its clone) with the
     /// pushed-aside plots' before/after frames. Exactly reversible.
     TileDrop {
-        from: usize,
-        to: usize,
+        source_index_before: usize,
+        target_index_before: usize,
+        target_index_after: usize,
+        source_canvas_before: Option<Box<CanvasDocument>>,
         removed: Vec<(usize, CanvasObject)>,
         inserted: Vec<CanvasObject>,
         existing_before: Vec<(ObjectId, ObjectFrame)>,

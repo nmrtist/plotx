@@ -53,6 +53,9 @@ fn default_auto_check() -> bool {
 pub struct GeneralSettings {
     #[serde(default = "default_snap_enabled")]
     pub snap_enabled: bool,
+    /// Keep a source canvas after tiling away its final object.
+    #[serde(default)]
+    pub keep_empty_source_canvas: bool,
     /// Number of complete previous project files retained beside the project.
     /// Zero disables save-time backups; crash-recovery snapshots are separate.
     #[serde(default = "default_project_backup_generations")]
@@ -250,6 +253,7 @@ impl Default for GeneralSettings {
     fn default() -> Self {
         Self {
             snap_enabled: default_snap_enabled(),
+            keep_empty_source_canvas: false,
             project_backup_generations: default_project_backup_generations(),
         }
     }

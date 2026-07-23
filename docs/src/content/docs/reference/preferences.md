@@ -11,6 +11,9 @@ restores everything except your recent-files list.
 
 - **Object snapping** — snap plots and shapes to guides while dragging (also
   toggleable from the toolbar).
+- **Keep source canvas when tiling its last object** — keep a page that a
+  drag-to-tile move empties, instead of deleting it along with the drop. Off by
+  default; hold `Alt` while releasing to reverse the choice for a single drop.
 - **Project backup copies** — keep a chosen number of complete previous saves
   as hidden files beside each project. Each copy can be as large as the
   project; choose Off to disable.

@@ -11,6 +11,9 @@ description: 偏好设置窗口中的每一项设置，按类别列出。
 
 - **Object snapping**——拖动时把图形和形状吸附到参考线（也可在工具栏
   中切换）。
+- **Keep source canvas when tiling its last object**——拖放平铺把页面上最后
+  一个对象移走后，保留这个空页面，而不随本次拖放一起删除。默认关闭；释放
+  鼠标时按住 `Alt` 可仅为本次拖放反转此选择。
 - **Project backup copies**——在每个项目旁以隐藏文件保留指定数量的完整
   历史保存。每份副本可能与项目一样大；选 Off 关闭。
 - **Automatic updates** 与 **Update channel**——见

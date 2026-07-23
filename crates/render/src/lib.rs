@@ -4,6 +4,8 @@
 
 pub mod contour;
 pub mod integral;
+#[cfg(feature = "screen")]
+mod screen_stats;
 pub mod svg;
 mod ticks;
 

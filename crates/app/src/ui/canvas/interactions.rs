@@ -267,15 +267,24 @@ pub(crate) fn handle_object_interactions(
     ui: &Ui,
     _resp: &egui::Response,
 ) {
-    let (hover, primary_down, primary_pressed, primary_released, shift) = ui.input(|i| {
-        (
-            i.pointer.hover_pos(),
-            i.pointer.primary_down(),
-            i.pointer.primary_pressed(),
-            i.pointer.primary_released(),
-            i.modifiers.shift,
-        )
-    });
+    let (hover, primary_down, primary_pressed, primary_released, shift, alt, esc, focused) = ui
+        .input(|i| {
+            (
+                i.pointer.hover_pos(),
+                i.pointer.primary_down(),
+                i.pointer.primary_pressed(),
+                i.pointer.primary_released(),
+                i.modifiers.shift,
+                i.modifiers.alt,
+                i.key_pressed(egui::Key::Escape),
+                i.focused,
+            )
+        });
+
+    if (esc || !focused) && matches!(app.interaction(), Interaction::Object(_)) {
+        app.cancel_interaction();
+        return;
+    }
 
     if primary_pressed {
         let Some(screen_pos) = hover else {
@@ -410,7 +419,7 @@ pub(crate) fn handle_object_interactions(
             app.session.ui.snap_guides.clear();
             if let Interaction::Object(drag) = app.take_interaction() {
                 if let Some(preview) = app.session.ui.tile_drop.take() {
-                    commit_tile_drop(app, ci, drag, preview);
+                    commit_tile_drop(app, drag, preview, alt);
                 } else if active {
                     finish_object_drag(app, ci, drag);
                 }
