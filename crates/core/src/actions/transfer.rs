@@ -85,6 +85,7 @@ impl Action {
         to: usize,
         newcomer_frame: crate::state::ObjectFrame,
         existing_after: Vec<(ObjectId, crate::state::ObjectFrame)>,
+        remove_empty_source: bool,
     ) -> Option<Self> {
         let Action::TransferObjects {
             removed,
@@ -97,14 +98,25 @@ impl Action {
             return None;
         };
         inserted.first_mut()?.frame = newcomer_frame;
+        let src = app.doc.canvases.get(from)?;
         let dst = app.doc.canvases.get(to)?;
         let existing_before = existing_after
             .iter()
             .filter_map(|&(id, _)| dst.object(id).map(|o| (id, o.frame)))
             .collect();
+        let source_will_be_empty = src.objects.len() == removed.len();
+        let source_canvas_before =
+            (remove_empty_source && source_will_be_empty).then(|| Box::new(src.clone()));
+        let target_index_after = if source_canvas_before.is_some() && from < to {
+            to - 1
+        } else {
+            to
+        };
         Some(Self::TileDrop {
-            from,
-            to,
+            source_index_before: from,
+            target_index_before: to,
+            target_index_after,
+            source_canvas_before,
             removed,
             inserted,
             existing_before,
@@ -226,8 +238,10 @@ impl PlotxApp {
     /// the target with the newcomer selected.
     pub(super) fn apply_tile_drop(&mut self, action: &Action) {
         let Action::TileDrop {
-            from,
-            to,
+            source_index_before,
+            target_index_before,
+            target_index_after,
+            source_canvas_before,
             removed,
             inserted,
             existing_after,
@@ -236,7 +250,13 @@ impl PlotxApp {
         else {
             return;
         };
-        let (from, to) = (*from, *to);
+        let (from, to) = (*source_index_before, *target_index_before);
+        // Validate every index before mutating either canvas. A stale history
+        // entry must be an all-or-nothing no-op, never a half-applied transfer.
+        if from == to || from >= self.doc.canvases.len() || to >= self.doc.canvases.len() {
+            self.clear_transfer_transients();
+            return;
+        }
         for &(id, frame) in existing_after {
             self.set_object_frame(to, id, frame);
         }
@@ -267,6 +287,10 @@ impl PlotxApp {
                 self.set_object_frame(to, id, frame);
             }
         }
+        if source_canvas_before.is_some() {
+            self.doc.canvases.remove(from);
+        }
+        let to = *target_index_after;
         self.session.active_canvas = Some(to);
         self.session.ui.selection = Selection::Objects(ids);
         let active = self.doc.canvases.get(to).and_then(|c| c.active_dataset());
@@ -280,8 +304,10 @@ impl PlotxApp {
     /// source slot, and restore the pre-drop active canvas and selection.
     pub(super) fn revert_tile_drop(&mut self, action: &Action) {
         let Action::TileDrop {
-            from,
-            to,
+            source_index_before,
+            target_index_before,
+            target_index_after,
+            source_canvas_before,
             removed,
             inserted,
             existing_before,
@@ -292,8 +318,21 @@ impl PlotxApp {
         else {
             return;
         };
-        let (from, to, active_before) = (*from, *to, *active_before);
-        if let Some(dst) = self.doc.canvases.get_mut(to) {
+        let (from, to, active_before) =
+            (*source_index_before, *target_index_before, *active_before);
+        if let Some(source) = source_canvas_before {
+            if from > self.doc.canvases.len() {
+                self.clear_transfer_transients();
+                return;
+            }
+            self.doc.canvases.insert(from, (**source).clone());
+        }
+        let current_target = if source_canvas_before.is_some() {
+            to
+        } else {
+            *target_index_after
+        };
+        if let Some(dst) = self.doc.canvases.get_mut(current_target) {
             for object in inserted {
                 dst.objects.retain(|o| o.id != object.id);
                 if dst.selected_object == Some(object.id) {
@@ -302,9 +341,11 @@ impl PlotxApp {
             }
         }
         for &(id, frame) in existing_before {
-            self.set_object_frame(to, id, frame);
+            self.set_object_frame(current_target, id, frame);
         }
-        if let Some(src) = self.doc.canvases.get_mut(from) {
+        if source_canvas_before.is_none()
+            && let Some(src) = self.doc.canvases.get_mut(from)
+        {
             for (slot, object) in removed {
                 let at = (*slot).min(src.objects.len());
                 src.next_object_id = src.next_object_id.max(object.id + 1);

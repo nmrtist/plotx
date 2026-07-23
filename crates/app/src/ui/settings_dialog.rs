@@ -233,6 +233,14 @@ fn render_category(
             );
             setting_row(
                 ui,
+                "Keep source canvas when tiling its last object",
+                Some("Alt temporarily reverses this choice for a single drop."),
+                |ui| {
+                    toggle(ui, &mut draft.general.keep_empty_source_canvas);
+                },
+            );
+            setting_row(
+                ui,
                 "Project backup copies",
                 Some(
                     "Keep this many complete previous saves as hidden files beside the project. \

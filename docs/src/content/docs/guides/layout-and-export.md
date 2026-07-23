@@ -70,6 +70,20 @@ values.
 The basis applies wherever PlotX places plots for you — **Apply grid**, and
 dragging a plot onto a page that already holds one.
 
+Dragging a plot onto another page moves it there and re-tiles the destination.
+During the drag the plot travels with the pointer, keeping the point you grabbed
+under the cursor, and the destination page draws where every plot will sit once
+you release. On a page that already holds two or more plots, the whole page
+re-tiles into an even grid and the arriving plot takes the cell you are pointing
+at.
+
+If the move leaves the source page empty, PlotX deletes that page as part of the
+drop, so the move and the deletion undo together. Hold `Alt` as you release to
+keep the empty page instead; the status bar shows which way `Alt` will flip the
+current drop. To keep empty source pages by default, turn on **Keep source canvas
+when tiling its last object** in Preferences → General — `Alt` then removes them
+for that one drop.
+
 With the Select tool active, each non-zero page margin is drawn as a dashed
 line across the page, showing the content area you are laying out into; a
 margin of zero draws no line. Turning on the layout grid adds the cell

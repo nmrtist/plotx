@@ -62,6 +62,42 @@ pub(crate) use slices::*;
 pub(crate) use snap::*;
 pub(crate) use tiling::*;
 
+fn finite_rect_intersects(a: egui::Rect, b: egui::Rect) -> bool {
+    let finite = |r: egui::Rect| {
+        [r.min.x, r.min.y, r.max.x, r.max.y]
+            .iter()
+            .all(|value| value.is_finite())
+    };
+    finite(a)
+        && finite(b)
+        && a.max.x >= b.min.x
+        && b.max.x >= a.min.x
+        && a.max.y >= b.min.y
+        && b.max.y >= a.min.y
+}
+
+#[cfg(test)]
+mod culling_tests {
+    use super::finite_rect_intersects;
+
+    #[test]
+    fn edge_contact_is_visible_and_non_finite_is_not() {
+        let clip = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(10.0, 10.0));
+        assert!(finite_rect_intersects(
+            egui::Rect::from_min_max(egui::pos2(10.0, 2.0), egui::pos2(20.0, 8.0)),
+            clip,
+        ));
+        assert!(!finite_rect_intersects(
+            egui::Rect::from_min_max(egui::pos2(11.0, 2.0), egui::pos2(20.0, 8.0)),
+            clip,
+        ));
+        assert!(!finite_rect_intersects(
+            egui::Rect::from_min_max(egui::pos2(f32::NAN, 0.0), egui::pos2(1.0, 1.0)),
+            clip,
+        ));
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(crate) enum CanvasInteractionClearScope {
     Transient,
@@ -112,7 +148,6 @@ pub fn render_central(app: &mut PlotxApp, ui: &mut Ui) {
     };
     // `dispatch_frame_gesture` may have switched the active frame.
     let ci = app.session.active_canvas.unwrap_or(ci);
-    let page = page_screen_rect(app.session.board, &app.doc.canvases[ci], rect);
 
     // Processing direct manipulation must update the document before its plots
     // are painted, so the changed spectrum is visible in this same frame.
@@ -149,6 +184,15 @@ pub fn render_central(app: &mut PlotxApp, ui: &mut Ui) {
         }
     }
 
+    // A tile drop may remove the now-empty source canvas and switch focus to the
+    // target in the same UI pass. Refresh both values before any post-interaction
+    // painting; the old index can otherwise refer to a different canvas or be out
+    // of bounds when the source was the last page.
+    let Some(ci) = app.session.active_canvas else {
+        return;
+    };
+    let page = page_screen_rect(app.session.board, &app.doc.canvases[ci], rect);
+
     let frame_stroke = Stroke::new(1.0_f32, ui.visuals().widgets.noninteractive.bg_stroke.color);
     // Pages float on the board the way chrome cards float on the workspace: a
     // soft shadow keeps a white page legible on the light workspace fill.
@@ -158,17 +202,23 @@ pub fn render_central(app: &mut PlotxApp, ui: &mut Ui) {
         spread: 0,
         color: Color32::from_black_alpha(if ui.visuals().dark_mode { 110 } else { 36 }),
     };
-    for other in 0..app.doc.canvases.len() {
-        if other == ci {
-            continue;
-        }
+    let clip = painter.clip_rect();
+    for other in (0..app.doc.canvases.len())
+        .filter(|&other| other != ci)
+        .chain(std::iter::once(ci))
+    {
         let other_page = page_screen_rect(app.session.board, &app.doc.canvases[other], rect);
-        painter.add(page_shadow.as_shape(frame_card_rect(other_page), header_corner_radius()));
-        paint_document(app, other, rect, &painter);
-        painter.rect_stroke(other_page, 0.0, frame_stroke, StrokeKind::Inside);
+        let card = frame_card_rect(other_page);
+        if finite_rect_intersects(card.expand(12.0), clip) {
+            painter.add(page_shadow.as_shape(card, header_corner_radius()));
+        }
+        if finite_rect_intersects(other_page, clip) {
+            paint_document(app, other, rect, &painter);
+            if other != ci {
+                painter.rect_stroke(other_page, 0.0, frame_stroke, StrokeKind::Inside);
+            }
+        }
     }
-    painter.add(page_shadow.as_shape(frame_card_rect(page), header_corner_radius()));
-    paint_document(app, ci, rect, &painter);
     paint_frame_headers(app, rect, ui, &painter);
     paint_frame_captions(app, rect, ui, &painter);
     render_inline_panel_note_editor(app, rect, ui);
@@ -179,6 +229,7 @@ pub fn render_central(app: &mut PlotxApp, ui: &mut Ui) {
     paint_marquee(app, ci, rect, &painter, chrome);
     paint_panel_label_selection(app, ci, rect, &painter, chrome);
     paint_object_selection(app, ci, rect, page, &painter, chrome);
+    paint_tile_ghost(app, &painter, chrome);
     paint_tile_preview(app, rect, &painter, chrome);
     super::canvas_size::page_size_chrome(app, ci, page, rect, ui);
     if pointer_owned {

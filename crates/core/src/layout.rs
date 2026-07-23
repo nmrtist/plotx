@@ -7,7 +7,7 @@ mod visual_spacing;
 pub use visual_spacing::{
     GutterPreset, LayoutItem, OccupiedGrid, SpacingMode, TilingDropRegion, arrange_grid,
     compute_tiling_plan_for_items, infer_occupied_grid, layout_item, outer_axis_cells,
-    tiling_drop_region,
+    tiling_drop_cell, tiling_drop_region,
 };
 
 /// Grid presets offered in the Arrange menu, as `(label, rows, cols)`.
@@ -384,11 +384,8 @@ pub struct TilingPlan {
     pub existing: Vec<(ObjectId, ObjectFrame)>,
 }
 
-/// Compute where a dropped plot and the target's existing plots tile a page:
-/// - 0 existing → the newcomer fills the page.
-/// - 1 existing → a two-way split; the pointer's half goes to the newcomer, the
-///   complementary half to the existing plot, separated by the layout gutter.
-/// - 2+ existing → an even grid re-tile of all N+1 plots (newcomer appended last).
+/// Compute where a dropped plot and the target's existing plots tile a page. With
+/// two or more existing plots, the pointer selects the newcomer's grid cell.
 pub fn compute_tiling_plan(
     page_pt: [f32; 2],
     layout: &PageLayout,
@@ -409,13 +406,11 @@ pub fn compute_tiling_plan(
                 existing: vec![(existing_ids[0], other)],
             }
         }
-        _ => grid_retile(page_pt, layout, existing_ids),
+        _ => grid_retile(page_pt, layout, existing_ids, pointer_page),
     }
 }
 
-/// Two-way page split. The pointer decides the axis and side: whichever of x/y is
-/// further from the page centre picks left/right vs top/bottom (ties favour
-/// left/right). Returns `(pointer_side_frame, opposite_frame)` separated by `g`.
+/// Two-way split; the pointer chooses the axis and side, with ties favouring left/right.
 fn split_two(page_pt: [f32; 2], g: f32, p: [f32; 2]) -> (ObjectFrame, ObjectFrame) {
     let [w, h] = page_pt;
     let nx = if w > 0.0 { p[0] / w } else { 0.5 };
@@ -441,9 +436,13 @@ fn split_two(page_pt: [f32; 2], g: f32, p: [f32; 2]) -> (ObjectFrame, ObjectFram
     }
 }
 
-/// Even grid re-tile of all N+1 plots into a near-square grid (existing keep their
-/// order, newcomer takes the next free cell).
-fn grid_retile(page_pt: [f32; 2], layout: &PageLayout, existing_ids: &[ObjectId]) -> TilingPlan {
+/// Even-grid re-tile; existing plots keep order while the pointer selects the new cell.
+fn grid_retile(
+    page_pt: [f32; 2],
+    layout: &PageLayout,
+    existing_ids: &[ObjectId],
+    pointer_page: [f32; 2],
+) -> TilingPlan {
     let n = existing_ids.len() + 1;
     let (rows, cols) = even_grid_dims(n);
     let grid_layout = PageLayout {
@@ -452,13 +451,22 @@ fn grid_retile(page_pt: [f32; 2], layout: &PageLayout, existing_ids: &[ObjectId]
         ..*layout
     };
     let cells = grid_frames(page_pt, &grid_layout);
+    let newcomer_cell = visual_spacing::tiling_drop_cell(page_pt, &grid_layout, n, pointer_page)
+        .unwrap_or(existing_ids.len());
     let existing = existing_ids
         .iter()
-        .zip(&cells)
-        .map(|(&id, &cell)| (id, cell))
+        .enumerate()
+        .map(|(index, &id)| {
+            let cell = if index < newcomer_cell {
+                index
+            } else {
+                index + 1
+            };
+            (id, cells[cell])
+        })
         .collect();
     TilingPlan {
-        newcomer: cells[existing_ids.len()],
+        newcomer: cells[newcomer_cell],
         existing,
     }
 }
@@ -516,6 +524,9 @@ mod tests {
             assert!(f.x >= -0.01 && f.y >= -0.01);
             assert!(f.x + f.width <= page[0] + 0.01 && f.y + f.height <= page[1] + 0.01);
         }
+        let bottom_right =
+            compute_tiling_plan(page, &PageLayout::default(), &[1, 2], [395.0, 295.0]);
+        assert!(bottom_right.newcomer.x > page[0] * 0.5 && bottom_right.newcomer.y > page[1] * 0.5);
     }
 
     #[test]

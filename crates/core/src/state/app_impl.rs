@@ -28,6 +28,7 @@ impl PlotxApp {
 
     pub fn new_with_settings(settings: crate::settings::Settings) -> Self {
         Self {
+            keep_empty_source_canvas: settings.general.keep_empty_source_canvas,
             doc: SharedDocument::new(Document {
                 datasets: Vec::new(),
                 canvases: Vec::new(),
@@ -391,6 +392,12 @@ impl PlotxApp {
                     .and_then(Dataset::as_nmr2d_mut)
                 {
                     n.integrals = drag.before;
+                }
+            }
+            Interaction::Object(drag) => {
+                self.set_object_frame(drag.canvas, drag.object, drag.before);
+                for (id, frame) in drag.others {
+                    self.set_object_frame(drag.canvas, id, frame);
                 }
             }
             _ => {}
