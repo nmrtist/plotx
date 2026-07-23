@@ -122,6 +122,18 @@ pub enum CommandExecutionClass {
 }
 
 impl CommandId {
+    fn tool_target(self) -> Option<Tool> {
+        match self {
+            Self::SelectRange => Some(Tool::SelectRegion),
+            Self::Regions => Some(Tool::Regions),
+            Self::PeakList => Some(Tool::Peaks),
+            Self::LineFit => Some(Tool::LineFit),
+            Self::Integrate => Some(Tool::Integrate),
+            Self::Tool(tool) => Some(tool),
+            _ => None,
+        }
+    }
+
     pub fn execution_class(self) -> CommandExecutionClass {
         match self {
             Self::RunBatchWorkflow => CommandExecutionClass::ToolEditor,
@@ -520,7 +532,12 @@ pub fn describe(app: &PlotxApp, id: CommandId) -> CommandDescriptor {
             && app.session.ui.spectrum_arithmetic_dialog.is_none()
             && app.session.ui.align_spectra_dialog.is_none()
             && !app.session.ui.interaction.is_active());
-    let enabled = gate.is_ok() && palette_available;
+    // Activation requirements must not trap an already-active tool after the
+    // dataset context changes: its command remains available for deactivation.
+    let active_tool = id
+        .tool_target()
+        .is_some_and(|tool| app.session.tool == tool);
+    let enabled = (gate.is_ok() || active_tool) && palette_available;
     let disabled_reason = if enabled { None } else { gate.err() };
     // A contextual group is dropped from the Ribbon entirely rather than shown
     // permanently dead: a dead group still consumes the width budget in

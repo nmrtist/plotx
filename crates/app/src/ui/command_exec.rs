@@ -103,7 +103,7 @@ pub fn execute(
         CommandId::SpectrumArithmetic => super::arithmetic::open_spectrum_arithmetic_dialog(app),
         CommandId::AlignSpectra => super::align::open_align_spectra_dialog(app),
         CommandId::StackData => app.stack_selected_data(),
-        CommandId::SelectRange => app.set_tool(Tool::SelectRegion),
+        CommandId::SelectRange => app.toggle_tool(Tool::SelectRegion),
         CommandId::ClearRange => app.clear_analysis_selection(),
         CommandId::Regions => toggle_regions(app),
         CommandId::SeriesTable => open_active_region_table(app),
@@ -116,7 +116,7 @@ pub fn execute(
         CommandId::Statistics => open_statistics(app),
         CommandId::ChartType => open_chart_type(app),
         CommandId::FigureTypography => app.session.ui.figure_typography_open = true,
-        CommandId::Integrate => app.set_tool(Tool::Integrate),
+        CommandId::Integrate => app.toggle_tool(Tool::Integrate),
         CommandId::Multiplets => analyze_multiplets(app),
         CommandId::TidyBoard => app.tidy_board(),
         CommandId::CanvasSettings => {
@@ -144,7 +144,7 @@ pub fn execute(
                 app.apply_theme(&theme);
             }
         }
-        CommandId::Tool(tool) => app.set_tool(tool),
+        CommandId::Tool(tool) => app.toggle_tool(tool),
     }
 }
 
@@ -222,13 +222,13 @@ fn analyze_multiplets(app: &mut PlotxApp) {
 }
 
 fn reveal_tool_group(app: &mut PlotxApp, tool: Tool, group: ToolGroup) {
-    app.set_tool(tool);
+    app.toggle_tool(tool);
     reveal_group(app, group);
 }
 
 fn toggle_regions(app: &mut PlotxApp) {
     if app.session.tool == Tool::Regions {
-        app.set_tool(Tool::BrowseZoom);
+        app.toggle_tool(Tool::Regions);
         return;
     }
     let Some(dataset) = app
@@ -237,7 +237,7 @@ fn toggle_regions(app: &mut PlotxApp) {
     else {
         return;
     };
-    app.set_tool(Tool::Regions);
+    app.toggle_tool(Tool::Regions);
     super::tools::open_region_task(app, dataset);
 }
 

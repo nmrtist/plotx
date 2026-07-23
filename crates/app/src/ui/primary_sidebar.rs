@@ -663,6 +663,8 @@ fn select_dataset(app: &mut PlotxApp, ui: &Ui, di: usize, extend: bool) {
 fn select_analysis(app: &mut PlotxApp, ui: &Ui, di: usize, item: &AnalysisItem, open: bool) {
     app.focus_single(di);
     app.session.ui.data_browser_selected_node = Some(item.kind.key(di));
+    // Opening a browser result must reveal its editor even when that tool is
+    // already active, so this navigation path intentionally uses ensure-on.
     match item.kind {
         AnalysisKind::Peak(id) => {
             app.session.ui.selected_peak = Some(id);

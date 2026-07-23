@@ -121,7 +121,7 @@ fn analysis_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) -> bool {
     ui.horizontal(|ui| {
         let selected = app.session.tool == Tool::SelectRegion;
         if ui.selectable_label(selected, "Analysis range").clicked() {
-            app.set_tool(Tool::SelectRegion);
+            app.toggle_tool(Tool::SelectRegion);
         }
         if ui
             .add_enabled(has_selection, Button::new("Clear"))
@@ -186,11 +186,7 @@ fn peaks_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) -> bool {
         .on_hover_text("Pick peaks by region, click, or one-shot detection — one set.")
         .clicked()
     {
-        app.set_tool(if active {
-            Tool::BrowseZoom
-        } else {
-            Tool::Peaks
-        });
+        app.toggle_tool(Tool::Peaks);
     }
     if active {
         ui.small(
@@ -303,11 +299,7 @@ pub(super) fn integrate_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
         .on_hover_text("Drag across a multiplet to add an integral; drag its edges to adjust it.")
         .clicked()
     {
-        app.set_tool(if drawing {
-            Tool::BrowseZoom
-        } else {
-            Tool::Integrate
-        });
+        app.toggle_tool(Tool::Integrate);
     }
     if drawing {
         ui.small(
@@ -389,11 +381,7 @@ fn integrate_2d_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
         )
         .clicked()
     {
-        app.set_tool(if drawing {
-            Tool::BrowseZoom
-        } else {
-            Tool::Integrate
-        });
+        app.toggle_tool(Tool::Integrate);
     }
     if drawing {
         ui.small("Drag to add · corners/edges resize · interior moves · right-click for reference or delete.");

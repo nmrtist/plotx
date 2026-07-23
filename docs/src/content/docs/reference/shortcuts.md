@@ -10,6 +10,10 @@ keyboard focus.
 
 Single keys, no modifiers:
 
+Press the same key again to leave a tool. Analysis tools return to **Zoom**;
+drawing tools such as **Text** and **Rectangle** return to **Select**. Pressing
+`V` or `Z` again leaves that neutral tool active.
+
 | Key | Tool |
 | --- | --- |
 | `V` | Select |
@@ -54,7 +58,7 @@ the cursor, or on the board when the cursor is over empty space.
 | `Ctrl` + `Shift` + `G` | Ungroup |
 | `Delete` or `Backspace` | Delete the selected annotation objects; in the Peaks and Integrate tools, delete the selected peak or region |
 | `F2` | Rename the selected dataset or canvas |
-| `Esc` | Cancel the active drag; otherwise step the selection back one level until nothing is selected |
+| `Esc` | Cancel the active drag; further presses clear the Analysis Range and selections one at a time, then leave the active tool |
 | `Ctrl` + `C` | Copy the selected frame (or the active canvas) to the clipboard as bitmap + vector |
 | `Ctrl` + `Shift` + `V` | Paste a delimited table (comma, tab, or semicolon) from the clipboard as a new data table |
 | `Ctrl` + `,` | Open Preferences |

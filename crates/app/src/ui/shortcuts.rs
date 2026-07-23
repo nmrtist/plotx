@@ -267,7 +267,10 @@ pub(super) fn handle_escape_shortcut(app: &mut PlotxApp, ctx: &egui::Context) {
     if !escape {
         return;
     }
+    handle_escape(app, now);
+}
 
+fn handle_escape(app: &mut PlotxApp, now: f64) {
     if app.interaction().is_active() {
         let phase = matches!(app.interaction(), Interaction::Phase(_));
         app.cancel_interaction();
@@ -284,7 +287,8 @@ pub(super) fn handle_escape_shortcut(app: &mut PlotxApp, ctx: &egui::Context) {
         app.session.status = "Cancelled interaction.".to_owned();
         return;
     }
-    // Esc steps back one level: analysis region -> panel-letter sub-selection -> selection.
+    // Esc steps back one level: analysis region -> panel-letter sub-selection ->
+    // selection -> active tool.
     if app.session.ui.analysis_selection.is_some() {
         if let Some(ci) = app.session.active_canvas {
             canvas::clear_canvas_interaction_state(
@@ -307,6 +311,13 @@ pub(super) fn handle_escape_shortcut(app: &mut PlotxApp, ctx: &egui::Context) {
 
     if !matches!(app.session.ui.selection, Selection::None) {
         exit_to_page(app, "Selection cleared.");
+        return;
+    }
+
+    let rest = app.session.tool.rest();
+    if app.session.tool != rest {
+        app.set_tool(rest);
+        app.session.status = "Exited tool mode.".to_owned();
     }
 }
 
@@ -532,5 +543,16 @@ mod tests {
             Some("V")
         );
         assert!(shortcut_label(commands::CommandId::About).is_none());
+    }
+
+    #[test]
+    fn escape_exits_an_active_tool_after_other_fallbacks() {
+        let mut app = PlotxApp::new_with_settings(plotx_core::settings::Settings::default());
+        app.set_tool(Tool::Integrate);
+
+        handle_escape(&mut app, 0.0);
+
+        assert_eq!(app.session.tool, Tool::BrowseZoom);
+        assert_eq!(app.session.status, "Exited tool mode.");
     }
 }

@@ -425,6 +425,18 @@ impl PlotxApp {
         }
     }
 
+    pub fn toggle_tool(&mut self, tool: Tool) {
+        let next = if self.session.tool == tool {
+            tool.rest()
+        } else {
+            tool
+        };
+        if self.session.tool != next && self.interaction().is_active() {
+            self.cancel_interaction();
+        }
+        self.set_tool(next);
+    }
+
     /// Select a whole object in page space. Clicking a grouped member selects the
     /// whole group, with the clicked object primary.
     pub fn select_object(&mut self, ci: usize, id: ObjectId) {
