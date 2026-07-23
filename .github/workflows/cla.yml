@@ -32,5 +32,5 @@ jobs:
           # Versioned path: publishing a new CLA version means pointing at a new
           # directory, which requires everyone to accept that version.
           path-to-signatures: signatures/version1/cla.json
-          branch: main
+          branch: cla-signatures
           allowlist: nmrtist,*[bot]
