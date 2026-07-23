@@ -5,7 +5,7 @@ mod paths;
 
 pub use io::{load, save};
 pub use model::*;
-pub use paths::config_dir;
+pub use paths::{config_dir, data_local_dir};
 
 pub const SETTINGS_SCHEMA_VERSION: u32 = 1;
 

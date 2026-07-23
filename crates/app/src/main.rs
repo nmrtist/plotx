@@ -3,6 +3,7 @@
 // Release Windows builds are GUI apps: suppress the console window.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod observability;
 mod scale;
 mod shot;
 mod ui;
@@ -45,6 +46,7 @@ struct Shell {
     app: PlotxApp,
     recovery: Option<plotx_core::project::RecoveryManager>,
     pending_recovery: Option<plotx_core::project::RecoverySnapshot>,
+    pending_crash_report: Option<std::path::PathBuf>,
     recovery_job: Option<std::thread::JoinHandle<Result<(), plotx_core::project::ProjectError>>>,
     recovery_written: bool,
     next_recovery_at: Instant,
@@ -59,6 +61,7 @@ struct Shell {
 impl eframe::App for Shell {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        observability::show_pending_crash_dialog();
         self.scale.drive(&mut self.app, &ctx, frame);
         let recovery_blocked = self.pending_recovery.is_some();
         #[cfg(target_os = "macos")]
@@ -109,15 +112,16 @@ impl eframe::App for Shell {
         if let Some(job) = self.recovery_job.take() {
             match job.join() {
                 Ok(Ok(())) => {}
-                Ok(Err(error)) => eprintln!("automatic recovery save failed on exit: {error}"),
-                Err(_) => eprintln!("automatic recovery worker panicked on exit"),
+                Ok(Err(error)) => log::error!("automatic recovery save failed on exit: {error}"),
+                Err(_) => log::error!("automatic recovery worker panicked on exit"),
             }
         }
         if let Some(recovery) = self.recovery.take()
             && let Err(error) = recovery.shutdown()
         {
-            eprintln!("failed to clear crash-recovery snapshot on clean exit: {error}");
+            log::error!("failed to clear crash-recovery snapshot on clean exit: {error}");
         }
+        log::logger().flush();
     }
 }
 
@@ -221,6 +225,9 @@ impl Shell {
             } else {
                 ui.small("The recovered document had not been saved yet.");
             }
+            if let Some(path) = &self.pending_crash_report {
+                ui.small(format!("Crash report: {}", path.display()));
+            }
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 if ui.button("Recover").clicked() {
@@ -231,6 +238,9 @@ impl Shell {
                 }
             });
         });
+        if (recover || discard) && self.pending_crash_report.take().is_some() {
+            observability::acknowledge_crash_report();
+        }
 
         if recover {
             match plotx_core::project::restore_recovery(&snapshot) {
@@ -333,6 +343,7 @@ fn main() -> eframe::Result<()> {
     if let Some(code) = plotx_core::update::run_helper_from_args() {
         std::process::exit(code);
     }
+    observability::initialize();
     plotx_core::update::cleanup_after_restart();
     let shot_active = std::env::var_os("PLOTX_SHOT").is_some();
     let settings = plotx_core::settings::load();
@@ -412,10 +423,30 @@ fn main() -> eframe::Result<()> {
                 },
                 None => None,
             };
+            let mut pending_crash_report = observability::pending_crash_report();
+            let crash_notice = if pending_recovery.is_none() {
+                pending_crash_report.take().map(|path| {
+                    observability::acknowledge_crash_report();
+                    format!(
+                        "PlotX did not shut down cleanly last time. A crash report was saved to {}.",
+                        path.display()
+                    )
+                })
+            } else {
+                None
+            };
             if updated {
                 app.session.status = format!("Updated to PlotX {}.", env!("CARGO_PKG_VERSION"));
                 // Stamp the new version so the notice shows only once.
                 plotx_core::settings::update(|_| {});
+            }
+            if let Some(notice) = crash_notice {
+                if updated {
+                    app.session.status.push(' ');
+                    app.session.status.push_str(&notice);
+                } else {
+                    app.session.status = notice;
+                }
             }
             #[cfg(target_os = "macos")]
             let native_menu =
@@ -426,6 +457,7 @@ fn main() -> eframe::Result<()> {
                 app,
                 recovery,
                 pending_recovery,
+                pending_crash_report,
                 recovery_job: None,
                 recovery_written: false,
                 next_recovery_at: Instant::now() + RECOVERY_INTERVAL,
@@ -441,14 +473,16 @@ fn main() -> eframe::Result<()> {
         }),
     )?;
     if let Some(error) = SHOT_FAILURE.lock().unwrap().take() {
-        eprintln!("screenshot harness failed: {error}");
+        log::error!("screenshot harness failed: {error}");
+        log::logger().flush();
         std::process::exit(1);
     }
     if let Some(plan) = PENDING_INSTALL.lock().unwrap().take()
         && let Err(error) = plan.launch(RELAUNCH_REQUESTED.load(Ordering::Relaxed))
     {
-        eprintln!("failed to launch update helper: {error}");
+        log::error!("failed to launch update helper: {error}");
     }
+    log::logger().flush();
     Ok(())
 }
 

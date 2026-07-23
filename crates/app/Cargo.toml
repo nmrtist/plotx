@@ -28,6 +28,7 @@ eframe.workspace = true
 egui_extras.workspace = true
 egui-phosphor.workspace = true
 image.workspace = true
+log.workspace = true
 num-complex.workspace = true
 rfd.workspace = true
 serde_json.workspace = true
