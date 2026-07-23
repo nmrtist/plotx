@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-pub(super) fn collect_abf_files(folder: &Path, output: &mut Vec<PathBuf>) {
+pub(super) fn collect_data_files(folder: &Path, output: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(folder) else {
         return;
     };
@@ -10,13 +10,18 @@ pub(super) fn collect_abf_files(folder: &Path, output: &mut Vec<PathBuf>) {
             continue;
         };
         if kind.is_dir() && !kind.is_symlink() {
-            collect_abf_files(&path, output);
-        } else if kind.is_file()
-            && path
+            collect_data_files(&path, output);
+        } else if kind.is_file() {
+            let extension = path
                 .extension()
-                .is_some_and(|extension| extension.eq_ignore_ascii_case("abf"))
-        {
-            output.push(path);
+                .and_then(|value| value.to_str())
+                .unwrap_or("");
+            if ["abf", "spm", "pfc"]
+                .iter()
+                .any(|supported| extension.eq_ignore_ascii_case(supported))
+            {
+                output.push(path);
+            }
         }
     }
 }

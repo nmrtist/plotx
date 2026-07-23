@@ -22,6 +22,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use zip::write::SimpleFileOptions;
 
+mod afm_convert;
 mod axis_overrides;
 mod codec;
 mod convert;
@@ -51,6 +52,7 @@ const FORMAT: &str = "plotx-project";
 const SCHEMA_VERSION: u32 = 1;
 const STORAGE_COMPLEX_F64_LE: &str = "complex_f64_le";
 const STORAGE_TABLE_V1: &str = "plotx_table_envelope_v1";
+const STORAGE_AFM_V1: &str = "plotx_afm_v1";
 const SNAPSHOT_KIND: &str = "editable_figure_v1";
 
 type Result<T> = std::result::Result<T, ProjectError>;

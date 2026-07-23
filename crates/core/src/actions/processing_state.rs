@@ -13,6 +13,7 @@ impl DatasetProcessingState {
             },
             Dataset::Table(_) => Self::Table,
             Dataset::Electrophysiology(d) => Self::Electrophysiology(d.processing),
+            Dataset::Afm(_) => Self::Afm,
         }
     }
 
@@ -66,6 +67,7 @@ impl DatasetProcessingState {
                 data.processing = *processing;
                 Ok(ProcessingRebuild::Rebuilt)
             }
+            (Dataset::Afm(_), Self::Afm) => Ok(ProcessingRebuild::Unchanged),
             (dataset, state) => Err(ProcessingStateError {
                 dataset_kind: dataset.kind_label(),
                 state_kind: state.kind_label(),
@@ -79,6 +81,7 @@ impl DatasetProcessingState {
             Self::Nmr2D { .. } => "NMR 2D",
             Self::Table => "Data Table",
             Self::Electrophysiology(_) => "Electrophysiology",
+            Self::Afm => "AFM",
         }
     }
 }

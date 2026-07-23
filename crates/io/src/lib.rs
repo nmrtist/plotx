@@ -6,6 +6,7 @@ pub mod bruker;
 pub mod delimited;
 pub mod jcamp_dx;
 pub mod jeol;
+pub mod nanoscope;
 pub mod xlsx;
 
 use num_complex::Complex64;
@@ -21,6 +22,8 @@ pub enum DataFormat {
     BrukerProcessed1D,
     BrukerProcessed2D,
     JcampDx1D,
+    BrukerNanoScopeSpm,
+    BrukerPeakForceCapture,
 }
 
 impl DataFormat {
@@ -32,6 +35,8 @@ impl DataFormat {
             Self::BrukerProcessed1D => "bruker-processed-1d",
             Self::BrukerProcessed2D => "bruker-processed-2d",
             Self::JcampDx1D => "jcamp-dx-1d",
+            Self::BrukerNanoScopeSpm => "bruker-nanoscope-spm",
+            Self::BrukerPeakForceCapture => "bruker-peakforce-capture",
         }
     }
 }
@@ -44,6 +49,8 @@ pub struct Provenance {
     pub data_path: PathBuf,
     /// Parameter files that define interpretation of the payload.
     pub parameter_paths: Vec<PathBuf>,
+    /// Related payloads merged into this logical dataset.
+    pub companion_paths: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,6 +59,10 @@ pub enum LoadWarningCode {
     OptionalImaginaryMissing,
     MissingStimulus,
     InvalidMetadata,
+    MissingCalibration,
+    MissingCompanion,
+    CompanionMismatch,
+    OptionalChannelSkipped,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -322,6 +333,79 @@ pub enum Acquisition {
     D1(NmrData),
     D2(Box<NmrData2D>),
     Electrophysiology(Box<ElectrophysiologyData>),
+    Afm(Box<AfmData>),
+}
+
+/// Linear calibration applied lazily to an AFM integer signal.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AfmScale {
+    pub multiplier: f64,
+    pub offset: f64,
+    pub unit: String,
+}
+
+impl AfmScale {
+    pub fn apply(&self, raw: i32) -> f64 {
+        self.offset + self.multiplier * f64::from(raw)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum AfmFrameDirection {
+    Trace,
+    Retrace,
+    Unknown,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AfmImageChannel {
+    pub name: String,
+    pub width: usize,
+    pub height: usize,
+    pub scan_size_x: f64,
+    pub scan_size_y: f64,
+    pub lateral_unit: String,
+    pub scale: AfmScale,
+    /// Row-major, normalized left-to-right and bottom-to-top.
+    pub raw: std::sync::Arc<[i32]>,
+    pub frame_direction: AfmFrameDirection,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AfmForceSet {
+    pub grid_width: usize,
+    pub grid_height: usize,
+    pub samples_per_curve: usize,
+    /// Pixel-major curves in normalized image order.
+    pub raw: std::sync::Arc<[i32]>,
+    pub signal_scale: AfmScale,
+    pub sample_period_s: Option<f64>,
+    pub z_positions: Option<std::sync::Arc<[f64]>>,
+    /// Sample indices in display order; approach precedes retract.
+    pub display_order: std::sync::Arc<[usize]>,
+    pub approach_samples: usize,
+    pub deflection_sensitivity_m_per_v: Option<f64>,
+    pub spring_constant_n_per_m: Option<f64>,
+}
+
+impl AfmForceSet {
+    pub fn curve_raw(&self, x: usize, y: usize) -> Option<&[i32]> {
+        if x >= self.grid_width || y >= self.grid_height {
+            return None;
+        }
+        let pixel = y.checked_mul(self.grid_width)?.checked_add(x)?;
+        let start = pixel.checked_mul(self.samples_per_curve)?;
+        self.raw
+            .get(start..start.checked_add(self.samples_per_curve)?)
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AfmData {
+    pub images: Vec<AfmImageChannel>,
+    pub forces: Option<AfmForceSet>,
+    pub source: String,
+    pub import_warnings: Vec<String>,
 }
 
 /// Physical quantity represented by an electrophysiology channel.
@@ -410,6 +494,9 @@ pub enum IoError {
 
     #[error(transparent)]
     JcampDx(#[from] jcamp_dx::JcampDxError),
+
+    #[error("invalid NanoScope file: {0}")]
+    InvalidNanoScope(String),
 }
 
 /// Load a dataset, auto-detecting the format from the path. A Bruker
@@ -429,6 +516,8 @@ pub fn detect_format(path: impl AsRef<Path>) -> Result<DataFormat, IoError> {
         .unwrap_or("")
         .to_ascii_lowercase();
     match ext.as_str() {
+        "spm" if nanoscope::is_nanoscope(path) => Ok(DataFormat::BrukerNanoScopeSpm),
+        "pfc" if nanoscope::is_nanoscope(path) => Ok(DataFormat::BrukerPeakForceCapture),
         "abf" if abf2::is_abf2(path) => Ok(DataFormat::Abf2),
         "jdf" => Ok(DataFormat::JeolDelta),
         "dx" | "jdx" | "jcamp" => Ok(DataFormat::JcampDx1D),
@@ -437,7 +526,7 @@ pub fn detect_format(path: impl AsRef<Path>) -> Result<DataFormat, IoError> {
         _ if abf2::is_abf2(path) => Ok(DataFormat::Abf2),
         _ if jeol::is_jdf(path) => Ok(DataFormat::JeolDelta),
         _ => Err(IoError::Unsupported(format!(
-            "unrecognised path {}: expected ABF2 .abf, JEOL .jdf, JCAMP-DX .dx/.jdx/.jcamp, Bruker fid/ser, or Bruker pdata",
+            "unrecognised path {}: expected NanoScope .spm/.pfc, ABF2 .abf, JEOL .jdf, JCAMP-DX .dx/.jdx/.jcamp, Bruker fid/ser, or Bruker pdata",
             path.display()
         ))),
     }
@@ -454,6 +543,7 @@ pub fn load_path(path: impl AsRef<Path>) -> Result<LoadResult, IoError> {
                 selected_path: path.to_path_buf(),
                 data_path: path.to_path_buf(),
                 parameter_paths: Vec::new(),
+                companion_paths: Vec::new(),
             },
             warnings: Vec::new(),
         }),
@@ -462,5 +552,8 @@ pub fn load_path(path: impl AsRef<Path>) -> Result<LoadResult, IoError> {
             bruker::load_processed(path)
         }
         DataFormat::JcampDx1D => jcamp_dx::load(path),
+        DataFormat::BrukerNanoScopeSpm | DataFormat::BrukerPeakForceCapture => {
+            nanoscope::load(path)
+        }
     }
 }

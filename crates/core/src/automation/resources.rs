@@ -109,6 +109,30 @@ impl<'a> ProjectResourceProvider<'a> {
                 vec!["s".to_owned()],
                 Vec::new(),
             ),
+            Dataset::Afm(afm) => {
+                let dimensions = afm.data.forces.as_ref().map_or_else(
+                    || {
+                        afm.data
+                            .images
+                            .first()
+                            .map_or_else(Vec::new, |image| vec![image.height, image.width])
+                    },
+                    |forces| {
+                        vec![
+                            forces.grid_height,
+                            forces.grid_width,
+                            forces.samples_per_curve,
+                        ]
+                    },
+                );
+                let units = afm
+                    .data
+                    .images
+                    .iter()
+                    .map(|image| image.scale.unit.clone())
+                    .collect();
+                (dimensions, units, Vec::new())
+            }
         };
         ResourceDescriptor {
             resource: top_ref(&id, KIND_DATASET),
@@ -538,6 +562,29 @@ fn preview_dataset(
             serde_json::json!({"summary": dataset.summary()}),
             recording.data.sweeps.len(),
         ),
+        Dataset::Afm(afm) => {
+            let shape = afm.data.forces.as_ref().map_or_else(
+                || {
+                    afm.data
+                        .images
+                        .first()
+                        .map_or_else(Vec::new, |image| vec![image.height, image.width])
+                },
+                |forces| {
+                    vec![
+                        forces.grid_height,
+                        forces.grid_width,
+                        forces.samples_per_curve,
+                    ]
+                },
+            );
+            let total = shape.iter().copied().fold(1usize, usize::saturating_mul);
+            (
+                shape,
+                serde_json::json!({"summary": dataset.summary()}),
+                total,
+            )
+        }
     };
     let returned = total.min(limit);
     Ok(DataPreview {

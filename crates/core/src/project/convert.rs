@@ -106,6 +106,51 @@ pub fn dataset_to_objects(
         Dataset::Electrophysiology(recording) => {
             electrophysiology_to_objects(recording, data_id, recipe_id)?
         }
+        Dataset::Afm(afm) => {
+            let blob = super::afm_convert::encode_afm(&afm.data)?;
+            let data = DataObject {
+                id: data_id.to_owned(),
+                role: "data".to_owned(),
+                classification: Classification {
+                    domain: "afm".to_owned(),
+                    technique: Some("nanoscope".to_owned()),
+                    object: "acquisition".to_owned(),
+                },
+                label: afm.name.clone(),
+                dimensions: Vec::new(),
+                payload: Payload {
+                    storage: STORAGE_AFM_V1.to_owned(),
+                    blob: format!("objects/{data_id}/data.bin"),
+                    shape: afm.data.forces.as_ref().map_or_else(Vec::new, |forces| {
+                        vec![
+                            forces.grid_height,
+                            forces.grid_width,
+                            forces.samples_per_curve,
+                        ]
+                    }),
+                    domain: "afm".to_owned(),
+                },
+                extensions: serde_json::json!({
+                    "plotx.afm": {
+                        "selected_channel": afm.selected_channel,
+                        "selected_pixel": afm.selected_pixel
+                    }
+                }),
+            };
+            let recipe = RecipeObject {
+                id: recipe_id.to_owned(),
+                role: "recipe".to_owned(),
+                classification: Classification {
+                    domain: "afm".to_owned(),
+                    technique: Some("nanoscope".to_owned()),
+                    object: "display_recipe".to_owned(),
+                },
+                input: data_id.to_owned(),
+                parameters: RecipeParameters::default(),
+                extensions: serde_json::Value::Null,
+            };
+            (data, blob, recipe)
+        }
     })
 }
 
@@ -114,6 +159,29 @@ pub fn object_to_dataset(
     data: &DataObject,
     recipe: &RecipeObject,
 ) -> Result<Dataset> {
+    if data.classification.domain == "afm" && data.payload.storage == STORAGE_AFM_V1 {
+        let raw = read_bytes(zip, &data.payload.blob)?;
+        let decoded = super::afm_convert::decode_afm(&raw)?;
+        let mut dataset = crate::state::AfmDataset::load(decoded);
+        dataset.name = data.label.clone();
+        if let Some(state) = data.extensions.get("plotx.afm") {
+            dataset.selected_channel = state
+                .get("selected_channel")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0) as usize;
+            if let Some(pixel) = state
+                .get("selected_pixel")
+                .and_then(serde_json::Value::as_array)
+                && let (Some(x), Some(y)) = (
+                    pixel.first().and_then(serde_json::Value::as_u64),
+                    pixel.get(1).and_then(serde_json::Value::as_u64),
+                )
+            {
+                dataset.selected_pixel = [x as usize, y as usize];
+            }
+        }
+        return Ok(Dataset::Afm(Box::new(dataset)));
+    }
     if data.classification.domain == "electrophysiology"
         && data.classification.object == "recording"
     {
@@ -367,6 +435,7 @@ pub fn canvas_to_view(
                         },
                         Dataset::Table(_) => "line_plot",
                         Dataset::Electrophysiology(_) => "line_plot",
+                        Dataset::Afm(_) => "heatmap",
                     };
                     let series = plot
                         .binding

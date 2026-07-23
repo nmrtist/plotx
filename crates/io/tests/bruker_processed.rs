@@ -49,6 +49,7 @@ fn loads_big_endian_scaled_1r_from_experiment_directory() {
         Acquisition::D1(data) => data,
         Acquisition::D2(_) => panic!("expected 1D"),
         Acquisition::Electrophysiology(_) => panic!("expected NMR"),
+        Acquisition::Afm(_) => panic!("expected NMR"),
     };
     assert_eq!(data.domain, Domain::Frequency);
     assert_eq!(
@@ -89,6 +90,7 @@ fn loads_2rr_and_reverses_both_frequency_axes() {
         Acquisition::D2(data) => *data,
         Acquisition::D1(_) => panic!("expected 2D"),
         Acquisition::Electrophysiology(_) => panic!("expected NMR"),
+        Acquisition::Afm(_) => panic!("expected NMR"),
     };
     assert_eq!(data.domain, Domain::Frequency);
     assert_eq!((data.rows, data.cols), (2, 3));

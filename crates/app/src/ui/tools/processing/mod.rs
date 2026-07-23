@@ -56,6 +56,7 @@ fn badge(dataset: &Dataset) -> (String, bool) {
         Dataset::Nmr2D(n) => n.preset.label().to_owned(),
         Dataset::Table(_) => String::new(),
         Dataset::Electrophysiology(_) => "Patch clamp".to_owned(),
+        Dataset::Afm(_) => "AFM".to_owned(),
     };
     (name, default)
 }
@@ -496,6 +497,7 @@ fn set_group_delay(app: &mut PlotxApp, di: usize, on: bool) {
         }
         Dataset::Table(_) => {}
         Dataset::Electrophysiology(_) => {}
+        Dataset::Afm(_) => {}
     }
 }
 
@@ -505,6 +507,7 @@ fn group_delay(dataset: &Dataset) -> bool {
         Dataset::Nmr2D(n) => n.group_delay_correct,
         Dataset::Table(_) => true,
         Dataset::Electrophysiology(_) => true,
+        Dataset::Afm(_) => true,
     }
 }
 
