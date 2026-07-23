@@ -1,5 +1,4 @@
 use super::{FileStamp, Manifest, ProjectError, RecoveryMetadata, Result, temporary_path};
-use directories::ProjectDirs;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io;
@@ -319,8 +318,8 @@ fn conceal_backup(_path: &Path) -> io::Result<()> {
 }
 
 fn recovery_root() -> Result<PathBuf> {
-    let root = ProjectDirs::from("", "", "plotx")
-        .map(|dirs| dirs.data_local_dir().join("recovery"))
+    let root = crate::settings::data_local_dir()
+        .map(|root| root.join("recovery"))
         .ok_or_else(|| ProjectError::Invalid("recovery directory is unavailable".to_owned()))?;
     std::fs::create_dir_all(&root)?;
     Ok(root)

@@ -89,6 +89,7 @@ export default defineConfig({
 						{ slug: 'reference/file-formats' },
 						{ slug: 'reference/updates' },
 						{ slug: 'reference/troubleshooting' },
+						{ slug: 'reference/reporting-problems' },
 					],
 				},
 			],

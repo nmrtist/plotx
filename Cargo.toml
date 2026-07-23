@@ -53,6 +53,7 @@ unicode-width = "0.2"
 statrs = { version = "0.18", default-features = false }
 tukey_test = "0.2"
 directories = "6"
+log = "0.4"
 uuid = { version = "1", features = ["serde", "v4"] }
 arrow = { version = "58.3", default-features = false, features = ["ipc"] }
 datafusion = { version = "54.0", default-features = false }
@@ -122,4 +123,6 @@ opt-level = 0
 [profile.release]
 lto = "thin"
 codegen-units = 1
+debug = "line-tables-only"
+split-debuginfo = "packed"
 strip = true
