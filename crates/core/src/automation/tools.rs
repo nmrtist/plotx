@@ -217,7 +217,7 @@ fn execute_rename(app: &mut PlotxApp, plan: &ToolPlan) -> Result<ToolResult, Aut
         } else if target.kind.0 == KIND_CANVAS_OBJECT
             && let (Some(parent), Some(local)) = (&target.parent_id, &target.local_id)
             && let Some(canvas) = canvas_index(app, parent)
-            && let Ok(object_id) = local.parse::<u64>()
+            && let Ok(object_id) = local.parse::<crate::state::ObjectId>()
             && let Some(object) = app.doc.canvases[canvas].object(object_id)
         {
             actions.push(Action::rename_object(
@@ -267,7 +267,7 @@ fn execute_scheme(app: &mut PlotxApp, plan: &ToolPlan) -> Result<ToolResult, Aut
         .applied_targets
         .iter()
         .filter_map(|index| app.doc.datasets.get(*index))
-        .map(|dataset| dataset.resource_id().to_owned())
+        .map(|dataset| dataset.resource_id().to_string())
         .collect::<BTreeSet<_>>();
     let skipped = scheme_plan
         .targets()
@@ -278,7 +278,7 @@ fn execute_scheme(app: &mut PlotxApp, plan: &ToolPlan) -> Result<ToolResult, Aut
                     .doc
                     .datasets
                     .get(target.dataset)
-                    .map(|dataset| dataset.resource_id().to_owned())
+                    .map(|dataset| dataset.resource_id().to_string())
                     .unwrap_or_else(|| format!("stale-{}", target.dataset));
                 (id, reason.to_owned())
             })
@@ -345,7 +345,7 @@ fn execute_import(app: &mut PlotxApp, plan: &ToolPlan) -> Result<ToolResult, Aut
         };
         let fingerprints = input_fingerprints(&loaded.inspection);
         produced.push(ResourceRef {
-            id: loaded.dataset.resource_id().to_owned(),
+            id: loaded.dataset.resource_id().to_string(),
             kind: ResourceKindId::new(KIND_DATASET),
             parent_id: None,
             local_id: None,
@@ -354,7 +354,7 @@ fn execute_import(app: &mut PlotxApp, plan: &ToolPlan) -> Result<ToolResult, Aut
         actions.push(Action::InsertDatasetWithCanvas {
             dataset_index: base_dataset + offset,
             canvas_index: base_canvas + offset,
-            canvas_resource_id: uuid::Uuid::new_v4().to_string(),
+            canvas_resource_id: crate::state::CanvasId::new(),
             dataset: Box::new(loaded.dataset),
             canvas_name: path
                 .file_stem()
@@ -393,7 +393,7 @@ fn execute_import(app: &mut PlotxApp, plan: &ToolPlan) -> Result<ToolResult, Aut
             .iter()
             .skip(base_canvas)
             .map(|canvas| ResourceRef {
-                id: canvas.resource_id.clone(),
+                id: canvas.resource_id.to_string(),
                 kind: ResourceKindId::new(KIND_CANVAS),
                 parent_id: None,
                 local_id: None,
@@ -443,7 +443,7 @@ fn execute_transform(app: &mut PlotxApp, plan: &ToolPlan) -> Result<ToolResult, 
         AutomationError::Execution("transform did not produce a typed table".into())
     })?;
     let produced = ResourceRef {
-        id: output.resource_id.clone(),
+        id: output.resource_id.to_string(),
         kind: ResourceKindId::new(KIND_DATASET),
         parent_id: None,
         local_id: None,
@@ -628,14 +628,14 @@ fn dataset_index(app: &PlotxApp, id: &str) -> Option<usize> {
     app.doc
         .datasets
         .iter()
-        .position(|dataset| dataset.resource_id() == id)
+        .position(|dataset| dataset.resource_id().to_string() == id)
 }
 
 fn canvas_index(app: &PlotxApp, id: &str) -> Option<usize> {
     app.doc
         .canvases
         .iter()
-        .position(|canvas| canvas.resource_id == id)
+        .position(|canvas| canvas.resource_id.to_string() == id)
 }
 
 fn serde_result(

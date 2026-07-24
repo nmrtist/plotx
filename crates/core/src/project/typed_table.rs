@@ -228,7 +228,9 @@ pub(crate) fn table_dataset_from_v1(
         })
         .collect::<plotx_data::Result<Vec<_>>>()?;
     let mut dataset = crate::state::TableDataset {
-        resource_id: data.id.clone(),
+        resource_id: data.id.parse().map_err(|_| {
+            ProjectError::Invalid(format!("table has invalid stable id {}", data.id))
+        })?,
         provenance: sidecar.provenance,
         meta: sidecar.meta,
         curve_fit_analyses: sidecar.curve_fit_analyses,

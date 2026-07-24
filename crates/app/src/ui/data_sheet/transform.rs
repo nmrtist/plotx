@@ -1,5 +1,5 @@
 use plotx_core::data::{RelPlanV1, SnapshotRead, TableSchema};
-use plotx_core::state::TableEditDelta;
+use plotx_core::state::{DatasetId, TableEditDelta};
 
 pub(super) struct TableTransformRequest {
     pub input_datasets: Vec<usize>,
@@ -18,7 +18,7 @@ pub(super) struct TableSheetContext<'a> {
     pub dataset: usize,
     pub commit: &'a mut Option<TableEditDelta>,
     pub transform: &'a mut Option<TableTransformRequest>,
-    pub refresh: &'a mut Option<(usize, Vec<usize>)>,
+    pub refresh: &'a mut Option<(usize, Vec<DatasetId>)>,
     pub catalog: &'a [TableCatalogEntry],
     pub transform_running: bool,
 }

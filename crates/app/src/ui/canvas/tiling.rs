@@ -268,10 +268,10 @@ pub(crate) fn paint_tile_preview(
 mod tests {
     use super::*;
 
-    fn drag(canvas: usize, object: ObjectId) -> ObjectDrag {
+    fn drag(canvas: usize, object: u64) -> ObjectDrag {
         ObjectDrag {
             canvas,
-            object,
+            object: ObjectId::new(object),
             kind: ObjectDragKind::Move,
             before: ObjectFrame::new(0.0, 0.0, 10.0, 10.0),
             start_pointer: [0.0; 2],
@@ -285,12 +285,14 @@ mod tests {
     fn tile_cache_identity_tracks_source_region_target_and_existing_order() {
         let layout = plotx_core::layout::PageLayout::default();
         let page = [400.0, 300.0];
+        let ids = [ObjectId::new(20), ObjectId::new(21)];
+        let reversed_ids = [ObjectId::new(21), ObjectId::new(20)];
         let base = tile_cache_key(
             &drag(0, 10),
             2,
             page,
             layout,
-            &[20, 21],
+            &ids,
             plotx_core::layout::TilingDropRegion::Left,
             None,
         );
@@ -301,7 +303,7 @@ mod tests {
                 2,
                 page,
                 layout,
-                &[20, 21],
+                &ids,
                 plotx_core::layout::TilingDropRegion::Left,
                 None,
             )
@@ -313,7 +315,7 @@ mod tests {
                 2,
                 page,
                 layout,
-                &[20, 21],
+                &ids,
                 plotx_core::layout::TilingDropRegion::Left,
                 None,
             )
@@ -325,7 +327,7 @@ mod tests {
                 3,
                 page,
                 layout,
-                &[20, 21],
+                &ids,
                 plotx_core::layout::TilingDropRegion::Left,
                 None,
             )
@@ -337,7 +339,7 @@ mod tests {
                 2,
                 [401.0, 300.0],
                 layout,
-                &[20, 21],
+                &ids,
                 plotx_core::layout::TilingDropRegion::Left,
                 None,
             )
@@ -349,7 +351,7 @@ mod tests {
                 2,
                 page,
                 plotx_core::layout::PageLayout { cols: 2, ..layout },
-                &[20, 21],
+                &ids,
                 plotx_core::layout::TilingDropRegion::Left,
                 None,
             )
@@ -361,7 +363,7 @@ mod tests {
                 2,
                 page,
                 layout,
-                &[20, 21],
+                &ids,
                 plotx_core::layout::TilingDropRegion::Right,
                 None,
             )
@@ -373,7 +375,7 @@ mod tests {
                 2,
                 page,
                 layout,
-                &[21, 20],
+                &reversed_ids,
                 plotx_core::layout::TilingDropRegion::Left,
                 None,
             )
@@ -383,7 +385,7 @@ mod tests {
             2,
             page,
             layout,
-            &[20, 21],
+            &ids,
             plotx_core::layout::TilingDropRegion::Retile,
             Some(0),
         );
@@ -392,7 +394,7 @@ mod tests {
             2,
             page,
             layout,
-            &[20, 21],
+            &ids,
             plotx_core::layout::TilingDropRegion::Retile,
             Some(3),
         );

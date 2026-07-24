@@ -116,7 +116,7 @@ fn analysis_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) -> bool {
         .ui
         .analysis_selection
         .as_ref()
-        .map(|selection| selection.dataset == di)
+        .map(|selection| selection.dataset == app.doc.datasets[di].resource_id())
         .unwrap_or(false);
     ui.horizontal(|ui| {
         let selected = app.session.tool == Tool::SelectRegion;

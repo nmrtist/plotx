@@ -402,7 +402,7 @@ impl AutomationUi {
             .and_then(|index| app.doc.canvases.get(index))
         {
             let target = plotx_core::automation::ResourceRef {
-                id: canvas.resource_id.clone(),
+                id: canvas.resource_id.to_string(),
                 kind: plotx_core::automation::ResourceKindId::new(
                     plotx_core::automation::KIND_CANVAS,
                 ),
@@ -424,7 +424,7 @@ fn highlight(app: &mut PlotxApp, id: &str) {
         .doc
         .datasets
         .iter()
-        .position(|dataset| dataset.resource_id() == id)
+        .position(|dataset| dataset.resource_id().to_string() == id)
     {
         app.set_active_dataset(Some(index));
     }
@@ -432,7 +432,7 @@ fn highlight(app: &mut PlotxApp, id: &str) {
         .doc
         .canvases
         .iter()
-        .position(|canvas| canvas.resource_id == id)
+        .position(|canvas| canvas.resource_id.to_string() == id)
     {
         app.session.active_canvas = Some(index);
         app.sync_selection_to_active_canvas();

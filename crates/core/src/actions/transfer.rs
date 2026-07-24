@@ -44,7 +44,7 @@ impl Action {
         let mut removed = Vec::with_capacity(picked.len());
         for (offset, &(slot, object)) in picked.iter().enumerate() {
             let mut clone = object.clone();
-            clone.id = dst.next_object_id + offset as ObjectId;
+            clone.id = dst.next_object_id.checked_advance(offset as u64);
             if let Some(g) = clone.group {
                 let mapped = match group_map.iter().find(|(old, _)| *old == g) {
                     Some(&(_, new)) => new,
@@ -173,7 +173,7 @@ impl PlotxApp {
         let ids: Vec<ObjectId> = inserted.iter().map(|o| o.id).collect();
         if let Some(dst) = self.doc.canvases.get_mut(to) {
             for object in inserted {
-                dst.next_object_id = dst.next_object_id.max(object.id + 1);
+                dst.next_object_id = dst.next_object_id.max(object.id.checked_advance(1));
                 if let Some(group) = object.group {
                     dst.next_group_id = dst.next_group_id.max(group + 1);
                 }
@@ -183,7 +183,12 @@ impl PlotxApp {
         }
         self.session.active_canvas = Some(to);
         self.session.ui.selection = Selection::Objects(ids);
-        let active = self.doc.canvases.get(to).and_then(|c| c.active_dataset());
+        let active = self
+            .doc
+            .canvases
+            .get(to)
+            .and_then(|c| c.active_dataset())
+            .and_then(|id| self.doc.dataset_index(id));
         self.set_active_dataset(active);
         self.session.view = PrimaryView::Canvas;
         self.clear_transfer_transients();
@@ -219,14 +224,15 @@ impl PlotxApp {
             // index despite earlier insertions.
             for (slot, object) in removed {
                 let at = (*slot).min(src.objects.len());
-                src.next_object_id = src.next_object_id.max(object.id + 1);
+                src.next_object_id = src.next_object_id.max(object.id.checked_advance(1));
                 src.objects.insert(at, object.clone());
             }
         }
         self.session.active_canvas = active_before;
         let active = active_before
             .and_then(|ci| self.doc.canvases.get(ci))
-            .and_then(|c| c.active_dataset());
+            .and_then(|c| c.active_dataset())
+            .and_then(|id| self.doc.dataset_index(id));
         self.set_active_dataset(active);
         self.set_selection(selection_before.clone());
         self.clear_transfer_transients();
@@ -266,7 +272,7 @@ impl PlotxApp {
         let ids: Vec<ObjectId> = inserted.iter().map(|o| o.id).collect();
         if let Some(dst) = self.doc.canvases.get_mut(to) {
             for object in inserted {
-                dst.next_object_id = dst.next_object_id.max(object.id + 1);
+                dst.next_object_id = dst.next_object_id.max(object.id.checked_advance(1));
                 if let Some(group) = object.group {
                     dst.next_group_id = dst.next_group_id.max(group + 1);
                 }
@@ -293,7 +299,12 @@ impl PlotxApp {
         let to = *target_index_after;
         self.session.active_canvas = Some(to);
         self.session.ui.selection = Selection::Objects(ids);
-        let active = self.doc.canvases.get(to).and_then(|c| c.active_dataset());
+        let active = self
+            .doc
+            .canvases
+            .get(to)
+            .and_then(|c| c.active_dataset())
+            .and_then(|id| self.doc.dataset_index(id));
         self.set_active_dataset(active);
         self.session.view = PrimaryView::Canvas;
         self.clear_transfer_transients();
@@ -348,14 +359,15 @@ impl PlotxApp {
         {
             for (slot, object) in removed {
                 let at = (*slot).min(src.objects.len());
-                src.next_object_id = src.next_object_id.max(object.id + 1);
+                src.next_object_id = src.next_object_id.max(object.id.checked_advance(1));
                 src.objects.insert(at, object.clone());
             }
         }
         self.session.active_canvas = active_before;
         let active = active_before
             .and_then(|ci| self.doc.canvases.get(ci))
-            .and_then(|c| c.active_dataset());
+            .and_then(|c| c.active_dataset())
+            .and_then(|id| self.doc.dataset_index(id));
         self.set_active_dataset(active);
         self.set_selection(selection_before.clone());
         self.clear_transfer_transients();

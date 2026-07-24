@@ -121,8 +121,8 @@ pub(super) fn sample_app() -> PlotxApp {
     app.session.active_canvas = Some(0);
     app.session.tool = Tool::SelectRegion;
     app.session.ui.analysis_selection = Some(AnalysisSelection {
-        dataset: 0,
-        canvas: 0,
+        dataset: app.doc.datasets[0].resource_id(),
+        canvas: app.doc.canvases[0].resource_id,
         object: id,
         x_range: AxisRange::new(1.0, 2.0),
         y_range: None,
@@ -421,7 +421,7 @@ fn project_roundtrip_preserves_axis_projections() {
         app.build_plot_object(1, ObjectFrame::new(0.0, 0.0, w, h), id, "Plot 2".to_owned());
     object.plot_mut().unwrap().projections = AxisProjections {
         top: AxisProjection {
-            source: ProjectionSource::Attached(0),
+            source: ProjectionSource::Attached(app.doc.datasets[0].resource_id()),
             visible: true,
         },
         left: AxisProjection {
@@ -442,7 +442,10 @@ fn project_roundtrip_preserves_axis_projections() {
         .plot()
         .unwrap()
         .projections;
-    assert_eq!(proj.top.source, ProjectionSource::Attached(0));
+    assert_eq!(
+        proj.top.source,
+        ProjectionSource::Attached(loaded.doc.datasets[0].resource_id())
+    );
     assert!(proj.top.visible);
     assert_eq!(proj.left.source, ProjectionSource::Skyline);
     assert!(!proj.left.visible);
@@ -579,9 +582,9 @@ fn project_roundtrip_preserves_overlay_binding() {
         app.build_plot_object(0, ObjectFrame::new(0.0, 0.0, w, h), id, "Plot 1".to_owned());
     object.plot_mut().unwrap().binding = crate::state::DataBinding {
         series: vec![
-            crate::state::SeriesBinding::new(0),
+            crate::state::SeriesBinding::new(app.doc.datasets[0].resource_id()),
             crate::state::SeriesBinding {
-                dataset: 1,
+                dataset: app.doc.datasets[1].resource_id(),
                 color: Some(Color::rgb(10, 20, 30)),
                 label: Some("treated".to_owned()),
                 scale: 1.0,
@@ -602,8 +605,14 @@ fn project_roundtrip_preserves_overlay_binding() {
 
     let binding = &first_plot(&loaded).binding;
     assert_eq!(binding.series.len(), 2);
-    assert_eq!(binding.series[0].dataset, 0);
-    assert_eq!(binding.series[1].dataset, 1);
+    assert_eq!(
+        binding.series[0].dataset,
+        loaded.doc.datasets[0].resource_id()
+    );
+    assert_eq!(
+        binding.series[1].dataset,
+        loaded.doc.datasets[1].resource_id()
+    );
     assert_eq!(binding.series[1].color, Some(Color::rgb(10, 20, 30)));
     assert_eq!(binding.series[1].label.as_deref(), Some("treated"));
     assert!(first_plot(&loaded).figure.show_legend);
@@ -626,9 +635,9 @@ fn project_roundtrip_preserves_stack_spec_and_series_fields() {
         let plot = object.plot_mut().unwrap();
         plot.binding = DataBinding {
             series: vec![
-                SeriesBinding::new(0),
+                SeriesBinding::new(app.doc.datasets[0].resource_id()),
                 SeriesBinding {
-                    dataset: 1,
+                    dataset: app.doc.datasets[1].resource_id(),
                     color: None,
                     label: None,
                     scale: 2.5,

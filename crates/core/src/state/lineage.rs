@@ -1,4 +1,4 @@
-use super::Dataset;
+use super::{Dataset, DatasetId};
 use serde::{Deserialize, Serialize};
 
 /// Why a dataset was materialized from one or more earlier datasets.
@@ -42,13 +42,17 @@ impl DerivationKind {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DatasetLineage {
     pub kind: DerivationKind,
-    pub sources: Vec<usize>,
+    pub sources: Vec<DatasetId>,
 }
 
 impl DatasetLineage {
-    pub fn new(kind: DerivationKind, sources: impl IntoIterator<Item = usize>) -> Self {
+    pub fn new<T: Into<DatasetId>>(
+        kind: DerivationKind,
+        sources: impl IntoIterator<Item = T>,
+    ) -> Self {
         let mut unique = Vec::new();
         for source in sources {
+            let source = source.into();
             if !unique.contains(&source) {
                 unique.push(source);
             }

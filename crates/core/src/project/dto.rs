@@ -263,6 +263,7 @@ pub struct ViewObject {
     #[serde(default)]
     pub inputs: Vec<String>,
     pub name: String,
+    pub next_object_id: u64,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub caption: String,
     #[serde(default = "caption_visible_default")]
@@ -713,8 +714,8 @@ pub struct ViewportDto {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct SelectionDto {
-    pub dataset: usize,
-    pub canvas: usize,
+    pub dataset: String,
+    pub canvas: String,
     pub object: String,
     pub x_range: RangeDto,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -774,8 +775,8 @@ impl RangeDto {
 impl SelectionDto {
     pub fn from_selection(selection: &AnalysisSelection) -> Self {
         Self {
-            dataset: selection.dataset,
-            canvas: selection.canvas,
+            dataset: selection.dataset.to_string(),
+            canvas: selection.canvas.to_string(),
             object: selection.object.to_string(),
             x_range: RangeDto::from_range(selection.x_range),
             y_range: selection.y_range.map(RangeDto::from_range),
@@ -784,8 +785,8 @@ impl SelectionDto {
 
     pub fn to_selection(&self) -> Option<AnalysisSelection> {
         Some(AnalysisSelection {
-            dataset: self.dataset,
-            canvas: self.canvas,
+            dataset: self.dataset.parse().ok()?,
+            canvas: self.canvas.parse().ok()?,
             object: self.object.parse().ok()?,
             x_range: self.x_range.into_range(),
             y_range: self.y_range.map(RangeDto::into_range),

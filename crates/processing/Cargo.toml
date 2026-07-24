@@ -16,3 +16,4 @@ plotx-analysis.workspace = true
 num-complex.workspace = true
 rustfft.workspace = true
 thiserror.workspace = true
+serde.workspace = true

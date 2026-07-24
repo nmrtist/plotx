@@ -300,9 +300,9 @@ pub(super) fn chart_plot_target(app: &PlotxApp, dataset: usize) -> Option<(usize
             continue;
         };
         let hit = canvas.objects.iter().find(|object| {
-            object
-                .plot()
-                .is_some_and(|plot| plot.binding.primary_dataset() == dataset)
+            object.plot().is_some_and(|plot| {
+                plot.binding.primary_dataset() == Some(app.doc.datasets[dataset].resource_id())
+            })
         });
         if let Some(object) = hit {
             return Some((ci, object.id));

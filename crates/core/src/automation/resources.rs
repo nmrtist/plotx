@@ -49,13 +49,16 @@ impl<'a> ProjectResourceProvider<'a> {
     }
 
     fn dataset_descriptor(&self, index: usize, dataset: &Dataset) -> ResourceDescriptor {
-        let id = dataset.resource_id().to_owned();
+        let id = dataset.resource_id();
+        // Only emit lineage sources that still exist: an undo can leave a
+        // dangling DatasetId in the document (kept for redo), but a descriptor
+        // naming a resource `resolve_target` would reject is inconsistent.
         let lineage = dataset
             .lineage()
             .into_iter()
             .flat_map(|lineage| lineage.sources.iter())
-            .filter_map(|source| self.app.doc.datasets.get(*source))
-            .map(|source| source.resource_id().to_owned())
+            .filter(|source| self.app.doc.dataset_index(**source).is_some())
+            .map(ToString::to_string)
             .collect();
         let mut capabilities = vec![cap(CAP_RENAME), cap(CAP_PREVIEW)];
         if matches!(dataset, Dataset::Nmr(_) | Dataset::Nmr2D(_)) {
@@ -72,7 +75,7 @@ impl<'a> ProjectResourceProvider<'a> {
                     .schema
                     .columns
                     .iter()
-                    .map(|column| child_ref(&id, &column.id.to_string(), KIND_TABLE_COLUMN));
+                    .map(|column| child_ref(id, &column.id.to_string(), KIND_TABLE_COLUMN));
                 metadata.insert("table_id".into(), snapshot.table_id.to_string());
                 metadata.insert(
                     "table_revision".into(),
@@ -135,7 +138,7 @@ impl<'a> ProjectResourceProvider<'a> {
             }
         };
         ResourceDescriptor {
-            resource: top_ref(&id, KIND_DATASET),
+            resource: top_ref(id, KIND_DATASET),
             name: dataset.display_name(),
             capabilities,
             children,
@@ -154,7 +157,7 @@ impl<'a> ProjectResourceProvider<'a> {
             .iter()
             .map(|object| {
                 child_ref(
-                    &canvas.resource_id,
+                    canvas.resource_id,
                     &object.id.to_string(),
                     KIND_CANVAS_OBJECT,
                 )
@@ -163,7 +166,7 @@ impl<'a> ProjectResourceProvider<'a> {
         let mut metadata = BTreeMap::new();
         metadata.insert("index_hint".to_owned(), index.to_string());
         ResourceDescriptor {
-            resource: top_ref(&canvas.resource_id, KIND_CANVAS),
+            resource: top_ref(canvas.resource_id, KIND_CANVAS),
             name: canvas.name.clone(),
             capabilities: vec![
                 cap(CAP_RENAME),
@@ -176,10 +179,10 @@ impl<'a> ProjectResourceProvider<'a> {
             units: vec!["mm".to_owned()],
             metadata,
             lineage: canvas
-                .dataset_indices()
+                .dataset_ids()
                 .into_iter()
-                .filter_map(|dataset| self.app.doc.datasets.get(dataset))
-                .map(|dataset| dataset.resource_id().to_owned())
+                .filter(|dataset| self.app.doc.dataset_index(*dataset).is_some())
+                .map(|dataset| dataset.to_string())
                 .collect(),
             revision: self.revision(),
         }
@@ -202,13 +205,13 @@ impl ResourceProvider for ProjectResourceProvider<'_> {
             .datasets
             .iter()
             .flat_map(|dataset| {
-                let child = dataset.resource_id().to_owned();
+                let child = dataset.resource_id();
                 dataset
                     .lineage()
                     .into_iter()
                     .flat_map(|lineage| lineage.sources.iter())
-                    .filter_map(|source| self.app.doc.datasets.get(*source))
-                    .map(move |source| format!("{} derives_from {}", child, source.resource_id()))
+                    .filter(|source| self.app.doc.dataset_index(**source).is_some())
+                    .map(move |source| format!("{child} derives_from {source}"))
             })
             .collect();
         ProjectBlueprint {
@@ -258,7 +261,7 @@ impl ResourceProvider for ProjectResourceProvider<'_> {
             for object in &canvas.objects {
                 descriptors.push(ResourceDescriptor {
                     resource: child_ref(
-                        &canvas.resource_id,
+                        canvas.resource_id,
                         &object.id.to_string(),
                         KIND_CANVAS_OBJECT,
                     ),
@@ -269,10 +272,10 @@ impl ResourceProvider for ProjectResourceProvider<'_> {
                     units: Vec::new(),
                     metadata: BTreeMap::new(),
                     lineage: object
-                        .dataset_indices()
+                        .dataset_ids()
                         .into_iter()
-                        .filter_map(|dataset| self.app.doc.datasets.get(dataset))
-                        .map(|dataset| dataset.resource_id().to_owned())
+                        .filter(|dataset| self.app.doc.dataset_index(*dataset).is_some())
+                        .map(|dataset| dataset.to_string())
                         .collect(),
                     revision: self.revision(),
                 });
@@ -297,7 +300,7 @@ impl ResourceProvider for ProjectResourceProvider<'_> {
             .active_canvas
             .and_then(|index| self.app.doc.canvases.get(index))
         {
-            selected.push(top_ref(&canvas.resource_id, KIND_CANVAS));
+            selected.push(top_ref(canvas.resource_id, KIND_CANVAS));
         }
         selected
     }
@@ -307,8 +310,8 @@ impl ResourceProvider for ProjectResourceProvider<'_> {
             AutomationError::InvalidSelector(format!("resource {} does not exist", target.id))
         })?;
         let Some(dataset) = self.app.doc.datasets.iter().find(|dataset| {
-            dataset.resource_id() == target.id
-                || target.parent_id.as_deref() == Some(dataset.resource_id())
+            dataset.resource_id().to_string() == target.id
+                || target.parent_id.as_deref() == Some(dataset.resource_id().to_string().as_str())
         }) else {
             return Ok(DataPreview {
                 target: target.clone(),
@@ -334,7 +337,7 @@ impl ResourceProvider for ProjectResourceProvider<'_> {
             .doc
             .canvases
             .iter()
-            .find(|canvas| canvas.resource_id == canvas_id)
+            .find(|canvas| canvas.resource_id.to_string() == canvas_id)
             .ok_or_else(|| {
                 AutomationError::InvalidSelector("render.preview requires a canvas".to_owned())
             })?;
@@ -673,20 +676,21 @@ fn finite_json(value: f64) -> serde_json::Value {
     }
 }
 
-fn top_ref(id: &str, kind: &str) -> ResourceRef {
+fn top_ref(id: impl ToString, kind: &str) -> ResourceRef {
     ResourceRef {
-        id: id.to_owned(),
+        id: id.to_string(),
         kind: ResourceKindId::new(kind),
         parent_id: None,
         local_id: None,
     }
 }
 
-fn child_ref(parent: &str, local: &str, kind: &str) -> ResourceRef {
+fn child_ref(parent: impl ToString, local: &str, kind: &str) -> ResourceRef {
+    let parent = parent.to_string();
     ResourceRef {
         id: format!("{parent}/{local}"),
         kind: ResourceKindId::new(kind),
-        parent_id: Some(parent.to_owned()),
+        parent_id: Some(parent),
         local_id: Some(local.to_owned()),
     }
 }

@@ -320,8 +320,8 @@ fn transient_state_never_changes_ribbon_group_visibility() {
     app.session.tool = Tool::Integrate;
     app.session.ui.peak_column = Some(plotx_core::data::ColumnId::new());
     app.session.ui.analysis_selection = Some(AnalysisSelection {
-        dataset: 0,
-        canvas,
+        dataset: app.doc.datasets[0].resource_id(),
+        canvas: app.doc.canvases[canvas].resource_id,
         object,
         x_range: range,
         y_range: None,

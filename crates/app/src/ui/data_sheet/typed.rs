@@ -3,7 +3,7 @@
 //! (RowId, revisions, patches) never appears in the UI.
 
 use egui::Ui;
-use plotx_core::state::{TableDataset, TableEditDelta};
+use plotx_core::state::{DatasetId, TableDataset, TableEditDelta};
 
 use super::grid::{self, SheetState};
 use super::transform::TableSheetContext;
@@ -82,7 +82,7 @@ fn toolbar(
     dataset: usize,
     running: bool,
     request: &mut Option<super::transform::TableTransformRequest>,
-    refresh: &mut Option<(usize, Vec<usize>)>,
+    refresh: &mut Option<(usize, Vec<DatasetId>)>,
     catalog: &[super::transform::TableCatalogEntry],
 ) {
     ui.horizontal(|ui| {
@@ -99,6 +99,9 @@ fn toolbar(
             .on_hover_text("Re-run this table's source recipe and keep your cell edits")
             .clicked()
         {
+            // Carry the source DatasetIds through untouched; start_table_refresh
+            // resolves them and reports any missing source, instead of silently
+            // dropping unresolved ones here.
             *refresh = Some((dataset, refresh_sources.unwrap()));
         }
         ui.menu_button("Combine", |ui| {

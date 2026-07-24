@@ -50,7 +50,7 @@ mod tests {
         let preview = TileDropPreview {
             cache_key: TileDropCacheKey {
                 source_canvas: 0,
-                source_object: 1,
+                source_object: ObjectId::new(1),
                 target_canvas: 1,
                 target_page_pt: [100.0; 2],
                 target_layout: crate::layout::PageLayout::default(),

@@ -41,7 +41,10 @@ fn subtract_with_coefficient_creates_named_dataset_on_new_canvas() {
         app.doc.datasets[2].lineage(),
         Some(&DatasetLineage::new(
             DerivationKind::SpectrumArithmetic,
-            [0, 1]
+            [
+                app.doc.datasets[0].resource_id(),
+                app.doc.datasets[1].resource_id(),
+            ]
         ))
     );
 }
@@ -167,7 +170,7 @@ fn unary_scale_and_offset_create_independent_dataset() {
         app.doc.datasets[1].lineage(),
         Some(&DatasetLineage::new(
             DerivationKind::SpectrumArithmetic,
-            [0]
+            [app.doc.datasets[0].resource_id()]
         ))
     );
 

@@ -49,11 +49,17 @@ fn live_and_frozen_region_tables_record_lineage() {
 
     assert_eq!(
         app.doc.datasets[1].lineage(),
-        Some(&DatasetLineage::new(DerivationKind::LiveRegionTable, [0]))
+        Some(&DatasetLineage::new(
+            DerivationKind::LiveRegionTable,
+            [app.doc.datasets[0].resource_id()]
+        ))
     );
     assert_eq!(
         app.doc.datasets[2].lineage(),
-        Some(&DatasetLineage::new(DerivationKind::FrozenRegionTable, [0]))
+        Some(&DatasetLineage::new(
+            DerivationKind::FrozenRegionTable,
+            [app.doc.datasets[0].resource_id()]
+        ))
     );
     assert!(app.doc.datasets[1].as_table().unwrap().provenance.is_some());
     assert!(app.doc.datasets[2].as_table().unwrap().provenance.is_none());

@@ -110,8 +110,8 @@ pub(crate) fn finish_selection_drag(
     });
 
     app.session.ui.analysis_selection = Some(AnalysisSelection {
-        dataset,
-        canvas: ci,
+        dataset: app.doc.datasets[dataset].resource_id(),
+        canvas: app.doc.canvases[ci].resource_id,
         object: object_id,
         x_range: x,
         y_range: y,
@@ -481,8 +481,12 @@ fn select_object_datasets(app: &mut PlotxApp, ci: usize, id: ObjectId) {
     let Some(object) = app.doc.canvases[ci].object(id) else {
         return;
     };
-    let active = object.dataset();
-    let datasets = object.dataset_indices();
+    let active = object.dataset().and_then(|id| app.doc.dataset_index(id));
+    let datasets = object
+        .dataset_ids()
+        .into_iter()
+        .filter_map(|id| app.doc.dataset_index(id))
+        .collect::<Vec<_>>();
     if !datasets.is_empty() {
         app.focus_datasets(&datasets, active);
     } else {

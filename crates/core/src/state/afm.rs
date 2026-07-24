@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct AfmDataset {
-    pub resource_id: String,
+    pub resource_id: DatasetId,
     pub data: Arc<AfmData>,
     pub name: Option<String>,
     pub selected_channel: usize,
@@ -18,7 +18,7 @@ impl AfmDataset {
             [forces.grid_width / 2, forces.grid_height / 2]
         });
         Self {
-            resource_id: uuid::Uuid::new_v4().to_string(),
+            resource_id: DatasetId::new(),
             data: Arc::new(data),
             name: None,
             selected_channel: 0,

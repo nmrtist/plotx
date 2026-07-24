@@ -360,7 +360,7 @@ pub(crate) fn page_size_chrome(
         label = format!("{label} · auto");
     }
     let overflows = content_overflows(canvas);
-    let resource_id = canvas.resource_id.clone();
+    let resource_id = canvas.resource_id.to_string();
     let suggestion =
         wider_preset_suggestion(canvas).filter(|s| !suggestion_dismissed(&ctx, &resource_id, s));
 

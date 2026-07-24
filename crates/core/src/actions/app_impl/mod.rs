@@ -354,7 +354,9 @@ impl PlotxApp {
                     self.doc.canvases.remove(*index);
                     self.session.active_canvas = *active_after;
                     if let Some(ci) = self.session.active_canvas {
-                        let active = self.doc.canvases[ci].active_dataset();
+                        let active = self.doc.canvases[ci]
+                            .active_dataset()
+                            .and_then(|id| self.doc.dataset_index(id));
                         self.set_active_dataset(active);
                     }
                     self.reset_interaction();
@@ -407,7 +409,7 @@ impl PlotxApp {
                     let id = inserted_object_id.unwrap_or(canvas.next_object_id);
                     let object = self.build_plot_object(*dataset_index, frame, id, object_name);
                     let canvas = self.doc.canvases.get_mut(*ci).unwrap();
-                    canvas.next_object_id = canvas.next_object_id.max(id + 1);
+                    canvas.next_object_id = canvas.next_object_id.max(id.checked_advance(1));
                     canvas.objects.push(object);
                     self.session.active_canvas = Some(*ci);
                 } else {
@@ -499,7 +501,9 @@ impl PlotxApp {
         }
         self.doc.canvases.insert(index, canvas);
         self.session.active_canvas = Some(index);
-        let active = self.doc.canvases[index].active_dataset();
+        let active = self.doc.canvases[index]
+            .active_dataset()
+            .and_then(|id| self.doc.dataset_index(id));
         self.set_active_dataset(active);
         self.session.view = PrimaryView::Canvas;
         self.set_selection(Selection::None);
@@ -514,7 +518,8 @@ impl PlotxApp {
         let active = self
             .session
             .active_canvas
-            .and_then(|ci| self.doc.canvases[ci].active_dataset());
+            .and_then(|ci| self.doc.canvases[ci].active_dataset())
+            .and_then(|id| self.doc.dataset_index(id));
         self.set_active_dataset(active);
         self.set_selection(Selection::None);
     }
@@ -575,7 +580,7 @@ impl PlotxApp {
     fn insert_object_value(&mut self, canvas: usize, object: CanvasObject) {
         let id = object.id;
         if let Some(c) = self.doc.canvases.get_mut(canvas) {
-            c.next_object_id = c.next_object_id.max(id + 1);
+            c.next_object_id = c.next_object_id.max(id.checked_advance(1));
             c.objects.push(object);
         }
         self.select_object(canvas, id);

@@ -41,6 +41,9 @@ These instructions apply to the entire repository.
 
 ## Rust workspace
 
+- Stable resources and components use typed IDs. Collection indices are
+  one-shot lookup positions only; they must not cross action, job, frame, or
+  persistence boundaries.
 - Respect crate boundaries: parsing in `plotx-io`, scientific algorithms in
   `plotx-analysis`, spectral transforms in `plotx-processing`, presentation
   models in `plotx-figure`, rendering in `plotx-render`, application state in

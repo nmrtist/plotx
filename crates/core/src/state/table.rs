@@ -6,8 +6,8 @@ use plotx_io::DiffusionMeta;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-fn new_resource_id() -> String {
-    uuid::Uuid::new_v4().to_string()
+fn new_resource_id() -> crate::state::DatasetId {
+    crate::state::DatasetId::new()
 }
 
 /// A column points into a table-level analysis so multiple responses and
@@ -181,7 +181,7 @@ pub const SHEET_MAX_ROWS: usize = 24;
 /// App-layer wrapper around an immutable typed table revision.
 #[derive(Clone)]
 pub struct TableDataset {
-    pub resource_id: String,
+    pub resource_id: crate::state::DatasetId,
     /// Executable extraction recipe used to refresh this immutable table.
     pub provenance: Option<TableProvenance>,
     /// Domain constants consumed by analysis bindings.

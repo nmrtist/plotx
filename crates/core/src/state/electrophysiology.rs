@@ -1,8 +1,8 @@
 use super::*;
 use plotx_analysis::electrophysiology::{self, PeakMode, TimeWindow};
 
-fn new_resource_id() -> String {
-    uuid::Uuid::new_v4().to_string()
+fn new_resource_id() -> DatasetId {
+    DatasetId::new()
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -74,7 +74,7 @@ impl Default for ElectrophysiologyProcessing {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ElectrophysiologyDataset {
     #[serde(default = "new_resource_id")]
-    pub resource_id: String,
+    pub resource_id: DatasetId,
     pub data: ElectrophysiologyData,
     pub name: Option<String>,
     pub metadata: RecordingMetadata,

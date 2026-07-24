@@ -39,7 +39,7 @@ fn project_roundtrip_preserves_raw_data_and_settings() {
         .remove("resource_id");
     let legacy_recording: crate::state::ElectrophysiologyDataset =
         serde_json::from_value(legacy_metadata).unwrap();
-    assert!(!legacy_recording.resource_id.is_empty());
+    assert!(!legacy_recording.resource_id.to_string().is_empty());
     let mut app = PlotxApp::new();
     app.doc
         .datasets

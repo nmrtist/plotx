@@ -1,6 +1,6 @@
 use plotx_core::data::ColumnId;
-use plotx_core::state::{Dataset, PlotxApp};
-use std::collections::HashSet;
+use plotx_core::state::{Dataset, DatasetId, PlotxApp};
+use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct DataTree {
@@ -59,33 +59,43 @@ impl AnalysisKind {
 impl DataTree {
     pub fn build(app: &PlotxApp) -> Self {
         let count = app.doc.datasets.len();
+        // This tree is rebuilt every visible frame; resolve source ids through a
+        // one-shot map instead of a linear `dataset_index` scan per lineage edge.
+        let index_of: HashMap<DatasetId, usize> = app
+            .doc
+            .datasets
+            .iter()
+            .enumerate()
+            .map(|(i, dataset)| (dataset.resource_id(), i))
+            .collect();
         let mut children = vec![Vec::new(); count];
         for (derived, dataset) in app.doc.datasets.iter().enumerate() {
             if let Some(lineage) = dataset.lineage() {
                 for &source in &lineage.sources {
-                    if source < count && source != derived {
+                    if let Some(source) = index_of.get(&source).copied()
+                        && source != derived
+                    {
                         children[source].push(derived);
                     }
                 }
             }
         }
 
-        let mut roots: Vec<usize> = app
-            .doc
-            .datasets
-            .iter()
-            .enumerate()
-            .filter(|(di, dataset)| {
-                dataset.lineage().is_none_or(|lineage| {
-                    lineage.sources.is_empty()
-                        || lineage
-                            .sources
-                            .iter()
-                            .all(|&source| source >= count || source == *di)
+        let mut roots: Vec<usize> =
+            app.doc
+                .datasets
+                .iter()
+                .enumerate()
+                .filter(|(di, dataset)| {
+                    dataset.lineage().is_none_or(|lineage| {
+                        lineage.sources.is_empty()
+                            || lineage.sources.iter().all(|&source| {
+                                index_of.get(&source).copied().is_none_or(|i| i == *di)
+                            })
+                    })
                 })
-            })
-            .map(|(di, _)| di)
-            .collect();
+                .map(|(di, _)| di)
+                .collect();
 
         // Corrupt in-memory graphs can consist only of a cycle. Keep every
         // dataset reachable even then; recursion below cuts repeated path nodes.
@@ -299,7 +309,7 @@ fn reveal_sources(app: &mut PlotxApp, di: usize, visiting: &mut HashSet<usize>) 
         .map(|lineage| lineage.sources.clone())
         .unwrap_or_default();
     for source in sources {
-        if source < app.doc.datasets.len() {
+        if let Some(source) = app.doc.dataset_index(source) {
             app.session
                 .ui
                 .data_browser_collapsed_datasets
@@ -319,7 +329,8 @@ pub(super) fn sources_tooltip(app: &PlotxApp, di: usize) -> Option<String> {
     let names: Vec<_> = lineage
         .sources
         .iter()
-        .filter_map(|&source| app.doc.datasets.get(source))
+        .filter_map(|&source| app.doc.dataset_index(source))
+        .filter_map(|source| app.doc.datasets.get(source))
         .map(Dataset::display_name)
         .collect();
     Some(format!(
@@ -333,7 +344,7 @@ pub(super) fn sources_tooltip(app: &PlotxApp, di: usize) -> Option<String> {
 mod tests {
     use super::*;
     use plotx_core::state::{
-        CurveFitReference, DatasetLineage, DerivationKind, FloatSeries, LineShapeKind,
+        CurveFitReference, DatasetId, DatasetLineage, DerivationKind, FloatSeries, LineShapeKind,
         MultipletPatternKind, NmrDataset, PeakMark, PeakOrigin, StoredLineFit, StoredMultiplet,
         materialized_float_series_table,
     };
@@ -355,7 +366,7 @@ mod tests {
         Dataset::Nmr(Box::new(dataset))
     }
 
-    fn derived(name: &str, kind: DerivationKind, sources: &[usize]) -> Dataset {
+    fn derived(name: &str, kind: DerivationKind, sources: &[DatasetId]) -> Dataset {
         let mut table = materialized_float_series_table(
             ("x".into(), "".into(), vec![Some(0.0)]),
             Vec::new(),
@@ -370,12 +381,18 @@ mod tests {
     #[test]
     fn builds_deep_multi_source_references_in_stable_order() {
         let mut app = PlotxApp::new();
-        app.doc.datasets = vec![
-            root("A"),
-            root("B"),
-            derived("AB", DerivationKind::SpectrumArithmetic, &[0, 1]),
-            derived("deep", DerivationKind::LineFitTable, &[2]),
+        app.doc.datasets = vec![root("A"), root("B")];
+        let roots = [
+            app.doc.datasets[0].resource_id(),
+            app.doc.datasets[1].resource_id(),
         ];
+        app.doc
+            .datasets
+            .push(derived("AB", DerivationKind::SpectrumArithmetic, &roots));
+        let ab = app.doc.datasets[2].resource_id();
+        app.doc
+            .datasets
+            .push(derived("deep", DerivationKind::LineFitTable, &[ab]));
         let tree = DataTree::build(&app);
         assert_eq!(
             tree.roots.iter().map(|n| n.dataset).collect::<Vec<_>>(),
@@ -390,10 +407,11 @@ mod tests {
     #[test]
     fn filtering_keeps_ancestor_path() {
         let mut app = PlotxApp::new();
-        app.doc.datasets = vec![
-            root("source"),
-            derived("result", DerivationKind::LineFitTable, &[0]),
-        ];
+        app.doc.datasets = vec![root("source")];
+        let source = app.doc.datasets[0].resource_id();
+        app.doc
+            .datasets
+            .push(derived("result", DerivationKind::LineFitTable, &[source]));
         let filtered = DataTree::build(&app).filtered(&app, "peak fit table");
         assert_eq!(filtered.roots.len(), 1);
         assert_eq!(filtered.roots[0].dataset, 0);
@@ -403,10 +421,16 @@ mod tests {
     #[test]
     fn cycles_are_cut_and_remain_accessible() {
         let mut app = PlotxApp::new();
-        app.doc.datasets = vec![
-            derived("A", DerivationKind::Slice, &[1]),
-            derived("B", DerivationKind::Projection, &[0]),
+        app.doc.datasets = vec![root("A"), root("B")];
+        let ids = [
+            app.doc.datasets[0].resource_id(),
+            app.doc.datasets[1].resource_id(),
         ];
+        app.doc.datasets[0].set_lineage(Some(DatasetLineage::new(DerivationKind::Slice, [ids[1]])));
+        app.doc.datasets[1].set_lineage(Some(DatasetLineage::new(
+            DerivationKind::Projection,
+            [ids[0]],
+        )));
         let tree = DataTree::build(&app);
         assert!(!tree.roots.is_empty());
         assert!(tree.roots[0].derived[0].derived[0].cycle_cut);
@@ -498,11 +522,17 @@ mod tests {
     #[test]
     fn external_focus_reveals_ancestor_branches() {
         let mut app = PlotxApp::new();
-        app.doc.datasets = vec![
-            root("source"),
-            derived("child", DerivationKind::Slice, &[0]),
-            derived("grandchild", DerivationKind::LineFitTable, &[1]),
-        ];
+        app.doc.datasets = vec![root("source")];
+        let source = app.doc.datasets[0].resource_id();
+        app.doc
+            .datasets
+            .push(derived("child", DerivationKind::Slice, &[source]));
+        let child = app.doc.datasets[1].resource_id();
+        app.doc.datasets.push(derived(
+            "grandchild",
+            DerivationKind::LineFitTable,
+            &[child],
+        ));
         app.session
             .ui
             .data_browser_collapsed_datasets

@@ -101,11 +101,15 @@ impl PlotxApp {
     /// primary dataset is `dataset`. Overlay-only datasets never contribute
     /// integral curves.
     pub fn sync_integral_curves_for(&mut self, dataset: usize) {
-        let curves = self
-            .doc
-            .datasets
-            .get(dataset)
-            .and_then(Dataset::as_nmr)
+        // Resolve the dataset once: the index can be stale (e.g. a cancelled
+        // integral drag after an import was undone), so a miss must return, not
+        // index-panic on the next line.
+        let Some(ds) = self.doc.datasets.get(dataset) else {
+            return;
+        };
+        let dataset_id = ds.resource_id();
+        let curves = ds
+            .as_nmr()
             .map(NmrDataset::integral_curves)
             .unwrap_or_default();
         for canvas in &mut self.doc.canvases {
@@ -113,9 +117,11 @@ impl PlotxApp {
                 let Some(plot) = object.plot_mut() else {
                     continue;
                 };
-                if plot.binding.primary_dataset() == dataset && plot.binding.primary_visible() {
+                if plot.binding.primary_dataset() == Some(dataset_id)
+                    && plot.binding.primary_visible()
+                {
                     plot.figure.integral_curves.clone_from(&curves);
-                } else if plot.binding.primary_dataset() == dataset {
+                } else if plot.binding.primary_dataset() == Some(dataset_id) {
                     plot.figure.integral_curves.clear();
                 }
             }

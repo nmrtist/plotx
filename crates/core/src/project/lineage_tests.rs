@@ -13,10 +13,15 @@ fn project_roundtrip_maps_multi_source_lineage_by_data_id() {
     app.doc
         .datasets
         .push(Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()))));
+    let sources = [
+        app.doc.datasets[1].resource_id(),
+        app.doc.datasets[0].resource_id(),
+        app.doc.datasets[1].resource_id(),
+    ];
     let mut derived = Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d())));
     derived.set_lineage(Some(DatasetLineage::new(
         DerivationKind::SpectrumArithmetic,
-        [1, 0, 1],
+        sources,
     )));
     app.doc.datasets.push(derived);
 
@@ -30,7 +35,10 @@ fn project_roundtrip_maps_multi_source_lineage_by_data_id() {
         loaded.doc.datasets[2].lineage(),
         Some(&DatasetLineage::new(
             DerivationKind::SpectrumArithmetic,
-            [1, 0]
+            [
+                loaded.doc.datasets[1].resource_id(),
+                loaded.doc.datasets[0].resource_id(),
+            ]
         ))
     );
 }
@@ -41,7 +49,7 @@ fn provenance_without_explicit_v1_lineage_stays_unlinked() {
     app.doc
         .datasets
         .push(Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()))));
-    let source_resource = app.doc.datasets[0].resource_id().to_owned();
+    let source_resource = app.doc.datasets[0].resource_id().to_string();
     let mut table = materialized_float_series_table(
         ("x".into(), "".into(), vec![Some(0.0)]),
         Vec::new(),
@@ -129,9 +137,10 @@ fn v1_table_roundtrip_preserves_units_missing_uncertainty_and_lineage() {
     );
     source.name = Some("measurements.csv".into());
     table.import_sources.push(source);
+    let source_id = app.doc.datasets[0].resource_id();
     table.lineage = Some(DatasetLineage::new(
         DerivationKind::WindowStatisticsTable,
-        [0],
+        [source_id],
     ));
     app.doc.datasets.push(Dataset::Table(Box::new(table)));
 
@@ -178,7 +187,7 @@ fn v1_table_roundtrip_preserves_units_missing_uncertainty_and_lineage() {
         table.lineage,
         Some(DatasetLineage::new(
             DerivationKind::WindowStatisticsTable,
-            [0]
+            [loaded.doc.datasets[0].resource_id()]
         ))
     );
 }

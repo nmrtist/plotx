@@ -290,7 +290,10 @@ impl BinParams {
 
 /// A stable identifier for a step, so callers can address it across edits and
 /// reorders. Mint fresh ids with [`StepId::fresh`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(transparent)]
 pub struct StepId(pub u64);
 
 impl StepId {

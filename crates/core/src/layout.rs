@@ -1,8 +1,6 @@
 //! Page-layout geometry: a panel grid plus the snapping math that pulls a dragged
 //! or resized object onto page edges, centre lines, margins and cell boundaries.
-
 use crate::state::{MM_TO_PT, ObjectFrame, ObjectId};
-
 mod visual_spacing;
 pub use visual_spacing::{
     GutterPreset, LayoutItem, OccupiedGrid, SpacingMode, TilingDropRegion, arrange_grid,
@@ -495,10 +493,10 @@ mod tests {
         };
         let g = 5.0 * MM_TO_PT;
         // Pointer well to the right of centre → left/right split, newcomer right.
-        let plan = compute_tiling_plan(page, &layout, &[7], [360.0, 150.0]);
+        let plan = compute_tiling_plan(page, &layout, &[ObjectId::new(7)], [360.0, 150.0]);
         assert_eq!(plan.existing.len(), 1);
         let (id, ex) = plan.existing[0];
-        assert_eq!(id, 7);
+        assert_eq!(id, ObjectId::new(7));
         let nc = plan.newcomer;
         assert!(nc.x > ex.x, "newcomer takes the right half");
         assert!(
@@ -512,7 +510,8 @@ mod tests {
     #[test]
     fn multi_plot_retile_grids_all_including_newcomer() {
         let page = [400.0, 300.0];
-        let plan = compute_tiling_plan(page, &PageLayout::default(), &[1, 2], [5.0, 5.0]);
+        let ids = [ObjectId::new(1), ObjectId::new(2)];
+        let plan = compute_tiling_plan(page, &PageLayout::default(), &ids, [5.0, 5.0]);
         assert_eq!(plan.existing.len(), 2, "both existing plots reframed");
         let frames = [plan.existing[0].1, plan.existing[1].1, plan.newcomer];
         for i in 0..frames.len() {
@@ -524,8 +523,7 @@ mod tests {
             assert!(f.x >= -0.01 && f.y >= -0.01);
             assert!(f.x + f.width <= page[0] + 0.01 && f.y + f.height <= page[1] + 0.01);
         }
-        let bottom_right =
-            compute_tiling_plan(page, &PageLayout::default(), &[1, 2], [395.0, 295.0]);
+        let bottom_right = compute_tiling_plan(page, &PageLayout::default(), &ids, [395.0, 295.0]);
         assert!(bottom_right.newcomer.x > page[0] * 0.5 && bottom_right.newcomer.y > page[1] * 0.5);
     }
 
@@ -606,11 +604,11 @@ mod tests {
         };
         let items = [
             LayoutItem {
-                id: 1,
+                id: ObjectId::new(1),
                 insets: [20.0; 4],
             },
             LayoutItem {
-                id: 2,
+                id: ObjectId::new(2),
                 insets: [30.0; 4],
             },
         ];
@@ -630,11 +628,11 @@ mod tests {
         };
         let items = [
             LayoutItem {
-                id: 1,
+                id: ObjectId::new(1),
                 insets: [10.0, 4.0, 18.0, 24.0],
             },
             LayoutItem {
-                id: 2,
+                id: ObjectId::new(2),
                 insets: [8.0, 5.0, 16.0, 6.0],
             },
         ];
@@ -660,21 +658,21 @@ mod tests {
         };
         let full = [
             LayoutItem {
-                id: 1,
+                id: ObjectId::new(1),
                 insets: [20.0; 4],
             },
             LayoutItem {
-                id: 2,
+                id: ObjectId::new(2),
                 insets: [20.0; 4],
             },
         ];
         let simple = [
             LayoutItem {
-                id: 1,
+                id: ObjectId::new(1),
                 insets: [5.0; 4],
             },
             LayoutItem {
-                id: 2,
+                id: ObjectId::new(2),
                 insets: [5.0; 4],
             },
         ];
@@ -738,8 +736,8 @@ mod tests {
     #[test]
     fn align_left_and_right_pin_to_bounding_edges() {
         let frames = vec![
-            (1u64, ObjectFrame::new(10.0, 0.0, 20.0, 10.0)),
-            (2, ObjectFrame::new(50.0, 40.0, 40.0, 10.0)),
+            (ObjectId::new(1), ObjectFrame::new(10.0, 0.0, 20.0, 10.0)),
+            (ObjectId::new(2), ObjectFrame::new(50.0, 40.0, 40.0, 10.0)),
         ];
         let left = align(&frames, Align::Left);
         assert!(approx(left[0].1.x, 10.0) && approx(left[1].1.x, 10.0));
@@ -751,8 +749,8 @@ mod tests {
     #[test]
     fn align_hcenter_centres_each_frame_on_bbox_centre() {
         let frames = vec![
-            (1u64, ObjectFrame::new(0.0, 0.0, 20.0, 10.0)),
-            (2, ObjectFrame::new(80.0, 0.0, 20.0, 10.0)),
+            (ObjectId::new(1), ObjectFrame::new(0.0, 0.0, 20.0, 10.0)),
+            (ObjectId::new(2), ObjectFrame::new(80.0, 0.0, 20.0, 10.0)),
         ];
         // bbox spans 0..100, centre 50.
         let out = align(&frames, Align::HCenter);
@@ -762,9 +760,9 @@ mod tests {
     #[test]
     fn distribute_horizontal_equalises_centre_spacing() {
         let frames = vec![
-            (1u64, ObjectFrame::new(0.0, 0.0, 10.0, 10.0)),
-            (2, ObjectFrame::new(12.0, 0.0, 10.0, 10.0)),
-            (3, ObjectFrame::new(90.0, 0.0, 10.0, 10.0)),
+            (ObjectId::new(1), ObjectFrame::new(0.0, 0.0, 10.0, 10.0)),
+            (ObjectId::new(2), ObjectFrame::new(12.0, 0.0, 10.0, 10.0)),
+            (ObjectId::new(3), ObjectFrame::new(90.0, 0.0, 10.0, 10.0)),
         ];
         // Centres: 5, 17, 95 → after: 5, 50, 95 (step 45); middle x = 45.
         let out = distribute(&frames, Distribute::Horizontal);
@@ -776,8 +774,8 @@ mod tests {
     #[test]
     fn distribute_needs_three_frames() {
         let frames = vec![
-            (1u64, ObjectFrame::new(0.0, 0.0, 10.0, 10.0)),
-            (2, ObjectFrame::new(90.0, 0.0, 10.0, 10.0)),
+            (ObjectId::new(1), ObjectFrame::new(0.0, 0.0, 10.0, 10.0)),
+            (ObjectId::new(2), ObjectFrame::new(90.0, 0.0, 10.0, 10.0)),
         ];
         let out = distribute(&frames, Distribute::Horizontal);
         assert_eq!(out, frames);

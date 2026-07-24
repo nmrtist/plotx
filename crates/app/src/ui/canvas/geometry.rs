@@ -394,7 +394,8 @@ mod tests {
     use super::*;
     use plotx_core::state::TextBox;
 
-    fn text_object(id: ObjectId, frame: ObjectFrame) -> CanvasObject {
+    fn text_object(id: u64, frame: ObjectFrame) -> CanvasObject {
+        let id = ObjectId::new(id);
         CanvasObject {
             id,
             name: format!("o{id}"),
@@ -461,7 +462,7 @@ mod tests {
             zoom: 2.0,
         };
         let page = bt.page_screen_rect(&canvas);
-        let r = bt.object_screen_rect(&canvas, 5).unwrap();
+        let r = bt.object_screen_rect(&canvas, ObjectId::new(5)).unwrap();
         assert!((r.left - (page.left() + 12.0 * 2.0)).abs() < 1e-3);
         assert!((r.top - (page.top() + 8.0 * 2.0)).abs() < 1e-3);
         assert!((r.width - 40.0 * 2.0).abs() < 1e-3);
@@ -615,6 +616,6 @@ mod tests {
             .objects
             .push(text_object(2, ObjectFrame::new(20.0, 20.0, 50.0, 50.0)));
         let hit = hit_object(&canvas, Pos2::new(35.0, 35.0), 1.0).unwrap();
-        assert_eq!(hit.object, 2);
+        assert_eq!(hit.object, ObjectId::new(2));
     }
 }

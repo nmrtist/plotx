@@ -1,6 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::{error::Error, fmt};
+
+use crate::state::{CanvasId, DatasetId, SeriesId};
+use plotx_processing::StepId;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -35,6 +39,114 @@ pub struct ResourceRef {
     pub parent_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub local_id: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    content = "id",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+pub enum ComponentRef {
+    Series(SeriesId),
+    ProcessingStep(StepId),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TargetRef {
+    pub resource: ResourceRef,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub component: Option<ComponentRef>,
+}
+
+impl TargetRef {
+    pub fn resource(resource: ResourceRef) -> Self {
+        Self {
+            resource,
+            component: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ResourceIdError {
+    WrongKind {
+        expected: &'static str,
+        actual: String,
+    },
+    ChildResource,
+    InvalidUuid(String),
+}
+
+impl fmt::Display for ResourceIdError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::WrongKind { expected, actual } => {
+                write!(f, "expected resource kind {expected}, got {actual}")
+            }
+            Self::ChildResource => f.write_str("expected a top-level resource"),
+            Self::InvalidUuid(value) => write!(f, "invalid UUID resource id {value}"),
+        }
+    }
+}
+
+impl Error for ResourceIdError {}
+
+fn top_level_uuid(
+    resource: &ResourceRef,
+    expected_kind: &'static str,
+) -> Result<uuid::Uuid, ResourceIdError> {
+    if resource.kind.0 != expected_kind {
+        return Err(ResourceIdError::WrongKind {
+            expected: expected_kind,
+            actual: resource.kind.0.clone(),
+        });
+    }
+    if resource.parent_id.is_some() || resource.local_id.is_some() {
+        return Err(ResourceIdError::ChildResource);
+    }
+    uuid::Uuid::parse_str(&resource.id)
+        .map_err(|_| ResourceIdError::InvalidUuid(resource.id.clone()))
+}
+
+impl From<DatasetId> for ResourceRef {
+    fn from(id: DatasetId) -> Self {
+        Self {
+            id: id.to_string(),
+            kind: ResourceKindId::new(crate::automation::KIND_DATASET),
+            parent_id: None,
+            local_id: None,
+        }
+    }
+}
+
+impl TryFrom<&ResourceRef> for DatasetId {
+    type Error = ResourceIdError;
+
+    fn try_from(resource: &ResourceRef) -> Result<Self, Self::Error> {
+        top_level_uuid(resource, crate::automation::KIND_DATASET).map(Self::from_uuid)
+    }
+}
+
+impl From<CanvasId> for ResourceRef {
+    fn from(id: CanvasId) -> Self {
+        Self {
+            id: id.to_string(),
+            kind: ResourceKindId::new(crate::automation::KIND_CANVAS),
+            parent_id: None,
+            local_id: None,
+        }
+    }
+}
+
+impl TryFrom<&ResourceRef> for CanvasId {
+    type Error = ResourceIdError;
+
+    fn try_from(resource: &ResourceRef) -> Result<Self, Self::Error> {
+        top_level_uuid(resource, crate::automation::KIND_CANVAS).map(Self::from_uuid)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -330,6 +442,10 @@ pub struct TableRevisionRecord {
     pub snapshot_fingerprint: plotx_data::ContentHash,
     pub followed_latest: bool,
 }
+
+#[cfg(test)]
+#[path = "types_tests.rs"]
+mod tests;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

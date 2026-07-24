@@ -4166,6 +4166,7 @@ dependencies = [
  "plotx-analysis",
  "plotx-io",
  "rustfft",
+ "serde",
  "thiserror 2.0.18",
 ]
 

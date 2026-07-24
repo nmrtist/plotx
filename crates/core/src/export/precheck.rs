@@ -199,7 +199,7 @@ mod tests {
     use super::*;
     use crate::state::{
         AxisOverrides, AxisProjections, CanvasObject, CanvasObjectKind, CanvasViewport, ChartSpec,
-        DataBinding, ObjectFrame, PanelMeta, PlotObject, StackSpec,
+        DataBinding, ObjectFrame, ObjectId, PanelMeta, PlotObject, StackSpec,
     };
     use plotx_figure::{Axis, Figure};
 
@@ -267,14 +267,14 @@ mod tests {
         panel.visible = false;
         let mut canvas = CanvasDocument::new("Hidden axes".to_owned(), [200.0, 100.0]);
         canvas.objects.push(CanvasObject {
-            id: 1,
+            id: ObjectId::new(1),
             name: "Plot".to_owned(),
             frame: ObjectFrame::new(0.0, 0.0, 100.0, 100.0),
             locked: false,
             visible: true,
             group: None,
             kind: CanvasObjectKind::Plot(Box::new(PlotObject {
-                binding: DataBinding::single(0),
+                binding: DataBinding::single(crate::state::DatasetId::new()),
                 chart: ChartSpec::default(),
                 stack: StackSpec::default(),
                 projections: AxisProjections::default(),

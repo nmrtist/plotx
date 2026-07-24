@@ -248,6 +248,7 @@ pub fn render_central(app: &mut PlotxApp, ui: &mut Ui) {
     let Some(di) = app.doc.canvases[ci]
         .object(object_id)
         .and_then(|object| object.dataset())
+        .and_then(|id| app.doc.dataset_index(id))
     else {
         return;
     };
@@ -557,7 +558,7 @@ fn resize_cursor(handle: ResizeHandle) -> egui::CursorIcon {
 mod tests {
     use super::*;
     use plotx_core::state::{
-        CanvasObject, CanvasObjectKind, CanvasViewport, PanelMeta, PlotObject, TextBox,
+        CanvasObject, CanvasObjectKind, CanvasViewport, DatasetId, PanelMeta, PlotObject, TextBox,
     };
     use plotx_figure::{Axis, Figure};
 
@@ -565,7 +566,7 @@ mod tests {
     fn hit_object_selects_text_box() {
         let mut canvas = CanvasDocument::new("page".to_owned(), [200.0, 200.0]);
         canvas.objects.push(CanvasObject {
-            id: 7,
+            id: ObjectId::new(7),
             name: "Text".to_owned(),
             frame: ObjectFrame::new(20.0, 20.0, 100.0, 30.0),
             locked: false,
@@ -576,21 +577,21 @@ mod tests {
 
         let hit = hit_object(&canvas, Pos2::new(50.0, 30.0), 1.0);
 
-        assert_eq!(hit.map(|hit| hit.object), Some(7));
+        assert_eq!(hit.map(|hit| hit.object), Some(ObjectId::new(7)));
     }
 
     #[test]
     fn hit_object_finds_object_outside_page_bounds() {
         let mut canvas = CanvasDocument::new("page".to_owned(), [100.0, 100.0]);
         canvas.objects.push(CanvasObject {
-            id: 1,
+            id: ObjectId::new(1),
             name: "plot".to_owned(),
             frame: ObjectFrame::new(-30.0, 20.0, 50.0, 40.0),
             locked: false,
             visible: true,
             group: None,
             kind: CanvasObjectKind::Plot(Box::new(PlotObject {
-                binding: plotx_core::state::DataBinding::single(0),
+                binding: plotx_core::state::DataBinding::single(DatasetId::new()),
                 chart: plotx_core::state::ChartSpec::default(),
                 stack: plotx_core::state::StackSpec::default(),
                 projections: plotx_core::state::AxisProjections::default(),
@@ -607,7 +608,7 @@ mod tests {
 
         let hit = hit_object(&canvas, Pos2::new(-10.0, 30.0), 1.0);
 
-        assert_eq!(hit.map(|hit| hit.object), Some(1));
+        assert_eq!(hit.map(|hit| hit.object), Some(ObjectId::new(1)));
     }
 
     #[test]
@@ -615,14 +616,14 @@ mod tests {
         let mut app = PlotxApp::new();
         let mut canvas = CanvasDocument::new("page".to_owned(), [200.0, 200.0]);
         canvas.objects.push(CanvasObject {
-            id: 3,
+            id: ObjectId::new(3),
             name: "plot".to_owned(),
             frame: ObjectFrame::new(10.0, 10.0, 80.0, 60.0),
             locked: false,
             visible: true,
             group: None,
             kind: CanvasObjectKind::Plot(Box::new(PlotObject {
-                binding: plotx_core::state::DataBinding::single(0),
+                binding: plotx_core::state::DataBinding::single(DatasetId::new()),
                 chart: plotx_core::state::ChartSpec::default(),
                 stack: plotx_core::state::StackSpec::default(),
                 projections: plotx_core::state::AxisProjections::default(),
@@ -638,13 +639,13 @@ mod tests {
         });
         app.doc.canvases.push(canvas);
         app.session.active_canvas = Some(0);
-        app.doc.canvases[0].selected_object = Some(3);
+        app.doc.canvases[0].selected_object = Some(ObjectId::new(3));
 
         app.session.tool = Tool::Select;
         assert_eq!(data_edit_target(&app, 0), None);
 
         app.session.tool = Tool::BrowseZoom;
-        assert_eq!(data_edit_target(&app, 0), Some(3));
+        assert_eq!(data_edit_target(&app, 0), Some(ObjectId::new(3)));
     }
 
     #[test]

@@ -107,6 +107,10 @@ impl PlotxApp {
         name: String,
         sources: impl IntoIterator<Item = usize>,
     ) {
+        let sources = sources
+            .into_iter()
+            .filter_map(|index| self.doc.datasets.get(index).map(Dataset::resource_id))
+            .collect::<Vec<_>>();
         let slice = Slice1D {
             ppm: result.ppm,
             values: result.values,
