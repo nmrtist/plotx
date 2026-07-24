@@ -18,8 +18,8 @@ fn stacked_figure_is_domain_generic_with_offset_scale_and_hide() {
         let chart = ChartSpec::default_for(domain);
         let binding = DataBinding {
             series: vec![
-                SeriesBinding::new(app.doc.datasets[0].resource_id()),
-                SeriesBinding::new(app.doc.datasets[1].resource_id()),
+                SeriesBinding::from_dataset(&app.doc.datasets[0]).unwrap(),
+                SeriesBinding::from_dataset(&app.doc.datasets[1]).unwrap(),
             ],
         };
         let sup = app.build_binding_figure(&binding, &chart, &StackSpec::default(), size);
@@ -53,7 +53,9 @@ fn stacked_figure_is_domain_generic_with_offset_scale_and_hide() {
         }
 
         let mut scaled = binding.clone();
-        scaled.series[0].scale = 3.0;
+        if let plotx_figure::SeriesEncoding::Line(line) = &mut scaled.series[0].encoding {
+            line.scale = 3.0;
+        }
         let fig_s = app.build_binding_figure(&scaled, &chart, &StackSpec::default(), size);
         assert!(fig_s.y.max > sup.y.max, "scaling up raises the peak");
         if domain == DataDomain::Table {
@@ -66,21 +68,27 @@ fn stacked_figure_is_domain_generic_with_offset_scale_and_hide() {
 fn field_overlay_stacks_two_2d_contours_in_distinct_colors() {
     use crate::state::{ChartSpec, DataBinding, DataDomain, SeriesBinding, StackMode, StackSpec};
     let mut app = sample_app();
+    let mut signed_grid = synthetic_2d();
+    signed_grid.domain = plotx_io::Domain::Frequency;
+    for (index, value) in signed_grid.data.iter_mut().enumerate() {
+        let column = index % signed_grid.cols;
+        *value = num_complex::Complex64::new(column as f64 - 15.5, 0.0);
+    }
     app.doc
         .datasets
         .push(Dataset::Nmr2D(Box::new(crate::state::Nmr2DDataset::load(
-            synthetic_2d(),
+            signed_grid.clone(),
         ))));
     app.doc
         .datasets
         .push(Dataset::Nmr2D(Box::new(crate::state::Nmr2DDataset::load(
-            synthetic_2d(),
+            signed_grid,
         ))));
     let (a, b) = (app.doc.datasets.len() - 2, app.doc.datasets.len() - 1);
     let binding = DataBinding {
         series: vec![
-            SeriesBinding::new(app.doc.datasets[a].resource_id()),
-            SeriesBinding::new(app.doc.datasets[b].resource_id()),
+            SeriesBinding::from_dataset(&app.doc.datasets[a]).unwrap(),
+            SeriesBinding::from_dataset(&app.doc.datasets[b]).unwrap(),
         ],
     };
     let chart = ChartSpec::default_for(DataDomain::Nmr2d);
@@ -91,13 +99,14 @@ fn field_overlay_stacks_two_2d_contours_in_distinct_colors() {
     let fig = app.build_binding_figure(&binding, &chart, &stack, [120.0, 80.0]);
 
     assert!(fig.show_legend, "a Field overlay shows a legend");
-    assert!(
-        fig.contours.len() >= 2,
-        "each 2D dataset contributes its own contour"
+    assert_eq!(
+        fig.contours.len(),
+        4,
+        "each signed dataset contributes both signs"
     );
     assert_ne!(
         fig.contours[0].color, fig.contours[1].color,
-        "overlaid datasets get distinct palette colours"
+        "a signed field keeps its positive and negative contours distinct"
     );
 }
 
@@ -148,14 +157,14 @@ fn selecting_canvas_populates_data_selection_with_its_datasets() {
     let object = app.doc.canvases[0].objects[0].id;
     let binding = crate::state::DataBinding {
         series: vec![
-            crate::state::SeriesBinding::new(app.doc.datasets[0].resource_id()),
-            crate::state::SeriesBinding::new(app.doc.datasets[1].resource_id()),
+            crate::state::SeriesBinding::from_dataset(&app.doc.datasets[0]).unwrap(),
+            crate::state::SeriesBinding::from_dataset(&app.doc.datasets[1]).unwrap(),
         ],
     };
     app.execute_action(Action::set_data_binding(
         0,
         object,
-        crate::state::DataBinding::single(app.doc.datasets[0].resource_id()),
+        crate::state::DataBinding::single(&app.doc.datasets[0]),
         binding,
     ));
 
@@ -183,14 +192,14 @@ fn plot_object_reports_every_bound_dataset_for_selection_mirroring() {
     let object = app.doc.canvases[0].objects[0].id;
     let binding = DataBinding {
         series: vec![
-            SeriesBinding::new(app.doc.datasets[0].resource_id()),
-            SeriesBinding::new(app.doc.datasets[1].resource_id()),
+            SeriesBinding::from_dataset(&app.doc.datasets[0]).unwrap(),
+            SeriesBinding::from_dataset(&app.doc.datasets[1]).unwrap(),
         ],
     };
     app.execute_action(Action::set_data_binding(
         0,
         object,
-        DataBinding::single(app.doc.datasets[0].resource_id()),
+        DataBinding::single(&app.doc.datasets[0]),
         binding,
     ));
 
@@ -218,8 +227,8 @@ fn shear_sign_flips_the_pseudo_3d_lean_direction() {
     let chart = ChartSpec::default_for(DataDomain::Table);
     let binding = DataBinding {
         series: vec![
-            SeriesBinding::new(table.doc.datasets[0].resource_id()),
-            SeriesBinding::new(table.doc.datasets[1].resource_id()),
+            SeriesBinding::from_dataset(&table.doc.datasets[0]).unwrap(),
+            SeriesBinding::from_dataset(&table.doc.datasets[1]).unwrap(),
         ],
     };
     let size = [120.0, 80.0];

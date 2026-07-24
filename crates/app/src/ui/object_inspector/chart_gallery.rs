@@ -4,7 +4,8 @@
 use egui::{DragValue, Ui};
 use plotx_core::actions::Action;
 use plotx_core::state::{
-    ChartSpec, Dataset, ObjectId, PlotxApp, chart_type, chart_types_for, default_chart_type,
+    ChartSpec, Dataset, ObjectId, PlotxApp, PresentationProfile, RequestedChart, chart_type,
+    chart_types_for_capabilities, default_chart_type, default_encoding, encoding_descriptors_for,
 };
 
 pub(super) fn chart_gallery(app: &mut PlotxApp, ci: usize, object: ObjectId, ui: &mut Ui) {
@@ -12,6 +13,7 @@ pub(super) fn chart_gallery(app: &mut PlotxApp, ci: usize, object: ObjectId, ui:
         return;
     };
     let current = plot.chart.clone();
+    let binding = plot.binding.clone();
     let Some(primary) = plot
         .binding
         .primary_dataset()
@@ -20,8 +22,17 @@ pub(super) fn chart_gallery(app: &mut PlotxApp, ci: usize, object: ObjectId, ui:
         return;
     };
     let domain = app.doc.datasets[primary].domain();
-    let types = chart_types_for(domain);
-    let current_id = if chart_type(&current.type_id).is_some_and(|c| c.domains.contains(&domain)) {
+    let Some(primary_series) = binding.series.first() else {
+        return;
+    };
+    let Some(field) = app.doc.datasets[primary].field_descriptor(primary_series.source.field)
+    else {
+        return;
+    };
+    let types = chart_types_for_capabilities(&field.capabilities, domain);
+    let current_id = if chart_type(&current.type_id)
+        .is_some_and(|chart| chart.is_applicable_to(&field.capabilities))
+    {
         current.type_id.clone()
     } else {
         default_chart_type(domain).id.to_owned()
@@ -108,6 +119,54 @@ pub(super) fn chart_gallery(app: &mut PlotxApp, ci: usize, object: ObjectId, ui:
         app.execute_action(Action::set_chart_type(ci, object, current, after));
         app.session.status = "Changed chart type.".to_owned();
     }
+
+    let encodings = visual_encodings(&field.capabilities);
+    if encodings.len() > 1 {
+        ui.separator();
+        ui.strong("Visual encoding");
+        ui.horizontal_wrapped(|ui| {
+            for descriptor in encodings {
+                let selected = matches!(
+                    (descriptor.id, &primary_series.encoding),
+                    ("line", plotx_figure::SeriesEncoding::Line(_))
+                        | ("contour", plotx_figure::SeriesEncoding::Contour(_))
+                        | ("heatmap", plotx_figure::SeriesEncoding::Heatmap(_))
+                        | ("image", plotx_figure::SeriesEncoding::Image(_))
+                );
+                if ui.selectable_label(selected, descriptor.id).clicked() {
+                    let requested = match descriptor.id {
+                        "line" => RequestedChart::Line,
+                        "contour" => RequestedChart::Contour,
+                        "heatmap" => RequestedChart::Heatmap,
+                        "image" => RequestedChart::Image,
+                        _ => continue,
+                    };
+                    let mut after = binding.clone();
+                    if let Some(series) = after.series.first_mut() {
+                        series.encoding = default_encoding(
+                            &field.capabilities,
+                            &field.metadata,
+                            requested,
+                            &PresentationProfile::default(),
+                        );
+                    }
+                    app.execute_action(Action::set_data_binding(
+                        ci,
+                        object,
+                        binding.clone(),
+                        after,
+                    ));
+                    app.session.status = "Changed visual encoding.".to_owned();
+                }
+            }
+        });
+    }
+}
+
+fn visual_encodings(
+    capabilities: &plotx_core::state::FieldCapabilities,
+) -> Vec<&'static plotx_core::state::EncodingDescriptor> {
+    encoding_descriptors_for(capabilities)
 }
 
 /// Per-chart-type options below the gallery. Drag edits only commit on
@@ -215,4 +274,74 @@ fn deferred_drag<T: Clone + Default + Send + Sync + 'static>(
         ui.data_mut(|d| d.insert_temp(id, value));
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use plotx_core::state::{AfmDataset, Dataset, Nmr2DDataset};
+    use std::sync::Arc;
+
+    #[test]
+    fn gallery_offers_contour_for_afm_height_and_heatmap_for_nmr_plane() {
+        let afm = Dataset::Afm(Box::new(AfmDataset::load(plotx_io::AfmData {
+            images: vec![plotx_io::AfmImageChannel {
+                name: "Height".to_owned(),
+                width: 2,
+                height: 2,
+                scan_size_x: 1.0,
+                scan_size_y: 1.0,
+                lateral_unit: "nm".to_owned(),
+                scale: plotx_io::AfmScale {
+                    multiplier: 1.0,
+                    offset: 0.0,
+                    unit: "nm".to_owned(),
+                },
+                raw: Arc::from(vec![0, 1, 2, 3]),
+                frame_direction: plotx_io::AfmFrameDirection::Trace,
+            }],
+            forces: None,
+            source: "gallery AFM".to_owned(),
+            import_warnings: Vec::new(),
+        })));
+        let afm_height = afm.field_descriptors().into_iter().next().unwrap();
+        assert!(
+            visual_encodings(&afm_height.capabilities)
+                .iter()
+                .any(|encoding| encoding.id == "contour")
+        );
+
+        let dimension = |nucleus: &str| plotx_io::Dim {
+            spectral_width_hz: 4_000.0,
+            observe_freq_mhz: 400.0,
+            carrier_ppm: 0.0,
+            nucleus: nucleus.to_owned(),
+            group_delay: 0.0,
+        };
+        let nmr = Dataset::Nmr2D(Box::new(Nmr2DDataset::load(plotx_io::NmrData2D {
+            data: vec![num_complex::Complex64::new(1.0, 0.0); 4],
+            rows: 2,
+            cols: 2,
+            domain: plotx_io::Domain::Frequency,
+            direct: dimension("1H"),
+            indirect: dimension("13C"),
+            quad: plotx_io::QuadMode::Complex,
+            indirect_conjugate: false,
+            experiment: None,
+            pseudo_axis: None,
+            diffusion: None,
+            nus: None,
+            source: "gallery NMR".to_owned(),
+        })));
+        let nmr_plane = nmr
+            .field_descriptors()
+            .into_iter()
+            .find(|field| field.local_id == "nmr.real")
+            .unwrap();
+        assert!(
+            visual_encodings(&nmr_plane.capabilities)
+                .iter()
+                .any(|encoding| encoding.id == "heatmap")
+        );
+    }
 }

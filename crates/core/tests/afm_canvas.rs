@@ -1,7 +1,9 @@
 use plotx_core::actions::Action;
+use plotx_core::automation::{KIND_FIELD, ProjectResourceProvider, ResourceProvider};
 use plotx_core::state::{
-    CanvasObjectKind, DEFAULT_CANVAS_SIZE_MM, Dataset, NATURE_DOUBLE_COLUMN, PlotxApp,
+    CanvasObjectKind, DEFAULT_CANVAS_SIZE_MM, Dataset, NATURE_DOUBLE_COLUMN, PlotxApp, StackSpec,
 };
+use plotx_figure::{ContourSpec, SeriesEncoding};
 use plotx_io::{AfmData, AfmForceSet, AfmFrameDirection, AfmImageChannel, AfmScale};
 use std::sync::Arc;
 
@@ -96,4 +98,117 @@ fn map_and_force_gui_insertion_builds_side_by_side_plots() {
         })
         .collect();
     assert_eq!(chart_ids, ["afm_map", "afm_force_curve"]);
+    let CanvasObjectKind::Plot(map) = &objects[0].kind else {
+        panic!("expected AFM map plot");
+    };
+    assert_eq!(
+        map.binding.series[0].source.field,
+        app.doc.datasets[0]
+            .field_descriptors()
+            .into_iter()
+            .find(|field| field.local_id.starts_with("afm.channel."))
+            .unwrap()
+            .id
+    );
+    assert!(matches!(
+        map.binding.series[0].encoding,
+        SeriesEncoding::Heatmap(_)
+    ));
+    let CanvasObjectKind::Plot(force) = &objects[1].kind else {
+        panic!("expected AFM force plot");
+    };
+    assert_eq!(
+        force.binding.series[0].source.field,
+        app.doc.datasets[0]
+            .field_descriptors()
+            .into_iter()
+            .find(|field| field.local_id == "afm.force_curve")
+            .unwrap()
+            .id
+    );
+    assert!(matches!(
+        force.binding.series[0].encoding,
+        SeriesEncoding::Line(_)
+    ));
+}
+
+#[test]
+fn afm_scalar_field_can_render_a_contour_without_a_domain_chart_branch() {
+    let app = insert(afm_dataset(true));
+    let CanvasObjectKind::Plot(map) = &app.doc.canvases[0].objects[0].kind else {
+        panic!("expected AFM map plot");
+    };
+    let mut binding = map.binding.clone();
+    binding.series[0].encoding = SeriesEncoding::Contour(
+        ContourSpec::absolute(1.5, false).expect("positive literal contour base"),
+    );
+    let figure = app.build_binding_figure(
+        &binding,
+        &map.chart,
+        &StackSpec::default(),
+        app.doc.canvases[0].size_mm,
+    );
+    assert!(!figure.contours.is_empty());
+    assert!(!figure.contours[0].segments.is_empty());
+}
+
+#[test]
+fn afm_fields_expose_independent_image_and_force_capabilities() {
+    let dataset = afm_dataset(true);
+    let fields = dataset.field_descriptors();
+    assert_eq!(fields.len(), 2);
+    assert!(
+        fields[0]
+            .capabilities
+            .contains(plotx_core::automation::CAP_FIELD_SCALAR_GRID_2D_REGULAR)
+    );
+    assert!(
+        fields[0]
+            .capabilities
+            .contains(plotx_core::automation::CAP_FIELD_LOCATION_SCALE)
+    );
+    assert!(
+        !fields[0]
+            .capabilities
+            .contains(plotx_core::automation::CAP_FIELD_CURVE_1D)
+    );
+    assert!(
+        fields[1]
+            .capabilities
+            .contains(plotx_core::automation::CAP_FIELD_CURVE_1D)
+    );
+    assert!(
+        !fields[1]
+            .capabilities
+            .contains(plotx_core::automation::CAP_FIELD_SCALAR_GRID_2D_REGULAR)
+    );
+}
+
+#[test]
+fn field_descriptors_are_dataset_child_resources() {
+    let app = insert(afm_dataset(true));
+    let dataset = &app.doc.datasets[0];
+    let descriptors = ProjectResourceProvider::new(&app).descriptors();
+    let fields = descriptors
+        .iter()
+        .filter(|descriptor| descriptor.resource.kind.0 == KIND_FIELD)
+        .collect::<Vec<_>>();
+    assert_eq!(fields.len(), 2);
+    assert!(fields.iter().all(|field| {
+        field.resource.parent_id.as_deref() == Some(&dataset.resource_id().to_string())
+    }));
+    let map_key = dataset
+        .field_descriptors()
+        .into_iter()
+        .find(|field| field.local_id.starts_with("afm.channel."))
+        .unwrap()
+        .local_id;
+    assert!(fields.iter().any(|field| {
+        field.resource.local_id.as_deref() == Some(map_key.as_str()) && map_key != "afm.channel.0"
+    }));
+    assert!(
+        fields
+            .iter()
+            .any(|field| field.resource.local_id.as_deref() == Some("afm.force_curve"))
+    );
 }

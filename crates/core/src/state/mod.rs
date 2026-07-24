@@ -29,6 +29,7 @@ mod app_impl_arithmetic;
 mod app_impl_compute;
 #[cfg(test)]
 mod app_impl_compute_tests;
+mod app_impl_figures;
 mod app_impl_io;
 mod app_impl_linefit;
 mod app_impl_multiplet;
@@ -50,6 +51,8 @@ mod datasets_2d_maps;
 mod document;
 mod document_identity;
 mod electrophysiology;
+mod field;
+mod field_catalog;
 mod fit_selection;
 mod identity;
 mod interaction;
@@ -64,6 +67,7 @@ mod panel_label;
 mod peaks;
 mod plot_object;
 mod region;
+mod series_binding;
 mod size_presets;
 mod stack;
 mod statistics;
@@ -95,6 +99,18 @@ pub use datasets::*;
 pub(crate) use datasets_2d_figure::{build_processed_figure, build_processed_figure_cancellable};
 pub use document::*;
 pub use electrophysiology::*;
+pub use field::*;
+pub use field_catalog::FieldCatalog;
+#[cfg(test)]
+pub(crate) use field_catalog::{
+    afm_channel_key, afm_channel_key_computations, afm_field_catalog,
+    reset_afm_channel_key_computations,
+};
+pub(crate) use field_catalog::{
+    afm_channel_keys, afm_field_catalog_for_keys, electrophysiology_channel_key,
+    electrophysiology_channel_keys, electrophysiology_field_catalog_for_keys, nmr_field_catalog,
+    nmr2d_field_catalog, table_field_catalog,
+};
 pub use identity::*;
 pub use interaction::*;
 pub use lineage::*;
@@ -104,6 +120,7 @@ pub use page_fit::*;
 pub use panel_label::*;
 pub use peaks::*;
 pub use region::*;
+pub use series_binding::*;
 pub use size_presets::*;
 pub use statistics::*;
 pub use statistics_report::{

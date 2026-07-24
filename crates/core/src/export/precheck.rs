@@ -275,7 +275,7 @@ mod tests {
             group: None,
             kind: CanvasObjectKind::Plot(Box::new(PlotObject {
                 next_series_id: crate::state::SeriesId::new(1),
-                binding: DataBinding::single(crate::state::DatasetId::new()),
+                binding: DataBinding { series: Vec::new() },
                 chart: ChartSpec::default(),
                 stack: StackSpec::default(),
                 projections: AxisProjections::default(),

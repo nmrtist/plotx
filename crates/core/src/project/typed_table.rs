@@ -101,6 +101,9 @@ fn block_path(hash: ContentHash) -> String {
 
 #[derive(Serialize, Deserialize)]
 struct TableSidecarV1 {
+    /// Dataset-owned child-field identity mapping. Mandatory: projects written
+    /// before FieldId stabilization are intentionally not accepted.
+    field_catalog: crate::state::FieldCatalog,
     #[serde(default)]
     x_column: Option<ColumnId>,
     series: Vec<crate::state::TableSeriesBinding>,
@@ -161,6 +164,7 @@ pub(crate) fn table_dataset_to_v1(
         }
     }
     let sidecar = TableSidecarV1 {
+        field_catalog: table.field_catalog.clone(),
         x_column: table.x_binding,
         series: table.series_bindings.clone(),
         provenance: table.provenance.clone(),
@@ -231,6 +235,7 @@ pub(crate) fn table_dataset_from_v1(
         resource_id: data.id.parse().map_err(|_| {
             ProjectError::Invalid(format!("table has invalid stable id {}", data.id))
         })?,
+        field_catalog: sidecar.field_catalog,
         provenance: sidecar.provenance,
         meta: sidecar.meta,
         curve_fit_analyses: sidecar.curve_fit_analyses,
@@ -262,6 +267,9 @@ pub(crate) fn table_dataset_from_v1(
         .map(|analysis| analysis.id.saturating_add(1))
         .max()
         .unwrap_or(0);
+    crate::state::Dataset::Table(Box::new(dataset.clone()))
+        .validate_field_catalog()
+        .map_err(ProjectError::Invalid)?;
     Ok(dataset)
 }
 

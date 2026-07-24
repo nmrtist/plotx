@@ -47,6 +47,7 @@ impl NmrDataset {
         };
         Self {
             resource_id: DatasetId::new(),
+            field_catalog: nmr_field_catalog(),
             data,
             base: spectrum.clone(),
             pipeline,

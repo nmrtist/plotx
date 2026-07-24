@@ -90,7 +90,15 @@ fn contour_slice_places_peak_and_exports_svg() {
         spec.f1_ppm[br]
     );
 
-    let fig = build_figure_2d(&spec, preset);
+    let capabilities = plotx_core::state::FieldCapabilities::new([
+        plotx_core::automation::CapabilityId::new(
+            plotx_core::automation::CAP_FIELD_SCALAR_GRID_2D_REGULAR,
+        ),
+        plotx_core::automation::CapabilityId::new(plotx_core::automation::CAP_FIELD_SIGNED),
+        plotx_core::automation::CapabilityId::new(plotx_core::automation::CAP_FIELD_NOISE_SCALE),
+    ]);
+    let contour = plotx_core::state::default_contour_spec(&capabilities);
+    let fig = build_figure_2d(&spec, preset, &contour);
     assert!(!fig.contours.is_empty());
     assert!(!fig.contours[0].segments.is_empty());
 

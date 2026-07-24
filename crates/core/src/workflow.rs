@@ -234,6 +234,10 @@ pub fn build_dataset_figure(dataset: &Dataset, chart: &ChartSpec, size_mm: [f32;
     figure
 }
 
+fn default_binding(dataset: &Dataset) -> DataBinding {
+    DataBinding::single(dataset)
+}
+
 pub fn build_plot_object(
     dataset: &Dataset,
     _dataset_index: usize,
@@ -259,7 +263,7 @@ pub fn build_plot_object(
         group: None,
         kind: CanvasObjectKind::Plot(Box::new(PlotObject {
             next_series_id: crate::state::SeriesId::new(1),
-            binding: DataBinding::single(dataset.resource_id()),
+            binding: default_binding(dataset),
             chart,
             stack: StackSpec::default(),
             projections: AxisProjections::default(),
@@ -326,6 +330,15 @@ pub fn build_default_canvas_for_dataset(
         );
         if let CanvasObjectKind::Plot(plot) = &mut second.kind {
             plot.chart.type_id = "afm_force_curve".to_owned();
+            if let Some(series) = plot.binding.series.first_mut()
+                && let Some(field) = dataset
+                    .field_descriptors()
+                    .into_iter()
+                    .find(|field| field.local_id == "afm.force_curve")
+            {
+                series.source.field = field.id;
+                series.encoding = plotx_figure::SeriesEncoding::default();
+            }
             plot.figure = build_dataset_figure(
                 dataset,
                 &plot.chart,

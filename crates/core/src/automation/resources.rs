@@ -10,6 +10,7 @@ pub const KIND_DATASET: &str = "plotx.dataset";
 pub const KIND_CANVAS: &str = "plotx.canvas";
 pub const KIND_TABLE_ROW: &str = "plotx.table.row";
 pub const KIND_TABLE_COLUMN: &str = "plotx.table.column";
+pub const KIND_FIELD: &str = "plotx.field";
 pub const KIND_CANVAS_OBJECT: &str = "plotx.canvas.object";
 pub const KIND_EXTERNAL_INPUT: &str = "plotx.external_input";
 
@@ -20,6 +21,22 @@ pub const CAP_EXPORT: &str = "figure.export";
 pub const CAP_PREVIEW: &str = "data.preview";
 pub const CAP_TRANSFORM: &str = "data.transform";
 pub const CAP_PROCESSING_SCHEME: &str = "processing.scheme";
+pub const CAP_FIELD_SCALAR_GRID_2D_REGULAR: &str = "field.scalar_grid_2d.regular";
+pub const CAP_FIELD_CURVE_1D: &str = "field.curve_1d";
+pub const CAP_FIELD_COLORED_RASTER_2D: &str = "field.colored_raster_2d";
+pub const CAP_FIELD_SIGNED: &str = "field.signed";
+pub const CAP_FIELD_NOISE_SCALE: &str = "field.noise_scale";
+pub const CAP_FIELD_LOCATION_SCALE: &str = "field.location_scale";
+pub const CAP_FIELD_BOUNDED: &str = "field.bounded";
+/// Provider semantics consumed only by legacy chart builders. They keep those
+/// builders from masquerading as universally applicable curve/grid encodings.
+pub const CAP_FIELD_TABLE: &str = "field.tabular";
+pub const CAP_FIELD_NMR_SPECTRUM: &str = "field.nmr.spectrum";
+pub const CAP_FIELD_NMR_CONTOUR: &str = "field.nmr.contour";
+pub const CAP_FIELD_NMR_STACK: &str = "field.nmr.stack";
+pub const CAP_FIELD_SWEEP_COLLECTION: &str = "field.sweep_collection";
+pub const CAP_FIELD_FORCE_CURVE: &str = "field.force_curve";
+pub const CAP_FIELD_AFM_MAP: &str = "field.afm.map";
 
 /// Capability-oriented resource access. New resource types can participate by
 /// implementing this trait; query and tool orchestration do not dispatch on a
@@ -67,7 +84,7 @@ impl<'a> ProjectResourceProvider<'a> {
         let mut metadata = BTreeMap::new();
         metadata.insert("domain".to_owned(), format!("{:?}", dataset.domain()));
         metadata.insert("index_hint".to_owned(), index.to_string());
-        let (dimensions, units, children) = match dataset {
+        let (dimensions, units, mut children) = match dataset {
             Dataset::Table(table) => {
                 capabilities.push(cap(CAP_TRANSFORM));
                 let snapshot = &table.typed_state.envelope.revision.snapshot;
@@ -137,6 +154,12 @@ impl<'a> ProjectResourceProvider<'a> {
                 (dimensions, units, Vec::new())
             }
         };
+        children.extend(
+            dataset
+                .field_descriptors()
+                .into_iter()
+                .map(|field| child_ref(id, &field.local_id, KIND_FIELD)),
+        );
         ResourceDescriptor {
             resource: top_ref(id, KIND_DATASET),
             name: dataset.display_name(),
@@ -252,6 +275,19 @@ impl ResourceProvider for ProjectResourceProvider<'_> {
                         revision: self.revision(),
                     });
                 }
+            }
+            for field in dataset.field_descriptors() {
+                descriptors.push(ResourceDescriptor {
+                    resource: child_ref(dataset.resource_id(), &field.local_id, KIND_FIELD),
+                    name: field.name,
+                    capabilities: field.capabilities.iter().cloned().collect(),
+                    children: Vec::new(),
+                    dimensions: field.dimensions,
+                    units: field.units,
+                    metadata: field.metadata.0,
+                    lineage: Vec::new(),
+                    revision: self.revision(),
+                });
             }
             descriptors.push(parent);
         }

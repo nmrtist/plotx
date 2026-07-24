@@ -118,6 +118,7 @@ macro_rules! local_id {
 }
 
 local_id!(SeriesId);
+local_id!(FieldId);
 local_id!(ObjectId);
 
 #[cfg(test)]

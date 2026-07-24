@@ -2,7 +2,7 @@ use super::{dataset_id, sample_app, synthetic_1d};
 use crate::actions::Action;
 use crate::state::{
     AxisProjection, DEFAULT_CANVAS_SIZE_MM, Dataset, DatasetId, DatasetLineage, DerivationKind,
-    NmrDataset, ObjectFrame, ProjectionSource, SeriesBinding,
+    FieldId, NmrDataset, ObjectFrame, ProjectionSource, SeriesBinding, SeriesSource,
 };
 use plotx_processing::{ProcessingStep, StepKind, StepSource};
 
@@ -20,7 +20,12 @@ fn dataset_delete_undo_restores_identity_and_persistent_references() {
     );
 
     let plot = app.doc.canvases[0].objects[0].plot_mut().unwrap();
-    plot.binding.series.push(SeriesBinding::new(inserted_id));
+    plot.binding
+        .series
+        .push(SeriesBinding::with_source(SeriesSource {
+            resource: inserted_id,
+            field: FieldId::default(),
+        }));
     plot.projections.top = AxisProjection {
         source: ProjectionSource::Attached(inserted_id),
         visible: true,
@@ -72,9 +77,18 @@ fn canvas_dataset_ids_follow_first_appearance_and_page_indices_follow_document_o
 
     let canvas = &mut app.doc.canvases[0];
     canvas.objects[0].plot_mut().unwrap().binding.series = vec![
-        SeriesBinding::new(ids[2]),
-        SeriesBinding::new(ids[0]),
-        SeriesBinding::new(ids[2]),
+        SeriesBinding::with_source(SeriesSource {
+            resource: ids[2],
+            field: FieldId::default(),
+        }),
+        SeriesBinding::with_source(SeriesSource {
+            resource: ids[0],
+            field: FieldId::default(),
+        }),
+        SeriesBinding::with_source(SeriesSource {
+            resource: ids[2],
+            field: FieldId::default(),
+        }),
     ];
     let object_id = canvas.allocate_object_id();
     let second_plot = app.build_plot_object(
@@ -108,7 +122,10 @@ fn series_reorder_preserves_ids_and_only_changes_order() {
     app.doc.datasets.push(second);
     let plot = app.doc.canvases[0].objects[0].plot_mut().unwrap();
     let id = plot.allocate_series_id();
-    let mut series = SeriesBinding::new(second_id);
+    let mut series = SeriesBinding::with_source(SeriesSource {
+        resource: second_id,
+        field: FieldId::default(),
+    });
     series.id = id;
     plot.binding.series.push(series);
     let before: Vec<_> = plot.binding.series.iter().map(|series| series.id).collect();
@@ -154,7 +171,10 @@ fn step_and_series_allocators_do_not_rollback_with_undo() {
         let series_id = plot.allocate_series_id();
         let high_water = plot.next_series_id;
         let mut after = before.clone();
-        let mut series = SeriesBinding::new(second_id);
+        let mut series = SeriesBinding::with_source(SeriesSource {
+            resource: second_id,
+            field: FieldId::default(),
+        });
         series.id = series_id;
         after.series.push(series);
         (series_id, high_water, before, after, object_id)

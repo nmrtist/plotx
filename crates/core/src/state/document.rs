@@ -162,31 +162,6 @@ pub struct NamedView {
     pub pan: [f32; 2],
 }
 
-/// One overlaid trace's data source with optional per-series style overrides.
-/// Only `dataset` is required.
-#[derive(Clone, Debug, PartialEq)]
-pub struct SeriesBinding {
-    pub id: SeriesId,
-    pub dataset: DatasetId,
-    pub color: Option<Color>,
-    pub label: Option<String>,
-    pub scale: f64,
-    pub visible: bool,
-}
-
-impl SeriesBinding {
-    pub fn new(dataset: impl Into<DatasetId>) -> Self {
-        Self {
-            id: SeriesId::default(),
-            dataset: dataset.into(),
-            color: None,
-            label: None,
-            scale: 1.0,
-            visible: true,
-        }
-    }
-}
-
 /// How a multi-dataset plot combines its members. Line kinds: `Superimposed`
 /// overlays every trace on a shared axis; `Offset` steps each successive trace
 /// vertically (and optionally horizontally, for a pseudo-3D look). Field kind:
@@ -234,14 +209,14 @@ pub struct DataBinding {
 }
 
 impl DataBinding {
-    pub fn single(dataset: impl Into<DatasetId>) -> Self {
+    pub fn single(dataset: &Dataset) -> Self {
         Self {
-            series: vec![SeriesBinding::new(dataset)],
+            series: SeriesBinding::from_dataset(dataset).into_iter().collect(),
         }
     }
 
     pub fn primary_dataset(&self) -> Option<DatasetId> {
-        self.series.first().map(|s| s.dataset)
+        self.series.first().map(|s| s.source.resource)
     }
 
     /// Result overlays belonging to the primary dataset follow the visibility
@@ -251,11 +226,13 @@ impl DataBinding {
     }
 
     pub fn dataset_ids(&self) -> Vec<DatasetId> {
-        self.series.iter().map(|s| s.dataset).collect()
+        self.series.iter().map(|s| s.source.resource).collect()
     }
 
     pub fn contains_dataset(&self, dataset: DatasetId) -> bool {
-        self.series.iter().any(|s| s.dataset == dataset)
+        self.series
+            .iter()
+            .any(|series| series.source.resource == dataset)
     }
 }
 

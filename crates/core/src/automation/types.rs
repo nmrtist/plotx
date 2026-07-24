@@ -20,6 +20,12 @@ impl ResourceKindId {
 #[serde(transparent)]
 pub struct CapabilityId(pub String);
 
+impl std::borrow::Borrow<str> for CapabilityId {
+    fn borrow(&self) -> &str {
+        &self.0
+    }
+}
+
 impl CapabilityId {
     pub fn new(value: impl Into<String>) -> Self {
         Self(value.into())

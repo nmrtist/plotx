@@ -30,6 +30,7 @@ mod convert_dimensions;
 mod convert_recipes;
 mod dto;
 mod electrophysiology_convert;
+mod field_catalog;
 mod integrals2d;
 mod persistence;
 mod pipeline_conv;
@@ -669,6 +670,8 @@ fn validate_lineage_acyclic(datasets: &[Dataset], bindings: &[DatasetBinding]) -
 mod cleanup_tests;
 #[cfg(test)]
 mod electrophysiology_tests;
+#[cfg(test)]
+mod field_encoding_tests;
 #[cfg(test)]
 mod lineage_tests;
 #[cfg(test)]

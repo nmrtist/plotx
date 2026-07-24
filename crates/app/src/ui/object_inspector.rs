@@ -169,12 +169,12 @@ fn data_section(app: &mut PlotxApp, ci: usize, object: ObjectId, ui: &mut Ui) {
                 }
             }
             let color = sb
-                .color
+                .primary_color()
                 .unwrap_or(OVERLAY_PALETTE[i % OVERLAY_PALETTE.len()]);
             swatch(ui, color);
             let name = app
                 .doc
-                .dataset_index(sb.dataset)
+                .dataset_index(sb.source.resource)
                 .and_then(|index| app.doc.datasets.get(index))
                 .map(Dataset::display_name)
                 .unwrap_or_default();
@@ -222,15 +222,21 @@ fn data_section(app: &mut PlotxApp, ci: usize, object: ObjectId, ui: &mut Ui) {
                         b.series.swap(i, i - 1);
                         next_binding = Some(b);
                     }
-                    let mut scale = sb.scale;
-                    if ui
-                        .add(DragValue::new(&mut scale).speed(0.02).range(0.01..=100.0))
-                        .on_hover_text("Scale")
-                        .changed()
-                    {
-                        let mut b = binding.clone();
-                        b.series[i].scale = scale;
-                        next_binding = Some(b);
+                    if matches!(sb.encoding, plotx_figure::SeriesEncoding::Line(_)) {
+                        let mut scale = sb.line_scale();
+                        if ui
+                            .add(DragValue::new(&mut scale).speed(0.02).range(0.01..=100.0))
+                            .on_hover_text("Scale")
+                            .changed()
+                        {
+                            let mut b = binding.clone();
+                            if let plotx_figure::SeriesEncoding::Line(line) =
+                                &mut b.series[i].encoding
+                            {
+                                line.scale = scale;
+                            }
+                            next_binding = Some(b);
+                        }
                     }
                 } else if i != 0 && ui.small_button("Primary").clicked() {
                     let mut b = binding.clone();
@@ -268,11 +274,13 @@ fn data_section(app: &mut PlotxApp, ci: usize, object: ObjectId, ui: &mut Ui) {
                             else {
                                 continue;
                             };
-                            let mut series =
-                                SeriesBinding::new(app.doc.datasets[*di].resource_id());
-                            series.id = series_id;
-                            b.series.push(series);
-                            next_binding = Some(b);
+                            if let Some(mut series) =
+                                SeriesBinding::from_dataset(&app.doc.datasets[*di])
+                            {
+                                series.id = series_id;
+                                b.series.push(series);
+                                next_binding = Some(b);
+                            }
                         }
                     }
                 });

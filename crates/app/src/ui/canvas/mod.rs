@@ -558,7 +558,7 @@ fn resize_cursor(handle: ResizeHandle) -> egui::CursorIcon {
 mod tests {
     use super::*;
     use plotx_core::state::{
-        CanvasObject, CanvasObjectKind, CanvasViewport, DatasetId, PanelMeta, PlotObject, TextBox,
+        CanvasObject, CanvasObjectKind, CanvasViewport, PanelMeta, PlotObject, TextBox,
     };
     use plotx_figure::{Axis, Figure};
 
@@ -592,7 +592,7 @@ mod tests {
             group: None,
             kind: CanvasObjectKind::Plot(Box::new(PlotObject {
                 next_series_id: plotx_core::state::SeriesId::new(1),
-                binding: plotx_core::state::DataBinding::single(DatasetId::new()),
+                binding: plotx_core::state::DataBinding { series: Vec::new() },
                 chart: plotx_core::state::ChartSpec::default(),
                 stack: plotx_core::state::StackSpec::default(),
                 projections: plotx_core::state::AxisProjections::default(),
@@ -625,7 +625,7 @@ mod tests {
             group: None,
             kind: CanvasObjectKind::Plot(Box::new(PlotObject {
                 next_series_id: plotx_core::state::SeriesId::new(1),
-                binding: plotx_core::state::DataBinding::single(DatasetId::new()),
+                binding: plotx_core::state::DataBinding { series: Vec::new() },
                 chart: plotx_core::state::ChartSpec::default(),
                 stack: plotx_core::state::StackSpec::default(),
                 projections: plotx_core::state::AxisProjections::default(),

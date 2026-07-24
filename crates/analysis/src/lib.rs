@@ -14,6 +14,7 @@ pub mod multiplet;
 pub mod peaks;
 mod pseudo2d_impl;
 pub mod relaxation;
+pub mod robust;
 pub mod series;
 mod series_reduce;
 pub mod stack;

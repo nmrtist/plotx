@@ -44,6 +44,12 @@ These instructions apply to the entire repository.
 - Stable resources and components use typed IDs. Collection indices are
   one-shot lookup positions only; they must not cross action, job, frame, or
   persistence boundaries.
+- Encoding applicability is attached to field rendering capabilities, never to
+  a data-domain enum. New domains gain an encoding by exposing its capability;
+  do not add domain branches or domain names to encoding/property registries.
+- A persisted default, an invocation input, and result provenance are lifecycle
+  copies of one value, not parallel sources of state. Resolve them in priority
+  order: explicit input, target provenance, then default.
 - Respect crate boundaries: parsing in `plotx-io`, scientific algorithms in
   `plotx-analysis`, spectral transforms in `plotx-processing`, presentation
   models in `plotx-figure`, rendering in `plotx-render`, application state in

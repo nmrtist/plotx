@@ -2,8 +2,14 @@
 //! coordinates. Both renderers (egui screen, SVG export) consume this model.
 
 mod colormap;
+mod encoding;
 
 pub use colormap::ColormapId;
+pub use encoding::{
+    ColorSource, ContourBasePolicy, ContourLevelSpec, ContourSpec, ContourStyle,
+    EstimatorSelection, HeatmapSpec, ImageInterpolation, ImageSpec, LineEncoding,
+    PositiveFiniteF32, PositiveFiniteF64, SeriesEncoding, UnitInterval,
+};
 
 /// An RGB color, 0–255 per channel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

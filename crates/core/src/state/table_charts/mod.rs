@@ -66,8 +66,8 @@ fn darkened(c: Color, factor: f32) -> Color {
 #[cfg(test)]
 mod tests {
     use crate::state::{
-        ChartSpec, DataDomain, Dataset, FloatSeries, chart_types_for,
-        materialized_float_series_table,
+        ChartSpec, DataDomain, Dataset, FieldCapabilities, FloatSeries,
+        chart_types_for_capabilities, materialized_float_series_table,
     };
 
     /// End-to-end sweep: every registered table chart builds from a realistic
@@ -103,7 +103,11 @@ mod tests {
         .unwrap();
         let dataset = Dataset::Table(Box::new(table));
 
-        for chart in chart_types_for(DataDomain::Table) {
+        let capabilities = FieldCapabilities::new([
+            crate::automation::CapabilityId::new(crate::automation::CAP_FIELD_CURVE_1D),
+            crate::automation::CapabilityId::new(crate::automation::CAP_FIELD_TABLE),
+        ]);
+        for chart in chart_types_for_capabilities(&capabilities, DataDomain::Table) {
             for stacked in [false, true] {
                 let spec = ChartSpec {
                     type_id: chart.id.to_owned(),

@@ -1,13 +1,16 @@
 use super::*;
-use plotx_figure::{AxisFrame, ColormapId, HeatmapGrid, Series};
+use plotx_figure::{AxisFrame, ColormapId, ContourSpec, HeatmapGrid, Series};
 use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct AfmDataset {
     pub resource_id: DatasetId,
+    /// Persisted mapping from stable channel keys to dataset-local field ids.
+    pub field_catalog: FieldCatalog,
     pub data: Arc<AfmData>,
+    /// Immutable keys calculated with the loaded raster data, never serialized.
+    pub(crate) image_field_keys: Arc<[String]>,
     pub name: Option<String>,
-    pub selected_channel: usize,
     pub selected_pixel: [usize; 2],
     pub lineage: Option<DatasetLineage>,
 }
@@ -17,18 +20,20 @@ impl AfmDataset {
         let selected_pixel = data.forces.as_ref().map_or([0, 0], |forces| {
             [forces.grid_width / 2, forces.grid_height / 2]
         });
+        let image_field_keys = crate::state::afm_channel_keys(&data);
         Self {
             resource_id: DatasetId::new(),
+            field_catalog: crate::state::afm_field_catalog_for_keys(&data, &image_field_keys),
             data: Arc::new(data),
+            image_field_keys,
             name: None,
-            selected_channel: 0,
             selected_pixel,
             lineage: None,
         }
     }
 
-    pub fn map_figure(&self, colormap: ColormapId) -> Option<Figure> {
-        let channel = self.data.images.get(self.selected_channel)?;
+    pub fn map_figure(&self, field: FieldId, colormap: ColormapId) -> Option<Figure> {
+        let channel = self.image_for_field(field)?;
         let values: Vec<f32> = channel
             .raw
             .iter()
@@ -60,7 +65,32 @@ impl AfmDataset {
         Some(figure)
     }
 
-    pub fn force_figure(&self) -> Option<Figure> {
+    pub fn contour_figure(&self, field: FieldId, contour: &ContourSpec) -> Option<Figure> {
+        let channel = self.image_for_field(field)?;
+        let values: Vec<f32> = channel
+            .raw
+            .iter()
+            .map(|value| channel.scale.apply(*value) as f32)
+            .collect();
+        let mut figure = Figure::new(
+            &channel.name,
+            Axis::new(&channel.lateral_unit, 0.0, channel.scan_size_x),
+            Axis::new(&channel.lateral_unit, 0.0, channel.scan_size_y),
+        );
+        figure.contours = crate::figures::scalar_contour_overlays(
+            &values,
+            channel.height,
+            channel.width,
+            [0.0, channel.scan_size_x, 0.0, channel.scan_size_y],
+            contour,
+        );
+        figure.lock_aspect = true;
+        figure.axis_frame = AxisFrame::Box;
+        Some(figure)
+    }
+
+    pub fn force_figure(&self, field: FieldId) -> Option<Figure> {
+        (self.field_catalog.id_for_key("afm.force_curve") == Some(field)).then_some(())?;
         let forces = self.data.forces.as_ref()?;
         let curve = forces.curve_raw(self.selected_pixel[0], self.selected_pixel[1])?;
         let x_value = |display_index: usize| {
@@ -146,6 +176,15 @@ impl AfmDataset {
         );
         figure.show_legend = true;
         Some(figure)
+    }
+
+    fn image_for_field(&self, field: FieldId) -> Option<&plotx_io::AfmImageChannel> {
+        self.data
+            .images
+            .iter()
+            .zip(self.image_field_keys.iter())
+            .find(|(_, key)| self.field_catalog.id_for_key(key) == Some(field))
+            .map(|(channel, _)| channel)
     }
 }
 

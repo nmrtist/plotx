@@ -30,7 +30,9 @@ fn save_rejects_missing_lineage_source() {
 fn save_rejects_missing_primary_and_series_datasets() {
     let mut missing_primary = sample_app();
     let missing = DatasetId::new();
-    first_plot_mut(&mut missing_primary).binding.series[0].dataset = missing;
+    first_plot_mut(&mut missing_primary).binding.series[0]
+        .source
+        .resource = missing;
     let error = save_error(&missing_primary, "missing-primary-dataset");
     assert!(
         error.contains(&format!("missing primary dataset {missing}")),
@@ -42,7 +44,10 @@ fn save_rejects_missing_primary_and_series_datasets() {
     first_plot_mut(&mut missing_series)
         .binding
         .series
-        .push(SeriesBinding::new(missing));
+        .push(SeriesBinding::with_source(crate::state::SeriesSource {
+            resource: missing,
+            field: crate::state::FieldId::default(),
+        }));
     let error = save_error(&missing_series, "missing-series-dataset");
     assert!(
         error.contains(&format!("missing series dataset {missing}")),
@@ -105,6 +110,7 @@ fn loading_a_maximum_object_id_reports_exhaustion() {
             "name": "Label",
             "kind": "text",
             "next_series_id": 0,
+            "series": [],
             "frame": { "x": 0.0, "y": 0.0, "width": 10.0, "height": 10.0 },
             "locked": false,
             "visible": true
@@ -159,7 +165,12 @@ fn loading_a_maximum_series_id_reports_exhaustion() {
             "name": "Plot",
             "kind": "line_plot",
             "input": recipe,
-            "series": [{ "id": u64::MAX, "input": recipe }],
+            "series": [{
+                "id": u64::MAX,
+                "input": recipe,
+                "field": 0,
+                "encoding": {"kind":"line","spec":{"color":{"explicit":{"r":15,"g":77,"b":146}},"scale":1.0,"width":1.0}}
+            }],
             "frame": { "x": 0.0, "y": 0.0, "width": 100.0, "height": 80.0 },
             "locked": false,
             "visible": true

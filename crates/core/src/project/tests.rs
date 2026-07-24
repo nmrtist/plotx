@@ -378,7 +378,7 @@ fn project_roundtrip_preserves_data_recipe_and_view() {
     assert!((phase.pivot_frac - 0.4).abs() < f64::EPSILON);
 }
 
-fn synthetic_true_2d() -> plotx_io::NmrData2D {
+pub(super) fn synthetic_true_2d() -> plotx_io::NmrData2D {
     use plotx_io::{Dim, Domain, NmrData2D, QuadMode};
     let (cols, rows) = (32usize, 4usize);
     let dim = |nucleus: &str| Dim {
@@ -582,14 +582,14 @@ fn project_roundtrip_preserves_overlay_binding() {
         app.build_plot_object(0, ObjectFrame::new(0.0, 0.0, w, h), id, "Plot 1".to_owned());
     object.plot_mut().unwrap().binding = crate::state::DataBinding {
         series: vec![
-            crate::state::SeriesBinding::new(app.doc.datasets[0].resource_id()),
-            crate::state::SeriesBinding {
-                id: crate::state::SeriesId::new(1),
-                dataset: app.doc.datasets[1].resource_id(),
-                color: Some(Color::rgb(10, 20, 30)),
-                label: Some("treated".to_owned()),
-                scale: 1.0,
-                visible: true,
+            crate::state::SeriesBinding::from_dataset(&app.doc.datasets[0]).unwrap(),
+            {
+                let mut series =
+                    crate::state::SeriesBinding::from_dataset(&app.doc.datasets[1]).unwrap();
+                series.id = crate::state::SeriesId::new(1);
+                series.set_primary_color(Color::rgb(10, 20, 30));
+                series.label = Some("treated".to_owned());
+                series
             },
         ],
     };
@@ -607,14 +607,17 @@ fn project_roundtrip_preserves_overlay_binding() {
     let binding = &first_plot(&loaded).binding;
     assert_eq!(binding.series.len(), 2);
     assert_eq!(
-        binding.series[0].dataset,
+        binding.series[0].source.resource,
         loaded.doc.datasets[0].resource_id()
     );
     assert_eq!(
-        binding.series[1].dataset,
+        binding.series[1].source.resource,
         loaded.doc.datasets[1].resource_id()
     );
-    assert_eq!(binding.series[1].color, Some(Color::rgb(10, 20, 30)));
+    assert_eq!(
+        binding.series[1].primary_color(),
+        Some(Color::rgb(10, 20, 30))
+    );
     assert_eq!(binding.series[1].label.as_deref(), Some("treated"));
     assert!(first_plot(&loaded).figure.show_legend);
 }
@@ -636,14 +639,15 @@ fn project_roundtrip_preserves_stack_spec_and_series_fields() {
         let plot = object.plot_mut().unwrap();
         plot.binding = DataBinding {
             series: vec![
-                SeriesBinding::new(app.doc.datasets[0].resource_id()),
-                SeriesBinding {
-                    id: crate::state::SeriesId::new(1),
-                    dataset: app.doc.datasets[1].resource_id(),
-                    color: None,
-                    label: None,
-                    scale: 2.5,
-                    visible: false,
+                SeriesBinding::from_dataset(&app.doc.datasets[0]).unwrap(),
+                {
+                    let mut series = SeriesBinding::from_dataset(&app.doc.datasets[1]).unwrap();
+                    series.id = crate::state::SeriesId::new(1);
+                    if let plotx_figure::SeriesEncoding::Line(line) = &mut series.encoding {
+                        line.scale = 2.5;
+                    }
+                    series.visible = false;
+                    series
                 },
             ],
         };
@@ -672,20 +676,18 @@ fn project_roundtrip_preserves_stack_spec_and_series_fields() {
     assert_eq!(plot.stack.shear_x, 0.1);
     assert!(plot.stack.normalize);
     assert_eq!(plot.stack.active, Some(1));
-    assert_eq!(plot.binding.series[1].scale, 2.5);
+    assert_eq!(plot.binding.series[1].line_scale(), 2.5);
     assert!(!plot.binding.series[1].visible);
 }
 
 #[test]
-fn single_input_without_explicit_series_is_still_parseable() {
-    let view: ViewCanvasObject = serde_json::from_str(
+fn plot_without_explicit_series_is_rejected_by_the_project_schema() {
+    let result = serde_json::from_str::<ViewCanvasObject>(
         r#"{"id":"1","name":"Plot","kind":"line_plot","input":"recipe_000000","next_series_id":0,
                 "frame":{"x":0.0,"y":0.0,"width":100.0,"height":80.0},
                 "title":null,"snapshot":null,"locked":false,"visible":true}"#,
-    )
-    .unwrap();
-    assert!(view.series.is_empty());
-    assert!(view.axis_overrides.is_none());
+    );
+    assert!(result.is_err());
 }
 #[test]
 fn scheme_save_load_apply_roundtrips() {

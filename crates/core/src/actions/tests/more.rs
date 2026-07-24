@@ -9,17 +9,19 @@ fn stacked_binding_builds_distinctly_coloured_series_with_legend() {
         .datasets
         .push(Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()))));
     let object = app.doc.canvases[0].objects[0].id;
+    let mut second = crate::state::SeriesBinding::from_dataset(&app.doc.datasets[1]).unwrap();
+    second.set_primary_color(plotx_figure::Color::rgb(0x8a, 0x1c, 0x1c));
     let binding = crate::state::DataBinding {
         series: vec![
-            crate::state::SeriesBinding::new(app.doc.datasets[0].resource_id()),
-            crate::state::SeriesBinding::new(app.doc.datasets[1].resource_id()),
+            crate::state::SeriesBinding::from_dataset(&app.doc.datasets[0]).unwrap(),
+            second,
         ],
     };
 
     app.execute_action(Action::set_data_binding(
         0,
         object,
-        crate::state::DataBinding::single(app.doc.datasets[0].resource_id()),
+        crate::state::DataBinding::single(&app.doc.datasets[0]),
         binding,
     ));
 
@@ -41,8 +43,8 @@ fn single_table_color_override_recolors_points_and_error_bars() {
     use crate::state::{ChartSpec, DataBinding, DataDomain, SeriesBinding, StackSpec};
     let (app, _) = table_app_with_sigma(vec![0.1, 0.1, 0.1]);
     let color = plotx_figure::Color::rgb(0xaa, 0x22, 0x44);
-    let mut series = SeriesBinding::new(app.doc.datasets[0].resource_id());
-    series.color = Some(color);
+    let mut series = SeriesBinding::from_dataset(&app.doc.datasets[0]).unwrap();
+    series.set_primary_color(color);
     let figure = app.build_binding_figure(
         &DataBinding {
             series: vec![series],
@@ -65,8 +67,8 @@ fn single_table_color_override_recolors_bar_polygons() {
     use crate::state::{ChartSpec, DataBinding, SeriesBinding, StackSpec};
     let (app, _) = table_app_with_sigma(vec![0.1, 0.1, 0.1]);
     let color = plotx_figure::Color::rgb(0xaa, 0x22, 0x44);
-    let mut series = SeriesBinding::new(app.doc.datasets[0].resource_id());
-    series.color = Some(color);
+    let mut series = SeriesBinding::from_dataset(&app.doc.datasets[0]).unwrap();
+    series.set_primary_color(color);
     let figure = app.build_binding_figure(
         &DataBinding {
             series: vec![series],
@@ -139,7 +141,7 @@ fn stack_candidates_reject_incompatible_datasets() {
         .push(Dataset::Nmr2D(Box::new(crate::state::Nmr2DDataset::load(
             synthetic_2d(),
         ))));
-    let binding = crate::state::DataBinding::single(app.doc.datasets[0].resource_id());
+    let binding = crate::state::DataBinding::single(&app.doc.datasets[0]);
 
     let candidates = app.stack_candidates(&binding);
     assert!(candidates.contains(&1), "the other 1D spectrum is eligible");
@@ -150,7 +152,7 @@ fn stack_candidates_reject_incompatible_datasets() {
 
     // The 2D primary is a Field-stackable domain, but with no other 2D dataset
     // loaded there is nothing to overlay onto it.
-    let two_d = crate::state::DataBinding::single(app.doc.datasets[2].resource_id());
+    let two_d = crate::state::DataBinding::single(&app.doc.datasets[2]);
     assert!(app.stack_candidates(&two_d).is_empty());
 }
 

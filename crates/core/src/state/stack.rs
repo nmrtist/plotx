@@ -8,7 +8,7 @@ impl PlotxApp {
         let Some(domain) = binding
             .series
             .first()
-            .and_then(|s| self.doc.dataset_index(s.dataset))
+            .and_then(|s| self.doc.dataset_index(s.source.resource))
             .and_then(|index| self.doc.datasets.get(index))
             .map(Dataset::domain)
         else {
@@ -17,7 +17,7 @@ impl PlotxApp {
         domain.stack_kind().is_some()
             && binding.series.iter().all(|s| {
                 self.doc
-                    .dataset_index(s.dataset)
+                    .dataset_index(s.source.resource)
                     .and_then(|index| self.doc.datasets.get(index))
                     .map(Dataset::domain)
                     == Some(domain)
@@ -70,7 +70,7 @@ impl PlotxApp {
         let mut prepared: Vec<(usize, Vec<Series>, Vec<ErrorBar>)> = Vec::new();
         let mut global_peak = 0.0f64;
         for (i, sb) in binding.series.iter().enumerate() {
-            let Some(dataset) = self.doc.dataset_index(sb.dataset) else {
+            let Some(dataset) = self.doc.dataset_index(sb.source.resource) else {
                 continue;
             };
             if !sb.visible {
@@ -83,7 +83,7 @@ impl PlotxApp {
                 .iter()
                 .flat_map(|s| s.points.iter())
                 .fold(0.0f64, |m, p| m.max(p[1].abs()));
-            let factor = sb.scale
+            let factor = sb.line_scale()
                 * if stack.normalize && peak > 0.0 {
                     1.0 / peak
                 } else {
@@ -111,7 +111,7 @@ impl PlotxApp {
         for (i, mut series, mut error_bars) in prepared {
             let sb = &binding.series[i];
             let color = sb
-                .color
+                .primary_color()
                 .unwrap_or(OVERLAY_PALETTE[i % OVERLAY_PALETTE.len()]);
             let label = self.series_label(sb);
             let x_off = if stacked {
@@ -176,24 +176,38 @@ impl PlotxApp {
             .primary_dataset()
             .and_then(|id| self.doc.dataset_index(id))
             .expect("validated data binding has a primary dataset");
-        let mut fig = self.build_full_canvas_figure(primary, &chart, size_mm);
+        let primary_part = binding
+            .series
+            .first()
+            .and_then(|series| self.build_encoded_series_figure(series))
+            .unwrap_or_else(|| self.build_full_canvas_figure(primary, &chart, size_mm));
+        let mut fig = primary_part.clone();
         fig.contours.clear();
         let (mut x_min, mut x_max) = (fig.x.min, fig.x.max);
         let (mut y_min, mut y_max) = (fig.y.min, fig.y.max);
         let mut merged = false;
         for (i, sb) in binding.series.iter().enumerate() {
-            let Some(dataset) = self.doc.dataset_index(sb.dataset) else {
-                continue;
-            };
             if !sb.visible {
                 continue;
             }
-            let part = self.build_full_canvas_figure(dataset, &chart, size_mm);
+            let encoded_contour = matches!(sb.encoding, plotx_figure::SeriesEncoding::Contour(_));
+            let part = if i == 0 {
+                primary_part.clone()
+            } else if let Some(part) = self.build_encoded_series_figure(sb) {
+                part
+            } else {
+                continue;
+            };
             let color = sb
-                .color
+                .primary_color()
                 .unwrap_or(OVERLAY_PALETTE[i % OVERLAY_PALETTE.len()]);
             for mut contour in part.contours {
-                contour.color = color;
+                // A concrete ContourSpec owns independent positive and negative
+                // styling. The legacy chart fallback retains its palette override
+                // until the broad stack migration lands in phase 7.
+                if !encoded_contour {
+                    contour.color = color;
+                }
                 fig.contours.push(contour);
             }
             if merged {
@@ -211,13 +225,13 @@ impl PlotxApp {
         fig.y.min = y_min;
         fig.y.max = y_max;
         fig.show_legend = true;
-        fig
+        self.normalize_binding_figure(fig, size_mm)
     }
 
     pub fn series_label(&self, sb: &SeriesBinding) -> String {
         sb.label.clone().unwrap_or_else(|| {
             self.doc
-                .dataset_by_id(sb.dataset)
+                .dataset_by_id(sb.source.resource)
                 .map(Dataset::display_name)
                 .unwrap_or_default()
         })
@@ -336,7 +350,7 @@ impl PlotxApp {
             series: sel
                 .iter()
                 .filter_map(|&d| self.doc.datasets.get(d))
-                .map(|dataset| SeriesBinding::new(dataset.resource_id()))
+                .filter_map(SeriesBinding::from_dataset)
                 .collect(),
         };
         let mode = match domain.stack_kind() {

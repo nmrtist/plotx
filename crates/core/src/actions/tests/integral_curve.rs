@@ -154,8 +154,8 @@ fn overlay_only_dataset_does_not_contribute_integrals() {
     app.doc.datasets.push(secondary);
     let binding = DataBinding {
         series: vec![
-            SeriesBinding::new(app.doc.datasets[0].resource_id()),
-            SeriesBinding::new(app.doc.datasets[1].resource_id()),
+            SeriesBinding::from_dataset(&app.doc.datasets[0]).unwrap(),
+            SeriesBinding::from_dataset(&app.doc.datasets[1]).unwrap(),
         ],
     };
     let fig = app.build_stacked_figure(&binding, &StackSpec::default(), [120.0, 80.0]);

@@ -42,6 +42,15 @@ impl Theme {
         }
     }
 
+    fn negative_contour_color(&self, i: usize) -> Color {
+        let candidate = self.trace_color(i + 1);
+        if candidate == self.trace_color(i) {
+            Color::rgb(0xd1, 0x24, 0x2a)
+        } else {
+            candidate
+        }
+    }
+
     fn style_library(&self) -> StyleLibrary {
         let mut text = TextBox::label(String::new());
         text.color = self.text_color;
@@ -137,21 +146,25 @@ pub struct ThemeSnapshot {
     pub background: Color,
     pub style_library: StyleLibrary,
     pub object_styles: Vec<(ObjectId, ObjectStyle)>,
-    pub series_colors: Vec<(ObjectId, Vec<Option<Color>>)>,
+    pub series_encodings: Vec<(ObjectId, Vec<plotx_figure::SeriesEncoding>)>,
 }
 
 impl PlotxApp {
     fn capture_theme_snapshot(&self, ci: usize) -> ThemeSnapshot {
         let canvas = &self.doc.canvases[ci];
         let mut object_styles = Vec::new();
-        let mut series_colors = Vec::new();
+        let mut series_encodings = Vec::new();
         for object in &canvas.objects {
             if let Some(style) = object.style() {
                 object_styles.push((object.id, style));
             } else if let Some(plot) = object.plot() {
-                series_colors.push((
+                series_encodings.push((
                     object.id,
-                    plot.binding.series.iter().map(|s| s.color).collect(),
+                    plot.binding
+                        .series
+                        .iter()
+                        .map(|series| series.encoding.clone())
+                        .collect(),
                 ));
             }
         }
@@ -159,7 +172,7 @@ impl PlotxApp {
             background: canvas.background,
             style_library: self.doc.style_library.clone(),
             object_styles,
-            series_colors,
+            series_encodings,
         }
     }
 
@@ -170,9 +183,21 @@ impl PlotxApp {
         for (_, style) in &mut snap.object_styles {
             theme.restyle_object(style);
         }
-        for (_, colors) in &mut snap.series_colors {
-            for (i, color) in colors.iter_mut().enumerate() {
-                *color = Some(theme.trace_color(i));
+        for (_, encodings) in &mut snap.series_encodings {
+            for (i, encoding) in encodings.iter_mut().enumerate() {
+                match encoding {
+                    plotx_figure::SeriesEncoding::Line(line) => {
+                        line.color = plotx_figure::ColorSource::Explicit(theme.trace_color(i));
+                    }
+                    plotx_figure::SeriesEncoding::Contour(contour) => {
+                        contour.style.positive_color =
+                            plotx_figure::ColorSource::Explicit(theme.trace_color(i));
+                        contour.style.negative_color =
+                            plotx_figure::ColorSource::Explicit(theme.negative_contour_color(i));
+                    }
+                    plotx_figure::SeriesEncoding::Heatmap(_)
+                    | plotx_figure::SeriesEncoding::Image(_) => {}
+                }
             }
         }
         snap
@@ -186,10 +211,10 @@ impl PlotxApp {
                     o.set_style(style);
                 }
             }
-            for (id, colors) in &snap.series_colors {
+            for (id, encodings) in &snap.series_encodings {
                 if let Some(plot) = c.object_mut(*id).and_then(|o| o.plot_mut()) {
-                    for (sb, &color) in plot.binding.series.iter_mut().zip(colors) {
-                        sb.color = color;
+                    for (series, encoding) in plot.binding.series.iter_mut().zip(encodings) {
+                        series.encoding = encoding.clone();
                     }
                 }
             }

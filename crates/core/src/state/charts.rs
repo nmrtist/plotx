@@ -1,4 +1,5 @@
-//! The chart registry: the catalog of chart types and the data domains they apply to.
+//! The chart registry. Data domains provide recommended defaults only; concrete
+//! encoding applicability is determined by field capabilities.
 
 use super::*;
 
@@ -52,152 +53,259 @@ pub struct ChartContext {
     pub view_angles: [f32; 2],
 }
 
-/// `id` is persisted in `.plotx`.
-pub struct ChartType {
+/// A chart registration. `recommended_domains` preserves sensible defaults for
+/// existing entry points, but it is never an applicability gate.
+pub struct ChartDescriptor {
     pub id: &'static str,
     pub name: &'static str,
-    pub domains: &'static [DataDomain],
+    pub recommended_domains: &'static [DataDomain],
+    /// Stable `CapabilityId` string identities required by this chart.
+    pub required_capabilities: &'static [&'static str],
     pub needs_column: bool,
     pub build: fn(&Dataset, &ChartContext) -> Option<Figure>,
 }
 
+/// Legacy spelling retained for the broad table-chart surface. New code should
+/// use `ChartDescriptor` and field capabilities.
+pub type ChartType = ChartDescriptor;
+
+impl ChartDescriptor {
+    pub fn is_applicable_to(&self, capabilities: &FieldCapabilities) -> bool {
+        capabilities.supports(self.required_capabilities)
+    }
+}
+
 /// The catalog. The first entry for a domain is that domain's default chart, so
 /// old `.plotx` files (no recorded chart type) map to it.
-static CHART_TYPES: &[ChartType] = &[
-    ChartType {
+static CHART_TYPES: &[ChartDescriptor] = &[
+    ChartDescriptor {
         id: "afm_map",
         name: "AFM Map",
-        domains: &[DataDomain::Afm],
+        recommended_domains: &[DataDomain::Afm],
+        required_capabilities: &[
+            crate::automation::CAP_FIELD_SCALAR_GRID_2D_REGULAR,
+            crate::automation::CAP_FIELD_AFM_MAP,
+        ],
         needs_column: false,
         build: build_afm_map,
     },
-    ChartType {
+    ChartDescriptor {
         id: "afm_force_curve",
         name: "Force Curve",
-        domains: &[DataDomain::Afm],
+        recommended_domains: &[DataDomain::Afm],
+        required_capabilities: &[
+            crate::automation::CAP_FIELD_CURVE_1D,
+            crate::automation::CAP_FIELD_FORCE_CURVE,
+        ],
         needs_column: false,
         build: build_afm_force,
     },
-    ChartType {
+    ChartDescriptor {
         id: "electrophysiology_sweeps",
         name: "Sweeps",
-        domains: &[DataDomain::Electrophysiology],
+        recommended_domains: &[DataDomain::Electrophysiology],
+        required_capabilities: &[
+            crate::automation::CAP_FIELD_CURVE_1D,
+            crate::automation::CAP_FIELD_SWEEP_COLLECTION,
+        ],
         needs_column: false,
         build: build_electrophysiology,
     },
-    ChartType {
+    ChartDescriptor {
         id: "nmr_spectrum",
         name: "Spectrum",
-        domains: &[DataDomain::Nmr1d],
+        recommended_domains: &[DataDomain::Nmr1d],
+        required_capabilities: &[
+            crate::automation::CAP_FIELD_CURVE_1D,
+            crate::automation::CAP_FIELD_NMR_SPECTRUM,
+        ],
         needs_column: false,
         build: build_nmr_spectrum,
     },
-    ChartType {
+    ChartDescriptor {
         id: "nmr_contour",
         name: "Contour",
-        domains: &[DataDomain::Nmr2d],
+        recommended_domains: &[DataDomain::Nmr2d],
+        required_capabilities: &[
+            crate::automation::CAP_FIELD_SCALAR_GRID_2D_REGULAR,
+            crate::automation::CAP_FIELD_NMR_CONTOUR,
+        ],
         needs_column: false,
         build: build_nmr_2d,
     },
-    ChartType {
+    ChartDescriptor {
         id: "nmr_pseudo",
         name: "Stack / analysis",
-        domains: &[DataDomain::PseudoNmr],
+        recommended_domains: &[DataDomain::PseudoNmr],
+        required_capabilities: &[
+            crate::automation::CAP_FIELD_CURVE_1D,
+            crate::automation::CAP_FIELD_NMR_STACK,
+        ],
         needs_column: false,
         build: build_nmr_2d,
     },
-    ChartType {
+    ChartDescriptor {
         id: "table_line",
         name: "Line",
-        domains: &[DataDomain::Table],
+        recommended_domains: &[DataDomain::Table],
+        required_capabilities: &[
+            crate::automation::CAP_FIELD_CURVE_1D,
+            crate::automation::CAP_FIELD_TABLE,
+        ],
         needs_column: false,
         build: build_table_line,
     },
-    ChartType {
+    ChartDescriptor {
         id: "table_bar",
         name: "Bar",
-        domains: &[DataDomain::Table],
+        recommended_domains: &[DataDomain::Table],
+        required_capabilities: &[crate::automation::CAP_FIELD_TABLE],
         needs_column: true,
         build: build_table_bar,
     },
-    ChartType {
+    ChartDescriptor {
         id: "table_bar_grouped",
         name: "Grouped bars",
-        domains: &[DataDomain::Table],
+        recommended_domains: &[DataDomain::Table],
+        required_capabilities: &[crate::automation::CAP_FIELD_TABLE],
         needs_column: false,
         build: build_table_bar_grouped,
     },
-    ChartType {
+    ChartDescriptor {
         id: "table_histogram",
         name: "Histogram",
-        domains: &[DataDomain::Table],
+        recommended_domains: &[DataDomain::Table],
+        required_capabilities: &[crate::automation::CAP_FIELD_TABLE],
         needs_column: true,
         build: build_table_histogram,
     },
-    ChartType {
+    ChartDescriptor {
         id: "table_box",
         name: "Box",
-        domains: &[DataDomain::Table],
+        recommended_domains: &[DataDomain::Table],
+        required_capabilities: &[crate::automation::CAP_FIELD_TABLE],
         needs_column: false,
         build: build_table_box,
     },
-    ChartType {
+    ChartDescriptor {
         id: "table_violin",
         name: "Violin",
-        domains: &[DataDomain::Table],
+        recommended_domains: &[DataDomain::Table],
+        required_capabilities: &[crate::automation::CAP_FIELD_TABLE],
         needs_column: false,
         build: build_table_violin,
     },
-    ChartType {
+    ChartDescriptor {
         id: "table_heatmap",
         name: "Heatmap",
-        domains: &[DataDomain::Table],
+        recommended_domains: &[DataDomain::Table],
+        required_capabilities: &[crate::automation::CAP_FIELD_TABLE],
         needs_column: false,
         build: build_table_heatmap,
     },
-    ChartType {
+    ChartDescriptor {
         id: "table_pie",
         name: "Pie",
-        domains: &[DataDomain::Table],
+        recommended_domains: &[DataDomain::Table],
+        required_capabilities: &[crate::automation::CAP_FIELD_TABLE],
         needs_column: true,
         build: build_table_pie,
     },
-    ChartType {
+    ChartDescriptor {
         id: "table_surface",
         name: "Surface 3D",
-        domains: &[DataDomain::Table],
+        recommended_domains: &[DataDomain::Table],
+        required_capabilities: &[crate::automation::CAP_FIELD_TABLE],
         needs_column: false,
         build: build_table_surface,
     },
 ];
 
-pub fn chart_type(id: &str) -> Option<&'static ChartType> {
+pub fn chart_type(id: &str) -> Option<&'static ChartDescriptor> {
     CHART_TYPES.iter().find(|c| c.id == id)
 }
 
-pub fn chart_types_for(domain: DataDomain) -> Vec<&'static ChartType> {
-    CHART_TYPES
+pub fn chart_types_for_capabilities(
+    capabilities: &FieldCapabilities,
+    preferred_domain: DataDomain,
+) -> Vec<&'static ChartDescriptor> {
+    let mut charts = CHART_TYPES
         .iter()
-        .filter(|c| c.domains.contains(&domain))
-        .collect()
+        .filter(|chart| chart.is_applicable_to(capabilities))
+        .collect::<Vec<_>>();
+    // Domains express presentation preference only. Applicability was decided
+    // above from the field's capabilities.
+    charts.sort_by_key(|chart| !chart.recommended_domains.contains(&preferred_domain));
+    charts
 }
 
-/// The chart type a stored id resolves to for a domain: the id itself when it
-/// is valid there, otherwise the domain default (old files, ids from newer
-/// builds, or a binding switched to another domain).
-pub fn resolved_chart_type(domain: DataDomain, id: &str) -> &'static ChartType {
+/// Resolve an unknown stored id to the domain's presentation default. Callers
+/// that materialize a binding must additionally check field capabilities.
+pub fn resolved_chart_type(domain: DataDomain, id: &str) -> &'static ChartDescriptor {
+    chart_type(id).unwrap_or_else(|| default_chart_type(domain))
+}
+
+/// Resolve a stored chart through the same field-capability gate used by the
+/// gallery. This is the legacy-chart counterpart of encoding materialization.
+pub fn resolved_chart_type_for_field(
+    capabilities: &FieldCapabilities,
+    domain: DataDomain,
+    id: &str,
+) -> &'static ChartDescriptor {
     chart_type(id)
-        .filter(|candidate| candidate.domains.contains(&domain))
+        .filter(|chart| chart.is_applicable_to(capabilities))
         .unwrap_or_else(|| default_chart_type(domain))
 }
 
 /// A domain's default chart type (its first registered entry). Every domain has
 /// at least one, so this never fails for a domain produced by `Dataset::domain`.
-pub fn default_chart_type(domain: DataDomain) -> &'static ChartType {
+pub fn default_chart_type(domain: DataDomain) -> &'static ChartDescriptor {
     CHART_TYPES
         .iter()
-        .find(|c| c.domains.contains(&domain))
+        .find(|c| c.recommended_domains.contains(&domain))
         .expect("every data domain registers at least one chart type")
+}
+
+/// The domain-neutral visual encoding catalog. Adding a provider that exposes
+/// a capability automatically makes the matching descriptor available; no
+/// chart registry domain branch is needed.
+pub struct EncodingDescriptor {
+    pub id: &'static str,
+    pub required_capabilities: &'static [&'static str],
+}
+
+impl EncodingDescriptor {
+    pub fn is_applicable_to(&self, capabilities: &FieldCapabilities) -> bool {
+        capabilities.supports(self.required_capabilities)
+    }
+}
+
+pub static ENCODING_DESCRIPTORS: &[EncodingDescriptor] = &[
+    EncodingDescriptor {
+        id: "line",
+        required_capabilities: &[crate::automation::CAP_FIELD_CURVE_1D],
+    },
+    EncodingDescriptor {
+        id: "contour",
+        required_capabilities: &[crate::automation::CAP_FIELD_SCALAR_GRID_2D_REGULAR],
+    },
+    EncodingDescriptor {
+        id: "heatmap",
+        required_capabilities: &[crate::automation::CAP_FIELD_SCALAR_GRID_2D_REGULAR],
+    },
+    EncodingDescriptor {
+        id: "image",
+        required_capabilities: &[crate::automation::CAP_FIELD_COLORED_RASTER_2D],
+    },
+];
+
+pub fn encoding_descriptors_for(
+    capabilities: &FieldCapabilities,
+) -> Vec<&'static EncodingDescriptor> {
+    ENCODING_DESCRIPTORS
+        .iter()
+        .filter(|descriptor| descriptor.is_applicable_to(capabilities))
+        .collect()
 }
 
 /// Default 3D surface view: slightly rotated and elevated so all three faces read.
@@ -261,11 +369,23 @@ fn build_electrophysiology(dataset: &Dataset, _ctx: &ChartContext) -> Option<Fig
 }
 
 fn build_afm_map(dataset: &Dataset, ctx: &ChartContext) -> Option<Figure> {
-    dataset.as_afm()?.map_figure(ctx.colormap)
+    let afm = dataset.as_afm()?;
+    let field = dataset
+        .field_descriptors()
+        .into_iter()
+        .find(|field| field.local_id.starts_with("afm.channel."))?
+        .id;
+    afm.map_figure(field, ctx.colormap)
 }
 
 fn build_afm_force(dataset: &Dataset, _ctx: &ChartContext) -> Option<Figure> {
-    dataset.as_afm()?.force_figure()
+    let afm = dataset.as_afm()?;
+    let field = dataset
+        .field_descriptors()
+        .into_iter()
+        .find(|field| field.local_id == "afm.force_curve")?
+        .id;
+    afm.force_figure(field)
 }
 
 fn build_nmr_2d(dataset: &Dataset, _ctx: &ChartContext) -> Option<Figure> {
@@ -316,7 +436,11 @@ mod tests {
 
     #[test]
     fn table_domain_lists_all_generic_charts_with_line_default() {
-        let ids: Vec<&str> = chart_types_for(DataDomain::Table)
+        let capabilities = FieldCapabilities::new([
+            crate::automation::CapabilityId::new(crate::automation::CAP_FIELD_CURVE_1D),
+            crate::automation::CapabilityId::new(crate::automation::CAP_FIELD_TABLE),
+        ]);
+        let ids: Vec<&str> = chart_types_for_capabilities(&capabilities, DataDomain::Table)
             .iter()
             .map(|c| c.id)
             .collect();
@@ -363,5 +487,44 @@ mod tests {
         ] {
             assert!(chart_type(default_chart_type(domain).id).is_some());
         }
+    }
+
+    #[test]
+    fn scalar_field_capability_unlocks_contour_and_heatmap_without_domain_registration() {
+        let capabilities = FieldCapabilities::new([crate::automation::CapabilityId::new(
+            crate::automation::CAP_FIELD_SCALAR_GRID_2D_REGULAR,
+        )]);
+        let ids = encoding_descriptors_for(&capabilities)
+            .into_iter()
+            .map(|descriptor| descriptor.id)
+            .collect::<Vec<_>>();
+        assert_eq!(ids, ["contour", "heatmap"]);
+    }
+
+    #[test]
+    fn colored_raster_unlocks_only_image_not_scalar_encodings() {
+        let capabilities = FieldCapabilities::new([crate::automation::CapabilityId::new(
+            crate::automation::CAP_FIELD_COLORED_RASTER_2D,
+        )]);
+        let ids = encoding_descriptors_for(&capabilities)
+            .into_iter()
+            .map(|descriptor| descriptor.id)
+            .collect::<Vec<_>>();
+        assert_eq!(ids, ["image"]);
+    }
+
+    #[test]
+    fn malformed_colored_scalar_field_is_excluded_from_contour_and_heatmap() {
+        let capabilities = FieldCapabilities::new([
+            crate::automation::CapabilityId::new(
+                crate::automation::CAP_FIELD_SCALAR_GRID_2D_REGULAR,
+            ),
+            crate::automation::CapabilityId::new(crate::automation::CAP_FIELD_COLORED_RASTER_2D),
+        ]);
+        let ids = encoding_descriptors_for(&capabilities)
+            .into_iter()
+            .map(|descriptor| descriptor.id)
+            .collect::<Vec<_>>();
+        assert_eq!(ids, ["image"]);
     }
 }

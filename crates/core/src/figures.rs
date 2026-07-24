@@ -2,11 +2,15 @@
 
 use plotx_analysis::diffusion::DiffusionMap;
 use plotx_analysis::ilt::IltResult;
-use plotx_figure::{Annotation, Axis, AxisFrame, Color, Contour, Figure, Series};
+use plotx_analysis::robust::{deplaned_location_scale, robust_difference_mad};
+use plotx_figure::{
+    Annotation, Axis, AxisFrame, Color, Contour, ContourBasePolicy, ContourLevelSpec, ContourSpec,
+    Figure, Series,
+};
 use plotx_io::NmrData;
 use plotx_processing::{Preset2D, Spectrum, Spectrum2D, StackSpectrum};
 
-use crate::state::ResolvedPeak;
+use crate::state::{ResolvedPeak, default_contour_spec, scalar_grid_capabilities};
 
 pub fn build_figure(data: &NmrData, spec: &Spectrum, peaks: &[ResolvedPeak]) -> Figure {
     let (ppm_lo, ppm_hi) = spec.ppm_bounds();
@@ -35,22 +39,18 @@ pub fn apply_peak_labels(mut fig: Figure, peaks: &[ResolvedPeak]) -> Figure {
     fig
 }
 
-/// Contour lowest level as a fraction of the peak, and the number/ratio of
-/// geometric levels drawn above it.
-pub const CONTOUR_BASE_FRAC: f64 = 0.04;
-pub const CONTOUR_LEVELS: usize = 14;
-pub const CONTOUR_RATIO: f64 = 1.35;
-
 /// Build a contour figure from a processed true-2D spectrum. F2 (direct) is the
 /// x-axis with high ppm on the left; F1 (indirect) is the y-axis with high ppm
 /// at the bottom (low ppm at the top) — the standard 2D NMR orientation.
-pub fn build_figure_2d(spec: &Spectrum2D, preset: Preset2D) -> Figure {
-    build_figure_2d_cancellable(spec, preset, &|| false).expect("non-cancelling contour figure")
+pub fn build_figure_2d(spec: &Spectrum2D, preset: Preset2D, contour: &ContourSpec) -> Figure {
+    build_figure_2d_cancellable(spec, preset, contour, &|| false)
+        .expect("non-cancelling contour figure")
 }
 
 pub fn build_figure_2d_cancellable(
     spec: &Spectrum2D,
     preset: Preset2D,
+    contour: &ContourSpec,
     cancelled: &impl Fn() -> bool,
 ) -> Option<Figure> {
     if cancelled() {
@@ -68,40 +68,187 @@ pub fn build_figure_2d_cancellable(
 
     if spec.f2_size >= 2 && spec.f1_size >= 2 {
         let z = spec.real();
-        // The real (absorption) plane carries signed lobes, so mirror the positive
-        // geometric levels to negative.
-        let peak = z.iter().fold(0.0f32, |m, &v| m.max(v.abs())) as f64;
-        let positive = plotx_render::contour::geometric_levels(
-            peak * CONTOUR_BASE_FRAC,
-            peak,
-            CONTOUR_LEVELS,
-            CONTOUR_RATIO,
-        );
-        let levels: Vec<f64> = positive
-            .iter()
-            .rev()
-            .map(|l| -l)
-            .chain(positive.iter().copied())
-            .collect();
         // Grid columns run low→high ppm (index 0 = f2_ppm[0]); rows likewise.
-        let segments = plotx_render::contour::segments_cancellable(
-            &z,
-            spec.f1_size,
-            spec.f2_size,
+        let bounds = [
             spec.f2_ppm[0],
             spec.f2_ppm[spec.f2_size - 1],
             spec.f1_ppm[0],
             spec.f1_ppm[spec.f1_size - 1],
-            &levels,
-            cancelled,
-        )?;
-        fig = fig.with_contour(Contour {
-            segments,
-            color: Color::TRACE,
-            width: 0.7,
-        });
+        ];
+        let positive = contour_levels(&z, spec.f1_size, spec.f2_size, &contour.positive, false);
+        let segments = if positive.is_empty() {
+            Vec::new()
+        } else {
+            contour_segments(&z, spec.f1_size, spec.f2_size, bounds, &positive, cancelled)?
+        };
+        if !segments.is_empty() {
+            fig = fig.with_contour(Contour {
+                segments,
+                color: contour.style.positive_color.resolve(),
+                width: contour.style.width.get(),
+            });
+        }
+        if let Some(negative) = contour.negative.as_ref() {
+            let levels = contour_levels(&z, spec.f1_size, spec.f2_size, negative, true);
+            let segments = if levels.is_empty() {
+                Vec::new()
+            } else {
+                contour_segments(&z, spec.f1_size, spec.f2_size, bounds, &levels, cancelled)?
+            };
+            if !segments.is_empty() {
+                fig = fig.with_contour(Contour {
+                    segments,
+                    color: contour.style.negative_color.resolve(),
+                    width: contour.style.width.get(),
+                });
+            }
+        }
     }
     Some(fig)
+}
+
+fn contour_segments(
+    values: &[f32],
+    rows: usize,
+    cols: usize,
+    bounds: [f64; 4],
+    levels: &[f64],
+    cancelled: &impl Fn() -> bool,
+) -> Option<Vec<[[f64; 2]; 2]>> {
+    plotx_render::contour::segments_cancellable(
+        values, rows, cols, bounds[0], bounds[1], bounds[2], bounds[3], levels, cancelled,
+    )
+}
+
+pub(crate) fn scalar_contour_overlays(
+    values: &[f32],
+    rows: usize,
+    cols: usize,
+    bounds: [f64; 4],
+    contour: &ContourSpec,
+) -> Vec<Contour> {
+    scalar_contour_overlays_cancellable(values, rows, cols, bounds, contour, &|| false)
+        .unwrap_or_default()
+}
+
+pub(crate) fn scalar_contour_overlays_cancellable(
+    values: &[f32],
+    rows: usize,
+    cols: usize,
+    bounds: [f64; 4],
+    contour: &ContourSpec,
+    cancelled: &impl Fn() -> bool,
+) -> Option<Vec<Contour>> {
+    if cancelled() {
+        return None;
+    }
+    let mut overlays = Vec::new();
+    let positive = contour_levels(values, rows, cols, &contour.positive, false);
+    if !positive.is_empty() {
+        let segments = contour_segments(values, rows, cols, bounds, &positive, cancelled)?;
+        if !segments.is_empty() {
+            overlays.push(Contour {
+                segments,
+                color: contour.style.positive_color.resolve(),
+                width: contour.style.width.get(),
+            });
+        }
+    }
+    if let Some(negative) = contour.negative.as_ref() {
+        let levels = contour_levels(values, rows, cols, negative, true);
+        if !levels.is_empty() {
+            let segments = contour_segments(values, rows, cols, bounds, &levels, cancelled)?;
+            if !segments.is_empty() {
+                overlays.push(Contour {
+                    segments,
+                    color: contour.style.negative_color.resolve(),
+                    width: contour.style.width.get(),
+                });
+            }
+        }
+    }
+    Some(overlays)
+}
+
+/// Resolve a level policy directly for the current model-layer renderer. The
+/// phase-4 cache/job split will memoize estimates; this pure calculation keeps
+/// policy state out of marching squares in the meantime.
+fn contour_levels(
+    values: &[f32],
+    rows: usize,
+    cols: usize,
+    level: &ContourLevelSpec,
+    negative: bool,
+) -> Vec<f64> {
+    let Some((minimum, maximum)) = finite_range(values) else {
+        return Vec::new();
+    };
+    let peak = if negative {
+        -minimum.min(0.0)
+    } else {
+        maximum.max(0.0)
+    };
+    if peak <= 0.0 {
+        return Vec::new();
+    }
+    let mut base = match &level.base {
+        ContourBasePolicy::Absolute(value) => value.get(),
+        ContourBasePolicy::NoiseSigma { multiplier, .. } => {
+            robust_difference_mad(values, rows, cols) * multiplier.get()
+        }
+        ContourBasePolicy::BackgroundScale { multiplier, .. } => {
+            let (location, scale) = deplaned_location_scale(values, rows, cols);
+            (location + multiplier.get() * scale).abs()
+        }
+        ContourBasePolicy::FractionOfRange(fraction) => {
+            minimum + fraction.get() * (maximum - minimum)
+        }
+    };
+    if level.count == 1 {
+        // One level always means one visible, interior contour. A policy at the
+        // exact peak has no crossing, so degenerate estimates resolve halfway
+        // to the signed peak rather than silently yielding an empty figure.
+        if !base.is_finite() || base <= 0.0 || base >= peak {
+            base = peak / 2.0;
+        }
+        return (base > 0.0 && base < peak)
+            .then_some(if negative { -base } else { base })
+            .into_iter()
+            .collect();
+    }
+    if !base.is_finite() || base <= 0.0 || base >= peak {
+        // A perfectly synthetic/noiseless grid has a zero MAD estimate. Use
+        // the user-selected ladder span rather than restoring a hidden peak
+        // fraction, so the concrete `ContourLevelSpec` still controls output.
+        base = peak
+            / level
+                .ratio
+                .get()
+                .powi(i32::from(level.count.saturating_sub(1)));
+    }
+    if !base.is_finite() || base <= 0.0 || base >= peak {
+        return Vec::new();
+    }
+    let levels = plotx_render::contour::geometric_levels(
+        base,
+        peak,
+        usize::from(level.count),
+        level.ratio.get(),
+    );
+    if negative {
+        levels.into_iter().map(|value| -value).collect()
+    } else {
+        levels
+    }
+}
+
+fn finite_range(values: &[f32]) -> Option<(f64, f64)> {
+    let mut finite = values.iter().copied().filter(|value| value.is_finite());
+    let first = f64::from(finite.next()?);
+    Some(finite.fold((first, first), |(minimum, maximum), value| {
+        let value = f64::from(value);
+        (minimum.min(value), maximum.max(value))
+    }))
 }
 
 /// Build a waterfall figure from a pseudo-2D stack: the direct-dimension
@@ -235,23 +382,18 @@ pub fn build_dosy_figure_cancellable(
             }
         }
     }
-    let peak = grid.iter().cloned().fold(0.0f32, f32::max) as f64;
     let mut fig = Figure::new(format!("DOSY — {source}"), x, y).with_axis_frame(AxisFrame::Box);
-    if peak > 0.0 {
-        let levels = plotx_render::contour::geometric_levels(
-            peak * CONTOUR_BASE_FRAC,
-            peak,
-            CONTOUR_LEVELS,
-            CONTOUR_RATIO,
-        );
+    let contour = bounded_scalar_contour_spec();
+    let levels = contour_levels(&grid, NY, NX, &contour.positive, false);
+    if !levels.is_empty() {
         // Grid rows map onto [logd_lo, logd_hi], cols onto [ppm_lo, ppm_hi].
         let segments = plotx_render::contour::segments_cancellable(
             &grid, NY, NX, ppm_lo, ppm_hi, logd_lo, logd_hi, &levels, cancelled,
         )?;
         fig = fig.with_contour(Contour {
             segments,
-            color: Color::TRACE,
-            width: 0.7,
+            color: contour.style.positive_color.resolve(),
+            width: contour.style.width.get(),
         });
     }
     Some(fig)
@@ -311,16 +453,11 @@ pub fn build_ilt_figure_cancellable(
             grid[r * nx + c] = a as f32;
         }
     }
-    let peak = grid.iter().cloned().fold(0.0f32, f32::max) as f64;
     let mut fig =
         Figure::new(format!("DOSY (ILT) — {source}"), x, y).with_axis_frame(AxisFrame::Box);
-    if peak > 0.0 {
-        let levels = plotx_render::contour::geometric_levels(
-            peak * CONTOUR_BASE_FRAC,
-            peak,
-            CONTOUR_LEVELS,
-            CONTOUR_RATIO,
-        );
+    let contour = bounded_scalar_contour_spec();
+    let levels = contour_levels(&grid, ny, nx, &contour.positive, false);
+    if !levels.is_empty() {
         let segments = plotx_render::contour::segments_cancellable(
             &grid,
             ny,
@@ -334,11 +471,16 @@ pub fn build_ilt_figure_cancellable(
         )?;
         fig = fig.with_contour(Contour {
             segments,
-            color: Color::TRACE,
-            width: 0.7,
+            color: contour.style.positive_color.resolve(),
+            width: contour.style.width.get(),
         });
     }
     Some(fig)
+}
+
+fn bounded_scalar_contour_spec() -> ContourSpec {
+    let capabilities = scalar_grid_capabilities(true, &[crate::automation::CAP_FIELD_BOUNDED]);
+    default_contour_spec(&capabilities)
 }
 
 #[cfg(test)]
@@ -376,7 +518,11 @@ mod tests {
     // share the projector, so a wrong flip is invisible in preview).
     #[test]
     fn contour_places_low_f1_ppm_near_the_top() {
-        let fig = build_figure_2d(&spectrum_2d(), Preset2D::Hsqc);
+        let fig = build_figure_2d(
+            &spectrum_2d(),
+            Preset2D::Hsqc,
+            &bounded_scalar_contour_spec(),
+        );
         assert_eq!(fig.axis_frame, AxisFrame::Box);
         let proj = Projector::new(&fig, Rect::new(0.0, 0.0, 400.0, 300.0), &Margins::default());
         let (_, py_low_ppm) = proj.project([1.5, 0.0]);
@@ -393,5 +539,62 @@ mod tests {
         assert_eq!(axis_label("13C"), "¹³C chemical shift (ppm)");
         assert_eq!(axis_label("1H"), "¹H chemical shift (ppm)");
         assert_eq!(axis_label("F"), "F chemical shift (ppm)");
+    }
+
+    #[test]
+    fn background_scale_removes_a_planar_afm_tilt_before_measuring_mad() {
+        let values = (0..4)
+            .flat_map(|row| (0..4).map(move |col| 10.0 + 3.0 * col as f32 + 2.0 * row as f32))
+            .collect::<Vec<_>>();
+        let (location, scale) = deplaned_location_scale(&values, 4, 4);
+
+        assert!((location - 17.5).abs() < 1e-10);
+        assert!(scale < 1e-10, "a plane is not background roughness");
+    }
+
+    #[test]
+    fn finite_range_preserves_signed_and_baselined_fields() {
+        assert_eq!(finite_range(&[-40.0, -5.0]), Some((-40.0, -5.0)));
+        assert_eq!(finite_range(&[500.0, 600.0]), Some((500.0, 600.0)));
+        assert_eq!(finite_range(&[f32::NAN, f32::INFINITY]), None);
+    }
+
+    #[test]
+    fn fraction_of_range_starts_from_the_field_minimum() {
+        let level = ContourLevelSpec {
+            base: ContourBasePolicy::FractionOfRange(
+                plotx_figure::UnitInterval::new(0.04).unwrap(),
+            ),
+            count: 1,
+            ratio: plotx_figure::PositiveFiniteF64::new(1.35).unwrap(),
+        };
+        assert_eq!(
+            contour_levels(&[500.0, 600.0], 1, 2, &level, false),
+            [504.0]
+        );
+    }
+
+    #[test]
+    fn all_negative_fields_get_negative_levels() {
+        let level = ContourLevelSpec {
+            base: ContourBasePolicy::Absolute(plotx_figure::PositiveFiniteF64::new(10.0).unwrap()),
+            count: 1,
+            ratio: plotx_figure::PositiveFiniteF64::new(1.35).unwrap(),
+        };
+        assert_eq!(contour_levels(&[-40.0, -5.0], 1, 2, &level, true), [-10.0]);
+        assert!(contour_levels(&[-40.0, -5.0], 1, 2, &level, false).is_empty());
+    }
+
+    #[test]
+    fn one_level_contour_uses_an_interior_fallback_for_degenerate_mad() {
+        let level = ContourLevelSpec {
+            base: ContourBasePolicy::NoiseSigma {
+                multiplier: plotx_figure::PositiveFiniteF64::new(5.0).unwrap(),
+                estimator: plotx_figure::EstimatorSelection::FollowLatest,
+            },
+            count: 1,
+            ratio: plotx_figure::PositiveFiniteF64::new(1.35).unwrap(),
+        };
+        assert_eq!(contour_levels(&[0.0, 2.0], 1, 2, &level, false), [1.0]);
     }
 }

@@ -27,6 +27,8 @@ pub struct NmrDataset {
     /// Stable automation and persistence identity. Array positions remain a UI
     /// implementation detail and must never escape into saved references.
     pub resource_id: DatasetId,
+    /// Persisted child-field identity allocator and key mapping.
+    pub field_catalog: FieldCatalog,
     pub data: NmrData,
     pub base: Spectrum,
     pub pipeline: AxisPipeline,
@@ -65,6 +67,7 @@ impl NmrDataset {
         let spectrum = reapply(&base, &pipeline);
         let mut result = Self {
             resource_id: DatasetId::new(),
+            field_catalog: nmr_field_catalog(),
             data,
             base,
             pipeline,
@@ -140,6 +143,8 @@ impl NmrDataset {
 pub struct Nmr2DDataset {
     /// Stable automation and persistence identity.
     pub resource_id: DatasetId,
+    /// Persisted child-field identity allocator and key mapping.
+    pub field_catalog: FieldCatalog,
     pub data: Arc<NmrData2D>,
     pub params: Params2D,
     /// Persistent owner-local allocator shared by both axes.
@@ -205,6 +210,7 @@ impl Nmr2DDataset {
         let processed_figure = Arc::new(build_processed_figure(&processed, preset));
         let mut result = Self {
             resource_id: DatasetId::new(),
+            field_catalog: nmr2d_field_catalog(),
             data: Arc::new(data),
             base_params: params.clone(),
             base_stale: false,

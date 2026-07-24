@@ -182,6 +182,8 @@ pub const SHEET_MAX_ROWS: usize = 24;
 #[derive(Clone)]
 pub struct TableDataset {
     pub resource_id: crate::state::DatasetId,
+    /// Persisted identity for the table's default series field.
+    pub field_catalog: crate::state::FieldCatalog,
     /// Executable extraction recipe used to refresh this immutable table.
     pub provenance: Option<TableProvenance>,
     /// Domain constants consumed by analysis bindings.
@@ -225,6 +227,7 @@ impl TableDataset {
     pub fn from_typed(typed_state: TypedTableState) -> Self {
         Self {
             resource_id: new_resource_id(),
+            field_catalog: crate::state::table_field_catalog(),
             provenance: None,
             meta: TableMeta::default(),
             curve_fit_analyses: Vec::new(),

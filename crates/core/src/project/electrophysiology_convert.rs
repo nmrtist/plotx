@@ -126,7 +126,11 @@ pub(super) fn electrophysiology_from_object(
             )));
         }
     };
-    Ok(Dataset::Electrophysiology(Box::new(recording)))
+    let dataset = Dataset::Electrophysiology(Box::new(recording));
+    dataset
+        .validate_field_catalog()
+        .map_err(ProjectError::Invalid)?;
+    Ok(dataset)
 }
 
 /// Traversal order shared by save and load so the length-prefixed blob is filled

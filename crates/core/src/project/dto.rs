@@ -353,7 +353,6 @@ pub struct ViewCanvasObject {
     /// it when zero keeps it out of text/shape/label objects, where it is noise.
     #[serde(default, skip_serializing_if = "is_zero_u64")]
     pub next_series_id: u64,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub series: Vec<SeriesBindingDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chart_type: Option<String>,
@@ -416,29 +415,19 @@ fn caption_visible_default() -> bool {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct SeriesBindingDto {
-    /// Owner-local series identity. Optional on read: a series list written
-    /// without ids falls back to positional numbering, which keeps the entries
-    /// distinct — a plain zero default would collapse every series onto id 0.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub id: Option<u64>,
+    /// Owner-local series identity. It is mandatory because a persisted series
+    /// is an addressable component, not a position in an overlay list.
+    pub id: u64,
     pub input: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub color: Option<[u8; 3]>,
+    /// Dataset-local stable field identity.
+    pub field: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
-    /// Multiplier applied before stacking; defaults to 1.0.
-    #[serde(default = "one_f64", skip_serializing_if = "is_one_f64")]
-    pub scale: f64,
+    /// The complete, concrete document encoding. Auto is creation-only and
+    /// intentionally cannot be represented here.
+    pub encoding: plotx_figure::SeriesEncoding,
     #[serde(default = "bool_true", skip_serializing_if = "is_true")]
     pub visible: bool,
-}
-
-fn one_f64() -> f64 {
-    1.0
-}
-
-fn is_one_f64(v: &f64) -> bool {
-    (*v - 1.0).abs() < f64::EPSILON
 }
 
 fn bool_true() -> bool {

@@ -376,7 +376,7 @@ fn single_table_figure_gains_line_fit_overlays() {
     assert_eq!(app.doc.datasets[1].line_fits().len(), 1);
 
     let fig = app.build_binding_figure(
-        &DataBinding::single(app.doc.datasets[1].resource_id()),
+        &DataBinding::single(&app.doc.datasets[1]),
         &ChartSpec::default_for(DataDomain::Table),
         &StackSpec::default(),
         [120.0, 80.0],
@@ -423,7 +423,7 @@ fn non_line_table_charts_skip_line_fit_overlays() {
         "table_surface",
     ] {
         let fig = app.build_binding_figure(
-            &DataBinding::single(app.doc.datasets[1].resource_id()),
+            &DataBinding::single(&app.doc.datasets[1]),
             &ChartSpec {
                 type_id: id.to_owned(),
                 ..ChartSpec::default()
@@ -450,8 +450,8 @@ fn stacked_figures_exclude_line_fit_overlays() {
 
     let binding = DataBinding {
         series: vec![
-            SeriesBinding::new(app.doc.datasets[0].resource_id()),
-            SeriesBinding::new(app.doc.datasets[1].resource_id()),
+            SeriesBinding::from_dataset(&app.doc.datasets[0]).unwrap(),
+            SeriesBinding::from_dataset(&app.doc.datasets[1]).unwrap(),
         ],
     };
     let stack = StackSpec {
@@ -473,8 +473,8 @@ fn single_plot_color_override_leaves_overlay_colors_alone() {
     ));
 
     let override_color = Color::rgb(0x11, 0x22, 0x33);
-    let mut binding = DataBinding::single(app.doc.datasets[0].resource_id());
-    binding.series[0].color = Some(override_color);
+    let mut binding = DataBinding::single(&app.doc.datasets[0]);
+    binding.series[0].set_primary_color(override_color);
     let fig = app.build_binding_figure(
         &binding,
         &ChartSpec::default_for(DataDomain::Nmr1d),

@@ -3,6 +3,7 @@ use super::convert_recipes::{nmr2d_recipe_extensions, read_regions};
 use super::electrophysiology_convert::{
     electrophysiology_from_object, electrophysiology_to_objects,
 };
+use super::field_catalog::{read as read_field_catalog, validate_series};
 use super::*;
 use crate::state::SeriesId;
 pub fn dataset_to_objects(
@@ -28,7 +29,8 @@ pub fn dataset_to_objects(
                 extensions: serde_json::json!({
                     "plotx.nmr": {
                         "source": &n.data.source
-                    }
+                    },
+                    "plotx.fields": &n.field_catalog
                 }),
             };
             let recipe = RecipeObject {
@@ -81,7 +83,8 @@ pub fn dataset_to_objects(
                         "experiment_hint": &n.data.experiment,
                         "pseudo_axis": n.data.pseudo_axis.as_ref().map(pseudo_axis_to_dto),
                         "diffusion": n.data.diffusion.as_ref().map(diffusion_to_dto),
-                    }
+                    },
+                    "plotx.fields": &n.field_catalog
                 }),
             };
             let recipe = RecipeObject {
@@ -135,9 +138,9 @@ pub fn dataset_to_objects(
                 },
                 extensions: serde_json::json!({
                     "plotx.afm": {
-                        "selected_channel": afm.selected_channel,
                         "selected_pixel": afm.selected_pixel
-                    }
+                    },
+                    "plotx.fields": &afm.field_catalog
                 }),
             };
             let recipe = RecipeObject {
@@ -165,24 +168,24 @@ pub fn object_to_dataset(
         let raw = read_bytes(zip, &data.payload.blob)?;
         let decoded = super::afm_convert::decode_afm(&raw)?;
         let mut dataset = crate::state::AfmDataset::load(decoded);
+        dataset.field_catalog = read_field_catalog(data)?;
         dataset.name = data.label.clone();
-        if let Some(state) = data.extensions.get("plotx.afm") {
-            dataset.selected_channel = state
-                .get("selected_channel")
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(0) as usize;
-            if let Some(pixel) = state
+        if let Some(state) = data.extensions.get("plotx.afm")
+            && let Some(pixel) = state
                 .get("selected_pixel")
                 .and_then(serde_json::Value::as_array)
-                && let (Some(x), Some(y)) = (
-                    pixel.first().and_then(serde_json::Value::as_u64),
-                    pixel.get(1).and_then(serde_json::Value::as_u64),
-                )
-            {
-                dataset.selected_pixel = [x as usize, y as usize];
-            }
+            && let (Some(x), Some(y)) = (
+                pixel.first().and_then(serde_json::Value::as_u64),
+                pixel.get(1).and_then(serde_json::Value::as_u64),
+            )
+        {
+            dataset.selected_pixel = [x as usize, y as usize];
         }
-        return Ok(Dataset::Afm(Box::new(dataset)));
+        let dataset = Dataset::Afm(Box::new(dataset));
+        dataset
+            .validate_field_catalog()
+            .map_err(ProjectError::Invalid)?;
+        return Ok(dataset);
     }
     if data.classification.domain == "electrophysiology"
         && data.classification.object == "recording"
@@ -234,10 +237,15 @@ pub fn object_to_dataset(
                 source: nmr_source(data),
                 group_delay: dim.group_delay.unwrap_or(0.0),
             });
+            dataset.field_catalog = read_field_catalog(data)?;
             apply_1d_recipe(&mut dataset, recipe)?;
             dataset.name = data.label.clone();
             dataset.retransform();
-            Ok(Dataset::Nmr(Box::new(dataset)))
+            let dataset = Dataset::Nmr(Box::new(dataset));
+            dataset
+                .validate_field_catalog()
+                .map_err(ProjectError::Invalid)?;
+            Ok(dataset)
         }
         2 => {
             let rows = *data
@@ -289,6 +297,7 @@ pub fn object_to_dataset(
                 nus: None,
                 source: nmr_source(data),
             });
+            dataset.field_catalog = read_field_catalog(data)?;
             apply_2d_recipe(&mut dataset, recipe);
             read_regions(&mut dataset, recipe);
             read_integrals_2d(&mut dataset, recipe)?;
@@ -297,7 +306,11 @@ pub fn object_to_dataset(
             if let Err(error) = dataset.recompute_integrals() {
                 dataset.integral_error = Some(error.to_string());
             }
-            Ok(Dataset::Nmr2D(Box::new(dataset)))
+            let dataset = Dataset::Nmr2D(Box::new(dataset));
+            dataset
+                .validate_field_catalog()
+                .map_err(ProjectError::Invalid)?;
+            Ok(dataset)
         }
         n => Err(ProjectError::Unsupported(format!(
             "NMR acquisitions with {n} dimensions"
@@ -454,19 +467,25 @@ pub fn canvas_to_view(
                         .map(|sb| {
                             let dataset = datasets
                                 .iter()
-                                .find(|dataset| dataset.resource_id() == sb.dataset)
+                                .find(|dataset| dataset.resource_id() == sb.source.resource)
                                 .ok_or_else(|| {
                                 ProjectError::Invalid(format!(
                                     "view {view_id} plot {} references missing series dataset {}",
-                                    object.id, sb.dataset
+                                    object.id, sb.source.resource
                                 ))
                             })?;
+                            validate_series(
+                                dataset,
+                                sb.source.field,
+                                &sb.encoding,
+                                &format!("view {view_id} plot {} series {}", object.id, sb.id),
+                            )?;
                             Ok(SeriesBindingDto {
-                                id: Some(sb.id.get()),
+                                id: sb.id.get(),
                                 input: format!("recipe_{}", dataset.resource_id()),
-                                color: sb.color.map(|c| [c.r, c.g, c.b]),
+                                field: sb.source.field.get(),
                                 label: sb.label.clone(),
-                                scale: sb.scale,
+                                encoding: sb.encoding.clone(),
                                 visible: sb.visible,
                             })
                         })
@@ -600,26 +619,39 @@ pub fn view_to_canvas(
                         ))
                     })
                 };
-                let binding = if view_object.series.is_empty() {
-                    let index = resolve(&view_object.input)?;
-                    DataBinding::single(app.doc.datasets[index].resource_id())
-                } else {
-                    let mut series = Vec::with_capacity(view_object.series.len());
-                    for (position, sb) in view_object.series.iter().enumerate() {
-                        series.push(SeriesBinding {
-                            id: SeriesId::new(sb.id.unwrap_or(position as u64)),
-                            dataset: {
-                                let index = resolve(&sb.input)?;
-                                app.doc.datasets[index].resource_id()
-                            },
-                            color: sb.color.map(|c| plotx_figure::Color::rgb(c[0], c[1], c[2])),
-                            label: sb.label.clone(),
-                            scale: sb.scale,
-                            visible: sb.visible,
-                        });
-                    }
-                    DataBinding { series }
-                };
+                if view_object.series.is_empty() {
+                    return Err(ProjectError::Invalid(format!(
+                        "view {view_id} plot {} has no series bindings",
+                        view_object.id
+                    )));
+                }
+                let mut series = Vec::with_capacity(view_object.series.len());
+                for sb in &view_object.series {
+                    let index = resolve(&sb.input)?;
+                    let dataset = app.doc.datasets.get(index).ok_or_else(|| {
+                        ProjectError::Invalid(format!(
+                            "view {view_id} references unavailable dataset index {index}"
+                        ))
+                    })?;
+                    let field = crate::state::FieldId::new(sb.field);
+                    validate_series(
+                        dataset,
+                        field,
+                        &sb.encoding,
+                        &format!("view {view_id} series {}", sb.id),
+                    )?;
+                    series.push(SeriesBinding {
+                        id: SeriesId::new(sb.id),
+                        source: crate::state::SeriesSource {
+                            resource: dataset.resource_id(),
+                            field,
+                        },
+                        label: sb.label.clone(),
+                        encoding: sb.encoding.clone(),
+                        visible: sb.visible,
+                    });
+                }
+                let binding = DataBinding { series };
                 let stack = view_object
                     .stack
                     .clone()
@@ -634,12 +666,8 @@ pub fn view_to_canvas(
                         view.id
                     ))
                 })?;
-                let domain = app
-                    .doc
-                    .datasets
-                    .get(di)
-                    .map(Dataset::domain)
-                    .unwrap_or(crate::state::DataDomain::Nmr1d);
+                // `dataset_index` above searched this same immutable vector.
+                let domain = app.doc.datasets[di].domain();
                 let chart = crate::state::ChartSpec {
                     type_id: view_object
                         .chart_type

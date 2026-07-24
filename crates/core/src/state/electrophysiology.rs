@@ -1,5 +1,6 @@
 use super::*;
 use plotx_analysis::electrophysiology::{self, PeakMode, TimeWindow};
+use std::sync::{Arc, OnceLock};
 
 fn new_resource_id() -> DatasetId {
     DatasetId::new()
@@ -75,7 +76,12 @@ impl Default for ElectrophysiologyProcessing {
 pub struct ElectrophysiologyDataset {
     #[serde(default = "new_resource_id")]
     pub resource_id: DatasetId,
+    /// Persisted mapping from stable channel keys to dataset-local field ids.
+    pub field_catalog: FieldCatalog,
     pub data: ElectrophysiologyData,
+    /// Calculated from loaded samples and omitted from project metadata.
+    #[serde(skip, default)]
+    field_keys: OnceLock<Arc<[Option<String>]>>,
     pub name: Option<String>,
     pub metadata: RecordingMetadata,
     pub processing: ElectrophysiologyProcessing,
@@ -115,9 +121,12 @@ impl ElectrophysiologyDataset {
             .map(|v| v.len() as f64 / data.sample_rate_hz)
             .fold(0.0, f64::max);
         let stimulus = stimulus.or_else(|| data.protocol.as_deref().and_then(suggested_stimulus));
+        let field_keys = crate::state::electrophysiology_channel_keys(&data);
         Self {
             resource_id: new_resource_id(),
+            field_catalog: crate::state::electrophysiology_field_catalog_for_keys(&field_keys),
             data,
+            field_keys: OnceLock::from(field_keys),
             name: None,
             metadata,
             processing: ElectrophysiologyProcessing::default(),
@@ -131,6 +140,15 @@ impl ElectrophysiologyDataset {
             },
             peak_mode: PeakMode::Negative,
         }
+    }
+
+    pub(crate) fn field_key(&self, channel: usize) -> Option<&str> {
+        self.field_keys().get(channel).and_then(Option::as_deref)
+    }
+
+    pub(crate) fn field_keys(&self) -> &[Option<String>] {
+        self.field_keys
+            .get_or_init(|| crate::state::electrophysiology_channel_keys(&self.data))
     }
 
     pub fn processed_trace(
@@ -220,6 +238,17 @@ impl ElectrophysiologyDataset {
             );
         }
         figure
+    }
+
+    pub fn figure_for_field(&self, field: FieldId) -> Option<Figure> {
+        let channel = (0..self.data.channels.len()).find(|&index| {
+            self.field_key(index)
+                .and_then(|key| self.field_catalog.id_for_key(key))
+                == Some(field)
+        })?;
+        let mut copy = self.clone();
+        copy.selected_channel = channel;
+        Some(copy.figure())
     }
 
     pub fn stimulus_values(
