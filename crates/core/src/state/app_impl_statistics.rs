@@ -133,11 +133,19 @@ impl PlotxApp {
             outcome,
         };
         let status = headline(&analysis);
+        let Some(dataset_id) = self
+            .doc
+            .datasets
+            .get(draft.dataset)
+            .map(Dataset::resource_id)
+        else {
+            return Err("The selected data table is no longer available.".to_owned());
+        };
         let before = self.stored_statistics(draft.dataset);
         let mut after = before.clone();
         after.push(analysis);
         self.execute_action(Action::SetTableStatistics {
-            dataset: draft.dataset,
+            dataset: dataset_id,
             before,
             after,
         });
@@ -147,13 +155,16 @@ impl PlotxApp {
 
     /// Delete one stored analysis as an undoable step.
     pub fn remove_statistics(&mut self, dataset: usize, id: u64) {
+        let Some(dataset_id) = self.doc.datasets.get(dataset).map(Dataset::resource_id) else {
+            return;
+        };
         let before = self.stored_statistics(dataset);
         if before.is_empty() {
             return;
         }
         let after: Vec<StatAnalysis> = before.iter().filter(|a| a.id != id).cloned().collect();
         self.execute_action(Action::SetTableStatistics {
-            dataset,
+            dataset: dataset_id,
             before,
             after,
         });

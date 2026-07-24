@@ -274,7 +274,11 @@ fn finish_integral_drag(app: &mut PlotxApp, dataset: usize, xspan: f64) {
         .unwrap()
         .integrals
         .clone();
-    app.execute_action(Action::set_integrals(dataset, drag.before, after));
+    app.execute_action(Action::set_integrals(
+        app.doc.datasets[dataset].resource_id(),
+        drag.before,
+        after,
+    ));
 }
 
 fn integral_context_menu(

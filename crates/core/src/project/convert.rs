@@ -4,6 +4,7 @@ use super::electrophysiology_convert::{
     electrophysiology_from_object, electrophysiology_to_objects,
 };
 use super::*;
+use crate::state::SeriesId;
 pub fn dataset_to_objects(
     dataset: &Dataset,
     data_id: &str,
@@ -42,6 +43,9 @@ pub fn dataset_to_objects(
                     ..RecipeParameters::default()
                 },
                 extensions: serde_json::json!({
+                    "plotx.step_allocator": {
+                        "next_id": n.next_step_id
+                    },
                     "plotx.analysis": {
                         "peaks": &n.peaks,
                         "integrals": &n.integrals,
@@ -394,6 +398,7 @@ pub fn canvas_to_view(
                 name: object.name.clone(),
                 kind: kind.to_owned(),
                 input: String::new(),
+                next_series_id: 0,
                 series: Vec::new(),
                 chart_type: None,
                 chart_column: None,
@@ -457,6 +462,7 @@ pub fn canvas_to_view(
                                 ))
                             })?;
                             Ok(SeriesBindingDto {
+                                id: Some(sb.id.get()),
                                 input: format!("recipe_{}", dataset.resource_id()),
                                 color: sb.color.map(|c| [c.r, c.g, c.b]),
                                 label: sb.label.clone(),
@@ -469,6 +475,7 @@ pub fn canvas_to_view(
                         .then(|| StackDto::from_spec(&plot.stack));
                     Ok(ViewCanvasObject {
                         input: format!("recipe_{}", primary_dataset.resource_id()),
+                        next_series_id: plot.next_series_id.get(),
                         series,
                         chart_type: Some(plot.chart.type_id.clone()),
                         chart_column: plot.chart.column.map(|column| column.to_string()),
@@ -575,7 +582,7 @@ pub fn view_to_canvas(
             .parse::<ObjectId>()
             .map_err(|_| ProjectError::Invalid(format!("invalid object id {}", view_object.id)))?;
         let frame = view_object.frame.into_frame();
-        let kind = match view_object.kind.as_str() {
+        let mut kind = match view_object.kind.as_str() {
             "text" => CanvasObjectKind::Text(text_box_from(view_object, false)),
             "panel_label" => CanvasObjectKind::PanelLabel(text_box_from(view_object, true)),
             "shape" => CanvasObjectKind::Shape(
@@ -598,8 +605,9 @@ pub fn view_to_canvas(
                     DataBinding::single(app.doc.datasets[index].resource_id())
                 } else {
                     let mut series = Vec::with_capacity(view_object.series.len());
-                    for sb in &view_object.series {
+                    for (position, sb) in view_object.series.iter().enumerate() {
                         series.push(SeriesBinding {
+                            id: SeriesId::new(sb.id.unwrap_or(position as u64)),
                             dataset: {
                                 let index = resolve(&sb.input)?;
                                 app.doc.datasets[index].resource_id()
@@ -705,6 +713,7 @@ pub fn view_to_canvas(
                     .map(PanelDto::into_panel)
                     .unwrap_or_else(|| PanelMeta::new(app.default_plot_title(di), frame.width));
                 CanvasObjectKind::Plot(Box::new(PlotObject {
+                    next_series_id: SeriesId::new(view_object.next_series_id),
                     binding,
                     chart,
                     stack,
@@ -717,6 +726,14 @@ pub fn view_to_canvas(
             }
             _ => continue,
         };
+        if let CanvasObjectKind::Plot(plot) = &mut kind {
+            plot.repair_series_allocator().ok_or_else(|| {
+                ProjectError::Invalid(format!(
+                    "view {view_id} object {} exhausts the series id space",
+                    view_object.id
+                ))
+            })?;
+        }
         canvas.objects.push(CanvasObject {
             id: object_id,
             name: view_object.name.clone(),
@@ -748,52 +765,4 @@ fn text_box_from(view_object: &ViewCanvasObject, panel: bool) -> TextBox {
                 TextBox::label(String::new())
             }
         })
-}
-pub fn dimension_from_1d(data: &NmrData) -> Dimension {
-    Dimension {
-        id: "f2".to_owned(),
-        role: "direct".to_owned(),
-        size: data.points.len(),
-        storage_axis: 0,
-        quantity: "time_or_frequency".to_owned(),
-        display_quantity: Some("chemical_shift".to_owned()),
-        unit: Some("ppm".to_owned()),
-        nucleus: Some(data.nucleus.clone()),
-        spectral_width_hz: Some(data.spectral_width_hz),
-        observe_freq_mhz: Some(data.observe_freq_mhz),
-        carrier_ppm: Some(data.carrier_ppm),
-        group_delay: Some(data.group_delay),
-    }
-}
-pub fn dimension_from_dim(
-    id: &str,
-    role: &str,
-    storage_axis: usize,
-    size: usize,
-    dim: &Dim,
-) -> Dimension {
-    Dimension {
-        id: id.to_owned(),
-        role: role.to_owned(),
-        size,
-        storage_axis,
-        quantity: "time_or_frequency".to_owned(),
-        display_quantity: Some("chemical_shift".to_owned()),
-        unit: Some("ppm".to_owned()),
-        nucleus: Some(dim.nucleus.clone()),
-        spectral_width_hz: Some(dim.spectral_width_hz),
-        observe_freq_mhz: Some(dim.observe_freq_mhz),
-        carrier_ppm: Some(dim.carrier_ppm),
-        group_delay: Some(dim.group_delay),
-    }
-}
-
-pub fn dim_from_dimension(dim: &Dimension) -> Result<Dim> {
-    Ok(Dim {
-        spectral_width_hz: required(dim.spectral_width_hz, "spectral_width_hz")?,
-        observe_freq_mhz: required(dim.observe_freq_mhz, "observe_freq_mhz")?,
-        carrier_ppm: required(dim.carrier_ppm, "carrier_ppm")?,
-        nucleus: dim.nucleus.clone().unwrap_or_else(|| "X".to_owned()),
-        group_delay: dim.group_delay.unwrap_or(0.0),
-    })
 }

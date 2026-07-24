@@ -60,7 +60,7 @@ fn target_ref_serializes_resource_and_typed_components() {
 
     let step_target = TargetRef {
         resource,
-        component: Some(ComponentRef::ProcessingStep(StepId(9))),
+        component: Some(ComponentRef::ProcessingStep(StepId::new(9))),
     };
     let encoded = serde_json::to_string(&step_target).unwrap();
     assert_eq!(

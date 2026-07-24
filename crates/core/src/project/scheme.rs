@@ -1,5 +1,6 @@
 use super::*;
 use crate::actions::{Action, DatasetProcessingState};
+use crate::state::DatasetId;
 use std::collections::HashSet;
 
 const SCHEME_VERSION: u32 = 1;
@@ -26,7 +27,11 @@ pub enum SchemeApplicationPolicy {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum SchemeTargetResult {
+    /// A dataset that accepts the scheme. The identity lives here rather than
+    /// beside the result because only this variant can have one: an
+    /// incompatible target may be a stale index with no dataset behind it.
     Compatible {
+        dataset_id: DatasetId,
         before: DatasetProcessingState,
         after: DatasetProcessingState,
     },
@@ -86,10 +91,14 @@ impl SchemeApplicationPlan {
         let mut skipped_targets = Vec::new();
         for target in &self.targets {
             match &target.result {
-                SchemeTargetResult::Compatible { before, after } => {
+                SchemeTargetResult::Compatible {
+                    dataset_id,
+                    before,
+                    after,
+                } => {
                     applied_targets.push(target.dataset);
                     actions.push(Action::update_dataset_processing(
-                        target.dataset,
+                        *dataset_id,
                         before.clone(),
                         after.clone(),
                     ));
@@ -131,6 +140,7 @@ pub fn plan_scheme_application(
             let result = match datasets.get(dataset) {
                 Some(target) => match apply_scheme(scheme, target) {
                     Ok(after) => SchemeTargetResult::Compatible {
+                        dataset_id: target.resource_id(),
                         before: DatasetProcessingState::from_dataset(target),
                         after,
                     },
@@ -191,8 +201,10 @@ pub fn apply_scheme(
                 .first()
                 .ok_or_else(|| incompatible("scheme carries no pipeline"))?;
             require_fft(dto)?;
+            let mut pipeline = pipeline_from_dto(dto);
+            remint_pipeline(&mut pipeline, &mut dataset_next_step_id(dataset));
             Ok(DatasetProcessingState::Nmr {
-                pipeline: pipeline_from_dto(dto),
+                pipeline,
                 group_delay_correct: scheme.group_delay_correct,
             })
         }
@@ -214,12 +226,16 @@ pub fn apply_scheme(
                 .as_deref()
                 .map(layout_from_str)
                 .unwrap_or(n.params.layout);
+            let mut params = Params2D {
+                layout,
+                f2: pipeline_from_dto(f2),
+                f1: pipeline_from_dto(f1),
+            };
+            let mut next = dataset_next_step_id(dataset);
+            remint_pipeline(&mut params.f2, &mut next);
+            remint_pipeline(&mut params.f1, &mut next);
             Ok(DatasetProcessingState::Nmr2D {
-                params: Params2D {
-                    layout,
-                    f2: pipeline_from_dto(f2),
-                    f1: pipeline_from_dto(f1),
-                },
+                params,
                 preset: n.preset,
             })
         }
@@ -233,8 +249,25 @@ pub fn apply_scheme(
     }
 }
 
-pub fn reset_processing(dataset: &Dataset) -> Option<DatasetProcessingState> {
+fn dataset_next_step_id(dataset: &Dataset) -> u64 {
     match dataset {
+        Dataset::Nmr(dataset) => dataset.next_step_id,
+        Dataset::Nmr2D(dataset) => dataset.next_step_id,
+        _ => 0,
+    }
+}
+
+/// Renumber a pipeline that is about to be adopted by `dataset`, so its steps
+/// take identities the owner's allocator has not handed out.
+fn remint_pipeline(pipeline: &mut AxisPipeline, next: &mut u64) {
+    for step in &mut pipeline.steps {
+        step.id = StepId::new(*next);
+        *next = next.checked_add(1).expect("step id overflow");
+    }
+}
+
+pub fn reset_processing(dataset: &Dataset) -> Option<DatasetProcessingState> {
+    let mut state = match dataset {
         Dataset::Nmr(_) => Some(DatasetProcessingState::Nmr {
             pipeline: AxisPipeline::default_1d(),
             group_delay_correct: true,
@@ -246,7 +279,17 @@ pub fn reset_processing(dataset: &Dataset) -> Option<DatasetProcessingState> {
         Dataset::Table(_) => None,
         Dataset::Electrophysiology(_) => None,
         Dataset::Afm(_) => None,
+    }?;
+    let mut next = dataset_next_step_id(dataset);
+    match &mut state {
+        DatasetProcessingState::Nmr { pipeline, .. } => remint_pipeline(pipeline, &mut next),
+        DatasetProcessingState::Nmr2D { params, .. } => {
+            remint_pipeline(&mut params.f2, &mut next);
+            remint_pipeline(&mut params.f1, &mut next);
+        }
+        _ => {}
     }
+    Some(state)
 }
 
 fn scheme_from_dataset(dataset: &Dataset) -> Option<ProcessingScheme> {
@@ -254,6 +297,7 @@ fn scheme_from_dataset(dataset: &Dataset) -> Option<ProcessingScheme> {
         Dataset::Nmr(n) => {
             let mut dto = pipeline_to_dto(&n.pipeline);
             force_user(&mut dto);
+            strip_step_identities(&mut dto);
             Some(ProcessingScheme {
                 schema_version: SCHEME_VERSION,
                 dimension_count: 1,
@@ -267,6 +311,8 @@ fn scheme_from_dataset(dataset: &Dataset) -> Option<ProcessingScheme> {
             let mut f1 = pipeline_to_dto(&n.params.f1);
             force_user(&mut f2);
             force_user(&mut f1);
+            strip_step_identities(&mut f2);
+            strip_step_identities(&mut f1);
             Some(ProcessingScheme {
                 schema_version: SCHEME_VERSION,
                 dimension_count: 2,
@@ -317,6 +363,7 @@ mod plan_tests {
                 SchemeApplicationTarget {
                     dataset: 2,
                     result: SchemeTargetResult::Compatible {
+                        dataset_id: DatasetId::new(),
                         before: state(),
                         after: state(),
                     },

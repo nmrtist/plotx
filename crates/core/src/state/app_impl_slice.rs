@@ -36,14 +36,21 @@ impl NmrDataset {
         };
         // The trace is already a phased spectrum: the pipeline is the bare FFT
         // anchor, so the transform reproduces the values with no further steps.
+        // This dataset owns the pipeline it is built with, so the single step
+        // takes id 0 and the allocator starts one past it.
         let pipeline = AxisPipeline {
-            steps: vec![ProcessingStep::new(StepKind::Fft, StepSource::Default)],
+            steps: vec![ProcessingStep::new(
+                StepId::new(0),
+                StepKind::Fft,
+                StepSource::Default,
+            )],
         };
         Self {
             resource_id: DatasetId::new(),
             data,
             base: spectrum.clone(),
             pipeline,
+            next_step_id: 1,
             group_delay_correct: true,
             has_imaginary: true,
             spectrum,

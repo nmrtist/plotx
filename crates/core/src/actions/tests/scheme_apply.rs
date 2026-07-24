@@ -71,3 +71,64 @@ fn batch_template_apply_filters_incompatible_targets_and_undoes_as_one_step() {
     assert!(group_delay(&app, 1));
     assert!(!group_delay(&app, 0));
 }
+
+/// P1-2 regression. A `.plotxproc` is a documented, hand-writable recipe and
+/// carries no identities: `apply_scheme` remints every step from the target
+/// dataset's allocator, so a required `id` field would make authors spell out a
+/// value that is thrown away. Dropping `#[serde(default)]` from
+/// `ProcessingStepDto::id` makes the parse below fail with `missing field id`.
+#[test]
+fn a_hand_written_scheme_without_step_ids_loads_and_applies() {
+    let json = r#"{
+        "schema_version": 1,
+        "dimension_count": 1,
+        "pipelines": [{"steps": [
+            {"kind": "Fft", "enabled": true, "source": "User"},
+            {"kind": {"Phase": {"phase0": 0.25, "phase1": 0.0, "pivot_frac": 0.5, "auto": null}},
+             "enabled": true, "source": "User"}
+        ]}],
+        "group_delay_correct": false
+    }"#;
+    let scheme: crate::project::ProcessingScheme =
+        serde_json::from_str(json).expect("a recipe may omit step identities");
+
+    let mut app = PlotxApp::new();
+    app.doc
+        .datasets
+        .push(Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()))));
+
+    let plan = plan_scheme_application(&scheme, &app.doc.datasets, &[0]);
+    assert_eq!(plan.compatible_count(), 1);
+    let prepared = plan.prepare(SchemeApplicationPolicy::StrictAll).unwrap();
+    app.execute_action(prepared.action);
+
+    // Reminting is what makes the missing ids harmless: the adopted steps must
+    // be unique and sit below the owner's allocator.
+    let n = app.doc.datasets[0].as_nmr().unwrap();
+    let mut ids: Vec<_> = n.pipeline.steps.iter().map(|step| step.id).collect();
+    assert_eq!(ids.len(), 2);
+    assert!(ids.iter().all(|id| id.get() < n.next_step_id));
+    ids.sort();
+    ids.dedup();
+    assert_eq!(ids.len(), 2, "adopted steps must not share an identity");
+    assert!(!group_delay(&app, 0));
+}
+
+/// The other half of P1-2: a saved recipe must not contain the discarded field
+/// at all, so what the app writes matches what the docs ask users to write.
+#[test]
+fn a_saved_scheme_omits_step_identities() {
+    let mut app = PlotxApp::new();
+    app.doc
+        .datasets
+        .push(Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()))));
+    let path = temp_scheme("no-step-ids");
+    save_scheme(&path, &app.doc.datasets[0]).unwrap();
+    let written = std::fs::read_to_string(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+
+    assert!(
+        !written.contains("\"id\""),
+        "a detached recipe carries no identities:\n{written}"
+    );
+}

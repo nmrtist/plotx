@@ -93,7 +93,9 @@ fn fid(shift_ppm: f64, group_delay: f64) -> NmrData {
 }
 
 fn step(kind: StepKind) -> ProcessingStep {
-    ProcessingStep::new(kind, StepSource::User)
+    static NEXT_TEST_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let id = StepId::new(NEXT_TEST_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+    ProcessingStep::new(id, kind, StepSource::User)
 }
 
 fn peak(spec: &Spectrum) -> Complex64 {
@@ -196,9 +198,7 @@ fn cleanup_steps_are_frequency_domain_and_reapply_cheaply() {
     for kind in kinds {
         assert_eq!(kind.domain(), StepDomain::Freq);
         let mut edited = base.clone();
-        edited
-            .steps
-            .push(ProcessingStep::new(kind, StepSource::User));
+        edited.steps.push(step(kind));
         assert!(!needs_retransform(&base, &edited, true, true));
     }
 }

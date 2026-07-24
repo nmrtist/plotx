@@ -511,7 +511,7 @@ pub(super) fn begin_processing_widget(
 ) {
     if resp.drag_started() {
         app.session.ui.processing_edit = Some(PendingProcessingEdit {
-            dataset: di,
+            dataset: app.doc.datasets[di].resource_id(),
             before,
         });
     }
@@ -532,7 +532,7 @@ pub(super) fn commit_processing_widget(
             .ui
             .processing_edit
             .take()
-            .filter(|edit| edit.dataset == di)
+            .filter(|edit| edit.dataset == app.doc.datasets[di].resource_id())
             .map(|edit| edit.before)
             .unwrap_or(fallback_before);
         let after = DatasetProcessingState::from_dataset(&app.doc.datasets[di]);

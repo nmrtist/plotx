@@ -41,6 +41,7 @@ impl PlotxApp {
         let Some(n) = self.doc.datasets.get(dataset).and_then(Dataset::as_nmr2d) else {
             return;
         };
+        let dataset_id = n.resource_id;
         let before = n.integrals.clone();
         let mut after = before.clone();
         let mut next_id = n.next_integral_id;
@@ -56,7 +57,12 @@ impl PlotxApp {
                         || original.method != candidate.method
                 })
         });
-        if let Some(n) = self.doc.datasets[dataset].as_nmr2d_mut() {
+        if let Some(n) = self
+            .doc
+            .datasets
+            .get_mut(dataset)
+            .and_then(Dataset::as_nmr2d_mut)
+        {
             n.next_integral_id = next_id;
             n.integrals = after;
             if needs_recompute {
@@ -68,7 +74,7 @@ impl PlotxApp {
             }
             after = n.integrals.clone();
         }
-        self.execute_action(Action::set_integrals_2d(dataset, before, after));
+        self.execute_action(Action::set_integrals_2d(dataset_id, before, after));
     }
 
     pub fn set_integral_2d_reference(&mut self, dataset: usize, id: u64, value: f64) {
@@ -139,17 +145,23 @@ impl PlotxApp {
         let Some(n) = self.doc.datasets.get(dataset).and_then(Dataset::as_nmr) else {
             return;
         };
+        let dataset_id = n.resource_id;
         let before = n.integrals.clone();
         let mut after = before.clone();
         let mut next_id = n.next_integral_id;
         edit(&mut after, &mut next_id);
-        if let Some(n) = self.doc.datasets[dataset].as_nmr_mut() {
+        if let Some(n) = self
+            .doc
+            .datasets
+            .get_mut(dataset)
+            .and_then(Dataset::as_nmr_mut)
+        {
             n.next_integral_id = next_id;
             n.integrals = after;
             n.recompute_integrals();
             after = n.integrals.clone();
         }
-        self.execute_action(Action::set_integrals(dataset, before, after));
+        self.execute_action(Action::set_integrals(dataset_id, before, after));
     }
 
     /// Use one integral as the normalization reference at a user-selected value.
@@ -189,18 +201,17 @@ impl PlotxApp {
     /// Snapshot the peak set, let `edit` mutate a working copy, then commit one
     /// undoable step. No-ops on domains without a peak set.
     pub fn edit_peaks(&mut self, dataset: usize, edit: impl FnOnce(&mut PeakSet)) {
-        let Some(before) = self
+        let Some((dataset_id, before)) = self
             .doc
             .datasets
             .get(dataset)
-            .and_then(Dataset::peaks)
-            .cloned()
+            .and_then(|value| Some((value.resource_id(), value.peaks().cloned()?)))
         else {
             return;
         };
         let mut after = before.clone();
         edit(&mut after);
-        self.execute_action(Action::set_peaks(dataset, before, after));
+        self.execute_action(Action::set_peaks(dataset_id, before, after));
     }
 
     /// Place a hand-picked peak, snapping the clicked `x` to the nearest local

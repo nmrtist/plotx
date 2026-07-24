@@ -618,10 +618,17 @@ fn handle_frame_drag(app: &mut PlotxApp, rect: egui::Rect, ui: &Ui) -> bool {
         app.reset_interaction();
         if let Some(after) = frame_board_pos(app, drag.frame) {
             let action = match drag.frame {
-                FrameRef::Page(ci) => Action::move_canvas_on_board(ci, drag.before, after),
-                FrameRef::Sheet(di) => Action::move_sheet_on_board(di, drag.before, after),
+                FrameRef::Page(ci) => Some(Action::move_canvas_on_board(ci, drag.before, after)),
+                FrameRef::Sheet(di) => app
+                    .doc
+                    .datasets
+                    .get(di)
+                    .map(plotx_core::state::Dataset::resource_id)
+                    .map(|id| Action::move_sheet_on_board(id, drag.before, after)),
             };
-            app.execute_action(action);
+            if let Some(action) = action {
+                app.execute_action(action);
+            }
         }
     }
 

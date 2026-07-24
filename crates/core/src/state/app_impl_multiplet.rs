@@ -140,7 +140,7 @@ impl PlotxApp {
             DEFAULT_CANVAS_SIZE_MM,
         );
         self.execute_action(Action::Composite(vec![
-            Action::set_multiplets(dataset, before, after),
+            Action::set_multiplets(self.doc.datasets[dataset].resource_id(), before, after),
             insert,
         ]));
         self.session.status = format!("Classified {} multiplet(s).", multiplets.len());
@@ -157,7 +157,11 @@ impl PlotxApp {
             return;
         };
         let after: Vec<StoredMultiplet> = before.iter().filter(|m| m.id != id).cloned().collect();
-        self.execute_action(Action::set_multiplets(dataset, before, after));
+        self.execute_action(Action::set_multiplets(
+            self.doc.datasets[dataset].resource_id(),
+            before,
+            after,
+        ));
     }
 }
 

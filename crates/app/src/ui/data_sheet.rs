@@ -82,7 +82,10 @@ pub(super) fn data_sheet_window(app: &mut PlotxApp, ctx: &egui::Context) {
         });
     if let Some(delta) = commit {
         let typed_diagnostic = delta.typed_diagnostic.clone();
-        app.execute_action(Action::edit_table(di, delta));
+        app.execute_action(Action::edit_table(
+            app.doc.datasets[di].resource_id(),
+            delta,
+        ));
         app.session.status = typed_diagnostic.unwrap_or_else(|| "Edited data table.".to_owned());
     }
     if let Some(request) = transform

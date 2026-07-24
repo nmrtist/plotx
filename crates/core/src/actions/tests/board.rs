@@ -1,4 +1,4 @@
-use super::{sample_app, table_app};
+use super::{dataset_id, sample_app, table_app};
 use crate::actions::Action;
 use crate::state::FrameRef;
 use crate::state::page_frame_showing_dataset;
@@ -71,7 +71,11 @@ fn move_sheet_on_board_applies_reverts_and_noops() {
     let before = app.doc.datasets[0].as_table().unwrap().board_pos;
     let after = [3240.0, 720.0];
 
-    app.execute_action(Action::move_sheet_on_board(0, before, after));
+    app.execute_action(Action::move_sheet_on_board(
+        dataset_id(&app, 0),
+        before,
+        after,
+    ));
     assert_eq!(app.doc.datasets[0].as_table().unwrap().board_pos, after);
     app.undo();
     assert_eq!(app.doc.datasets[0].as_table().unwrap().board_pos, before);
@@ -79,7 +83,11 @@ fn move_sheet_on_board_applies_reverts_and_noops() {
     assert_eq!(app.doc.datasets[0].as_table().unwrap().board_pos, after);
     // An unchanged position is a no-op: no new undo entry.
     let len = app.session.undo_stack.len();
-    app.execute_action(Action::move_sheet_on_board(0, after, after));
+    app.execute_action(Action::move_sheet_on_board(
+        dataset_id(&app, 0),
+        after,
+        after,
+    ));
     assert_eq!(app.session.undo_stack.len(), len);
 }
 

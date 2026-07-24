@@ -278,7 +278,11 @@ fn region_task_body(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
     }
     if name_lost && let Some(before) = app.session.ui.region_edit_before.take() {
         let after = app.doc.datasets[di].as_nmr2d().unwrap().regions.clone();
-        app.execute_action(Action::set_regions(di, before, after));
+        app.execute_action(Action::set_regions(
+            app.doc.datasets[di].resource_id(),
+            before,
+            after,
+        ));
     }
     if let Some((id, m)) = metric_change {
         app.edit_regions(di, |regions, _| {

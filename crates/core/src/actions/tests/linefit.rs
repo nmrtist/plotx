@@ -206,7 +206,11 @@ fn set_line_fits_applies_reverts_and_skips_noops() {
     let mut app = two_lorentzian_app();
     let fit = stored_sample(0);
 
-    app.execute_action(Action::set_line_fits(0, Vec::new(), vec![fit.clone()]));
+    app.execute_action(Action::set_line_fits(
+        dataset_id(&app, 0),
+        Vec::new(),
+        vec![fit.clone()],
+    ));
     assert_eq!(
         app.doc.datasets[0].as_nmr().unwrap().line_fits,
         vec![fit.clone()]
@@ -218,7 +222,11 @@ fn set_line_fits_applies_reverts_and_skips_noops() {
     assert_eq!(app.doc.datasets[0].line_fits(), std::slice::from_ref(&fit));
 
     let undo_before = app.session.undo_stack.len();
-    app.execute_action(Action::set_line_fits(0, vec![fit.clone()], vec![fit]));
+    app.execute_action(Action::set_line_fits(
+        dataset_id(&app, 0),
+        vec![fit.clone()],
+        vec![fit],
+    ));
     assert_eq!(app.session.undo_stack.len(), undo_before);
 }
 
@@ -226,7 +234,7 @@ fn set_line_fits_applies_reverts_and_skips_noops() {
 fn remove_line_fit_deletes_by_id_and_is_undoable() {
     let mut app = two_lorentzian_app();
     app.execute_action(Action::set_line_fits(
-        0,
+        dataset_id(&app, 0),
         Vec::new(),
         vec![stored_sample(0), stored_sample(1)],
     ));
@@ -250,7 +258,7 @@ fn remove_line_fit_deletes_by_id_and_is_undoable() {
 fn background_fit_rebuilds_undo_snapshot_at_completion() {
     let mut app = two_lorentzian_app();
     app.execute_action(Action::set_line_fits(
-        0,
+        dataset_id(&app, 0),
         Vec::new(),
         vec![stored_sample(5), stored_sample(6)],
     ));
@@ -360,7 +368,11 @@ fn single_table_figure_gains_line_fit_overlays() {
     )
     .unwrap();
     app.doc.datasets.push(Dataset::Table(Box::new(table)));
-    app.execute_action(Action::set_line_fits(1, Vec::new(), vec![stored_sample(0)]));
+    app.execute_action(Action::set_line_fits(
+        dataset_id(&app, 1),
+        Vec::new(),
+        vec![stored_sample(0)],
+    ));
     assert_eq!(app.doc.datasets[1].line_fits().len(), 1);
 
     let fig = app.build_binding_figure(
@@ -393,7 +405,11 @@ fn non_line_table_charts_skip_line_fit_overlays() {
     )
     .unwrap();
     app.doc.datasets.push(Dataset::Table(Box::new(table)));
-    app.execute_action(Action::set_line_fits(1, Vec::new(), vec![stored_sample(0)]));
+    app.execute_action(Action::set_line_fits(
+        dataset_id(&app, 1),
+        Vec::new(),
+        vec![stored_sample(0)],
+    ));
 
     // The stored fit lives in the table's x/y space; distribution and part-of-
     // whole charts draw in other coordinates where the curve is unrelated ink.
@@ -426,7 +442,11 @@ fn non_line_table_charts_skip_line_fit_overlays() {
 fn stacked_figures_exclude_line_fit_overlays() {
     let mut app = two_lorentzian_app();
     app.doc.datasets.push(two_lorentzian_dataset("second"));
-    app.execute_action(Action::set_line_fits(0, Vec::new(), vec![stored_sample(0)]));
+    app.execute_action(Action::set_line_fits(
+        dataset_id(&app, 0),
+        Vec::new(),
+        vec![stored_sample(0)],
+    ));
 
     let binding = DataBinding {
         series: vec![
@@ -446,7 +466,11 @@ fn stacked_figures_exclude_line_fit_overlays() {
 fn single_plot_color_override_leaves_overlay_colors_alone() {
     use plotx_figure::Color;
     let mut app = two_lorentzian_app();
-    app.execute_action(Action::set_line_fits(0, Vec::new(), vec![stored_sample(0)]));
+    app.execute_action(Action::set_line_fits(
+        dataset_id(&app, 0),
+        Vec::new(),
+        vec![stored_sample(0)],
+    ));
 
     let override_color = Color::rgb(0x11, 0x22, 0x33);
     let mut binding = DataBinding::single(app.doc.datasets[0].resource_id());

@@ -125,7 +125,11 @@ fn set_multiplets_applies_reverts_and_skips_noops() {
         area: 1.0,
         peak_ppm: vec![2.02, 2.0],
     };
-    app.execute_action(Action::set_multiplets(0, Vec::new(), vec![m.clone()]));
+    app.execute_action(Action::set_multiplets(
+        dataset_id(&app, 0),
+        Vec::new(),
+        vec![m.clone()],
+    ));
     assert_eq!(app.doc.datasets[0].multiplets(), std::slice::from_ref(&m));
 
     app.undo();
@@ -133,7 +137,9 @@ fn set_multiplets_applies_reverts_and_skips_noops() {
     app.redo();
     assert_eq!(app.doc.datasets[0].multiplets(), std::slice::from_ref(&m));
 
-    assert!(Action::set_multiplets(0, vec![m.clone()], vec![m.clone()]).is_noop());
+    assert!(
+        Action::set_multiplets(dataset_id(&app, 0), vec![m.clone()], vec![m.clone()]).is_noop()
+    );
 
     app.remove_multiplet(0, 0);
     assert!(app.doc.datasets[0].multiplets().is_empty());

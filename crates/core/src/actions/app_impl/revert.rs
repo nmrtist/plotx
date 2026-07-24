@@ -3,6 +3,14 @@ use crate::state::{Dataset, Interaction, PlotxApp, Selection};
 
 impl PlotxApp {
     pub(super) fn revert_action(&mut self, action: &Action) {
+        macro_rules! dataset_index {
+            ($id:expr) => {
+                match self.doc.dataset_index($id) {
+                    Some(index) => index,
+                    None => return,
+                }
+            };
+        }
         match action {
             Action::Composite(actions) => {
                 for action in actions.iter().rev() {
@@ -12,7 +20,7 @@ impl PlotxApp {
             Action::UpdateDatasetProcessing {
                 dataset, before, ..
             } => {
-                self.set_dataset_processing_state(*dataset, before);
+                self.set_dataset_processing_state(dataset_index!(*dataset), before);
             }
             Action::SetObjectViewport {
                 canvas,
@@ -60,10 +68,11 @@ impl PlotxApp {
             Action::MoveSheetOnBoard {
                 dataset, before, ..
             } => {
+                let dataset = dataset_index!(*dataset);
                 if let Some(t) = self
                     .doc
                     .datasets
-                    .get_mut(*dataset)
+                    .get_mut(dataset)
                     .and_then(Dataset::as_table_mut)
                 {
                     t.board_pos = *before;
@@ -170,57 +179,58 @@ impl PlotxApp {
             Action::RenameDataset {
                 dataset, before, ..
             } => {
-                if let Some(d) = self.doc.datasets.get_mut(*dataset) {
+                let dataset = dataset_index!(*dataset);
+                if let Some(d) = self.doc.datasets.get_mut(dataset) {
                     d.set_name(before.clone());
                 }
             }
             Action::SetCurveFitAnalyses {
                 dataset, before, ..
             } => {
-                self.set_curve_fit_analyses(*dataset, before);
+                self.set_curve_fit_analyses(dataset_index!(*dataset), before);
             }
             Action::EditTable { dataset, delta } => {
-                self.apply_table_edit(*dataset, delta, false);
+                self.apply_table_edit(dataset_index!(*dataset), delta, false);
             }
             Action::SetTypedTableState {
                 dataset, before, ..
             } => {
-                self.set_typed_table_state(*dataset, before);
+                self.set_typed_table_state(dataset_index!(*dataset), before);
             }
             Action::SetRegions {
                 dataset, before, ..
             } => {
-                self.set_regions(*dataset, before);
+                self.set_regions(dataset_index!(*dataset), before);
             }
             Action::SetIntegrals {
                 dataset, before, ..
             } => {
-                self.set_integrals(*dataset, before);
+                self.set_integrals(dataset_index!(*dataset), before);
             }
             Action::SetIntegrals2D {
                 dataset, before, ..
             } => {
-                self.set_integrals_2d(*dataset, before);
+                self.set_integrals_2d(dataset_index!(*dataset), before);
             }
             Action::SetPeaks {
                 dataset, before, ..
             } => {
-                self.set_peaks(*dataset, before);
+                self.set_peaks(dataset_index!(*dataset), before);
             }
             Action::SetLineFits {
                 dataset, before, ..
             } => {
-                self.set_line_fits(*dataset, before);
+                self.set_line_fits(dataset_index!(*dataset), before);
             }
             Action::SetMultiplets {
                 dataset, before, ..
             } => {
-                self.set_multiplets(*dataset, before);
+                self.set_multiplets(dataset_index!(*dataset), before);
             }
             Action::SetTableStatistics {
                 dataset, before, ..
             } => {
-                self.set_table_statistics(*dataset, before);
+                self.set_table_statistics(dataset_index!(*dataset), before);
             }
             Action::InsertObject {
                 canvas,

@@ -591,6 +591,7 @@ mod tests {
             visible: true,
             group: None,
             kind: CanvasObjectKind::Plot(Box::new(PlotObject {
+                next_series_id: plotx_core::state::SeriesId::new(1),
                 binding: plotx_core::state::DataBinding::single(DatasetId::new()),
                 chart: plotx_core::state::ChartSpec::default(),
                 stack: plotx_core::state::StackSpec::default(),
@@ -623,6 +624,7 @@ mod tests {
             visible: true,
             group: None,
             kind: CanvasObjectKind::Plot(Box::new(PlotObject {
+                next_series_id: plotx_core::state::SeriesId::new(1),
                 binding: plotx_core::state::DataBinding::single(DatasetId::new()),
                 chart: plotx_core::state::ChartSpec::default(),
                 stack: plotx_core::state::StackSpec::default(),
@@ -734,7 +736,7 @@ mod tests {
         app.sync_phase_interaction();
         assert_eq!(count(&mut app), 0, "no pivot before the Phase editor opens");
 
-        app.session.ui.proc_expanded_step = Some(phase_id);
+        app.session.ui.proc_expanded_step = Some((app.doc.datasets[0].resource_id(), phase_id));
         app.sync_phase_interaction();
         assert_eq!(app.session.tool, Tool::ManualPhase);
         assert!(

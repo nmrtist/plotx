@@ -238,7 +238,11 @@ impl PlotxApp {
         let mut after = before.clone();
         after.push(stored.clone());
 
-        self.execute_action(Action::set_line_fits(dataset, before, after));
+        self.execute_action(Action::set_line_fits(
+            self.doc.datasets[dataset].resource_id(),
+            before,
+            after,
+        ));
         self.session.status = format!(
             "Fitted {} peak(s), R² = {:.4}. Open the result in the Peak Fit panel.",
             stored.peaks.len(),
@@ -285,7 +289,11 @@ impl PlotxApp {
             return;
         };
         let after: Vec<StoredLineFit> = before.iter().filter(|f| f.id != id).cloned().collect();
-        self.execute_action(Action::set_line_fits(dataset, before, after));
+        self.execute_action(Action::set_line_fits(
+            self.doc.datasets[dataset].resource_id(),
+            before,
+            after,
+        ));
     }
 }
 

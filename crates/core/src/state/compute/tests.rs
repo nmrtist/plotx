@@ -2,6 +2,10 @@ use super::*;
 use num_complex::Complex64;
 use plotx_io::{Dim, Domain, QuadMode};
 use plotx_processing::{PhaseParams, ProcessingStep, StepKind, process_2d};
+
+fn dataset(value: u128) -> DatasetId {
+    DatasetId::from_uuid(uuid::Uuid::from_u128(value))
+}
 fn data_2d() -> Arc<NmrData2D> {
     let dim = Dim {
         spectral_width_hz: 1000.0,
@@ -58,12 +62,13 @@ fn repeated_processing_requests_coalesce_to_latest_recipe() {
     let first = Params2D::default_for(preset);
     let mut latest = first.clone();
     latest.f2.steps.push(ProcessingStep::new(
+        plotx_processing::StepId::new(99),
         StepKind::Phase(PhaseParams::MANUAL_ZERO),
         plotx_processing::StepSource::User,
     ));
 
-    service.request_2d_full(0, 4, data_2d(), first, preset);
-    service.request_2d_full(0, 4, data_2d(), latest.clone(), preset);
+    service.request_2d_full(dataset(0), 4, data_2d(), first, preset);
+    service.request_2d_full(dataset(0), 4, data_2d(), latest.clone(), preset);
     assert_eq!(service.deferred_processing.len(), 1);
 
     let deadline = Instant::now() + Duration::from_secs(2);
@@ -88,9 +93,13 @@ fn an_idle_processing_request_dispatches_immediately() {
     let preset = Preset2D::Cosy;
     let params = Params2D::default_for(preset);
 
-    service.request_2d_full(0, 0, data_2d(), params, preset);
+    service.request_2d_full(dataset(0), 0, data_2d(), params, preset);
     assert!(service.deferred_processing.is_empty());
-    assert!(service.active.contains_key(&(0, ComputeKind::Processing2D)));
+    assert!(
+        service
+            .active
+            .contains_key(&(dataset(0), ComputeKind::Processing2D))
+    );
 }
 
 #[test]
@@ -102,7 +111,7 @@ fn reapply_to_reapply_keeps_the_active_job_and_replaces_the_deferred_recipe() {
 
     let token = Arc::new(AtomicBool::new(false));
     service.active.insert(
-        (0, ComputeKind::Processing2D),
+        (dataset(0), ComputeKind::Processing2D),
         ActiveJob {
             generation: 10,
             started_at: Instant::now(),
@@ -112,16 +121,17 @@ fn reapply_to_reapply_keeps_the_active_job_and_replaces_the_deferred_recipe() {
     );
 
     first.f2.steps.push(ProcessingStep::new(
+        plotx_processing::StepId::new(99),
         StepKind::Phase(PhaseParams::MANUAL_ZERO),
         plotx_processing::StepSource::User,
     ));
-    service.request_2d_reapply(0, 0, base.clone(), first, preset);
+    service.request_2d_reapply(dataset(0), 0, base.clone(), first, preset);
     assert!(!token.load(Ordering::Relaxed));
-    let first_generation = service.deferred_processing[&0].generation;
+    let first_generation = service.deferred_processing[&dataset(0)].generation;
 
-    service.request_2d_reapply(0, 0, base, Params2D::default_for(preset), preset);
+    service.request_2d_reapply(dataset(0), 0, base, Params2D::default_for(preset), preset);
     assert!(!token.load(Ordering::Relaxed));
-    assert!(service.deferred_processing[&0].generation > first_generation);
+    assert!(service.deferred_processing[&dataset(0)].generation > first_generation);
 }
 
 #[test]
@@ -129,7 +139,7 @@ fn any_full_retransform_cancels_an_active_reapply() {
     let mut service = ComputeService::new();
     let token = Arc::new(AtomicBool::new(false));
     service.active.insert(
-        (0, ComputeKind::Processing2D),
+        (dataset(0), ComputeKind::Processing2D),
         ActiveJob {
             generation: 10,
             started_at: Instant::now(),
@@ -139,10 +149,16 @@ fn any_full_retransform_cancels_an_active_reapply() {
     );
 
     let preset = Preset2D::Cosy;
-    service.request_2d_full(0, 0, data_2d(), Params2D::default_for(preset), preset);
+    service.request_2d_full(
+        dataset(0),
+        0,
+        data_2d(),
+        Params2D::default_for(preset),
+        preset,
+    );
     assert!(token.load(Ordering::Relaxed));
     assert!(matches!(
-        service.deferred_processing[&0].input,
+        service.deferred_processing[&dataset(0)].input,
         ProcessingInput::Full(_)
     ));
 }
@@ -155,7 +171,7 @@ fn a_processing_request_reports_the_analysis_it_cancels() {
     let stack = stack_spectrum();
     service
         .enqueue_dosy(
-            1,
+            dataset(1),
             0,
             stack,
             vec![0.0, 1.0, 2.0],
@@ -166,7 +182,13 @@ fn a_processing_request_reports_the_analysis_it_cancels() {
         .expect("an idle dataset accepts a DOSY job");
 
     let preset = Preset2D::Cosy;
-    let aborted = service.request_2d_full(1, 0, data_2d(), Params2D::default_for(preset), preset);
+    let aborted = service.request_2d_full(
+        dataset(1),
+        0,
+        data_2d(),
+        Params2D::default_for(preset),
+        preset,
+    );
     assert_eq!(aborted, vec![ComputeKind::Dosy]);
 }
 
@@ -178,7 +200,7 @@ fn a_cancelled_analysis_stops_blocking_a_re_run() {
     let mut service = ComputeService::new();
     service
         .enqueue_dosy(
-            2,
+            dataset(2),
             0,
             stack_spectrum(),
             vec![0.0, 1.0, 2.0],
@@ -187,12 +209,15 @@ fn a_cancelled_analysis_stops_blocking_a_re_run() {
             "test".into(),
         )
         .expect("an idle dataset accepts a DOSY job");
-    assert_eq!(service.blocking_work_for(2), Some(ComputeKind::Dosy));
-
-    assert!(service.cancel(2, ComputeKind::Dosy));
-    assert_eq!(service.progress(2, ComputeKind::Dosy), None);
     assert_eq!(
-        service.blocking_work_for(2),
+        service.blocking_work_for(dataset(2)),
+        Some(ComputeKind::Dosy)
+    );
+
+    assert!(service.cancel(dataset(2), ComputeKind::Dosy));
+    assert_eq!(service.progress(dataset(2), ComputeKind::Dosy), None);
+    assert_eq!(
+        service.blocking_work_for(dataset(2)),
         None,
         "a cancelled job the user cannot see must not block a re-run"
     );
@@ -205,9 +230,15 @@ fn a_cancelled_analysis_stops_blocking_a_re_run() {
 fn pending_processing_blocks_dosy_under_its_own_name() {
     let mut service = ComputeService::new();
     let preset = Preset2D::Cosy;
-    service.request_2d_full(4, 0, data_2d(), Params2D::default_for(preset), preset);
+    service.request_2d_full(
+        dataset(4),
+        0,
+        data_2d(),
+        Params2D::default_for(preset),
+        preset,
+    );
     assert_eq!(
-        service.blocking_work_for(4),
+        service.blocking_work_for(dataset(4)),
         Some(ComputeKind::Processing2D)
     );
 }
@@ -216,10 +247,19 @@ fn pending_processing_blocks_dosy_under_its_own_name() {
 fn cancelling_processing_discards_its_result_and_releases_the_service() {
     let mut service = ComputeService::new();
     let preset = Preset2D::Cosy;
-    service.request_2d_full(3, 2, data_2d(), Params2D::default_for(preset), preset);
+    service.request_2d_full(
+        dataset(3),
+        2,
+        data_2d(),
+        Params2D::default_for(preset),
+        preset,
+    );
 
-    assert!(service.cancel(3, ComputeKind::Processing2D));
-    assert_eq!(service.progress(3, ComputeKind::Processing2D), None);
+    assert!(service.cancel(dataset(3), ComputeKind::Processing2D));
+    assert_eq!(
+        service.progress(dataset(3), ComputeKind::Processing2D),
+        None
+    );
 
     let deadline = Instant::now() + Duration::from_secs(2);
     let mut completed = Vec::new();
@@ -238,7 +278,7 @@ fn cancelled_ilt_job_reports_acknowledgement_without_a_result() {
     let stack = stack_spectrum();
     let done = run_job(Job::Ilt {
         generation: 7,
-        dataset: 2,
+        dataset: dataset(2),
         epoch: 0,
         token,
         stack,
@@ -254,8 +294,8 @@ fn cancelled_ilt_job_reports_acknowledgement_without_a_result() {
         done,
         Done::Cancelled {
             generation: 7,
-            dataset: 2,
+            dataset: id,
             kind: ComputeKind::Ilt
-        }
+        } if id == dataset(2)
     ));
 }

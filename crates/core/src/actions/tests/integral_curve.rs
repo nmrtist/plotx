@@ -1,4 +1,4 @@
-use super::{push_canvas, sample_app};
+use super::{dataset_id, push_canvas, sample_app};
 use crate::actions::Action;
 use crate::state::{IntegralDrag, Interaction, RegionDragKind, Tool};
 use crate::{DisplayModeLabel, IntegralResult};
@@ -23,7 +23,11 @@ fn set_integrals_apply_undo_redo_keeps_all_primary_figures_synced() {
     let mut app = sample_app();
     push_canvas(&mut app, 0, "second", [120.0, 80.0]);
     let integral = sample_integral(7, 3.0, Some(3.0));
-    app.execute_action(Action::set_integrals(0, Vec::new(), vec![integral]));
+    app.execute_action(Action::set_integrals(
+        dataset_id(&app, 0),
+        Vec::new(),
+        vec![integral],
+    ));
     assert!(app.doc.canvases.iter().all(|canvas| {
         let curve = &canvas.objects[0].plot().unwrap().figure.integral_curves;
         curve.len() == 1 && curve[0].label == "3.000"
@@ -227,7 +231,11 @@ fn processing_action_apply_undo_and_redo_recompute_integrals() {
         }
     }
 
-    app.execute_action(Action::update_dataset_processing(0, before, after));
+    app.execute_action(Action::update_dataset_processing(
+        dataset_id(&app, 0),
+        before,
+        after,
+    ));
     assert_ne!(
         app.doc.datasets[0].as_nmr().unwrap().integrals[0].area,
         999.0

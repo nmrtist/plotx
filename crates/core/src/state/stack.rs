@@ -356,6 +356,20 @@ impl PlotxApp {
         let figure = self.build_binding_figure(&binding, &chart, &stack, canvas.size_mm);
         let viewport = CanvasViewport::from_figure(&figure);
         let panel = PanelMeta::new(self.default_plot_title(sel[0]), frame.width);
+        let mut plot = PlotObject {
+            next_series_id: SeriesId::new(0),
+            binding,
+            chart,
+            stack,
+            projections: AxisProjections::default(),
+            axis_overrides: AxisOverrides::default(),
+            figure,
+            viewport,
+            panel,
+        };
+        // One place decides how a freshly materialized binding is numbered, so
+        // the ids and the allocator cannot drift apart.
+        plot.mint_series_ids();
         canvas.objects.push(CanvasObject {
             id,
             name: "Plot 1".to_owned(),
@@ -363,16 +377,7 @@ impl PlotxApp {
             locked: false,
             visible: true,
             group: None,
-            kind: CanvasObjectKind::Plot(Box::new(PlotObject {
-                binding,
-                chart,
-                stack,
-                projections: AxisProjections::default(),
-                axis_overrides: AxisOverrides::default(),
-                figure,
-                viewport,
-                panel,
-            })),
+            kind: CanvasObjectKind::Plot(Box::new(plot)),
         });
         let index = self.doc.canvases.len();
         self.execute_action(Action::insert_canvas(

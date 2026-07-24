@@ -413,7 +413,11 @@ fn finish_integral_2d_drag(
         .unwrap()
         .integrals
         .clone();
-    app.execute_action(Action::set_integrals_2d(dataset, drag.before, after));
+    app.execute_action(Action::set_integrals_2d(
+        app.doc.datasets[dataset].resource_id(),
+        drag.before,
+        after,
+    ));
 }
 
 fn integral_2d_context_menu(

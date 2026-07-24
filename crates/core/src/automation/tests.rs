@@ -233,7 +233,11 @@ fn composite_validation_prevents_partial_application() {
     let mut app = app_with_table_and_canvas();
     let before = app.doc.datasets[0].display_name();
     let action = Action::Composite(vec![
-        Action::rename_dataset(0, app.doc.datasets[0].name(), Some("partial".to_owned())),
+        Action::rename_dataset(
+            app.doc.datasets[0].resource_id(),
+            app.doc.datasets[0].name(),
+            Some("partial".to_owned()),
+        ),
         Action::rename_canvas(99, String::new(), "invalid".to_owned()),
     ]);
     assert!(app.try_execute_action(action).is_err());

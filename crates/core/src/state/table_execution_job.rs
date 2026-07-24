@@ -18,7 +18,7 @@ pub struct TableTransformJob {
 }
 
 pub struct TableRefreshJob {
-    dataset: usize,
+    dataset: DatasetId,
     epoch: u64,
     started_at: Instant,
     cancel: Arc<AtomicBool>,
@@ -157,12 +157,14 @@ impl crate::state::PlotxApp {
         if self.session.table_transform_job.is_some() || self.session.table_refresh_job.is_some() {
             return Err("A table operation is already running.".into());
         }
-        let before = self
+        let (dataset_id, before) = self
             .doc
             .datasets
             .get(dataset)
-            .and_then(crate::state::Dataset::as_table)
-            .map(|table| table.typed_state.clone())
+            .and_then(|value| {
+                let table = value.as_table()?;
+                Some((value.resource_id(), table.typed_state.clone()))
+            })
             .ok_or_else(|| "Select a derived data table to refresh.".to_owned())?;
         let inputs = self.typed_inputs(&input_datasets)?;
         let worker_derived = before.clone();
@@ -182,7 +184,7 @@ impl crate::state::PlotxApp {
             let _ = tx.send(result);
         });
         self.session.table_refresh_job = Some(TableRefreshJob {
-            dataset,
+            dataset: dataset_id,
             epoch: self.session.dataset_epoch,
             started_at: Instant::now(),
             cancel,
@@ -302,24 +304,32 @@ impl crate::state::PlotxApp {
         input_datasets: &[usize],
         memory_limit_bytes: u64,
     ) -> Result<(), String> {
-        let derived = self
+        let (dataset_id, derived) = self
             .doc
             .datasets
             .get(dataset)
-            .and_then(crate::state::Dataset::as_table)
-            .map(|table| table.typed_state.clone())
+            .and_then(|value| {
+                let table = value.as_table()?;
+                Some((value.resource_id(), table.typed_state.clone()))
+            })
             .ok_or_else(|| "Select a derived data table to refresh.".to_owned())?;
         let input_ids: Vec<DatasetId> = input_datasets
             .iter()
-            .map(|&index| self.doc.datasets[index].resource_id())
-            .collect();
+            .map(|&index| {
+                self.doc
+                    .datasets
+                    .get(index)
+                    .map(crate::state::Dataset::resource_id)
+                    .ok_or_else(|| "An input table is no longer available.".to_owned())
+            })
+            .collect::<Result<_, String>>()?;
         let inputs = self.typed_inputs(&input_ids)?;
         let refs = inputs.iter().collect::<Vec<_>>();
         let refreshed = refresh_typed_plan(&derived, &refs, memory_limit_bytes, &BTreeSet::new())
             .map_err(|error| error.to_string())?;
         let revision = refreshed.envelope.revision.id;
         self.execute_action(crate::actions::Action::SetTypedTableState {
-            dataset,
+            dataset: dataset_id,
             before: Box::new(derived),
             after: Box::new(refreshed),
         });

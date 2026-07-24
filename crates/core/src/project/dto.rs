@@ -142,6 +142,13 @@ pub struct AxisPipelineDto {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ProcessingStepDto {
+    /// Present in a project archive, where step identities must round-trip.
+    /// Absent in a `.plotxproc` recipe: a detached recipe carries no identity —
+    /// the adopting dataset remints every step from its own allocator — so
+    /// requiring one would make hand-written recipes spell out a field that is
+    /// immediately discarded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<u64>,
     pub kind: StepKindDto,
     pub enabled: bool,
     pub source: StepSourceDto,
@@ -331,24 +338,8 @@ impl PageLayoutDto {
 }
 
 #[cfg(test)]
-mod page_layout_tests {
-    use super::*;
-
-    #[test]
-    fn missing_spacing_mode_defaults_to_visual_and_writes_explicitly() {
-        let dto: PageLayoutDto = serde_json::from_str(
-            r#"{"margin_mm":[0.0,0.0,0.0,0.0],"gutter_mm":5.0,"rows":1,"cols":2}"#,
-        )
-        .unwrap();
-        assert_eq!(
-            dto.into_layout().spacing_mode,
-            crate::layout::SpacingMode::Visual
-        );
-        let encoded =
-            serde_json::to_string(&PageLayoutDto::from_layout(&PageLayout::default())).unwrap();
-        assert!(encoded.contains("\"spacing_mode\":\"visual\""));
-    }
-}
+#[path = "dto_tests.rs"]
+mod tests;
 
 #[derive(Serialize, Deserialize)]
 pub struct ViewCanvasObject {
@@ -357,6 +348,11 @@ pub struct ViewCanvasObject {
     pub kind: String,
     #[serde(default)]
     pub input: String,
+    /// Plot-only allocator high-water mark, derivable from `series` via
+    /// `PlotObject::repair_series_allocator` (which load always runs). Omitting
+    /// it when zero keeps it out of text/shape/label objects, where it is noise.
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub next_series_id: u64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub series: Vec<SeriesBindingDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -410,12 +406,21 @@ fn is_zero(n: &usize) -> bool {
     *n == 0
 }
 
+fn is_zero_u64(n: &u64) -> bool {
+    *n == 0
+}
+
 fn caption_visible_default() -> bool {
     true
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct SeriesBindingDto {
+    /// Owner-local series identity. Optional on read: a series list written
+    /// without ids falls back to positional numbering, which keeps the entries
+    /// distinct — a plain zero default would collapse every series onto id 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<u64>,
     pub input: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<[u8; 3]>,

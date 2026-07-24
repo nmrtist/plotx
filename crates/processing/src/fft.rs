@@ -142,21 +142,27 @@ fn fftshift(v: &[Complex64]) -> Vec<Complex64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Apodization, AxisPipeline, ProcessingStep, StepKind, StepSource, ZeroFill};
+    use crate::{
+        Apodization, AxisPipeline, ProcessingStep, StepId, StepKind, StepSource, ZeroFill,
+    };
     use plotx_io::Domain;
     use std::f64::consts::TAU;
 
+    // A detached test recipe: no dataset owns it, so numbering its own steps
+    // 0..n is enough to keep them distinguishable.
     fn pipe(apo: Option<Apodization>, zf: ZeroFill) -> AxisPipeline {
-        let mut steps = Vec::new();
-        if let Some(a) = apo {
-            steps.push(ProcessingStep::new(StepKind::Apodize(a), StepSource::User));
+        let kinds = apo
+            .map(StepKind::Apodize)
+            .into_iter()
+            .chain([StepKind::ZeroFill(zf), StepKind::Fft]);
+        AxisPipeline {
+            steps: kinds
+                .enumerate()
+                .map(|(index, kind)| {
+                    ProcessingStep::new(StepId::new(index as u64), kind, StepSource::User)
+                })
+                .collect(),
         }
-        steps.push(ProcessingStep::new(
-            StepKind::ZeroFill(zf),
-            StepSource::User,
-        ));
-        steps.push(ProcessingStep::new(StepKind::Fft, StepSource::User));
-        AxisPipeline { steps }
     }
 
     fn decaying_sinusoid(

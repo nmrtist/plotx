@@ -165,16 +165,28 @@ impl PlotxApp {
             }
             let before = DatasetProcessingState::from_dataset(&self.doc.datasets[row.dataset]);
             let mut pipeline = n.pipeline.clone();
-            apply_reference_shift(&mut pipeline, ppm, target);
+            let group_delay_correct = n.group_delay_correct;
+            // `pipeline` is a copy of a live recipe, so an appended referencing
+            // step needs a real identity from this dataset's allocator rather
+            // than template-local numbering. Reserving it unconditionally is
+            // safe: the allocator is a monotone high-water mark and gaps are
+            // expected (it deliberately never rolls back on undo).
+            let Some(dataset) = self
+                .doc
+                .datasets
+                .get_mut(row.dataset)
+                .and_then(Dataset::as_nmr_mut)
+            else {
+                continue;
+            };
+            let step_id = dataset.allocate_step_id();
+            let dataset_id = dataset.resource_id;
+            apply_reference_shift(&mut pipeline, ppm, target, step_id);
             let after = DatasetProcessingState::Nmr {
                 pipeline,
-                group_delay_correct: n.group_delay_correct,
+                group_delay_correct,
             };
-            actions.push(Action::update_dataset_processing(
-                row.dataset,
-                before,
-                after,
-            ));
+            actions.push(Action::update_dataset_processing(dataset_id, before, after));
         }
         if aligned == 0 {
             self.session.status = "No spectrum had a usable peak in the window.".into();

@@ -9,6 +9,13 @@ pub fn apply_1d_recipe(dataset: &mut NmrDataset, recipe: &RecipeObject) -> Resul
     if let Some(dto) = p.pipelines.first() {
         dataset.pipeline = pipeline_from_dto(dto);
     }
+    dataset.next_step_id = recipe
+        .extensions
+        .get("plotx.step_allocator")
+        .and_then(|value| value.get("next_id"))
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    dataset.repair_step_allocator();
     dataset.group_delay_correct = p.group_delay_correct;
     dataset.has_imaginary = true;
     if let Some(analysis) = recipe.extensions.get("plotx.analysis") {
@@ -102,6 +109,10 @@ pub(super) fn read_regions(dataset: &mut Nmr2DDataset, recipe: &RecipeObject) {
 
 pub(super) fn nmr2d_recipe_extensions(dataset: &Nmr2DDataset) -> serde_json::Value {
     let mut extensions = serde_json::Map::new();
+    extensions.insert(
+        "plotx.step_allocator".to_owned(),
+        serde_json::json!({ "next_id": dataset.next_step_id }),
+    );
     if !dataset.regions.is_empty() {
         extensions.insert(
             "plotx.regions".to_owned(),
@@ -138,6 +149,13 @@ pub fn apply_2d_recipe(dataset: &mut Nmr2DDataset, recipe: &RecipeObject) {
     if let Some(f1) = p.pipelines.get(1) {
         dataset.params.f1 = pipeline_from_dto(f1);
     }
+    dataset.next_step_id = recipe
+        .extensions
+        .get("plotx.step_allocator")
+        .and_then(|value| value.get("next_id"))
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    dataset.repair_step_allocator();
     dataset.params.layout = p
         .layout
         .as_deref()
