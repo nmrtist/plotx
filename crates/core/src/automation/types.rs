@@ -41,6 +41,11 @@ pub struct ResourceRef {
     pub local_id: Option<String>,
 }
 
+/// An owner-local component identity. Both variants are only meaningful
+/// relative to the [`TargetRef::resource`] they travel with — `SeriesId` is
+/// local to a plot object and `StepId` is local to a dataset pipeline, and both
+/// number from zero in every owner. A `ComponentRef` must therefore never be
+/// stored or compared on its own; keep it inside its `TargetRef`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
     tag = "kind",

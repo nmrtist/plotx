@@ -13,7 +13,7 @@ use crate::{Integral2D, IntegralResult};
 
 impl Action {
     pub fn update_dataset_processing(
-        dataset: usize,
+        dataset: DatasetId,
         before: DatasetProcessingState,
         after: DatasetProcessingState,
     ) -> Self {
@@ -135,7 +135,7 @@ impl Action {
         }
     }
 
-    pub fn move_sheet_on_board(dataset: usize, before: [f32; 2], after: [f32; 2]) -> Self {
+    pub fn move_sheet_on_board(dataset: DatasetId, before: [f32; 2], after: [f32; 2]) -> Self {
         Self::MoveSheetOnBoard {
             dataset,
             before,
@@ -258,7 +258,11 @@ impl Action {
         }
     }
 
-    pub fn rename_dataset(dataset: usize, before: Option<String>, after: Option<String>) -> Self {
+    pub fn rename_dataset(
+        dataset: DatasetId,
+        before: Option<String>,
+        after: Option<String>,
+    ) -> Self {
         Self::RenameDataset {
             dataset,
             before,
@@ -267,7 +271,7 @@ impl Action {
     }
 
     pub fn set_curve_fit_analyses(
-        dataset: usize,
+        dataset: DatasetId,
         before: (Vec<Option<CurveFitReference>>, Vec<StoredCurveFitAnalysis>),
         after: (Vec<Option<CurveFitReference>>, Vec<StoredCurveFitAnalysis>),
     ) -> Self {
@@ -278,14 +282,14 @@ impl Action {
         }
     }
 
-    pub fn edit_table(dataset: usize, delta: TableEditDelta) -> Self {
+    pub fn edit_table(dataset: DatasetId, delta: TableEditDelta) -> Self {
         Self::EditTable {
             dataset,
             delta: Box::new(delta),
         }
     }
 
-    pub fn set_regions(dataset: usize, before: Vec<Region>, after: Vec<Region>) -> Self {
+    pub fn set_regions(dataset: DatasetId, before: Vec<Region>, after: Vec<Region>) -> Self {
         Self::SetRegions {
             dataset,
             before,
@@ -294,7 +298,7 @@ impl Action {
     }
 
     pub fn set_integrals(
-        dataset: usize,
+        dataset: DatasetId,
         before: Vec<IntegralResult>,
         after: Vec<IntegralResult>,
     ) -> Self {
@@ -306,7 +310,7 @@ impl Action {
     }
 
     pub fn set_integrals_2d(
-        dataset: usize,
+        dataset: DatasetId,
         before: Vec<Integral2D>,
         after: Vec<Integral2D>,
     ) -> Self {
@@ -318,7 +322,7 @@ impl Action {
     }
 
     pub fn set_peaks(
-        dataset: usize,
+        dataset: DatasetId,
         before: crate::state::PeakSet,
         after: crate::state::PeakSet,
     ) -> Self {
@@ -330,7 +334,7 @@ impl Action {
     }
 
     pub fn set_line_fits(
-        dataset: usize,
+        dataset: DatasetId,
         before: Vec<StoredLineFit>,
         after: Vec<StoredLineFit>,
     ) -> Self {
@@ -342,7 +346,7 @@ impl Action {
     }
 
     pub fn set_multiplets(
-        dataset: usize,
+        dataset: DatasetId,
         before: Vec<StoredMultiplet>,
         after: Vec<StoredMultiplet>,
     ) -> Self {

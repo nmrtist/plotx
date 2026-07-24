@@ -30,6 +30,8 @@ pub struct NmrDataset {
     pub data: NmrData,
     pub base: Spectrum,
     pub pipeline: AxisPipeline,
+    /// Persistent owner-local allocator; excluded from processing undo snapshots.
+    pub next_step_id: u64,
     /// Whether the FFT divides out the digital-filter group delay. An advanced
     /// escape hatch; on for every computed FID.
     pub group_delay_correct: bool,
@@ -61,11 +63,12 @@ impl NmrDataset {
         let has_imaginary = data.domain == Domain::Time || data.points.iter().any(|v| v.im != 0.0);
         let base = fft::transform_base(&data, &pipeline, group_delay_correct);
         let spectrum = reapply(&base, &pipeline);
-        Self {
+        let mut result = Self {
             resource_id: DatasetId::new(),
             data,
             base,
             pipeline,
+            next_step_id: 0,
             group_delay_correct,
             has_imaginary,
             spectrum,
@@ -78,7 +81,13 @@ impl NmrDataset {
             next_line_fit_id: 0,
             multiplets: Vec::new(),
             next_multiplet_id: 0,
-        }
+        };
+        // Currently a no-op: the 1D templates already number 0..n and the
+        // allocator starts at 0. Kept so `load` establishes the "ids are unique
+        // and below next_step_id" invariant itself, rather than inheriting it
+        // from whichever template `pipeline` happened to come from.
+        result.remint_all_steps();
+        result
     }
 
     /// Cheap re-apply of the frequency-domain steps from the cached `base` (no FFT).
@@ -99,6 +108,30 @@ impl NmrDataset {
     pub fn pipeline(&self) -> &AxisPipeline {
         &self.pipeline
     }
+
+    pub fn allocate_step_id(&mut self) -> StepId {
+        let id = StepId::new(self.next_step_id);
+        self.next_step_id = self.next_step_id.checked_add(1).expect("step id overflow");
+        id
+    }
+
+    pub fn repair_step_allocator(&mut self) {
+        let required = self
+            .pipeline
+            .steps
+            .iter()
+            .map(|step| step.id.get().saturating_add(1))
+            .max()
+            .unwrap_or(0);
+        self.next_step_id = self.next_step_id.max(required);
+    }
+
+    fn remint_all_steps(&mut self) {
+        for step in &mut self.pipeline.steps {
+            step.id = StepId::new(self.next_step_id);
+            self.next_step_id = self.next_step_id.checked_add(1).expect("step id overflow");
+        }
+    }
 }
 
 /// A loaded 2D acquisition and its processing recipe. `base` is the post-FFT,
@@ -109,6 +142,8 @@ pub struct Nmr2DDataset {
     pub resource_id: DatasetId,
     pub data: Arc<NmrData2D>,
     pub params: Params2D,
+    /// Persistent owner-local allocator shared by both axes.
+    pub next_step_id: u64,
     /// Recipe used to produce `base`. While an async retransform is pending,
     /// `params` may be newer than this snapshot.
     pub base_params: Params2D,
@@ -168,12 +203,13 @@ impl Nmr2DDataset {
         let base = process_2d(&data, &params);
         let processed = reapply_2d(&base, &params);
         let processed_figure = Arc::new(build_processed_figure(&processed, preset));
-        Self {
+        let mut result = Self {
             resource_id: DatasetId::new(),
             data: Arc::new(data),
             base_params: params.clone(),
             base_stale: false,
             params,
+            next_step_id: 0,
             preset,
             group_delay_correct,
             has_imaginary,
@@ -194,7 +230,9 @@ impl Nmr2DDataset {
             integrals: Vec::new(),
             next_integral_id: 0,
             integral_error: None,
-        }
+        };
+        result.remint_all_steps();
+        result
     }
     /// Cheap re-apply of per-axis phase from the cached `base` (no FFT).
     pub fn rebuild(&mut self) {
@@ -290,6 +328,38 @@ impl Nmr2DDataset {
     /// Whether this is a pseudo-2D array with a recovered ruler (DOSY/relaxation).
     pub fn is_pseudo(&self) -> bool {
         matches!(self.processed, Processed2D::Stack(_)) && self.data.pseudo_axis.is_some()
+    }
+
+    pub fn allocate_step_id(&mut self) -> StepId {
+        let id = StepId::new(self.next_step_id);
+        self.next_step_id = self.next_step_id.checked_add(1).expect("step id overflow");
+        id
+    }
+
+    pub fn repair_step_allocator(&mut self) {
+        let required = self
+            .params
+            .f2
+            .steps
+            .iter()
+            .chain(&self.params.f1.steps)
+            .map(|step| step.id.get().saturating_add(1))
+            .max()
+            .unwrap_or(0);
+        self.next_step_id = self.next_step_id.max(required);
+    }
+
+    fn remint_all_steps(&mut self) {
+        for step in self
+            .params
+            .f2
+            .steps
+            .iter_mut()
+            .chain(&mut self.params.f1.steps)
+        {
+            step.id = StepId::new(self.next_step_id);
+            self.next_step_id = self.next_step_id.checked_add(1).expect("step id overflow");
+        }
     }
 }
 

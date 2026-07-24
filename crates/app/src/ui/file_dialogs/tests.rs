@@ -48,7 +48,10 @@ fn mixed_columns_import_as_typed_text_without_being_discarded() {
         assert!(delta.typed_diagnostic.is_none());
         delta
     };
-    app.execute_action(plotx_core::actions::Action::edit_table(0, delta));
+    app.execute_action(plotx_core::actions::Action::edit_table(
+        app.doc.datasets[0].resource_id(),
+        delta,
+    ));
     let edited_fingerprint = app.doc.datasets[0]
         .as_table()
         .unwrap()

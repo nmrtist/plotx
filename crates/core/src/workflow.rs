@@ -258,6 +258,7 @@ pub fn build_plot_object(
         visible: true,
         group: None,
         kind: CanvasObjectKind::Plot(Box::new(PlotObject {
+            next_series_id: crate::state::SeriesId::new(1),
             binding: DataBinding::single(dataset.resource_id()),
             chart,
             stack: StackSpec::default(),

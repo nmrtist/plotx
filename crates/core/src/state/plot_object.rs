@@ -1,7 +1,41 @@
-use super::{CanvasViewport, DatasetId, PlotObject};
+use super::{CanvasViewport, DatasetId, PlotObject, SeriesId};
 use plotx_figure::Figure;
 
 impl PlotObject {
+    pub fn allocate_series_id(&mut self) -> SeriesId {
+        let id = self.next_series_id;
+        self.next_series_id = id.checked_advance(1);
+        id
+    }
+
+    /// Assign identities to a newly materialized binding in order. Callers that
+    /// restore persisted bindings must preserve their ids and use
+    /// `repair_series_allocator` instead.
+    pub fn mint_series_ids(&mut self) {
+        let start = self.next_series_id;
+        for (offset, series) in self.binding.series.iter_mut().enumerate() {
+            series.id = start.checked_advance(offset as u64);
+        }
+        self.next_series_id = start.checked_advance(self.binding.series.len() as u64);
+    }
+
+    /// Raise the allocator above every id the (possibly persisted) binding
+    /// already carries, so the next `allocate_series_id` cannot alias one.
+    ///
+    /// Returns `None` when the binding's highest id is `u64::MAX` and no
+    /// successor exists: the file is unusable rather than merely inconsistent,
+    /// and the caller must reject it. Defaulting to zero here would skip the
+    /// repair entirely and hand out a duplicate on the very next allocation.
+    #[must_use]
+    pub fn repair_series_allocator(&mut self) -> Option<()> {
+        let Some(highest) = self.binding.series.iter().map(|series| series.id).max() else {
+            return Some(());
+        };
+        let required = highest.try_advance(1)?;
+        self.next_series_id = self.next_series_id.max(required);
+        Some(())
+    }
+
     pub fn primary_dataset(&self) -> Option<DatasetId> {
         self.binding.primary_dataset()
     }

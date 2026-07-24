@@ -258,8 +258,20 @@ fn data_section(app: &mut PlotxApp, ci: usize, object: ObjectId, ui: &mut Ui) {
                         let label = app.doc.datasets[*di].display_name();
                         if ui.selectable_label(false, label).clicked() {
                             let mut b = binding.clone();
-                            b.series
-                                .push(SeriesBinding::new(app.doc.datasets[*di].resource_id()));
+                            let Some(series_id) = app
+                                .doc
+                                .canvases
+                                .get_mut(ci)
+                                .and_then(|canvas| canvas.object_mut(object))
+                                .and_then(|object| object.plot_mut())
+                                .map(|plot| plot.allocate_series_id())
+                            else {
+                                continue;
+                            };
+                            let mut series =
+                                SeriesBinding::new(app.doc.datasets[*di].resource_id());
+                            series.id = series_id;
+                            b.series.push(series);
                             next_binding = Some(b);
                         }
                     }

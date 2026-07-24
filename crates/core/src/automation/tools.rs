@@ -204,7 +204,7 @@ fn execute_rename(app: &mut PlotxApp, plan: &ToolPlan) -> Result<ToolResult, Aut
     for target in compatible_targets(plan) {
         if let Some(index) = dataset_index(app, &target.id) {
             actions.push(Action::rename_dataset(
-                index,
+                app.doc.datasets[index].resource_id(),
                 app.doc.datasets[index].name(),
                 Some(params.name.clone()),
             ));

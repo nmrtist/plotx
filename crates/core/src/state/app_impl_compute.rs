@@ -46,8 +46,9 @@ impl PlotxApp {
         let nucleus = d2.data.direct.nucleus.clone();
         let source = stack.source.clone();
         let stack = stack.clone();
+        let dataset_id = d2.resource_id;
         let outcome = self.session.compute.enqueue_dosy(
-            dataset,
+            dataset_id,
             self.session.dataset_epoch,
             stack,
             values,
@@ -96,8 +97,9 @@ impl PlotxApp {
         let nucleus = d2.data.direct.nucleus.clone();
         let source = stack.source.clone();
         let stack = stack.clone();
+        let dataset_id = d2.resource_id;
         let outcome = self.session.compute.enqueue_ilt(
-            dataset,
+            dataset_id,
             self.session.dataset_epoch,
             stack,
             b_factors,
@@ -114,7 +116,10 @@ impl PlotxApp {
     }
 
     pub fn cancel_compute(&mut self, dataset: usize, kind: ComputeKind) -> bool {
-        if !self.session.compute.cancel(dataset, kind) {
+        let Some(dataset_id) = self.doc.datasets.get(dataset).map(Dataset::resource_id) else {
+            return false;
+        };
+        if !self.session.compute.cancel(dataset_id, kind) {
             return false;
         }
         self.session.status = match kind {
@@ -149,6 +154,9 @@ impl PlotxApp {
                     {
                         continue;
                     }
+                    let Some(dataset) = self.doc.dataset_index(dataset) else {
+                        continue;
+                    };
                     let any = result.amp.iter().flatten().any(|&a| a > 0.0);
                     let Some(d2) = self
                         .doc
@@ -186,6 +194,9 @@ impl PlotxApp {
                     {
                         continue;
                     }
+                    let Some(dataset) = self.doc.dataset_index(dataset) else {
+                        continue;
+                    };
                     let any = result.d.iter().any(|d| d.is_finite());
                     let Some(d2) = self
                         .doc
@@ -227,6 +238,9 @@ impl PlotxApp {
                     {
                         continue;
                     }
+                    let Some(dataset) = self.doc.dataset_index(dataset) else {
+                        continue;
+                    };
                     let Some(d2) = self
                         .doc
                         .datasets
@@ -261,8 +275,8 @@ impl PlotxApp {
                 Done::Failed { dataset, kind, .. } => {
                     let name = self
                         .doc
-                        .datasets
-                        .get(dataset)
+                        .dataset_index(dataset)
+                        .and_then(|index| self.doc.datasets.get(index))
                         .map_or_else(|| "the dataset".to_owned(), Dataset::display_name);
                     self.session.status = format!(
                         "{} for {name} could not be started; background computation is \
@@ -298,9 +312,10 @@ impl PlotxApp {
             || plotx_processing::needs_retransform_2d(&d2.params, &d2.base_params);
         let params = d2.params.clone();
         let preset = d2.preset;
+        let dataset_id = d2.resource_id;
         let aborted = if full {
             self.session.compute.request_2d_full(
-                dataset,
+                dataset_id,
                 self.session.dataset_epoch,
                 std::sync::Arc::clone(&d2.data),
                 params,
@@ -308,7 +323,7 @@ impl PlotxApp {
             )
         } else {
             self.session.compute.request_2d_reapply(
-                dataset,
+                dataset_id,
                 self.session.dataset_epoch,
                 d2.base.clone(),
                 params,

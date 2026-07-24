@@ -39,6 +39,7 @@ impl DatasetProcessingState {
                     n.group_delay_correct,
                 );
                 n.pipeline = pipeline.clone();
+                n.repair_step_allocator();
                 n.group_delay_correct = *group_delay_correct;
                 let rebuild = if full {
                     n.retransform();
@@ -53,6 +54,7 @@ impl DatasetProcessingState {
             (Dataset::Nmr2D(n), Self::Nmr2D { params, preset }) => {
                 let full = plotx_processing::needs_retransform_2d(params, &n.params);
                 n.params = params.clone();
+                n.repair_step_allocator();
                 n.preset = *preset;
                 if full {
                     n.retransform();

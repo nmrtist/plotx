@@ -26,6 +26,7 @@ mod afm_convert;
 mod axis_overrides;
 mod codec;
 mod convert;
+mod convert_dimensions;
 mod convert_recipes;
 mod dto;
 mod electrophysiology_convert;
@@ -38,6 +39,7 @@ mod typed_table;
 
 pub use codec::*;
 pub use convert::*;
+pub use convert_dimensions::*;
 pub use convert_recipes::*;
 pub use dto::*;
 use integrals2d::read_integrals_2d;
@@ -679,6 +681,8 @@ mod pseudo_tests;
 mod reference_tests;
 #[cfg(test)]
 mod schema_tests;
+#[cfg(test)]
+mod step_identity_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

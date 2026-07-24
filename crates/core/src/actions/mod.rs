@@ -1,9 +1,9 @@
 use crate::layout::PageLayout;
 use crate::state::{
     AxisOverrides, AxisProjections, CanvasDocument, CanvasObject, CanvasViewport, ChartSpec,
-    CurveFitReference, DataBinding, Dataset, NamedView, ObjectFrame, ObjectId, ObjectStyle,
-    PanelLabelStyle, PanelMeta, PlotxApp, PrimaryView, Region, Selection, StackSpec, StatAnalysis,
-    StoredCurveFitAnalysis, StoredLineFit, StoredMultiplet, TableEditDelta, TextBox,
+    CurveFitReference, DataBinding, Dataset, DatasetId, NamedView, ObjectFrame, ObjectId,
+    ObjectStyle, PanelLabelStyle, PanelMeta, PlotxApp, PrimaryView, Region, Selection, StackSpec,
+    StatAnalysis, StoredCurveFitAnalysis, StoredLineFit, StoredMultiplet, TableEditDelta, TextBox,
     TypedTableState,
 };
 use crate::theme::ThemeSnapshot;
@@ -73,7 +73,7 @@ pub struct PendingCanvasSizeEdit {
 
 #[derive(Clone)]
 pub struct PendingProcessingEdit {
-    pub dataset: usize,
+    pub dataset: DatasetId,
     pub before: DatasetProcessingState,
 }
 
@@ -97,7 +97,7 @@ pub struct PendingInspectorEdit {
 pub enum Action {
     Composite(Vec<Action>),
     UpdateDatasetProcessing {
-        dataset: usize,
+        dataset: DatasetId,
         before: DatasetProcessingState,
         after: DatasetProcessingState,
     },
@@ -147,7 +147,7 @@ pub enum Action {
         after: [f32; 2],
     },
     MoveSheetOnBoard {
-        dataset: usize,
+        dataset: DatasetId,
         before: [f32; 2],
         after: [f32; 2],
     },
@@ -249,23 +249,23 @@ pub enum Action {
         after: PanelLabelStyle,
     },
     RenameDataset {
-        dataset: usize,
+        dataset: DatasetId,
         before: Option<String>,
         after: Option<String>,
     },
     /// Replace a table's analysis snapshots and per-column references atomically.
     SetCurveFitAnalyses {
-        dataset: usize,
+        dataset: DatasetId,
         before: (Vec<Option<CurveFitReference>>, Vec<StoredCurveFitAnalysis>),
         after: (Vec<Option<CurveFitReference>>, Vec<StoredCurveFitAnalysis>),
     },
     /// Apply a stable-identity incremental table transaction.
     EditTable {
-        dataset: usize,
+        dataset: DatasetId,
         delta: Box<TableEditDelta>,
     },
     SetTypedTableState {
-        dataset: usize,
+        dataset: DatasetId,
         before: Box<TypedTableState>,
         after: Box<TypedTableState>,
     },
@@ -273,44 +273,44 @@ pub enum Action {
     /// resize / rename / delete). The linked series table is re-derived on apply
     /// and undo, so it stays consistent without a second action.
     SetRegions {
-        dataset: usize,
+        dataset: DatasetId,
         before: Vec<Region>,
         after: Vec<Region>,
     },
     SetIntegrals {
-        dataset: usize,
+        dataset: DatasetId,
         before: Vec<IntegralResult>,
         after: Vec<IntegralResult>,
     },
     /// Replace a true-2D dataset's rectangular volume measurements as one
     /// undoable edit (create, geometry, metadata, reference, or deletion).
     SetIntegrals2D {
-        dataset: usize,
+        dataset: DatasetId,
         before: Vec<Integral2D>,
         after: Vec<Integral2D>,
     },
     /// Replace a dataset's peak set (detector recipe, hand-placed marks, and
     /// suppressed detections) as one undoable step.
     SetPeaks {
-        dataset: usize,
+        dataset: DatasetId,
         before: crate::state::PeakSet,
         after: crate::state::PeakSet,
     },
     /// Replace a 1D dataset's stored lineshape deconvolutions as one undoable step.
     SetLineFits {
-        dataset: usize,
+        dataset: DatasetId,
         before: Vec<StoredLineFit>,
         after: Vec<StoredLineFit>,
     },
     /// Replace a 1D NMR dataset's stored multiplet analyses as one undoable step.
     SetMultiplets {
-        dataset: usize,
+        dataset: DatasetId,
         before: Vec<StoredMultiplet>,
         after: Vec<StoredMultiplet>,
     },
     /// Replace a table dataset's stored statistics analyses as one undoable step.
     SetTableStatistics {
-        dataset: usize,
+        dataset: DatasetId,
         before: Vec<StatAnalysis>,
         after: Vec<StatAnalysis>,
     },

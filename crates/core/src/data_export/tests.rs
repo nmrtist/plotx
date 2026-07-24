@@ -323,9 +323,12 @@ fn default_channel_tracks_the_enabled_magnitude_display_step() {
         DataExportAvailability::for_dataset(&dataset).default_channel,
         IntensityChannel::Real
     );
-    nmr.pipeline
-        .steps
-        .push(ProcessingStep::new(StepKind::Magnitude, StepSource::User));
+    let id = nmr.allocate_step_id();
+    nmr.pipeline.steps.push(ProcessingStep::new(
+        id,
+        StepKind::Magnitude,
+        StepSource::User,
+    ));
     let dataset = Dataset::Nmr(Box::new(nmr));
     assert_eq!(
         DataExportAvailability::for_dataset(&dataset).default_channel,

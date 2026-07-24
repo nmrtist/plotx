@@ -618,7 +618,11 @@ fn apply_browser_event(app: &mut PlotxApp, ui: &Ui, event: Option<BrowserEvent>)
             let trimmed = name.trim();
             let before = app.doc.datasets[di].name();
             let after = (!trimmed.is_empty()).then(|| trimmed.to_owned());
-            app.execute_action(Action::rename_dataset(di, before, after));
+            app.execute_action(Action::rename_dataset(
+                app.doc.datasets[di].resource_id(),
+                before,
+                after,
+            ));
             app.session.ui.rename = None;
         }
         Some(BrowserEvent::RenameCancel) => app.session.ui.rename = None,

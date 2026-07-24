@@ -75,6 +75,10 @@ pub(super) fn push_canvas(app: &mut PlotxApp, dataset: usize, name: &str, size_m
     app.doc.canvases.push(canvas);
 }
 
+pub(super) fn dataset_id(app: &PlotxApp, index: usize) -> crate::state::DatasetId {
+    app.doc.datasets[index].resource_id()
+}
+
 fn first_plot(app: &PlotxApp) -> &crate::state::PlotObject {
     app.doc.canvases[0].objects[0].plot().unwrap()
 }
@@ -209,7 +213,11 @@ fn processing_undo_redo_rebuilds_spectrum_and_canvas() {
         }
     }
 
-    app.execute_action(Action::update_dataset_processing(0, before, after));
+    app.execute_action(Action::update_dataset_processing(
+        dataset_id(&app, 0),
+        before,
+        after,
+    ));
     let edited_y = first_plot(&app).figure.series[0].points[3][1];
     assert_ne!(edited_y, original_y);
     assert_eq!(phase0_of(&app), (0.5, false));
@@ -238,7 +246,7 @@ fn phase_editor_session_is_one_undo_step() {
         .id;
     let before = DatasetProcessingState::from_dataset(&app.doc.datasets[0]);
 
-    app.session.ui.proc_expanded_step = Some(phase_id);
+    app.session.ui.proc_expanded_step = Some((dataset_id(&app, 0), phase_id));
     app.sync_phase_interaction();
     assert!(app.session.ui.processing_session.is_some());
 
@@ -579,7 +587,7 @@ fn rename_and_redo_stack_behave() {
     assert!(app.can_redo());
 
     app.execute_action(Action::rename_dataset(
-        0,
+        dataset_id(&app, 0),
         None,
         Some("data name".to_owned()),
     ));

@@ -454,8 +454,11 @@ pub struct UiState {
     /// The chosen slice orientation for a true-2D spectrum (ignored for a stack,
     /// whose slices are always increments).
     pub slice_kind: plotx_processing::SliceKind,
-    /// The processing step whose inline editor is expanded, if any.
-    pub proc_expanded_step: Option<StepId>,
+    /// The processing step whose inline editor is expanded, if any. `StepId` is
+    /// owner-local — every dataset numbers its steps from zero — so the owning
+    /// dataset is stored alongside it; without it, expanding a row on one
+    /// dataset would light up the same-numbered row on every other one.
+    pub proc_expanded_step: Option<(DatasetId, StepId)>,
     /// Latched result of the last phase-editing sync: `true` while the canvas is
     /// held in on-plot phase mode because a Phase step's editor is open. Edge-
     /// detected so a manual tool switch mid-phasing isn't fought each frame.
@@ -465,7 +468,7 @@ pub struct UiState {
     pub proc_paused: bool,
     /// While paused, the earliest pre-edit snapshot (dataset + state) so all
     /// staged edits commit as one undoable step on Apply.
-    pub proc_pending: Option<(usize, DatasetProcessingState)>,
+    pub proc_pending: Option<(DatasetId, DatasetProcessingState)>,
 }
 
 impl UiState {

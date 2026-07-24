@@ -53,12 +53,15 @@ impl PlotxApp {
         before: DatasetProcessingState,
         after: DatasetProcessingState,
     ) {
+        let Some(dataset_id) = self.doc.datasets.get(dataset).map(Dataset::resource_id) else {
+            return;
+        };
         if self
             .session
             .ui
             .processing_session
             .as_ref()
-            .is_some_and(|edit| edit.dataset == dataset)
+            .is_some_and(|edit| edit.dataset == dataset_id)
             && !self.session.ui.proc_paused
         {
             if DatasetProcessingState::from_dataset(&self.doc.datasets[dataset]) != after {
@@ -69,10 +72,10 @@ impl PlotxApp {
         if self.session.ui.proc_paused {
             self.set_recipe_no_recompute(dataset, &after);
             if self.session.ui.proc_pending.is_none() {
-                self.session.ui.proc_pending = Some((dataset, before));
+                self.session.ui.proc_pending = Some((dataset_id, before));
             }
         } else {
-            self.execute_action(Action::update_dataset_processing(dataset, before, after));
+            self.execute_action(Action::update_dataset_processing(dataset_id, before, after));
         }
     }
 
@@ -83,19 +86,22 @@ impl PlotxApp {
     /// Start a processing transaction whose live edits may come from multiple UI
     /// surfaces. Re-entering the same dataset preserves the original snapshot.
     pub fn begin_processing_session(&mut self, dataset: usize) {
+        let Some(dataset_id) = self.doc.datasets.get(dataset).map(Dataset::resource_id) else {
+            return;
+        };
         if self
             .session
             .ui
             .processing_session
             .as_ref()
-            .is_some_and(|edit| edit.dataset == dataset)
+            .is_some_and(|edit| edit.dataset == dataset_id)
         {
             return;
         }
         self.finish_processing_session();
         if let Some(current) = self.doc.datasets.get(dataset) {
             self.session.ui.processing_session = Some(PendingProcessingEdit {
-                dataset,
+                dataset: dataset_id,
                 before: DatasetProcessingState::from_dataset(current),
             });
         }
@@ -107,9 +113,10 @@ impl PlotxApp {
         let Some(edit) = self.session.ui.processing_session.take() else {
             return;
         };
-        let Some(dataset) = self.doc.datasets.get(edit.dataset) else {
+        let Some(dataset_index) = self.doc.dataset_index(edit.dataset) else {
             return;
         };
+        let dataset = &self.doc.datasets[dataset_index];
         let after = DatasetProcessingState::from_dataset(dataset);
         let action = Action::update_dataset_processing(edit.dataset, edit.before, after);
         if let Err(error) = self.record_applied_processing_action(action) {
@@ -121,10 +128,13 @@ impl PlotxApp {
         let Some((dataset, before)) = self.session.ui.proc_pending.take() else {
             return;
         };
-        let after = DatasetProcessingState::from_dataset(&self.doc.datasets[dataset]);
+        let Some(dataset_index) = self.doc.dataset_index(dataset) else {
+            return;
+        };
+        let after = DatasetProcessingState::from_dataset(&self.doc.datasets[dataset_index]);
         // Restore the pre-edit recipe so the commit sees a real diff and picks
         // retransform vs rebuild correctly, then apply the accumulated recipe.
-        self.set_recipe_no_recompute(dataset, &before);
+        self.set_recipe_no_recompute(dataset_index, &before);
         self.execute_action(Action::update_dataset_processing(dataset, before, after));
     }
 
@@ -133,6 +143,9 @@ impl PlotxApp {
     /// sufficient to restore the state before the edit run.
     pub fn discard_paused_processing(&mut self) {
         let Some((dataset, before)) = self.session.ui.proc_pending.take() else {
+            return;
+        };
+        let Some(dataset) = self.doc.dataset_index(dataset) else {
             return;
         };
         self.set_recipe_no_recompute(dataset, &before);
@@ -147,9 +160,15 @@ impl PlotxApp {
     }
 
     fn phase_editor_dataset(&self) -> Option<usize> {
-        let id = self.session.ui.proc_expanded_step?;
+        let (owner, id) = self.session.ui.proc_expanded_step?;
         let di = self.active_dataset()?;
-        let dataset = &self.doc.datasets[di];
+        let dataset = self.doc.datasets.get(di)?;
+        // The expanded row belongs to one dataset. Without this check a step
+        // that merely shares its owner-local number would read as "the user is
+        // phasing" the moment the active dataset changes.
+        if dataset.resource_id() != owner {
+            return None;
+        }
         dataset
             .phase_axes()
             .iter()
@@ -175,7 +194,12 @@ impl PlotxApp {
                 .ui
                 .processing_session
                 .as_ref()
-                .is_some_and(|edit| edit.dataset == dataset)
+                .is_some_and(|edit| {
+                    self.doc
+                        .datasets
+                        .get(dataset)
+                        .is_some_and(|value| value.resource_id() == edit.dataset)
+                })
         });
         if phasing == self.session.ui.phase_edit_active && (!phasing || session_matches) {
             return;

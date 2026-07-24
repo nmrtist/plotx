@@ -27,6 +27,8 @@ mod app_impl_analysis;
 mod app_impl_analysis_tests;
 mod app_impl_arithmetic;
 mod app_impl_compute;
+#[cfg(test)]
+mod app_impl_compute_tests;
 mod app_impl_io;
 mod app_impl_linefit;
 mod app_impl_multiplet;

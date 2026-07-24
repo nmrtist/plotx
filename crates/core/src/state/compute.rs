@@ -13,6 +13,7 @@ use plotx_processing::{
     Params2D, Preset2D, Processed2D, StackSpectrum, process_2d_cancellable, reapply_2d_cancellable,
 };
 
+use super::DatasetId;
 use super::build_processed_figure_cancellable;
 use crate::{IltParams, build_dosy_figure_cancellable, build_ilt_figure_cancellable};
 
@@ -48,7 +49,7 @@ pub enum EnqueueError {
 enum Job {
     Ilt {
         generation: u64,
-        dataset: usize,
+        dataset: DatasetId,
         epoch: u64,
         token: Arc<AtomicBool>,
         stack: Arc<StackSpectrum>,
@@ -61,7 +62,7 @@ enum Job {
     },
     Dosy {
         generation: u64,
-        dataset: usize,
+        dataset: DatasetId,
         epoch: u64,
         token: Arc<AtomicBool>,
         stack: Arc<StackSpectrum>,
@@ -72,7 +73,7 @@ enum Job {
     },
     Process2D {
         generation: u64,
-        dataset: usize,
+        dataset: DatasetId,
         epoch: u64,
         token: Arc<AtomicBool>,
         input: ProcessingInput,
@@ -103,7 +104,7 @@ impl ProcessingInput {
 
 struct DeferredProcessing {
     generation: u64,
-    dataset: usize,
+    dataset: DatasetId,
     epoch: u64,
     input: ProcessingInput,
     params: Params2D,
@@ -122,7 +123,7 @@ struct ActiveJob {
 pub enum Done {
     Ilt {
         generation: u64,
-        dataset: usize,
+        dataset: DatasetId,
         epoch: u64,
         result: IltResult,
         params: IltParams,
@@ -130,14 +131,14 @@ pub enum Done {
     },
     Dosy {
         generation: u64,
-        dataset: usize,
+        dataset: DatasetId,
         epoch: u64,
         result: DiffusionMap,
         figure: Arc<Figure>,
     },
     Processing2D {
         generation: u64,
-        dataset: usize,
+        dataset: DatasetId,
         epoch: u64,
         base: Option<Processed2D>,
         processed: Processed2D,
@@ -146,7 +147,7 @@ pub enum Done {
     },
     Cancelled {
         generation: u64,
-        dataset: usize,
+        dataset: DatasetId,
         kind: ComputeKind,
     },
     /// A request could not be handed to a worker. Reported through the same queue
@@ -154,7 +155,7 @@ pub enum Done {
     /// leaving the caller waiting on work that will never run.
     Failed {
         generation: u64,
-        dataset: usize,
+        dataset: DatasetId,
         kind: ComputeKind,
     },
 }
@@ -168,9 +169,9 @@ pub struct ComputeService {
     job_tx: Sender<Job>,
     done_rx: Receiver<Done>,
     next_gen: u64,
-    latest: HashMap<(usize, ComputeKind), u64>,
-    active: HashMap<(usize, ComputeKind), ActiveJob>,
-    deferred_processing: HashMap<usize, DeferredProcessing>,
+    latest: HashMap<(DatasetId, ComputeKind), u64>,
+    active: HashMap<(DatasetId, ComputeKind), ActiveJob>,
+    deferred_processing: HashMap<DatasetId, DeferredProcessing>,
     /// Dispatch failures awaiting collection by `try_drain`.
     failures: Vec<Done>,
 }
@@ -204,7 +205,7 @@ impl ComputeService {
     #[allow(clippy::too_many_arguments)]
     pub fn enqueue_ilt(
         &mut self,
-        dataset: usize,
+        dataset: DatasetId,
         epoch: u64,
         stack: Arc<StackSpectrum>,
         b_factors: Vec<f64>,
@@ -254,7 +255,7 @@ impl ComputeService {
     #[allow(clippy::too_many_arguments)]
     pub fn enqueue_dosy(
         &mut self,
-        dataset: usize,
+        dataset: DatasetId,
         epoch: u64,
         stack: Arc<StackSpectrum>,
         values: Vec<f64>,
@@ -301,7 +302,7 @@ impl ComputeService {
     /// request aborted, so the caller can say so.
     pub fn request_2d_full(
         &mut self,
-        dataset: usize,
+        dataset: DatasetId,
         epoch: u64,
         data: Arc<NmrData2D>,
         params: Params2D,
@@ -314,7 +315,7 @@ impl ComputeService {
     /// [`Self::request_2d_full`] does.
     pub fn request_2d_reapply(
         &mut self,
-        dataset: usize,
+        dataset: DatasetId,
         epoch: u64,
         base: Processed2D,
         params: Params2D,
@@ -331,7 +332,7 @@ impl ComputeService {
 
     fn request_2d(
         &mut self,
-        dataset: usize,
+        dataset: DatasetId,
         epoch: u64,
         input: ProcessingInput,
         params: Params2D,
@@ -356,14 +357,14 @@ impl ComputeService {
         aborted
     }
 
-    fn next_generation(&mut self, dataset: usize, kind: ComputeKind) -> u64 {
+    fn next_generation(&mut self, dataset: DatasetId, kind: ComputeKind) -> u64 {
         let generation = self.next_gen;
         self.next_gen = self.next_gen.wrapping_add(1);
         self.latest.insert((dataset, kind), generation);
         generation
     }
 
-    fn cancel_failed_enqueue(&mut self, dataset: usize, kind: ComputeKind, generation: u64) {
+    fn cancel_failed_enqueue(&mut self, dataset: DatasetId, kind: ComputeKind, generation: u64) {
         self.active.remove(&(dataset, kind));
         if self.latest.get(&(dataset, kind)) == Some(&generation) {
             self.latest.remove(&(dataset, kind));
@@ -371,7 +372,7 @@ impl ComputeService {
     }
 
     fn dispatch_ready_processing(&mut self) {
-        let ready: Vec<usize> = self
+        let ready: Vec<DatasetId> = self
             .deferred_processing
             .keys()
             .filter(|dataset| {
@@ -450,7 +451,7 @@ impl ComputeService {
         !self.active.is_empty() || !self.deferred_processing.is_empty()
     }
 
-    pub fn progress(&self, dataset: usize, kind: ComputeKind) -> Option<Duration> {
+    pub fn progress(&self, dataset: DatasetId, kind: ComputeKind) -> Option<Duration> {
         self.active.get(&(dataset, kind)).and_then(|active| {
             (!active.token.load(Ordering::Relaxed)).then(|| active.started_at.elapsed())
         })
@@ -458,7 +459,7 @@ impl ComputeService {
 
     /// Return the active DOSY computation regardless of which method the UI is
     /// currently displaying. Only one method may run per dataset at a time.
-    pub fn dosy_progress(&self, dataset: usize) -> Option<(ComputeKind, Duration)> {
+    pub fn dosy_progress(&self, dataset: DatasetId) -> Option<(ComputeKind, Duration)> {
         [ComputeKind::Dosy, ComputeKind::Ilt]
             .into_iter()
             .find_map(|kind| self.progress(dataset, kind).map(|elapsed| (kind, elapsed)))
@@ -468,7 +469,7 @@ impl ComputeService {
     /// already cancelled does not count even though its entry lives until the
     /// worker acknowledges: `progress` reports it as gone, so blocking on it would
     /// reject a re-run against a computation the user cannot see or wait for.
-    pub fn blocking_work_for(&self, dataset: usize) -> Option<ComputeKind> {
+    pub fn blocking_work_for(&self, dataset: DatasetId) -> Option<ComputeKind> {
         if self.deferred_processing.contains_key(&dataset) {
             return Some(ComputeKind::Processing2D);
         }
@@ -487,7 +488,7 @@ impl ComputeService {
     /// because Full may replace that cached base.
     fn cancel_incompatible_for_processing(
         &mut self,
-        dataset: usize,
+        dataset: DatasetId,
         requested_input: ProcessingInputKind,
     ) -> Vec<ComputeKind> {
         let mut aborted = Vec::new();
@@ -516,7 +517,7 @@ impl ComputeService {
         aborted
     }
 
-    pub fn cancel(&mut self, dataset: usize, kind: ComputeKind) -> bool {
+    pub fn cancel(&mut self, dataset: DatasetId, kind: ComputeKind) -> bool {
         let mut cancelled = false;
         if let Some(active) = self.active.get(&(dataset, kind)) {
             active.token.store(true, Ordering::Relaxed);
@@ -532,7 +533,7 @@ impl ComputeService {
         cancelled
     }
 
-    pub fn is_current(&self, dataset: usize, kind: ComputeKind, generation: u64) -> bool {
+    pub fn is_current(&self, dataset: DatasetId, kind: ComputeKind, generation: u64) -> bool {
         self.latest.get(&(dataset, kind)) == Some(&generation)
     }
 }
@@ -696,7 +697,7 @@ fn run_job(job: Job) -> Done {
     }
 }
 
-fn cancelled_done(generation: u64, dataset: usize) -> Done {
+fn cancelled_done(generation: u64, dataset: DatasetId) -> Done {
     Done::Cancelled {
         generation,
         dataset,
@@ -704,7 +705,7 @@ fn cancelled_done(generation: u64, dataset: usize) -> Done {
     }
 }
 
-fn done_identity(done: &Done) -> (usize, ComputeKind, u64) {
+fn done_identity(done: &Done) -> (DatasetId, ComputeKind, u64) {
     match done {
         Done::Ilt {
             dataset,

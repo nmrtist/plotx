@@ -20,10 +20,11 @@ fn project_and_scheme_roundtrips_preserve_cleanup_steps() {
         StepKind::Invert,
     ];
     for kind in &cleanup {
+        let id = dataset.allocate_step_id();
         dataset
             .pipeline
             .steps
-            .push(ProcessingStep::new(kind.clone(), StepSource::User));
+            .push(ProcessingStep::new(id, kind.clone(), StepSource::User));
     }
     dataset.retransform();
     let expected: Vec<StepKind> = cleanup.to_vec();

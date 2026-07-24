@@ -6,9 +6,15 @@ pub enum ActionApplyError {
     StaleTarget(String),
 }
 
+/// The document shape a composite has projected so far. Validation runs before
+/// anything is applied, so a child action that targets a dataset an earlier
+/// child inserts must be judged against this projection, not against the live
+/// document.
 pub(super) struct ValidationShape {
     datasets: usize,
     canvases: usize,
+    /// Datasets inserted by earlier children of the composite under validation.
+    inserted: Vec<crate::state::DatasetId>,
 }
 
 impl ValidationShape {
@@ -16,7 +22,12 @@ impl ValidationShape {
         Self {
             datasets: app.doc.datasets.len(),
             canvases: app.doc.canvases.len(),
+            inserted: Vec::new(),
         }
+    }
+
+    fn has_dataset(&self, app: &PlotxApp, id: crate::state::DatasetId) -> bool {
+        app.doc.dataset_index(id).is_some() || self.inserted.contains(&id)
     }
 }
 
@@ -32,7 +43,7 @@ pub(super) fn validate_action(
             }
         }
         Action::RenameDataset { dataset, .. } | Action::UpdateDatasetProcessing { dataset, .. } => {
-            if *dataset >= shape.datasets {
+            if !shape.has_dataset(app, *dataset) {
                 return Err(ActionApplyError::StaleTarget(format!("dataset {dataset}")));
             }
         }
@@ -49,6 +60,7 @@ pub(super) fn validate_action(
             dataset_index,
             canvas_index,
             inserted_into_existing_canvas,
+            dataset,
             ..
         } => {
             if *dataset_index != shape.datasets {
@@ -69,6 +81,7 @@ pub(super) fn validate_action(
                 shape.canvases += 1;
             }
             shape.datasets += 1;
+            shape.inserted.push(dataset.resource_id());
         }
         Action::DeleteCanvas { index, .. } => {
             if *index >= shape.canvases {

@@ -14,8 +14,17 @@ pub fn pipeline_from_dto(dto: &AxisPipelineDto) -> AxisPipeline {
     }
 }
 
+/// Drop step identities from a pipeline destined for a detached recipe
+/// (`.plotxproc`), which has no owner to make them meaningful.
+pub fn strip_step_identities(dto: &mut AxisPipelineDto) {
+    for step in &mut dto.steps {
+        step.id = None;
+    }
+}
+
 fn step_to_dto(step: &ProcessingStep) -> ProcessingStepDto {
     ProcessingStepDto {
+        id: Some(step.id.get()),
         kind: kind_to_dto(&step.kind),
         enabled: step.enabled,
         source: source_to_dto(step.source),
@@ -23,8 +32,10 @@ fn step_to_dto(step: &ProcessingStep) -> ProcessingStepDto {
 }
 
 fn step_from_dto(dto: &ProcessingStepDto) -> ProcessingStep {
+    // A recipe without identities decodes to placeholder numbering; every path
+    // that hands such a pipeline to a dataset remints it (see `apply_scheme`).
     ProcessingStep {
-        id: StepId::fresh(),
+        id: StepId::new(dto.id.unwrap_or(0)),
         kind: kind_from_dto(&dto.kind),
         enabled: dto.enabled,
         source: source_from_dto(dto.source),
@@ -289,7 +300,10 @@ mod tests {
         let pipe = AxisPipeline {
             steps: kinds
                 .iter()
-                .map(|k| ProcessingStep::new(k.clone(), StepSource::User))
+                .enumerate()
+                .map(|(index, k)| {
+                    ProcessingStep::new(StepId::new(index as u64), k.clone(), StepSource::User)
+                })
                 .collect(),
         };
         let dto = pipeline_to_dto(&pipe);
@@ -304,10 +318,10 @@ mod tests {
     #[test]
     fn pipeline_json_without_cleanup_variants_still_loads() {
         let json = r#"{"steps":[
-            {"kind":{"Apodize":{"Exponential":{"lb_hz":1.0}}},"enabled":true,"source":"User"},
-            {"kind":"Fft","enabled":true,"source":"Default"},
-            {"kind":{"Baseline":"Offset"},"enabled":true,"source":"User"},
-            {"kind":"Magnitude","enabled":false,"source":"Default"}
+            {"id":10,"kind":{"Apodize":{"Exponential":{"lb_hz":1.0}}},"enabled":true,"source":"User"},
+            {"id":11,"kind":"Fft","enabled":true,"source":"Default"},
+            {"id":12,"kind":{"Baseline":"Offset"},"enabled":true,"source":"User"},
+            {"id":13,"kind":"Magnitude","enabled":false,"source":"Default"}
         ]}"#;
         let dto: AxisPipelineDto = serde_json::from_str(json).unwrap();
         let pipe = pipeline_from_dto(&dto);

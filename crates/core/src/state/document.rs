@@ -166,6 +166,7 @@ pub struct NamedView {
 /// Only `dataset` is required.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SeriesBinding {
+    pub id: SeriesId,
     pub dataset: DatasetId,
     pub color: Option<Color>,
     pub label: Option<String>,
@@ -176,6 +177,7 @@ pub struct SeriesBinding {
 impl SeriesBinding {
     pub fn new(dataset: impl Into<DatasetId>) -> Self {
         Self {
+            id: SeriesId::default(),
             dataset: dataset.into(),
             color: None,
             label: None,
@@ -320,6 +322,9 @@ impl AxisProjections {
 
 #[derive(Clone)]
 pub struct PlotObject {
+    /// Persistent high-water mark for owner-local series identities. This is
+    /// deliberately outside `binding`, which actions may replace wholesale.
+    pub next_series_id: SeriesId,
     pub binding: DataBinding,
     /// The selected chart type (registry id) + its context, driving figure
     /// rebuilds through `state::charts`. Defaults to the dataset domain's default.

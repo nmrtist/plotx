@@ -295,7 +295,11 @@ impl PlotxApp {
         {
             d2.next_region_id = next_id;
         }
-        self.execute_action(Action::set_regions(dataset, before, after));
+        self.execute_action(Action::set_regions(
+            self.doc.datasets[dataset].resource_id(),
+            before,
+            after,
+        ));
     }
 
     /// Create the live series table for a dataset's regions.
@@ -470,7 +474,7 @@ impl PlotxApp {
                 .any(|reference| reference.analysis_id == analysis.id)
         });
         self.execute_action(Action::set_curve_fit_analyses(
-            dataset,
+            self.doc.datasets[dataset].resource_id(),
             (before_refs, before_analyses),
             (after_refs, after_analyses),
         ));

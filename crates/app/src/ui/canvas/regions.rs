@@ -250,5 +250,9 @@ fn finish_region_drag(app: &mut PlotxApp, dataset: usize, xspan: f64) {
         .unwrap()
         .regions
         .clone();
-    app.execute_action(Action::set_regions(dataset, drag.before, after));
+    app.execute_action(Action::set_regions(
+        app.doc.datasets[dataset].resource_id(),
+        drag.before,
+        after,
+    ));
 }

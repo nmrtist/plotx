@@ -584,6 +584,7 @@ fn project_roundtrip_preserves_overlay_binding() {
         series: vec![
             crate::state::SeriesBinding::new(app.doc.datasets[0].resource_id()),
             crate::state::SeriesBinding {
+                id: crate::state::SeriesId::new(1),
                 dataset: app.doc.datasets[1].resource_id(),
                 color: Some(Color::rgb(10, 20, 30)),
                 label: Some("treated".to_owned()),
@@ -637,6 +638,7 @@ fn project_roundtrip_preserves_stack_spec_and_series_fields() {
             series: vec![
                 SeriesBinding::new(app.doc.datasets[0].resource_id()),
                 SeriesBinding {
+                    id: crate::state::SeriesId::new(1),
                     dataset: app.doc.datasets[1].resource_id(),
                     color: None,
                     label: None,
@@ -675,65 +677,16 @@ fn project_roundtrip_preserves_stack_spec_and_series_fields() {
 }
 
 #[test]
-fn legacy_single_input_loads_as_one_series_binding() {
+fn single_input_without_explicit_series_is_still_parseable() {
     let view: ViewCanvasObject = serde_json::from_str(
-        r#"{"id":"1","name":"Plot","kind":"line_plot","input":"recipe_000000",
+        r#"{"id":"1","name":"Plot","kind":"line_plot","input":"recipe_000000","next_series_id":0,
                 "frame":{"x":0.0,"y":0.0,"width":100.0,"height":80.0},
                 "title":null,"snapshot":null,"locked":false,"visible":true}"#,
     )
     .unwrap();
-    assert!(view.series.is_empty(), "old files carry no series list");
+    assert!(view.series.is_empty());
     assert!(view.axis_overrides.is_none());
 }
-
-#[test]
-fn project_roundtrip_preserves_custom_pipeline_steps() {
-    let mut app = PlotxApp::new();
-    let mut dataset = NmrDataset::load(synthetic_1d());
-    // One time-side step (an exponential window before the FFT) and one
-    // frequency-side step (a referencing shift) that must both survive.
-    let fft_pos = dataset
-        .pipeline
-        .steps
-        .iter()
-        .position(|s| matches!(s.kind, StepKind::Fft))
-        .unwrap();
-    dataset.pipeline.steps.insert(
-        fft_pos,
-        ProcessingStep::new(
-            StepKind::Apodize(Apodization::Exponential { lb_hz: 8.0 }),
-            StepSource::User,
-        ),
-    );
-    dataset.pipeline.steps.push(ProcessingStep::new(
-        StepKind::Reference(ReferenceParams {
-            at_ppm: 2.0,
-            target_ppm: 2.5,
-        }),
-        StepSource::User,
-    ));
-    dataset.retransform();
-    app.doc.datasets.push(Dataset::Nmr(Box::new(dataset)));
-
-    let path = temp_project("pipeline");
-    let _ = std::fs::remove_file(&path);
-    save_project(&app, &path, false).unwrap();
-    let loaded = load_project(&path).unwrap();
-    let _ = std::fs::remove_file(&path);
-
-    let Dataset::Nmr(n) = &loaded.doc.datasets[0] else {
-        panic!("expected a 1D NMR dataset");
-    };
-    assert!(n.pipeline.steps.iter().any(|s| matches!(
-        &s.kind,
-        StepKind::Apodize(Apodization::Exponential { lb_hz }) if (*lb_hz - 8.0).abs() < 1e-9
-    )));
-    assert!(n.pipeline.steps.iter().any(|s| matches!(
-        &s.kind,
-        StepKind::Reference(r) if (r.target_ppm - 2.5).abs() < 1e-9 && (r.at_ppm - 2.0).abs() < 1e-9
-    )));
-}
-
 #[test]
 fn scheme_save_load_apply_roundtrips() {
     use crate::actions::DatasetProcessingState;

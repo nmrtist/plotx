@@ -288,18 +288,22 @@ impl BinParams {
     };
 }
 
-/// A stable identifier for a step, so callers can address it across edits and
-/// reorders. Mint fresh ids with [`StepId::fresh`].
+/// A stable identifier for a step, unique within its owning dataset pipeline.
+/// Owner-local: two different datasets both number their steps from zero, so a
+/// `StepId` is only meaningful next to the dataset that minted it.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
 )]
 #[serde(transparent)]
-pub struct StepId(pub u64);
+pub struct StepId(u64);
 
 impl StepId {
-    pub fn fresh() -> Self {
-        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-        StepId(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+    pub const fn new(value: u64) -> Self {
+        Self(value)
+    }
+
+    pub const fn get(self) -> u64 {
+        self.0
     }
 }
 
@@ -365,13 +369,33 @@ pub struct ProcessingStep {
 }
 
 impl ProcessingStep {
-    pub fn new(kind: StepKind, source: StepSource) -> Self {
+    /// Build a step with an explicit identity. `id` must come from the owning
+    /// dataset's allocator whenever the step is destined for a *live* pipeline;
+    /// only detached recipe values (templates, DTO decoding, tests) may number
+    /// their own steps, and a dataset adopting such a value must remint them.
+    /// The parameter is deliberately not defaulted so every call site has to
+    /// answer where its identity comes from.
+    pub fn new(id: StepId, kind: StepKind, source: StepSource) -> Self {
         Self {
-            id: StepId::fresh(),
+            id,
             kind,
             enabled: true,
             source,
         }
+    }
+}
+
+/// Mints `0..n` for a *detached* pipeline value that no dataset owns yet.
+/// A dataset that adopts the pipeline remints from its own allocator, so these
+/// ids never reach a live pipeline unchanged.
+#[derive(Default)]
+struct TemplateIds(u64);
+
+impl TemplateIds {
+    fn next(&mut self) -> StepId {
+        let id = StepId::new(self.0);
+        self.0 += 1;
+        id
     }
 }
 
@@ -386,22 +410,32 @@ pub struct AxisPipeline {
 
 impl AxisPipeline {
     pub fn default_1d() -> Self {
-        let mut apodize =
-            ProcessingStep::new(StepKind::Apodize(Apodization::None), StepSource::Default);
+        let mut ids = TemplateIds::default();
+        let mut apodize = ProcessingStep::new(
+            ids.next(),
+            StepKind::Apodize(Apodization::None),
+            StepSource::Default,
+        );
         apodize.enabled = false;
+        let zero_fill = ProcessingStep::new(
+            ids.next(),
+            StepKind::ZeroFill(ZeroFill::None),
+            StepSource::Default,
+        );
+        let fft = ProcessingStep::new(ids.next(), StepKind::Fft, StepSource::Default);
+        let phase = ProcessingStep::new(
+            ids.next(),
+            StepKind::Phase(PhaseParams::AUTO),
+            StepSource::Default,
+        );
         let mut baseline = ProcessingStep::new(
+            ids.next(),
             StepKind::Baseline(BaselineMethod::AUTO),
             StepSource::Default,
         );
         baseline.enabled = false;
         Self {
-            steps: vec![
-                apodize,
-                ProcessingStep::new(StepKind::ZeroFill(ZeroFill::None), StepSource::Default),
-                ProcessingStep::new(StepKind::Fft, StepSource::Default),
-                ProcessingStep::new(StepKind::Phase(PhaseParams::AUTO), StepSource::Default),
-                baseline,
-            ],
+            steps: vec![apodize, zero_fill, fft, phase, baseline],
         }
     }
 
@@ -409,16 +443,20 @@ impl AxisPipeline {
     /// transformed by the instrument software. No time-domain or FFT step is
     /// represented, so editing this recipe cannot imply a fictitious FID.
     pub fn frequency_1d() -> Self {
+        let mut ids = TemplateIds::default();
+        let phase = ProcessingStep::new(
+            ids.next(),
+            StepKind::Phase(PhaseParams::AUTO),
+            StepSource::Default,
+        );
         let mut baseline = ProcessingStep::new(
+            ids.next(),
             StepKind::Baseline(BaselineMethod::AUTO),
             StepSource::Default,
         );
         baseline.enabled = false;
         Self {
-            steps: vec![
-                ProcessingStep::new(StepKind::Phase(PhaseParams::AUTO), StepSource::Default),
-                baseline,
-            ],
+            steps: vec![phase, baseline],
         }
     }
 
@@ -428,15 +466,21 @@ impl AxisPipeline {
         } else {
             PhaseParams::MANUAL_ZERO
         };
+        let mut ids = TemplateIds::default();
         Self {
             steps: vec![
                 ProcessingStep::new(
+                    ids.next(),
                     StepKind::Apodize(Apodization::CosineBell),
                     StepSource::Default,
                 ),
-                ProcessingStep::new(StepKind::ZeroFill(ZeroFill::None), StepSource::Default),
-                ProcessingStep::new(StepKind::Fft, StepSource::Default),
-                ProcessingStep::new(StepKind::Phase(phase), StepSource::Default),
+                ProcessingStep::new(
+                    ids.next(),
+                    StepKind::ZeroFill(ZeroFill::None),
+                    StepSource::Default,
+                ),
+                ProcessingStep::new(ids.next(), StepKind::Fft, StepSource::Default),
+                ProcessingStep::new(ids.next(), StepKind::Phase(phase), StepSource::Default),
             ],
         }
     }
@@ -447,8 +491,10 @@ impl AxisPipeline {
         } else {
             PhaseParams::MANUAL_ZERO
         };
+        let mut ids = TemplateIds::default();
         Self {
             steps: vec![ProcessingStep::new(
+                ids.next(),
                 StepKind::Phase(phase),
                 StepSource::Default,
             )],

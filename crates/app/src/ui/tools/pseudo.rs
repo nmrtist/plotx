@@ -20,7 +20,11 @@ pub(super) fn experiment_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) -> bo
             *preset = chosen;
             params.layout = chosen.layout();
         }
-        app.execute_action(Action::update_dataset_processing(di, before, after));
+        app.execute_action(Action::update_dataset_processing(
+            app.doc.datasets[di].resource_id(),
+            before,
+            after,
+        ));
     }
 
     let is_stack = {
@@ -279,7 +283,11 @@ fn pseudo_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
         }
     }
 
-    let progress = app.session.compute.dosy_progress(di);
+    let progress = app
+        .doc
+        .datasets
+        .get(di)
+        .and_then(|dataset| app.session.compute.dosy_progress(dataset.resource_id()));
     ui.horizontal(|ui| {
         if is_dosy
             && !is_ilt

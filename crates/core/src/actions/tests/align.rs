@@ -175,7 +175,7 @@ fn pending_paused_processing_blocks_alignment() {
     let mut app = app_with(&[2.0, 2.5]);
     app.session.ui.proc_paused = true;
     app.session.ui.proc_pending = Some((
-        0,
+        dataset_id(&app, 0),
         crate::actions::DatasetProcessingState::from_dataset(&app.doc.datasets[0]),
     ));
 
@@ -194,4 +194,58 @@ fn empty_selection_scopes_to_all_datasets() {
     assert_eq!(plan.rows.len(), 2);
     assert_eq!(plan.shift_count(), 2);
     assert!(app.can_align_spectra());
+}
+
+/// P0-1 regression. `apply_reference_shift` appends a step to a *live* recipe,
+/// so its identity has to come from the owning dataset's allocator. When the
+/// step was minted with template-local numbering it landed on `StepId(0)`,
+/// aliasing the pipeline's first row: the Processing panel resolves rows with
+/// `position(|s| s.id == id)`, so deleting the new Reference row deleted
+/// Apodize instead. Reverting the fix makes the uniqueness assertion fail.
+#[test]
+fn reference_alignment_gives_the_appended_step_a_unique_identity() {
+    let mut app = app_with(&[2.0]);
+    let before_ids: Vec<_> = app.doc.datasets[0]
+        .axis_pipeline(crate::state::PhaseAxis::Direct)
+        .unwrap()
+        .steps
+        .iter()
+        .map(|step| step.id)
+        .collect();
+    assert!(
+        !before_ids.is_empty(),
+        "the fixture starts with a populated pipeline"
+    );
+
+    let plan = app.plan_spectrum_alignment(0.0, 5.0, AlignTargetMode::Custom(3.0));
+    app.apply_spectrum_alignment(&plan);
+
+    let steps = app.doc.datasets[0]
+        .axis_pipeline(crate::state::PhaseAxis::Direct)
+        .unwrap()
+        .steps
+        .clone();
+    let appended = steps
+        .iter()
+        .find(|step| matches!(step.kind, plotx_processing::StepKind::Reference(_)))
+        .expect("alignment appended a referencing step");
+    assert!(
+        !before_ids.contains(&appended.id),
+        "the appended step reused an identity already in the live pipeline"
+    );
+
+    let mut ids: Vec<_> = steps.iter().map(|step| step.id).collect();
+    ids.sort();
+    let unique = ids.len();
+    ids.dedup();
+    assert_eq!(
+        ids.len(),
+        unique,
+        "step ids must be unique within a dataset"
+    );
+
+    // The allocator moved past the id it handed out, so the next step cannot
+    // collide either.
+    let next = app.doc.datasets[0].as_nmr().unwrap().next_step_id;
+    assert!(ids.iter().all(|id| id.get() < next));
 }

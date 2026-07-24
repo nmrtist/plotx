@@ -104,6 +104,7 @@ fn loading_a_maximum_object_id_reports_exhaustion() {
             "id": u64::MAX.to_string(),
             "name": "Label",
             "kind": "text",
+            "next_series_id": 0,
             "frame": { "x": 0.0, "y": 0.0, "width": 10.0, "height": 10.0 },
             "locked": false,
             "visible": true
@@ -127,6 +128,65 @@ fn loading_a_maximum_object_id_reports_exhaustion() {
 
     assert!(
         matches!(error, ProjectError::Invalid(ref message) if message.contains("object id space exhausted")),
+        "{error}"
+    );
+}
+
+/// P0-4 regression, mirroring `loading_a_maximum_object_id_reports_exhaustion`
+/// for the series allocator. `repair_series_allocator` used to map the
+/// `u64::MAX` case to `SeriesId(0)` through `unwrap_or_default()`; because
+/// `next_series_id < 0` is never true, the repair was skipped entirely and the
+/// very next `allocate_series_id` handed back an id the binding already used.
+/// Restoring `unwrap_or_default()` makes this load succeed and the test fail.
+#[test]
+fn loading_a_maximum_series_id_reports_exhaustion() {
+    let app = sample_app();
+    let recipe = format!("recipe_{}", app.doc.datasets[0].resource_id());
+    let path = temp_project("maximum-series-id");
+    let _ = std::fs::remove_file(&path);
+    save_project(&app, &path, false).unwrap();
+    let file = std::fs::File::open(&path).unwrap();
+    let mut zip = zip::ZipArchive::new(file).unwrap();
+    let view: ViewObject = serde_json::from_value(serde_json::json!({
+        "id": "view-max-series-id",
+        "role": "canvas",
+        "classification": { "domain": "visualization", "object": "page" },
+        "name": "Maximum series id",
+        "next_object_id": 2,
+        "layout": { "size_mm": [120.0, 80.0] },
+        "objects": [{
+            "id": "1",
+            "name": "Plot",
+            "kind": "line_plot",
+            "input": recipe,
+            "series": [{ "id": u64::MAX, "input": recipe }],
+            "frame": { "x": 0.0, "y": 0.0, "width": 100.0, "height": 80.0 },
+            "locked": false,
+            "visible": true
+        }]
+    }))
+    .unwrap();
+
+    let mut loading_app = PlotxApp::new();
+    loading_app.doc.datasets.push(app.doc.datasets[0].clone());
+    let mut recipe_to_dataset = HashMap::new();
+    recipe_to_dataset.insert(recipe.clone(), 0usize);
+
+    let error = match view_to_canvas(
+        &mut loading_app,
+        &mut zip,
+        "view-max-series-id",
+        &view,
+        0,
+        &recipe_to_dataset,
+    ) {
+        Ok(_) => panic!("an exhausted series id space must be rejected"),
+        Err(error) => error,
+    };
+    let _ = std::fs::remove_file(&path);
+
+    assert!(
+        matches!(error, ProjectError::Invalid(ref message) if message.contains("series id space")),
         "{error}"
     );
 }

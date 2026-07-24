@@ -219,7 +219,7 @@ mod tests {
 
         let mut app = PlotxApp::new();
         app.doc.datasets.push(Dataset::Table(Box::new(dataset)));
-        app.execute_action(Action::edit_table(0, delta));
+        app.execute_action(Action::edit_table(app.doc.datasets[0].resource_id(), delta));
         assert!(
             app.doc.datasets[0].as_table().unwrap().series_bindings[0]
                 .fit

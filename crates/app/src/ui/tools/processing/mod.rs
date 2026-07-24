@@ -7,7 +7,7 @@ mod editors;
 use egui::{Button, Ui};
 use egui_phosphor::regular as icon;
 use plotx_core::actions::DatasetProcessingState;
-use plotx_core::state::{Dataset, PhaseAxis, PlotxApp};
+use plotx_core::state::{Dataset, DatasetId, PhaseAxis, PlotxApp};
 use plotx_processing::{
     Apodization, AutoPhaseMethod, AxisPipeline, BaselineMethod, BinParams, NormalizeMethod,
     PhaseParams, ProcessingStep, ReferenceParams, SmoothMethod, StepDomain, StepId, StepKind,
@@ -101,6 +101,9 @@ fn step_list(app: &mut PlotxApp, di: usize, axis: PhaseAxis, ui: &mut Ui) {
         return;
     };
 
+    let Some(owner) = app.doc.datasets.get(di).map(Dataset::resource_id) else {
+        return;
+    };
     let last = steps.len().saturating_sub(1);
     let mut op: Option<(StepId, RowOp)> = None;
     for (i, step) in steps.iter().enumerate() {
@@ -108,7 +111,7 @@ fn step_list(app: &mut PlotxApp, di: usize, axis: PhaseAxis, ui: &mut Ui) {
             fft_anchor(ui);
             continue;
         }
-        row(app, di, axis, step, i == 0, i == last, ui, &mut op);
+        row(app, di, owner, axis, step, i == 0, i == last, ui, &mut op);
     }
     if let Some((id, o)) = op {
         apply_row_op(app, di, axis, id, o);
@@ -132,6 +135,7 @@ fn fft_anchor(ui: &mut Ui) {
 fn row(
     app: &mut PlotxApp,
     di: usize,
+    owner: DatasetId,
     axis: PhaseAxis,
     step: &ProcessingStep,
     first: bool,
@@ -140,7 +144,7 @@ fn row(
     op: &mut Option<(StepId, RowOp)>,
 ) {
     let id = step.id;
-    let expanded = app.session.ui.proc_expanded_step == Some(id);
+    let expanded = app.session.ui.proc_expanded_step == Some((owner, id));
     ui.horizontal(|ui| {
         ui.weak(icon::DOTS_SIX_VERTICAL);
         let mut enabled = step.enabled;
@@ -152,14 +156,14 @@ fn row(
             .selectable_label(expanded, editors::kind_label(&step.kind))
             .clicked()
         {
-            app.session.ui.proc_expanded_step = if expanded { None } else { Some(id) };
+            app.session.ui.proc_expanded_step = if expanded { None } else { Some((owner, id)) };
         }
         if step.source == StepSource::User {
             ui.weak("•");
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.menu_button(icon::DOTS_THREE, |ui| {
-                row_menu(app, id, first, last, op, ui)
+                row_menu(app, owner, id, first, last, op, ui)
             });
             ui.weak(editors::kind_summary(&step.kind));
         });
@@ -172,8 +176,10 @@ fn row(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn row_menu(
     app: &mut PlotxApp,
+    owner: DatasetId,
     id: StepId,
     first: bool,
     last: bool,
@@ -181,7 +187,7 @@ fn row_menu(
     ui: &mut Ui,
 ) {
     if ui.button("Edit").clicked() {
-        app.session.ui.proc_expanded_step = Some(id);
+        app.session.ui.proc_expanded_step = Some((owner, id));
         ui.close();
     }
     if ui.button(format!("{}  Duplicate", icon::COPY)).clicked() {
@@ -409,15 +415,31 @@ fn set_phase_method(
 }
 
 fn apply_row_op(app: &mut PlotxApp, di: usize, axis: PhaseAxis, id: StepId, op: RowOp) {
-    let before = DatasetProcessingState::from_dataset(&app.doc.datasets[di]);
+    let Some(dataset) = app.doc.datasets.get(di) else {
+        return;
+    };
+    let before = DatasetProcessingState::from_dataset(dataset);
     let mut after = before.clone();
+    let duplicate_id = if matches!(op, RowOp::Duplicate) {
+        match allocate_step_id(app, di) {
+            Some(id) => Some(id),
+            // Only spectral datasets expose processing rows; a stale index or a
+            // non-spectral dataset is a no-op, not a crash.
+            None => return,
+        }
+    } else {
+        None
+    };
     if let Some(pipe) = state_pipe(&mut after, axis)
         && let Some(idx) = pipe.steps.iter().position(|s| s.id == id)
     {
         match op {
             RowOp::Duplicate => {
+                let Some(duplicate_id) = duplicate_id else {
+                    return;
+                };
                 let mut clone = pipe.steps[idx].clone();
-                clone.id = StepId::fresh();
+                clone.id = duplicate_id;
                 clone.source = StepSource::User;
                 pipe.steps.insert(idx + 1, clone);
             }
@@ -445,8 +467,24 @@ fn apply_row_op(app: &mut PlotxApp, di: usize, axis: PhaseAxis, id: StepId, op: 
     app.commit_processing_edit(di, before, after);
 }
 
+/// Reserve a step identity from the dataset that will own it. `None` for a
+/// stale index or a dataset kind with no processing pipeline.
+fn allocate_step_id(app: &mut PlotxApp, di: usize) -> Option<StepId> {
+    match app.doc.datasets.get_mut(di)? {
+        Dataset::Nmr(dataset) => Some(dataset.allocate_step_id()),
+        Dataset::Nmr2D(dataset) => Some(dataset.allocate_step_id()),
+        _ => None,
+    }
+}
+
 fn add_step(app: &mut PlotxApp, di: usize, axis: PhaseAxis, kind: StepKind) {
-    let before = DatasetProcessingState::from_dataset(&app.doc.datasets[di]);
+    let Some(dataset) = app.doc.datasets.get(di) else {
+        return;
+    };
+    let before = DatasetProcessingState::from_dataset(dataset);
+    let Some(id) = allocate_step_id(app, di) else {
+        return;
+    };
     let mut after = before.clone();
     if let Some(pipe) = state_pipe(&mut after, axis) {
         let fft = pipe
@@ -458,7 +496,7 @@ fn add_step(app: &mut PlotxApp, di: usize, axis: PhaseAxis, kind: StepKind) {
             _ => pipe.steps.len(),
         };
         pipe.steps
-            .insert(at, ProcessingStep::new(kind, StepSource::User));
+            .insert(at, ProcessingStep::new(id, kind, StepSource::User));
     }
     app.commit_processing_edit(di, before, after);
 }
@@ -470,7 +508,9 @@ fn reset_to_default(app: &mut PlotxApp, di: usize) {
     app.session.ui.proc_pending = None;
     let before = DatasetProcessingState::from_dataset(&app.doc.datasets[di]);
     app.execute_action(plotx_core::actions::Action::update_dataset_processing(
-        di, before, after,
+        app.doc.datasets[di].resource_id(),
+        before,
+        after,
     ));
 }
 
