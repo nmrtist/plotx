@@ -365,7 +365,7 @@ pub enum Action {
     InsertDatasetWithCanvas {
         dataset_index: usize,
         canvas_index: usize,
-        canvas_resource_id: String,
+        canvas_resource_id: crate::state::CanvasId,
         dataset: Box<Dataset>,
         canvas_name: String,
         size_mm: [f32; 2],

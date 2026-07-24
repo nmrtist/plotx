@@ -174,7 +174,7 @@ impl PlotxApp {
     /// per region (x = the raw indirect ruler, y = the region reduced by its
     /// metric). `None` when the dataset is not a series or has no regions.
     fn build_region_table(&self, dataset: usize) -> Option<TableDataset> {
-        let source_resource = self.doc.datasets.get(dataset)?.resource_id().to_owned();
+        let source_resource = self.doc.datasets.get(dataset)?.resource_id().to_string();
         let d2 = self.doc.datasets.get(dataset).and_then(Dataset::as_nmr2d)?;
         let (Processed2D::Stack(stack), Some(axis)) = (&d2.processed, &d2.data.pseudo_axis) else {
             return None;
@@ -234,7 +234,7 @@ impl PlotxApp {
 
     /// The `Dataset::Table` linked to `source` (its provenance points back), if any.
     pub fn region_table_index(&self, source: usize) -> Option<usize> {
-        let source_resource = self.doc.datasets.get(source)?.resource_id();
+        let source_resource = self.doc.datasets.get(source)?.resource_id().to_string();
         self.doc.datasets.iter().position(|d| {
             d.as_table()
                 .and_then(|t| t.provenance.as_ref())
@@ -312,7 +312,7 @@ impl PlotxApp {
         let mut tds = table;
         tds.lineage = Some(DatasetLineage::new(
             DerivationKind::LiveRegionTable,
-            [dataset],
+            [self.doc.datasets[dataset].resource_id()],
         ));
         tds.name = Some(format!(
             "{} — regions",
@@ -341,7 +341,7 @@ impl PlotxApp {
         tds.provenance = None;
         tds.lineage = Some(DatasetLineage::new(
             DerivationKind::FrozenRegionTable,
-            [dataset],
+            [self.doc.datasets[dataset].resource_id()],
         ));
         tds.name = Some(format!(
             "{} — regions (frozen)",
@@ -558,6 +558,7 @@ impl PlotxApp {
     }
 
     pub fn analysis_range_for(&self, dataset: usize) -> Option<AxisRange> {
+        let dataset = self.doc.datasets.get(dataset)?.resource_id();
         self.session
             .ui
             .analysis_selection
@@ -567,12 +568,12 @@ impl PlotxApp {
             .or_else(|| self.visible_range_for_dataset(dataset))
     }
 
-    fn visible_range_for_dataset(&self, dataset: usize) -> Option<AxisRange> {
+    fn visible_range_for_dataset(&self, dataset: DatasetId) -> Option<AxisRange> {
         let ci = self.session.active_canvas?;
         let canvas = self.doc.canvases.get(ci)?;
         let object_id = canvas.active_plot_object_id()?;
         let plot = canvas.object(object_id)?.plot()?;
-        (plot.primary_dataset() == dataset).then_some(plot.viewport.view_x)
+        (plot.primary_dataset() == Some(dataset)).then_some(plot.viewport.view_x)
     }
 }
 

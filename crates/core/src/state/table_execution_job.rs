@@ -1,6 +1,6 @@
 use super::{
-    TypedTableState, execute_typed_plan, execute_typed_plan_cancellable, refresh_typed_plan,
-    refresh_typed_plan_cancellable,
+    DatasetId, TypedTableState, execute_typed_plan, execute_typed_plan_cancellable,
+    refresh_typed_plan, refresh_typed_plan_cancellable,
 };
 use plotx_data::TableId;
 use std::collections::BTreeSet;
@@ -9,7 +9,7 @@ use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 pub struct TableTransformJob {
-    input_datasets: Vec<usize>,
+    input_datasets: Vec<DatasetId>,
     epoch: u64,
     name: String,
     started_at: Instant,
@@ -37,6 +37,10 @@ impl crate::state::PlotxApp {
         if self.session.table_transform_job.is_some() || self.session.table_refresh_job.is_some() {
             return Err("A table transform is already running.".into());
         }
+        let input_datasets: Vec<DatasetId> = input_datasets
+            .into_iter()
+            .map(|index| self.doc.datasets[index].resource_id())
+            .collect();
         let inputs = self.typed_inputs(&input_datasets)?;
         let cancel = Arc::new(AtomicBool::new(false));
         let worker_cancel = Arc::clone(&cancel);
@@ -66,16 +70,18 @@ impl crate::state::PlotxApp {
         Ok(())
     }
 
-    fn typed_inputs(&self, datasets: &[usize]) -> Result<Vec<TypedTableState>, String> {
+    fn typed_inputs(&self, datasets: &[DatasetId]) -> Result<Vec<TypedTableState>, String> {
         datasets
             .iter()
-            .map(|index| {
+            .map(|id| {
                 self.doc
-                    .datasets
-                    .get(*index)
+                    .dataset_by_id(*id)
                     .and_then(crate::state::Dataset::as_table)
                     .map(|table| table.typed_state.clone())
-                    .ok_or_else(|| format!("Dataset {} is not a data table.", index + 1))
+                    .ok_or_else(|| {
+                        "A source data table for this refresh is missing or is no longer a table."
+                            .to_owned()
+                    })
             })
             .collect()
     }
@@ -145,7 +151,7 @@ impl crate::state::PlotxApp {
     pub fn start_table_refresh(
         &mut self,
         dataset: usize,
-        input_datasets: Vec<usize>,
+        input_datasets: Vec<DatasetId>,
         memory_limit_bytes: u64,
     ) -> Result<(), String> {
         if self.session.table_transform_job.is_some() || self.session.table_refresh_job.is_some() {
@@ -263,7 +269,11 @@ impl crate::state::PlotxApp {
         name: String,
         memory_limit_bytes: u64,
     ) -> Result<usize, String> {
-        let inputs = self.typed_inputs(input_datasets)?;
+        let input_ids: Vec<DatasetId> = input_datasets
+            .iter()
+            .map(|&index| self.doc.datasets[index].resource_id())
+            .collect();
+        let inputs = self.typed_inputs(&input_ids)?;
         let refs = inputs.iter().collect::<Vec<_>>();
         let typed = execute_typed_plan(
             plan,
@@ -275,7 +285,7 @@ impl crate::state::PlotxApp {
         .map_err(|error| error.to_string())?;
         let index = self.doc.datasets.len();
         let job = TableTransformJob {
-            input_datasets: input_datasets.to_vec(),
+            input_datasets: input_ids,
             epoch: self.session.dataset_epoch,
             name,
             started_at: Instant::now(),
@@ -299,7 +309,11 @@ impl crate::state::PlotxApp {
             .and_then(crate::state::Dataset::as_table)
             .map(|table| table.typed_state.clone())
             .ok_or_else(|| "Select a derived data table to refresh.".to_owned())?;
-        let inputs = self.typed_inputs(input_datasets)?;
+        let input_ids: Vec<DatasetId> = input_datasets
+            .iter()
+            .map(|&index| self.doc.datasets[index].resource_id())
+            .collect();
+        let inputs = self.typed_inputs(&input_ids)?;
         let refs = inputs.iter().collect::<Vec<_>>();
         let refreshed = refresh_typed_plan(&derived, &refs, memory_limit_bytes, &BTreeSet::new())
             .map_err(|error| error.to_string())?;
@@ -319,6 +333,20 @@ mod tests {
     use super::*;
     use crate::state::{Dataset, FloatSeries, materialized_float_series_table};
     use plotx_data::{Relation, SnapshotRead};
+
+    #[test]
+    fn typed_inputs_reports_a_missing_source_dataset() {
+        let app = crate::state::PlotxApp::new();
+        let missing = DatasetId::new();
+
+        let error = match app.typed_inputs(&[missing]) {
+            Ok(_) => panic!("a missing source dataset must be rejected"),
+            Err(error) => error,
+        };
+
+        assert!(error.contains("source data table"), "{error}");
+        assert!(error.contains("missing"), "{error}");
+    }
 
     #[test]
     fn background_transform_commits_only_after_polling_completion() {

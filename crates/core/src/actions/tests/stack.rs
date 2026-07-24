@@ -17,7 +17,10 @@ fn stacked_figure_is_domain_generic_with_offset_scale_and_hide() {
     for (app, domain) in [(&nmr, DataDomain::Nmr1d), (&table, DataDomain::Table)] {
         let chart = ChartSpec::default_for(domain);
         let binding = DataBinding {
-            series: vec![SeriesBinding::new(0), SeriesBinding::new(1)],
+            series: vec![
+                SeriesBinding::new(app.doc.datasets[0].resource_id()),
+                SeriesBinding::new(app.doc.datasets[1].resource_id()),
+            ],
         };
         let sup = app.build_binding_figure(&binding, &chart, &StackSpec::default(), size);
         assert!(sup.show_legend, "a combined figure shows a legend");
@@ -75,7 +78,10 @@ fn field_overlay_stacks_two_2d_contours_in_distinct_colors() {
         ))));
     let (a, b) = (app.doc.datasets.len() - 2, app.doc.datasets.len() - 1);
     let binding = DataBinding {
-        series: vec![SeriesBinding::new(a), SeriesBinding::new(b)],
+        series: vec![
+            SeriesBinding::new(app.doc.datasets[a].resource_id()),
+            SeriesBinding::new(app.doc.datasets[b].resource_id()),
+        ],
     };
     let chart = ChartSpec::default_for(DataDomain::Nmr2d);
     let stack = StackSpec {
@@ -142,22 +148,28 @@ fn selecting_canvas_populates_data_selection_with_its_datasets() {
     let object = app.doc.canvases[0].objects[0].id;
     let binding = crate::state::DataBinding {
         series: vec![
-            crate::state::SeriesBinding::new(0),
-            crate::state::SeriesBinding::new(1),
+            crate::state::SeriesBinding::new(app.doc.datasets[0].resource_id()),
+            crate::state::SeriesBinding::new(app.doc.datasets[1].resource_id()),
         ],
     };
     app.execute_action(Action::set_data_binding(
         0,
         object,
-        crate::state::DataBinding::single(0),
+        crate::state::DataBinding::single(app.doc.datasets[0].resource_id()),
         binding,
     ));
 
-    assert_eq!(app.doc.canvases[0].dataset_indices(), vec![0, 1]);
+    let mut dataset_indices = app.doc.canvases[0]
+        .dataset_ids()
+        .into_iter()
+        .filter_map(|id| app.doc.dataset_index(id))
+        .collect::<Vec<_>>();
+    dataset_indices.sort_unstable();
+    assert_eq!(dataset_indices, vec![0, 1]);
 
     // Selecting the canvas mirrors its datasets into the Data-list multi-select,
     // so a qualifying page can be stacked immediately.
-    app.session.ui.data_selection = app.doc.canvases[0].dataset_indices();
+    app.session.ui.data_selection = dataset_indices;
     assert_eq!(app.stackable_selection(), Some(vec![0, 1]));
 }
 
@@ -170,20 +182,29 @@ fn plot_object_reports_every_bound_dataset_for_selection_mirroring() {
         .push(Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()))));
     let object = app.doc.canvases[0].objects[0].id;
     let binding = DataBinding {
-        series: vec![SeriesBinding::new(0), SeriesBinding::new(1)],
+        series: vec![
+            SeriesBinding::new(app.doc.datasets[0].resource_id()),
+            SeriesBinding::new(app.doc.datasets[1].resource_id()),
+        ],
     };
     app.execute_action(Action::set_data_binding(
         0,
         object,
-        DataBinding::single(0),
+        DataBinding::single(app.doc.datasets[0].resource_id()),
         binding,
     ));
 
     // The board-click handler mirrors this into the Data list, so a stacked plot
     // must surface both of its datasets, not just the primary.
     let obj = app.doc.canvases[0].object(object).unwrap();
-    assert_eq!(obj.dataset_indices(), vec![0, 1]);
-    assert_eq!(obj.dataset(), Some(0));
+    assert_eq!(
+        obj.dataset_ids(),
+        vec![
+            app.doc.datasets[0].resource_id(),
+            app.doc.datasets[1].resource_id()
+        ]
+    );
+    assert_eq!(obj.dataset(), Some(app.doc.datasets[0].resource_id()));
 }
 
 #[test]
@@ -196,7 +217,10 @@ fn shear_sign_flips_the_pseudo_3d_lean_direction() {
         .push(Dataset::Table(Box::new(second_table())));
     let chart = ChartSpec::default_for(DataDomain::Table);
     let binding = DataBinding {
-        series: vec![SeriesBinding::new(0), SeriesBinding::new(1)],
+        series: vec![
+            SeriesBinding::new(table.doc.datasets[0].resource_id()),
+            SeriesBinding::new(table.doc.datasets[1].resource_id()),
+        ],
     };
     let size = [120.0, 80.0];
     let right = StackSpec {

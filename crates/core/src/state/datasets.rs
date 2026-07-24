@@ -26,7 +26,7 @@ pub struct PhaseDrag {
 pub struct NmrDataset {
     /// Stable automation and persistence identity. Array positions remain a UI
     /// implementation detail and must never escape into saved references.
-    pub resource_id: String,
+    pub resource_id: DatasetId,
     pub data: NmrData,
     pub base: Spectrum,
     pub pipeline: AxisPipeline,
@@ -62,7 +62,7 @@ impl NmrDataset {
         let base = fft::transform_base(&data, &pipeline, group_delay_correct);
         let spectrum = reapply(&base, &pipeline);
         Self {
-            resource_id: uuid::Uuid::new_v4().to_string(),
+            resource_id: DatasetId::new(),
             data,
             base,
             pipeline,
@@ -106,7 +106,7 @@ impl NmrDataset {
 #[derive(Clone)]
 pub struct Nmr2DDataset {
     /// Stable automation and persistence identity.
-    pub resource_id: String,
+    pub resource_id: DatasetId,
     pub data: Arc<NmrData2D>,
     pub params: Params2D,
     /// Recipe used to produce `base`. While an async retransform is pending,
@@ -169,7 +169,7 @@ impl Nmr2DDataset {
         let processed = reapply_2d(&base, &params);
         let processed_figure = Arc::new(build_processed_figure(&processed, preset));
         Self {
-            resource_id: uuid::Uuid::new_v4().to_string(),
+            resource_id: DatasetId::new(),
             data: Arc::new(data),
             base_params: params.clone(),
             base_stale: false,

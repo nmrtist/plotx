@@ -8,16 +8,20 @@ impl PlotxApp {
         let Some(domain) = binding
             .series
             .first()
-            .and_then(|s| self.doc.datasets.get(s.dataset))
+            .and_then(|s| self.doc.dataset_index(s.dataset))
+            .and_then(|index| self.doc.datasets.get(index))
             .map(Dataset::domain)
         else {
             return false;
         };
         domain.stack_kind().is_some()
-            && binding
-                .series
-                .iter()
-                .all(|s| self.doc.datasets.get(s.dataset).map(Dataset::domain) == Some(domain))
+            && binding.series.iter().all(|s| {
+                self.doc
+                    .dataset_index(s.dataset)
+                    .and_then(|index| self.doc.datasets.get(index))
+                    .map(Dataset::domain)
+                    == Some(domain)
+            })
     }
 
     /// Combine a stackable binding into one figure. Dispatches on the primary's
@@ -29,7 +33,11 @@ impl PlotxApp {
         stack: &StackSpec,
         size_mm: [f32; 2],
     ) -> Figure {
-        let domain = self.doc.datasets[binding.primary_dataset()].domain();
+        let primary = binding
+            .primary_dataset()
+            .and_then(|id| self.doc.dataset_index(id))
+            .expect("validated data binding has a primary dataset");
+        let domain = self.doc.datasets[primary].domain();
         match (domain.stack_kind(), stack.mode) {
             (Some(StackKind::Field), _) => self.build_contour_overlay(binding, size_mm),
             _ => self.build_line_stack(binding, stack, size_mm),
@@ -45,11 +53,14 @@ impl PlotxApp {
         stack: &StackSpec,
         size_mm: [f32; 2],
     ) -> Figure {
-        let domain = self.doc.datasets[binding.primary_dataset()].domain();
+        let primary = binding
+            .primary_dataset()
+            .and_then(|id| self.doc.dataset_index(id))
+            .expect("validated data binding has a primary dataset");
+        let domain = self.doc.datasets[primary].domain();
         let line_chart = ChartSpec::default_for(domain);
         // The primary's line figure supplies the axis labels and orientation.
-        let mut fig =
-            self.build_full_canvas_figure(binding.primary_dataset(), &line_chart, size_mm);
+        let mut fig = self.build_full_canvas_figure(primary, &line_chart, size_mm);
         let x_span = (fig.x.max - fig.x.min).abs().max(f64::MIN_POSITIVE);
         fig.series.clear();
         fig.error_bars.clear();
@@ -59,10 +70,13 @@ impl PlotxApp {
         let mut prepared: Vec<(usize, Vec<Series>, Vec<ErrorBar>)> = Vec::new();
         let mut global_peak = 0.0f64;
         for (i, sb) in binding.series.iter().enumerate() {
-            if !sb.visible || self.doc.datasets.get(sb.dataset).is_none() {
+            let Some(dataset) = self.doc.dataset_index(sb.dataset) else {
+                continue;
+            };
+            if !sb.visible {
                 continue;
             }
-            let part = self.build_full_canvas_figure(sb.dataset, &line_chart, size_mm);
+            let part = self.build_full_canvas_figure(dataset, &line_chart, size_mm);
             let mut series = part.series;
             let mut error_bars = part.error_bars;
             let peak = series
@@ -158,16 +172,23 @@ impl PlotxApp {
     /// labels and orientation; hidden series are skipped.
     fn build_contour_overlay(&self, binding: &DataBinding, size_mm: [f32; 2]) -> Figure {
         let chart = ChartSpec::default_for(DataDomain::Nmr2d);
-        let mut fig = self.build_full_canvas_figure(binding.primary_dataset(), &chart, size_mm);
+        let primary = binding
+            .primary_dataset()
+            .and_then(|id| self.doc.dataset_index(id))
+            .expect("validated data binding has a primary dataset");
+        let mut fig = self.build_full_canvas_figure(primary, &chart, size_mm);
         fig.contours.clear();
         let (mut x_min, mut x_max) = (fig.x.min, fig.x.max);
         let (mut y_min, mut y_max) = (fig.y.min, fig.y.max);
         let mut merged = false;
         for (i, sb) in binding.series.iter().enumerate() {
-            if !sb.visible || self.doc.datasets.get(sb.dataset).is_none() {
+            let Some(dataset) = self.doc.dataset_index(sb.dataset) else {
+                continue;
+            };
+            if !sb.visible {
                 continue;
             }
-            let part = self.build_full_canvas_figure(sb.dataset, &chart, size_mm);
+            let part = self.build_full_canvas_figure(dataset, &chart, size_mm);
             let color = sb
                 .color
                 .unwrap_or(OVERLAY_PALETTE[i % OVERLAY_PALETTE.len()]);
@@ -196,8 +217,7 @@ impl PlotxApp {
     pub fn series_label(&self, sb: &SeriesBinding) -> String {
         sb.label.clone().unwrap_or_else(|| {
             self.doc
-                .datasets
-                .get(sb.dataset)
+                .dataset_by_id(sb.dataset)
                 .map(Dataset::display_name)
                 .unwrap_or_default()
         })
@@ -207,20 +227,19 @@ impl PlotxApp {
     /// same stackable domain not already bound. Empty when the plot's primary is
     /// not a stackable domain.
     pub fn stack_candidates(&self, binding: &DataBinding) -> Vec<usize> {
-        let Some(domain) = self
-            .doc
-            .datasets
-            .get(binding.primary_dataset())
+        let Some(domain) = binding
+            .primary_dataset()
+            .and_then(|id| self.doc.dataset_by_id(id))
             .map(Dataset::domain)
             .filter(|d| d.stack_kind().is_some())
         else {
             return Vec::new();
         };
-        let bound = binding.dataset_indices();
+        let bound = binding.dataset_ids();
         (0..self.doc.datasets.len())
             .filter(|di| {
                 self.doc.datasets.get(*di).map(Dataset::domain) == Some(domain)
-                    && !bound.contains(di)
+                    && !bound.contains(&self.doc.datasets[*di].resource_id())
             })
             .collect()
     }
@@ -314,7 +333,11 @@ impl PlotxApp {
         };
         let domain = self.doc.datasets[sel[0]].domain();
         let binding = DataBinding {
-            series: sel.iter().map(|&d| SeriesBinding::new(d)).collect(),
+            series: sel
+                .iter()
+                .filter_map(|&d| self.doc.datasets.get(d))
+                .map(|dataset| SeriesBinding::new(dataset.resource_id()))
+                .collect(),
         };
         let mode = match domain.stack_kind() {
             Some(StackKind::Field) => StackMode::ColorOverlay,

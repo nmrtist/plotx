@@ -1,17 +1,17 @@
-use super::Dataset;
+use super::{Dataset, DatasetId};
 
 impl Dataset {
-    pub fn resource_id(&self) -> &str {
+    pub fn resource_id(&self) -> DatasetId {
         match self {
-            Dataset::Nmr(dataset) => &dataset.resource_id,
-            Dataset::Nmr2D(dataset) => &dataset.resource_id,
-            Dataset::Table(dataset) => &dataset.resource_id,
-            Dataset::Electrophysiology(dataset) => &dataset.resource_id,
-            Dataset::Afm(dataset) => &dataset.resource_id,
+            Dataset::Nmr(dataset) => dataset.resource_id,
+            Dataset::Nmr2D(dataset) => dataset.resource_id,
+            Dataset::Table(dataset) => dataset.resource_id,
+            Dataset::Electrophysiology(dataset) => dataset.resource_id,
+            Dataset::Afm(dataset) => dataset.resource_id,
         }
     }
 
-    pub(crate) fn set_resource_id(&mut self, id: String) {
+    pub(crate) fn set_resource_id(&mut self, id: DatasetId) {
         match self {
             Dataset::Nmr(dataset) => dataset.resource_id = id,
             Dataset::Nmr2D(dataset) => dataset.resource_id = id,

@@ -126,7 +126,7 @@ impl PlotxApp {
         let mut tds = multiplet_summary_table(&multiplets);
         tds.lineage = Some(DatasetLineage::new(
             DerivationKind::MultipletTable,
-            [dataset],
+            [self.doc.datasets[dataset].resource_id()],
         ));
         tds.name = Some(format!(
             "{} — multiplets",

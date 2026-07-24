@@ -149,7 +149,10 @@ fn overlay_only_dataset_does_not_contribute_integrals() {
     secondary.as_nmr_mut().unwrap().integrals = vec![sample_integral(4, 2.0, None)];
     app.doc.datasets.push(secondary);
     let binding = DataBinding {
-        series: vec![SeriesBinding::new(0), SeriesBinding::new(1)],
+        series: vec![
+            SeriesBinding::new(app.doc.datasets[0].resource_id()),
+            SeriesBinding::new(app.doc.datasets[1].resource_id()),
+        ],
     };
     let fig = app.build_stacked_figure(&binding, &StackSpec::default(), [120.0, 80.0]);
     assert!(fig.integral_curves.is_empty());

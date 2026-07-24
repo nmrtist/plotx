@@ -174,8 +174,8 @@ fn data_section(app: &mut PlotxApp, ci: usize, object: ObjectId, ui: &mut Ui) {
             swatch(ui, color);
             let name = app
                 .doc
-                .datasets
-                .get(sb.dataset)
+                .dataset_index(sb.dataset)
+                .and_then(|index| app.doc.datasets.get(index))
                 .map(Dataset::display_name)
                 .unwrap_or_default();
             let label = if i == 0 {
@@ -242,10 +242,9 @@ fn data_section(app: &mut PlotxApp, ci: usize, object: ObjectId, ui: &mut Ui) {
     }
 
     let candidates = app.stack_candidates(&binding);
-    if app
-        .doc
-        .datasets
-        .get(binding.primary_dataset())
+    if binding
+        .primary_dataset()
+        .and_then(|id| app.doc.dataset_by_id(id))
         .map(Dataset::domain)
         .is_some_and(|d| d.stack_kind().is_some())
     {
@@ -259,7 +258,8 @@ fn data_section(app: &mut PlotxApp, ci: usize, object: ObjectId, ui: &mut Ui) {
                         let label = app.doc.datasets[*di].display_name();
                         if ui.selectable_label(false, label).clicked() {
                             let mut b = binding.clone();
-                            b.series.push(SeriesBinding::new(*di));
+                            b.series
+                                .push(SeriesBinding::new(app.doc.datasets[*di].resource_id()));
                             next_binding = Some(b);
                         }
                     }
@@ -270,10 +270,9 @@ fn data_section(app: &mut PlotxApp, ci: usize, object: ObjectId, ui: &mut Ui) {
     }
 
     if is_stack {
-        let kind = app
-            .doc
-            .datasets
-            .get(binding.primary_dataset())
+        let kind = binding
+            .primary_dataset()
+            .and_then(|id| app.doc.dataset_by_id(id))
             .and_then(|d| d.domain().stack_kind());
         if let Some(kind) = kind {
             stack_controls(kind, &stack, &mut next_stack, ui);

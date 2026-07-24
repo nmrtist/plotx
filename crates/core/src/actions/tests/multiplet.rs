@@ -96,7 +96,10 @@ fn apply_multiplet_analysis_stores_creates_table_and_undoes_as_one_step() {
     );
     assert_eq!(
         app.doc.datasets[1].lineage(),
-        Some(&DatasetLineage::new(DerivationKind::MultipletTable, [0]))
+        Some(&DatasetLineage::new(
+            DerivationKind::MultipletTable,
+            [app.doc.datasets[0].resource_id()]
+        ))
     );
 
     app.undo();

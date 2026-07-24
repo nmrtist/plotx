@@ -416,9 +416,9 @@ fn split_plan(
 mod tests {
     use super::*;
 
-    fn item(id: ObjectId, inset: f32) -> LayoutItem {
+    fn item(id: u64, inset: f32) -> LayoutItem {
         LayoutItem {
-            id,
+            id: ObjectId::new(id),
             insets: [inset; 4],
         }
     }
@@ -568,9 +568,9 @@ mod tests {
         assert_ne!(narrow.newcomer, wide.newcomer);
     }
 
-    fn frame(id: ObjectId, col: u32, row: u32) -> (ObjectId, ObjectFrame) {
+    fn frame(id: u64, col: u32, row: u32) -> (ObjectId, ObjectFrame) {
         (
-            id,
+            ObjectId::new(id),
             ObjectFrame::new(col as f32 * 20.0, row as f32 * 30.0, 10.0, 10.0),
         )
     }
@@ -585,7 +585,7 @@ mod tests {
         ])
         .unwrap();
         assert_eq!((grid.rows, grid.cols), (2, 2));
-        assert_eq!(grid.ids, vec![1, 2, 3, 4]);
+        assert_eq!(grid.ids, [1, 2, 3, 4].map(ObjectId::new));
     }
 
     #[test]
@@ -599,18 +599,21 @@ mod tests {
         ])
         .unwrap();
         assert_eq!((grid.rows, grid.cols), (2, 3));
-        assert_eq!(grid.ids, vec![1, 2, 3, 4, 5]);
+        assert_eq!(grid.ids, [1, 2, 3, 4, 5].map(ObjectId::new));
     }
 
     #[test]
     fn occupied_grid_accepts_single_row_and_single_column() {
         let row = infer_occupied_grid(&[frame(2, 1, 0), frame(1, 0, 0), frame(3, 2, 0)]).unwrap();
-        assert_eq!((row.rows, row.cols, row.ids), (1, 3, vec![1, 2, 3]));
+        assert_eq!(
+            (row.rows, row.cols, row.ids),
+            (1, 3, [1, 2, 3].map(ObjectId::new).to_vec())
+        );
         let column =
             infer_occupied_grid(&[frame(3, 0, 2), frame(1, 0, 0), frame(2, 0, 1)]).unwrap();
         assert_eq!(
             (column.rows, column.cols, column.ids),
-            (3, 1, vec![1, 2, 3])
+            (3, 1, [1, 2, 3].map(ObjectId::new).to_vec())
         );
     }
 
@@ -627,8 +630,8 @@ mod tests {
     #[test]
     fn occupied_grid_rejects_two_objects_in_one_tolerance_cell() {
         let frames = [
-            (1, ObjectFrame::new(0.0, 0.0, 10.0, 10.0)),
-            (2, ObjectFrame::new(0.5, 0.5, 10.0, 10.0)),
+            (ObjectId::new(1), ObjectFrame::new(0.0, 0.0, 10.0, 10.0)),
+            (ObjectId::new(2), ObjectFrame::new(0.5, 0.5, 10.0, 10.0)),
         ];
         assert!(infer_occupied_grid(&frames).is_none());
     }

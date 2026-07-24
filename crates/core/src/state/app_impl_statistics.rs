@@ -186,7 +186,7 @@ impl PlotxApp {
         let mut table = data;
         table.lineage = Some(DatasetLineage::new(
             DerivationKind::StatisticsTable,
-            [dataset],
+            [self.doc.datasets[dataset].resource_id()],
         ));
         table.name = Some(format!("{source_name} — {}", analysis.title));
         table.board_pos = super::app_impl_analysis::next_sheet_pos_after_new_canvas(self);

@@ -12,10 +12,14 @@ pub(super) fn chart_gallery(app: &mut PlotxApp, ci: usize, object: ObjectId, ui:
         return;
     };
     let current = plot.chart.clone();
-    let primary = plot.binding.primary_dataset();
-    let Some(domain) = app.doc.datasets.get(primary).map(Dataset::domain) else {
+    let Some(primary) = plot
+        .binding
+        .primary_dataset()
+        .and_then(|id| app.doc.dataset_index(id))
+    else {
         return;
     };
+    let domain = app.doc.datasets[primary].domain();
     let types = chart_types_for(domain);
     let current_id = if chart_type(&current.type_id).is_some_and(|c| c.domains.contains(&domain)) {
         current.type_id.clone()

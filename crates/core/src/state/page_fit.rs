@@ -153,7 +153,7 @@ mod tests {
     fn page_with_text(size_mm: [f32; 2], frame: ObjectFrame) -> CanvasDocument {
         let mut canvas = CanvasDocument::new("page".into(), size_mm);
         canvas.objects.push(CanvasObject {
-            id: 1,
+            id: ObjectId::new(1),
             name: "t".to_owned(),
             frame,
             locked: false,
@@ -161,7 +161,7 @@ mod tests {
             group: None,
             kind: CanvasObjectKind::Text(TextBox::label("x".to_owned())),
         });
-        canvas.next_object_id = 2;
+        canvas.next_object_id = ObjectId::new(2);
         canvas
     }
 

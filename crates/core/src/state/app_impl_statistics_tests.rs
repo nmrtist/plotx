@@ -256,7 +256,10 @@ fn add_to_board_materializes_a_derived_table_with_lineage() {
     let derived = app.doc.datasets.last().unwrap();
     assert_eq!(
         derived.lineage(),
-        Some(&DatasetLineage::new(DerivationKind::StatisticsTable, [0]))
+        Some(&DatasetLineage::new(
+            DerivationKind::StatisticsTable,
+            [app.doc.datasets[0].resource_id()]
+        ))
     );
     // One column per named group keeps the source column identity.
     let table = derived.as_table().unwrap();

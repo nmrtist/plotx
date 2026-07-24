@@ -1,4 +1,4 @@
-use super::tests::temp_project;
+use super::tests::{sample_app, temp_project};
 use super::*;
 
 #[test]
@@ -17,6 +17,49 @@ fn pre_release_projects_are_written_with_v1_schema() {
         Some(outcome.revision.as_str())
     );
     assert!(manifest.recovery.is_none());
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn identity_schema_snapshot_uses_typed_text_and_persists_object_allocator() {
+    let mut app = sample_app();
+    let dataset = app.doc.datasets[0].resource_id();
+    let canvas = app.doc.canvases[0].resource_id;
+    let object = app.doc.canvases[0].objects[0].id;
+    app.session.ui.analysis_selection = Some(AnalysisSelection {
+        dataset,
+        canvas,
+        object,
+        x_range: AxisRange::new(1.0, 2.0),
+        y_range: None,
+    });
+
+    let path = temp_project("identity_schema_snapshot");
+    let _ = std::fs::remove_file(&path);
+    save_project(&app, &path, false).unwrap();
+    let file = File::open(&path).unwrap();
+    let mut zip = zip::ZipArchive::new(file).unwrap();
+    let manifest: Manifest = read_json(&mut zip, "manifest.json").unwrap();
+    let view: serde_json::Value = read_json(&mut zip, &manifest.views[0].path).unwrap();
+    let workspace: serde_json::Value = read_json(&mut zip, &manifest.workspace).unwrap();
+
+    assert_eq!(
+        view["next_object_id"],
+        app.doc.canvases[0].next_object_id.get()
+    );
+    assert_eq!(view["objects"][0]["id"], object.to_string());
+    assert_eq!(
+        workspace["analysis_selection"]["dataset"],
+        dataset.to_string()
+    );
+    assert_eq!(
+        workspace["analysis_selection"]["canvas"],
+        canvas.to_string()
+    );
+    assert_eq!(
+        workspace["analysis_selection"]["object"],
+        object.to_string()
+    );
     std::fs::remove_file(path).unwrap();
 }
 

@@ -206,7 +206,9 @@ pub(super) fn electrophysiology_group(app: &mut PlotxApp, di: usize, ui: &mut Ui
         match result {
             Ok((table, name, kind)) => {
                 let table_index = app.insert_typed_table_dataset(table, name.to_owned());
-                app.doc.datasets[table_index].set_lineage(Some(DatasetLineage::new(kind, [di])));
+                let source_id = app.doc.datasets[di].resource_id();
+                app.doc.datasets[table_index]
+                    .set_lineage(Some(DatasetLineage::new(kind, [source_id])));
             }
             Err(error) => app.session.status = error.to_string(),
         }

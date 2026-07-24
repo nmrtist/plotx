@@ -169,8 +169,10 @@ fn canvas_list(app: &mut PlotxApp, ui: &mut Ui) {
             plotx_core::state::toggle_frame_selection_synced(app, FrameRef::Page(ci));
         } else {
             app.session.active_canvas = Some(ci);
-            let datasets = app.doc.canvases[ci].dataset_indices();
-            let lead = app.doc.canvases[ci].active_dataset();
+            let lead = app.doc.canvases[ci]
+                .active_dataset()
+                .and_then(|id| app.doc.dataset_index(id));
+            let datasets = app.doc.page_dataset_indices(ci);
             app.focus_datasets(&datasets, lead);
             app.sync_selection_to_active_canvas();
             app.reset_interaction();
@@ -182,7 +184,9 @@ fn canvas_list(app: &mut PlotxApp, ui: &mut Ui) {
     }
     if let Some(ci) = start_rename {
         app.session.active_canvas = Some(ci);
-        let active = app.doc.canvases[ci].active_dataset();
+        let active = app.doc.canvases[ci]
+            .active_dataset()
+            .and_then(|id| app.doc.dataset_index(id));
         app.set_active_dataset(active);
         app.sync_selection_to_active_canvas();
         app.reset_interaction();
@@ -295,7 +299,8 @@ fn object_list(app: &mut PlotxApp, ci: usize, ui: &mut Ui) {
         app.select_object(ci, object_id);
         let active = app.doc.canvases[ci]
             .object(object_id)
-            .and_then(|object| object.dataset());
+            .and_then(|object| object.dataset())
+            .and_then(|id| app.doc.dataset_index(id));
         app.set_active_dataset(active);
         app.reset_interaction();
         app.session.ui.panel_note_inline_edit = None;
@@ -749,7 +754,7 @@ fn provenance_source_frame(app: &PlotxApp, di: usize) -> Option<FrameRef> {
         .doc
         .datasets
         .iter()
-        .position(|dataset| dataset.resource_id() == source_resource)?;
+        .position(|dataset| dataset.resource_id().to_string() == source_resource)?;
     plotx_core::state::page_frame_showing_dataset(app, src).or_else(|| {
         app.doc
             .datasets

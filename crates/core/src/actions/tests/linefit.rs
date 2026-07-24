@@ -122,7 +122,10 @@ fn run_line_fit_stores_inline_result_and_materializes_on_request() {
     assert!(table.provenance.is_none());
     assert_eq!(
         app.doc.datasets[1].lineage(),
-        Some(&DatasetLineage::new(DerivationKind::LineFitTable, [0]))
+        Some(&DatasetLineage::new(
+            DerivationKind::LineFitTable,
+            [app.doc.datasets[0].resource_id()]
+        ))
     );
 
     let series_names: Vec<&str> = app.doc.canvases[0].objects[0]
@@ -361,7 +364,7 @@ fn single_table_figure_gains_line_fit_overlays() {
     assert_eq!(app.doc.datasets[1].line_fits().len(), 1);
 
     let fig = app.build_binding_figure(
-        &DataBinding::single(1),
+        &DataBinding::single(app.doc.datasets[1].resource_id()),
         &ChartSpec::default_for(DataDomain::Table),
         &StackSpec::default(),
         [120.0, 80.0],
@@ -404,7 +407,7 @@ fn non_line_table_charts_skip_line_fit_overlays() {
         "table_surface",
     ] {
         let fig = app.build_binding_figure(
-            &DataBinding::single(1),
+            &DataBinding::single(app.doc.datasets[1].resource_id()),
             &ChartSpec {
                 type_id: id.to_owned(),
                 ..ChartSpec::default()
@@ -426,7 +429,10 @@ fn stacked_figures_exclude_line_fit_overlays() {
     app.execute_action(Action::set_line_fits(0, Vec::new(), vec![stored_sample(0)]));
 
     let binding = DataBinding {
-        series: vec![SeriesBinding::new(0), SeriesBinding::new(1)],
+        series: vec![
+            SeriesBinding::new(app.doc.datasets[0].resource_id()),
+            SeriesBinding::new(app.doc.datasets[1].resource_id()),
+        ],
     };
     let stack = StackSpec {
         mode: StackMode::Offset,
@@ -443,7 +449,7 @@ fn single_plot_color_override_leaves_overlay_colors_alone() {
     app.execute_action(Action::set_line_fits(0, Vec::new(), vec![stored_sample(0)]));
 
     let override_color = Color::rgb(0x11, 0x22, 0x33);
-    let mut binding = DataBinding::single(0);
+    let mut binding = DataBinding::single(app.doc.datasets[0].resource_id());
     binding.series[0].color = Some(override_color);
     let fig = app.build_binding_figure(
         &binding,

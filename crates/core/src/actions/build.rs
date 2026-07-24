@@ -445,7 +445,7 @@ impl Action {
         Self::InsertDatasetWithCanvas {
             dataset_index: app.doc.datasets.len(),
             canvas_index: app.doc.canvases.len(),
-            canvas_resource_id: uuid::Uuid::new_v4().to_string(),
+            canvas_resource_id: crate::state::CanvasId::new(),
             dataset: Box::new(dataset),
             canvas_name,
             size_mm,
@@ -462,7 +462,7 @@ impl Action {
         Self::InsertDatasetWithCanvas {
             dataset_index: app.doc.datasets.len(),
             canvas_index: app.doc.canvases.len(),
-            canvas_resource_id: uuid::Uuid::new_v4().to_string(),
+            canvas_resource_id: crate::state::CanvasId::new(),
             dataset: Box::new(dataset),
             canvas_name: String::new(),
             size_mm: crate::state::DEFAULT_CANVAS_SIZE_MM,

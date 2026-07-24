@@ -485,8 +485,10 @@ fn activate_frame(app: &mut PlotxApp, frame: FrameRef) {
         FrameRef::Page(ci) => {
             activate_page(app, ci);
             if let Some(canvas) = app.doc.canvases.get(ci) {
-                let datasets = canvas.dataset_indices();
-                let lead = canvas.active_dataset();
+                let lead = canvas
+                    .active_dataset()
+                    .and_then(|id| app.doc.dataset_index(id));
+                let datasets = app.doc.page_dataset_indices(ci);
                 app.focus_datasets(&datasets, lead);
             }
         }

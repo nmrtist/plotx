@@ -504,7 +504,8 @@ fn numbered_output_path(base_path: &Path, ordinal: usize, extension: &str) -> Pa
 mod tests {
     use super::*;
     use crate::state::{
-        CanvasDocument, CanvasObject, CanvasObjectKind, ObjectFrame, ShapeKind, ShapeObject,
+        CanvasDocument, CanvasObject, CanvasObjectKind, ObjectFrame, ObjectId, ShapeKind,
+        ShapeObject,
     };
 
     fn canvas(name: &str, size_mm: [f32; 2]) -> CanvasDocument {
@@ -520,7 +521,7 @@ mod tests {
     fn canvas_with_shape(frame: ObjectFrame) -> CanvasDocument {
         let mut canvas = canvas("page", [100.0, 80.0]);
         canvas.objects.push(CanvasObject {
-            id: 1,
+            id: ObjectId::new(1),
             name: "shape".into(),
             frame,
             locked: false,

@@ -2,8 +2,8 @@ use crate::layout::PageLayout;
 use crate::state::{
     AnalysisSelection, AxisRange, CanvasDocument, CanvasObject, CanvasObjectKind, CanvasViewport,
     DataBinding, Dataset, DatasetLineage, DerivationKind, Nmr2DDataset, NmrDataset, ObjectFrame,
-    PanelMeta, PlotObject, PlotxApp, PrimaryView, Region, RegionMetric, SeriesBinding, ShapeKind,
-    ShapeObject, StackMode, StackSpec, TextAlign, TextBox, Tool,
+    ObjectId, PanelMeta, PlotObject, PlotxApp, PrimaryView, Region, RegionMetric, SeriesBinding,
+    ShapeKind, ShapeObject, StackMode, StackSpec, TextAlign, TextBox, Tool,
 };
 use num_complex::Complex64;
 use plotx_figure::Color;
@@ -238,7 +238,7 @@ fn save_project_impl(
     let mut bindings = Vec::with_capacity(doc.datasets.len());
     let mut written_table_blocks = std::collections::BTreeSet::new();
     for dataset in &doc.datasets {
-        let data_id = dataset.resource_id().to_owned();
+        let data_id = dataset.resource_id().to_string();
         let recipe_id = format!("recipe_{data_id}");
         let data_path = format!("objects/{data_id}/object.json");
         let recipe_path = format!("objects/{recipe_id}/object.json");
@@ -280,8 +280,9 @@ fn save_project_impl(
                 .iter()
                 .map(|source| {
                     doc.datasets
-                        .get(*source)
-                        .map(|dataset| dataset.resource_id().to_owned())
+                        .iter()
+                        .find(|dataset| dataset.resource_id() == *source)
+                        .map(|dataset| dataset.resource_id().to_string())
                         .ok_or_else(|| {
                             ProjectError::Invalid(format!(
                                 "dataset {data_id} references missing lineage source {source}"
@@ -305,7 +306,7 @@ fn save_project_impl(
 
     let mut view_order = Vec::with_capacity(doc.canvases.len());
     for canvas in &doc.canvases {
-        let view_id = canvas.resource_id.clone();
+        let view_id = canvas.resource_id.to_string();
         let view_path = format!("views/{view_id}.json");
         let mut view = canvas_to_view(&doc.datasets, canvas, &view_id)?;
         if include_view_snapshots {
@@ -356,11 +357,11 @@ fn save_project_impl(
         active_data: workspace_state
             .active_dataset
             .and_then(|i| doc.datasets.get(i))
-            .map(|dataset| dataset.resource_id().to_owned()),
+            .map(|dataset| dataset.resource_id().to_string()),
         active_view: workspace_state
             .active_canvas
             .and_then(|i| doc.canvases.get(i))
-            .map(|canvas| canvas.resource_id.clone()),
+            .map(|canvas| canvas.resource_id.to_string()),
         primary_view: workspace_state.primary_view.clone(),
         tool: workspace_state.tool.clone(),
         analysis_selection: workspace_state.analysis_selection.clone(),
@@ -430,7 +431,9 @@ pub fn load_project(path: &Path) -> Result<PlotxApp> {
             ProjectError::Invalid(format!("missing recipe object {}", binding.recipe))
         })?;
         let mut dataset = object_to_dataset(&mut zip, data, recipe)?;
-        dataset.set_resource_id(binding.data.clone());
+        dataset.set_resource_id(binding.data.parse().map_err(|_| {
+            ProjectError::Invalid(format!("dataset has invalid stable id {}", binding.data))
+        })?);
         let di = app.doc.datasets.len();
         app.doc.datasets.push(dataset);
         recipe_to_dataset.insert(binding.recipe.clone(), di);
@@ -455,7 +458,9 @@ pub fn load_project(path: &Path) -> Result<PlotxApp> {
             .ok_or_else(|| ProjectError::Invalid(format!("missing view object {view_id}")))?;
         let mut canvas =
             view_to_canvas(&mut app, &mut zip, view_id, view, index, &recipe_to_dataset)?;
-        canvas.resource_id = view_id.clone();
+        canvas.resource_id = view_id.parse().map_err(|_| {
+            ProjectError::Invalid(format!("canvas has invalid stable id {view_id}"))
+        })?;
         app.doc.canvases.push(canvas);
     }
 
@@ -514,11 +519,11 @@ fn validate_resource_ids(doc: &crate::state::Document) -> Result<()> {
     for (kind, id) in doc
         .datasets
         .iter()
-        .map(|dataset| ("dataset", dataset.resource_id()))
+        .map(|dataset| ("dataset", dataset.resource_id().to_string()))
         .chain(
             doc.canvases
                 .iter()
-                .map(|canvas| ("canvas", canvas.resource_id.as_str())),
+                .map(|canvas| ("canvas", canvas.resource_id.to_string())),
         )
     {
         if id.is_empty()
@@ -589,18 +594,19 @@ fn resolve_dataset_lineage(
             }
             let mut sources = Vec::with_capacity(dto.sources.len());
             for source_id in &dto.sources {
-                let source = data_to_dataset.get(source_id).copied().ok_or_else(|| {
+                let source_index = data_to_dataset.get(source_id).copied().ok_or_else(|| {
                     ProjectError::Invalid(format!(
                         "dataset {} references missing lineage source {source_id}",
                         binding.data
                     ))
                 })?;
-                if source == di {
+                if source_index == di {
                     return Err(ProjectError::Invalid(format!(
                         "dataset {} cannot derive from itself",
                         binding.data
                     )));
                 }
+                let source = datasets[source_index].resource_id();
                 if !sources.contains(&source) {
                     sources.push(source);
                 }
@@ -634,7 +640,16 @@ fn validate_lineage_acyclic(datasets: &[Dataset], bindings: &[DatasetBinding]) -
         state[di] = 1;
         if let Some(lineage) = datasets[di].lineage() {
             for &source in &lineage.sources {
-                visit(source, datasets, state, bindings)?;
+                let source_index = datasets
+                    .iter()
+                    .position(|dataset| dataset.resource_id() == source)
+                    .ok_or_else(|| {
+                        ProjectError::Invalid(format!(
+                            "dataset {} references missing lineage source {source}",
+                            bindings[di].data
+                        ))
+                    })?;
+                visit(source_index, datasets, state, bindings)?;
             }
         }
         state[di] = 2;

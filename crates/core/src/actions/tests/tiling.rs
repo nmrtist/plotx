@@ -1,7 +1,9 @@
 use crate::actions::Action;
 use crate::actions::tests::{push_canvas, sample_app};
 use crate::layout::compute_tiling_plan;
-use crate::state::{AxisOverrides, AxisRange, ObjectFrame, TileDropCacheKey, TileDropPreview};
+use crate::state::{
+    AxisOverrides, AxisRange, ObjectFrame, ObjectId, TileDropCacheKey, TileDropPreview,
+};
 
 /// A drop of canvas 0's plot onto canvas 1 (which already has one plot) transfers
 /// ownership and reframes both into a two-way split, undoably.
@@ -114,11 +116,11 @@ fn cancelling_interaction_clears_tile_preview_cache() {
     app.session.ui.tile_drop = Some(TileDropPreview {
         cache_key: TileDropCacheKey {
             source_canvas: 0,
-            source_object: 1,
+            source_object: ObjectId::new(1),
             target_canvas: 1,
             target_page_pt: [100.0, 80.0],
             target_layout: crate::layout::PageLayout::default(),
-            target_existing_ids: vec![2],
+            target_existing_ids: vec![ObjectId::new(2)],
             region: crate::layout::TilingDropRegion::Left,
             pointer_cell: None,
         },

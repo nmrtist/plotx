@@ -236,7 +236,7 @@ pub fn build_dataset_figure(dataset: &Dataset, chart: &ChartSpec, size_mm: [f32;
 
 pub fn build_plot_object(
     dataset: &Dataset,
-    dataset_index: usize,
+    _dataset_index: usize,
     frame: ObjectFrame,
     id: ObjectId,
     name: String,
@@ -258,7 +258,7 @@ pub fn build_plot_object(
         visible: true,
         group: None,
         kind: CanvasObjectKind::Plot(Box::new(PlotObject {
-            binding: DataBinding::single(dataset_index),
+            binding: DataBinding::single(dataset.resource_id()),
             chart,
             stack: StackSpec::default(),
             projections: AxisProjections::default(),
@@ -498,7 +498,7 @@ mod tests {
         let (dataset, source) = dataset_from_acquisition(acquisition());
         assert_eq!(dataset.kind_label(), "NMR 1D");
         let canvas = build_default_canvas(&dataset, &source);
-        assert_eq!(canvas.dataset_indices(), vec![0]);
+        assert_eq!(canvas.dataset_ids(), vec![dataset.resource_id()]);
         assert_eq!(canvas.objects.len(), 1);
     }
 

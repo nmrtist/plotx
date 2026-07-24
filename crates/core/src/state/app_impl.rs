@@ -128,7 +128,20 @@ impl PlotxApp {
         if binding.series.len() > 1 && self.series_stackable(binding) {
             self.build_stacked_figure(binding, stack, size_mm)
         } else {
-            let primary = binding.primary_dataset();
+            let Some(primary_id) = binding.primary_dataset() else {
+                return Figure::new(
+                    "",
+                    plotx_figure::Axis::new("x", 0.0, 1.0),
+                    plotx_figure::Axis::new("y", 0.0, 1.0),
+                );
+            };
+            let Some(primary) = self.doc.dataset_index(primary_id) else {
+                return Figure::new(
+                    "",
+                    plotx_figure::Axis::new("x", 0.0, 1.0),
+                    plotx_figure::Axis::new("y", 0.0, 1.0),
+                );
+            };
             let domain = self.doc.datasets[primary].domain();
             let mut fig = self.build_full_canvas_figure(primary, chart, size_mm);
             // A single-series colour override (e.g. a theme's primary trace colour)
@@ -183,7 +196,12 @@ impl PlotxApp {
         size_mm: [f32; 2],
     ) -> Figure {
         let mut fig = self.build_binding_figure(binding, chart, stack, size_mm);
-        self.apply_axis_projections(&mut fig, binding.primary_dataset(), projections);
+        if let Some(dataset) = binding
+            .primary_dataset()
+            .and_then(|id| self.doc.dataset_index(id))
+        {
+            self.apply_axis_projections(&mut fig, dataset, projections);
+        }
         fig
     }
 
@@ -218,7 +236,12 @@ impl PlotxApp {
         }
         let slice = match &cfg.source {
             ProjectionSource::None => return None,
-            ProjectionSource::Attached(other) => return self.attached_axis_trace(*other),
+            ProjectionSource::Attached(other) => {
+                return self
+                    .doc
+                    .dataset_index(*other)
+                    .and_then(|index| self.attached_axis_trace(index));
+            }
             ProjectionSource::Sum => spec.project(kind, ProjectionMode::Sum),
             ProjectionSource::Skyline => spec.project(kind, ProjectionMode::Skyline),
             ProjectionSource::Slice(index) => spec.slice(kind, *index),
@@ -290,6 +313,9 @@ impl PlotxApp {
     }
 
     pub fn rebuild_canvases_for(&mut self, dataset: usize) {
+        let Some(dataset_id) = self.doc.datasets.get(dataset).map(Dataset::resource_id) else {
+            return;
+        };
         for ci in 0..self.doc.canvases.len() {
             let ids: Vec<ObjectId> = self.doc.canvases[ci]
                 .objects
@@ -297,7 +323,7 @@ impl PlotxApp {
                 .filter_map(|object| {
                     object
                         .plot()
-                        .filter(|plot| plot.binding.contains_dataset(dataset))
+                        .filter(|plot| plot.binding.contains_dataset(dataset_id))
                         .map(|_| object.id)
                 })
                 .collect();

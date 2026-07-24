@@ -84,7 +84,7 @@ pub(crate) fn paint_analysis_selection(
     let Some(selection) = &app.session.ui.analysis_selection else {
         return;
     };
-    if selection.canvas != ci || selection.object != object_id {
+    if selection.canvas != app.doc.canvases[ci].resource_id || selection.object != object_id {
         return;
     }
     let Some(object) = app.doc.canvases[ci].object(object_id) else {

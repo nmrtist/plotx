@@ -257,7 +257,10 @@ impl PlotxApp {
         let unit = source.trace_x_unit();
         let source_name = source.display_name();
         let mut table = line_fit_parameter_table(&fit, &unit);
-        table.lineage = Some(DatasetLineage::new(DerivationKind::LineFitTable, [dataset]));
+        table.lineage = Some(DatasetLineage::new(
+            DerivationKind::LineFitTable,
+            [self.doc.datasets[dataset].resource_id()],
+        ));
         table.name = Some(format!("{source_name} — peak fit"));
         table.board_pos = super::app_impl_analysis::next_sheet_pos_after_new_canvas(self);
         let action = Action::insert_dataset_with_default_canvas(

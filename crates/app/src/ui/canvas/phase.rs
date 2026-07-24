@@ -51,6 +51,7 @@ pub(crate) fn handle_phase_before_paint(
     let Some(di) = app.doc.canvases[ci]
         .object(object_id)
         .and_then(|object| object.dataset())
+        .and_then(|id| app.doc.dataset_index(id))
     else {
         return;
     };

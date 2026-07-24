@@ -46,8 +46,10 @@ mod datasets;
 mod datasets_2d_figure;
 mod datasets_2d_maps;
 mod document;
+mod document_identity;
 mod electrophysiology;
 mod fit_selection;
+mod identity;
 mod interaction;
 mod lineage;
 mod linefit;
@@ -91,6 +93,7 @@ pub use datasets::*;
 pub(crate) use datasets_2d_figure::{build_processed_figure, build_processed_figure_cancellable};
 pub use document::*;
 pub use electrophysiology::*;
+pub use identity::*;
 pub use interaction::*;
 pub use lineage::*;
 pub use linefit::*;
@@ -123,7 +126,6 @@ pub const DEFAULT_CANVAS_SIZE_MM: [f32; 2] = NATURE_SINGLE_COLUMN.size_mm();
 const PX_PER_IN: f32 = 96.0;
 const MM_PER_IN: f32 = 25.4;
 
-pub type ObjectId = u64;
 pub type GroupId = u64;
 
 #[cfg(test)]
@@ -133,12 +135,16 @@ mod tests {
 
     #[test]
     fn selection_multi_reports_primary_and_membership() {
-        let sel = Selection::Objects(vec![3, 7, 9]);
-        assert_eq!(sel.object(), Some(3));
-        assert_eq!(sel.objects(), &[3, 7, 9]);
-        assert!(sel.contains(7));
-        assert!(!sel.contains(4));
-        assert_eq!(Selection::single(5).objects(), &[5]);
+        let ids = [3, 7, 9].map(ObjectId::new);
+        let sel = Selection::Objects(ids.to_vec());
+        assert_eq!(sel.object(), Some(ObjectId::new(3)));
+        assert_eq!(sel.objects(), &ids);
+        assert!(sel.contains(ObjectId::new(7)));
+        assert!(!sel.contains(ObjectId::new(4)));
+        assert_eq!(
+            Selection::single(ObjectId::new(5)).objects(),
+            &[ObjectId::new(5)]
+        );
     }
 
     #[test]

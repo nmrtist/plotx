@@ -228,11 +228,23 @@ fn undo_finishes_and_reverts_a_live_axis_override_edit() {
 
 #[test]
 fn reorder_z_front_and_back_preserve_relative_order() {
-    let order = [1u64, 2, 3, 4];
-    assert_eq!(reorder_z(&order, &[1, 3], ZOrder::Front), vec![2, 4, 1, 3]);
-    assert_eq!(reorder_z(&order, &[2, 4], ZOrder::Back), vec![2, 4, 1, 3]);
-    assert_eq!(reorder_z(&order, &[1], ZOrder::Forward), vec![2, 1, 3, 4]);
-    assert_eq!(reorder_z(&order, &[4], ZOrder::Backward), vec![1, 2, 4, 3]);
+    let ids = [1, 2, 3, 4].map(ObjectId::new);
+    assert_eq!(
+        reorder_z(&ids, &[ObjectId::new(1), ObjectId::new(3)], ZOrder::Front),
+        [2, 4, 1, 3].map(ObjectId::new)
+    );
+    assert_eq!(
+        reorder_z(&ids, &[ObjectId::new(2), ObjectId::new(4)], ZOrder::Back),
+        [2, 4, 1, 3].map(ObjectId::new)
+    );
+    assert_eq!(
+        reorder_z(&ids, &[ObjectId::new(1)], ZOrder::Forward),
+        [2, 1, 3, 4].map(ObjectId::new)
+    );
+    assert_eq!(
+        reorder_z(&ids, &[ObjectId::new(4)], ZOrder::Backward),
+        [1, 2, 4, 3].map(ObjectId::new)
+    );
 }
 
 #[test]
@@ -249,14 +261,14 @@ fn bring_to_front_moves_id_to_front_end_and_undoes() {
         app.doc.canvases[0].objects.push(object);
     }
     let ids: Vec<_> = app.doc.canvases[0].objects.iter().map(|o| o.id).collect();
-    assert_eq!(ids, vec![1, 2, 3]);
+    assert_eq!(ids, [1, 2, 3].map(ObjectId::new));
 
-    app.apply_z_order(0, &[1], ZOrder::Front);
+    app.apply_z_order(0, &[ObjectId::new(1)], ZOrder::Front);
     let after: Vec<_> = app.doc.canvases[0].objects.iter().map(|o| o.id).collect();
-    assert_eq!(after, vec![2, 3, 1]);
-    assert_eq!(*after.last().unwrap(), 1);
+    assert_eq!(after, [2, 3, 1].map(ObjectId::new));
+    assert_eq!(*after.last().unwrap(), ObjectId::new(1));
 
     app.undo();
     let reverted: Vec<_> = app.doc.canvases[0].objects.iter().map(|o| o.id).collect();
-    assert_eq!(reverted, vec![1, 2, 3]);
+    assert_eq!(reverted, [1, 2, 3].map(ObjectId::new));
 }

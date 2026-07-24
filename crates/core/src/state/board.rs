@@ -155,10 +155,11 @@ pub fn tidy_board_layout(app: &PlotxApp) -> Vec<(FrameRef, [f32; 2])> {
 /// for semantic jumps between an extracted table, its source spectrum, and its
 /// fit chart.
 pub fn page_frame_showing_dataset(app: &PlotxApp, di: usize) -> Option<FrameRef> {
+    let dataset_id = app.doc.datasets.get(di)?.resource_id();
     app.doc
         .canvases
         .iter()
-        .position(|c| c.objects.iter().any(|o| o.dataset() == Some(di)))
+        .position(|c| c.objects.iter().any(|o| o.dataset() == Some(dataset_id)))
         .map(FrameRef::Page)
 }
 
@@ -223,12 +224,7 @@ fn sync_data_selection_from_frames(app: &mut PlotxApp) {
     let mut datasets: Vec<usize> = Vec::new();
     for frame in frames {
         let indices = match frame {
-            FrameRef::Page(ci) => app
-                .doc
-                .canvases
-                .get(ci)
-                .map(|c| c.dataset_indices())
-                .unwrap_or_default(),
+            FrameRef::Page(ci) => app.doc.page_dataset_indices(ci),
             FrameRef::Sheet(di) => vec![di],
         };
         for di in indices {

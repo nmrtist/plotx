@@ -85,7 +85,7 @@ fn query_reports_reasons_pagination_and_stale_frozen_sets_are_rejected() {
         request(
             "resource.rename",
             serde_json::json!({"name":"next"}),
-            vec![id],
+            vec![id.to_string()],
             0,
         ),
     )
@@ -111,7 +111,7 @@ fn unknown_tool_parameters_are_rejected_and_registry_ids_are_unique() {
         request(
             "resource.rename",
             serde_json::json!({"name":"ok", "surprise":true}),
-            vec![id],
+            vec![id.to_string()],
             0,
         ),
     )
@@ -138,7 +138,7 @@ fn data_transform_executes_the_same_persisted_relplan_and_is_undoable() {
         )),
         columns: vec![signal],
     });
-    let resource_id = source.resource_id.clone();
+    let resource_id = source.resource_id;
     let tool_plan = plan_tool(
         &app,
         request(
@@ -148,7 +148,7 @@ fn data_transform_executes_the_same_persisted_relplan_and_is_undoable() {
                 "name": "Projected",
                 "memory_limit_bytes": 16 * 1024 * 1024,
             }),
-            vec![resource_id.clone()],
+            vec![resource_id.to_string()],
             app.doc.automation_revision,
         ),
     )
@@ -198,7 +198,7 @@ fn data_transform_executes_the_same_persisted_relplan_and_is_undoable() {
                 "memory_limit_bytes": 16 * 1024 * 1024,
             }),
             targets: TargetSelector::Explicit {
-                ids: vec![resource_id],
+                ids: vec![resource_id.to_string()],
             },
             dependencies: Vec::new(),
             bindings: Vec::new(),
@@ -245,13 +245,13 @@ fn composite_validation_prevents_partial_application() {
 fn dag_executes_by_output_binding_and_collapses_to_one_undo() {
     let mut app = app_with_table_and_canvas();
     let dataset_id = app.doc.datasets[0].resource_id().to_owned();
-    let canvas_id = app.doc.canvases[0].resource_id.clone();
+    let canvas_id = app.doc.canvases[0].resource_id;
     let workflow = WorkflowDefinition {
         schema: WORKFLOW_SCHEMA.to_owned(),
         inputs: BTreeMap::from([(
             "targets".to_owned(),
             WorkflowInput::Resources {
-                ids: vec![dataset_id, canvas_id],
+                ids: vec![dataset_id.to_string(), canvas_id.to_string()],
             },
         )]),
         nodes: vec![
@@ -345,7 +345,7 @@ fn dag_validation_rejects_cycles_missing_ports_and_wrong_parameters() {
 fn stable_ids_rows_columns_runs_and_revision_survive_project_roundtrip() {
     let mut app = app_with_table_and_canvas();
     let dataset_id = app.doc.datasets[0].resource_id().to_owned();
-    let canvas_id = app.doc.canvases[0].resource_id.clone();
+    let canvas_id = app.doc.canvases[0].resource_id;
     let table = app.doc.datasets[0].as_table().unwrap();
     let row_ids = table.typed_rows(usize::MAX, &[]).unwrap().row_ids;
     let column_ids = table
@@ -494,8 +494,8 @@ fn simulated_agent_observes_plans_modifies_renders_exports_and_undoes() {
     );
     assert!(targets.total_matches >= 2);
     let ids = vec![
-        app.doc.datasets[0].resource_id().to_owned(),
-        app.doc.canvases[0].resource_id.clone(),
+        app.doc.datasets[0].resource_id().to_string(),
+        app.doc.canvases[0].resource_id.to_string(),
     ];
     let output = std::env::temp_dir().join(format!("plotx-agent-{}", uuid::Uuid::new_v4()));
     let workflow = WorkflowDefinition {

@@ -333,8 +333,8 @@ fn setup(app: &mut PlotxApp) {
         && let Some(object) = app.doc.canvases[ci].active_plot_object_id()
     {
         app.session.ui.analysis_selection = Some(AnalysisSelection {
-            dataset: 0,
-            canvas: ci,
+            dataset: app.doc.datasets[0].resource_id(),
+            canvas: app.doc.canvases[ci].resource_id,
             object,
             x_range: AxisRange::new(FIT_LO, FIT_HI),
             y_range: None,

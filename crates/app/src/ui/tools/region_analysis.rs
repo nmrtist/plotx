@@ -351,7 +351,7 @@ pub(crate) fn open_region_table(app: &mut PlotxApp, di: usize) {
         .doc
         .canvases
         .iter()
-        .position(|canvas| canvas.active_dataset() == Some(tj))
+        .position(|canvas| canvas.active_dataset() == Some(app.doc.datasets[tj].resource_id()))
     {
         app.session.active_canvas = Some(ci);
         app.sync_selection_to_active_canvas();

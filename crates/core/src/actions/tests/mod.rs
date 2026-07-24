@@ -15,6 +15,7 @@ mod linefit;
 mod more;
 mod multiplet;
 mod scheme_apply;
+mod stable_identity;
 mod stack;
 mod tiling;
 use num_complex::Complex64;
@@ -138,7 +139,7 @@ fn insert_dataset_existing_canvas_does_not_select_inserted_object() {
     app.execute_action(Action::InsertDatasetWithCanvas {
         dataset_index,
         canvas_index: app.doc.canvases.len(),
-        canvas_resource_id: uuid::Uuid::new_v4().to_string(),
+        canvas_resource_id: crate::state::CanvasId::new(),
         dataset: Box::new(dataset),
         canvas_name: "unused".to_owned(),
         size_mm: DEFAULT_CANVAS_SIZE_MM,
@@ -155,6 +156,11 @@ fn insert_dataset_existing_canvas_does_not_select_inserted_object() {
     app.undo();
     assert_eq!(app.doc.canvases[0].objects.len(), 1);
     assert_eq!(app.doc.canvases[0].selected_object, None);
+    assert!(app.doc.canvases[0].next_object_id > inserted_id);
+
+    app.redo();
+    assert!(app.doc.canvases[0].object(inserted_id).is_some());
+    assert!(app.doc.canvases[0].next_object_id > inserted_id);
 }
 
 #[test]
@@ -546,6 +552,8 @@ fn delete_canvas_undo_restores_order_and_active_canvas() {
     let mut app = sample_app();
     push_canvas(&mut app, 0, "second canvas", [90.0, 60.0]);
     app.session.active_canvas = Some(0);
+    let canvas_id = app.doc.canvases[0].resource_id;
+    let object_id = app.doc.canvases[0].objects[0].id;
 
     app.execute_action(Action::delete_canvas(&app, 0).unwrap());
     assert_eq!(app.doc.canvases[0].name, "second canvas");
@@ -553,6 +561,8 @@ fn delete_canvas_undo_restores_order_and_active_canvas() {
 
     app.undo();
     assert_eq!(app.doc.canvases[0].name, "sample canvas");
+    assert_eq!(app.doc.canvases[0].resource_id, canvas_id);
+    assert!(app.doc.canvases[0].object(object_id).is_some());
     assert_eq!(app.doc.canvases[1].name, "second canvas");
     assert_eq!(app.session.active_canvas, Some(0));
 }

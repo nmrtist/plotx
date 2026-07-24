@@ -40,7 +40,7 @@ impl NmrDataset {
             steps: vec![ProcessingStep::new(StepKind::Fft, StepSource::Default)],
         };
         Self {
-            resource_id: uuid::Uuid::new_v4().to_string(),
+            resource_id: DatasetId::new(),
             data,
             base: spectrum.clone(),
             pipeline,
@@ -130,7 +130,10 @@ impl PlotxApp {
         kind: DerivationKind,
     ) {
         let mut ds = Dataset::Nmr(Box::new(NmrDataset::from_slice(slice, name.clone())));
-        ds.set_lineage(Some(DatasetLineage::new(kind, [source])));
+        ds.set_lineage(Some(DatasetLineage::new(
+            kind,
+            [self.doc.datasets[source].resource_id()],
+        )));
         let action = Action::insert_dataset_with_default_canvas(
             self,
             ds,
@@ -201,11 +204,17 @@ mod tests {
 
         assert_eq!(
             app.doc.datasets[1].lineage(),
-            Some(&DatasetLineage::new(DerivationKind::Slice, [0]))
+            Some(&DatasetLineage::new(
+                DerivationKind::Slice,
+                [app.doc.datasets[0].resource_id()]
+            ))
         );
         assert_eq!(
             app.doc.datasets[2].lineage(),
-            Some(&DatasetLineage::new(DerivationKind::Projection, [0]))
+            Some(&DatasetLineage::new(
+                DerivationKind::Projection,
+                [app.doc.datasets[0].resource_id()]
+            ))
         );
     }
 }

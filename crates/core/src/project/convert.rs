@@ -4,7 +4,6 @@ use super::electrophysiology_convert::{
     electrophysiology_from_object, electrophysiology_to_objects,
 };
 use super::*;
-
 pub fn dataset_to_objects(
     dataset: &Dataset,
     data_id: &str,
@@ -153,7 +152,6 @@ pub fn dataset_to_objects(
         }
     })
 }
-
 pub fn object_to_dataset(
     zip: &mut zip::ZipArchive<File>,
     data: &DataObject,
@@ -302,9 +300,7 @@ pub fn object_to_dataset(
         ))),
     }
 }
-
 use crate::state::{AxisProjection, AxisProjections, ProjectionSource};
-
 fn projections_to_dto(p: &AxisProjections, datasets: &[Dataset]) -> Result<Option<ProjectionsDto>> {
     if p.is_empty() {
         return Ok(None);
@@ -314,7 +310,6 @@ fn projections_to_dto(p: &AxisProjections, datasets: &[Dataset]) -> Result<Optio
         left: axis_projection_to_dto(&p.left, datasets)?,
     }))
 }
-
 fn axis_projection_to_dto(
     a: &AxisProjection,
     datasets: &[Dataset],
@@ -326,7 +321,8 @@ fn axis_projection_to_dto(
             Some(format!(
                 "recipe_{}",
                 datasets
-                    .get(d)
+                    .iter()
+                    .find(|dataset| dataset.resource_id() == d)
                     .ok_or_else(|| {
                         ProjectError::Invalid(format!(
                             "axis projection references missing dataset {d}"
@@ -347,20 +343,20 @@ fn axis_projection_to_dto(
         visible: a.visible,
     }))
 }
-
 fn projections_from_dto(
     dto: &ProjectionsDto,
     recipe_to_dataset: &HashMap<String, usize>,
+    datasets: &[Dataset],
 ) -> AxisProjections {
     AxisProjections {
-        top: axis_projection_from_dto(dto.top.as_ref(), recipe_to_dataset),
-        left: axis_projection_from_dto(dto.left.as_ref(), recipe_to_dataset),
+        top: axis_projection_from_dto(dto.top.as_ref(), recipe_to_dataset, datasets),
+        left: axis_projection_from_dto(dto.left.as_ref(), recipe_to_dataset, datasets),
     }
 }
-
 fn axis_projection_from_dto(
     dto: Option<&AxisProjectionDto>,
     recipe_to_dataset: &HashMap<String, usize>,
+    datasets: &[Dataset],
 ) -> AxisProjection {
     let Some(dto) = dto else {
         return AxisProjection::default();
@@ -370,6 +366,8 @@ fn axis_projection_from_dto(
             .attached
             .as_ref()
             .and_then(|id| recipe_to_dataset.get(id).copied())
+            .and_then(|index| datasets.get(index))
+            .map(Dataset::resource_id)
             .map(ProjectionSource::Attached)
             .unwrap_or(ProjectionSource::None),
         "sum" => ProjectionSource::Sum,
@@ -382,7 +380,6 @@ fn axis_projection_from_dto(
         visible: dto.visible,
     }
 }
-
 pub fn canvas_to_view(
     datasets: &[Dataset],
     canvas: &CanvasDocument,
@@ -420,8 +417,16 @@ pub fn canvas_to_view(
             };
             match &object.kind {
                 CanvasObjectKind::Plot(plot) => {
-                    let primary = plot.primary_dataset();
-                    let primary_dataset = datasets.get(primary).ok_or_else(|| {
+                    let primary = plot.primary_dataset().ok_or_else(|| {
+                        ProjectError::Invalid(format!(
+                            "view {view_id} plot {} has no primary dataset",
+                            object.id
+                        ))
+                    })?;
+                    let primary_dataset = datasets
+                        .iter()
+                        .find(|dataset| dataset.resource_id() == primary)
+                        .ok_or_else(|| {
                         ProjectError::Invalid(format!(
                             "view {view_id} plot {} references missing primary dataset {primary}",
                             object.id
@@ -442,7 +447,10 @@ pub fn canvas_to_view(
                         .series
                         .iter()
                         .map(|sb| {
-                            let dataset = datasets.get(sb.dataset).ok_or_else(|| {
+                            let dataset = datasets
+                                .iter()
+                                .find(|dataset| dataset.resource_id() == sb.dataset)
+                                .ok_or_else(|| {
                                 ProjectError::Invalid(format!(
                                     "view {view_id} plot {} references missing series dataset {}",
                                     object.id, sb.dataset
@@ -508,6 +516,7 @@ pub fn canvas_to_view(
             .filter(|input| !input.is_empty())
             .collect(),
         name: canvas.name.clone(),
+        next_object_id: canvas.next_object_id.get(),
         caption: canvas.caption.clone(),
         caption_visible: canvas.caption_visible,
         panel_label_style: Some(canvas.panel_label_style.as_key().to_owned()),
@@ -528,7 +537,6 @@ pub fn canvas_to_view(
         snapshot: None,
     })
 }
-
 pub fn view_to_canvas(
     app: &mut PlotxApp,
     zip: &mut zip::ZipArchive<File>,
@@ -564,7 +572,7 @@ pub fn view_to_canvas(
     for view_object in &view.objects {
         let object_id = view_object
             .id
-            .parse::<u64>()
+            .parse::<ObjectId>()
             .map_err(|_| ProjectError::Invalid(format!("invalid object id {}", view_object.id)))?;
         let frame = view_object.frame.into_frame();
         let kind = match view_object.kind.as_str() {
@@ -586,12 +594,16 @@ pub fn view_to_canvas(
                     })
                 };
                 let binding = if view_object.series.is_empty() {
-                    DataBinding::single(resolve(&view_object.input)?)
+                    let index = resolve(&view_object.input)?;
+                    DataBinding::single(app.doc.datasets[index].resource_id())
                 } else {
                     let mut series = Vec::with_capacity(view_object.series.len());
                     for sb in &view_object.series {
                         series.push(SeriesBinding {
-                            dataset: resolve(&sb.input)?,
+                            dataset: {
+                                let index = resolve(&sb.input)?;
+                                app.doc.datasets[index].resource_id()
+                            },
                             color: sb.color.map(|c| plotx_figure::Color::rgb(c[0], c[1], c[2])),
                             label: sb.label.clone(),
                             scale: sb.scale,
@@ -605,7 +617,15 @@ pub fn view_to_canvas(
                     .clone()
                     .map(StackDto::into_spec)
                     .unwrap_or_default();
-                let di = binding.primary_dataset();
+                let dataset_id = binding.primary_dataset().ok_or_else(|| {
+                    ProjectError::Invalid(format!("view {} has an empty data binding", view.id))
+                })?;
+                let di = app.doc.dataset_index(dataset_id).ok_or_else(|| {
+                    ProjectError::Invalid(format!(
+                        "view {} references missing dataset {dataset_id}",
+                        view.id
+                    ))
+                })?;
                 let domain = app
                     .doc
                     .datasets
@@ -647,7 +667,7 @@ pub fn view_to_canvas(
                 let projections = view_object
                     .projections
                     .as_ref()
-                    .map(|dto| projections_from_dto(dto, recipe_to_dataset))
+                    .map(|dto| projections_from_dto(dto, recipe_to_dataset, &app.doc.datasets))
                     .unwrap_or_default();
                 let mut figure = if let Some(snapshot) = &view_object.snapshot {
                     read_json(zip, &snapshot.figure).unwrap_or_else(|_| {
@@ -706,14 +726,16 @@ pub fn view_to_canvas(
             group: view_object.group,
             kind,
         });
-        max_id = max_id.max(object_id);
+        max_id = max_id.max(object_id.get());
         max_group = max_group.max(view_object.group.unwrap_or(0));
     }
-    canvas.next_object_id = max_id + 1;
+    let repaired_next = ObjectId::new(max_id)
+        .try_advance(1)
+        .ok_or_else(|| ProjectError::Invalid("object id space exhausted".to_owned()))?;
+    canvas.next_object_id = ObjectId::new(view.next_object_id).max(repaired_next);
     canvas.next_group_id = max_group + 1;
     Ok(canvas)
 }
-
 fn text_box_from(view_object: &ViewCanvasObject, panel: bool) -> TextBox {
     view_object
         .text
@@ -727,7 +749,6 @@ fn text_box_from(view_object: &ViewCanvasObject, panel: bool) -> TextBox {
             }
         })
 }
-
 pub fn dimension_from_1d(data: &NmrData) -> Dimension {
     Dimension {
         id: "f2".to_owned(),
@@ -744,7 +765,6 @@ pub fn dimension_from_1d(data: &NmrData) -> Dimension {
         group_delay: Some(data.group_delay),
     }
 }
-
 pub fn dimension_from_dim(
     id: &str,
     role: &str,

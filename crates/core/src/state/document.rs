@@ -21,8 +21,8 @@ pub struct ZoomDrag {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct AnalysisSelection {
-    pub dataset: usize,
-    pub canvas: usize,
+    pub dataset: DatasetId,
+    pub canvas: CanvasId,
     pub object: ObjectId,
     pub x_range: AxisRange,
     pub y_range: Option<AxisRange>,
@@ -166,7 +166,7 @@ pub struct NamedView {
 /// Only `dataset` is required.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SeriesBinding {
-    pub dataset: usize,
+    pub dataset: DatasetId,
     pub color: Option<Color>,
     pub label: Option<String>,
     pub scale: f64,
@@ -174,9 +174,9 @@ pub struct SeriesBinding {
 }
 
 impl SeriesBinding {
-    pub fn new(dataset: usize) -> Self {
+    pub fn new(dataset: impl Into<DatasetId>) -> Self {
         Self {
-            dataset,
+            dataset: dataset.into(),
             color: None,
             label: None,
             scale: 1.0,
@@ -232,14 +232,14 @@ pub struct DataBinding {
 }
 
 impl DataBinding {
-    pub fn single(dataset: usize) -> Self {
+    pub fn single(dataset: impl Into<DatasetId>) -> Self {
         Self {
             series: vec![SeriesBinding::new(dataset)],
         }
     }
 
-    pub fn primary_dataset(&self) -> usize {
-        self.series.first().map(|s| s.dataset).unwrap_or(0)
+    pub fn primary_dataset(&self) -> Option<DatasetId> {
+        self.series.first().map(|s| s.dataset)
     }
 
     /// Result overlays belonging to the primary dataset follow the visibility
@@ -248,11 +248,11 @@ impl DataBinding {
         self.series.first().is_some_and(|series| series.visible)
     }
 
-    pub fn dataset_indices(&self) -> Vec<usize> {
+    pub fn dataset_ids(&self) -> Vec<DatasetId> {
         self.series.iter().map(|s| s.dataset).collect()
     }
 
-    pub fn contains_dataset(&self, dataset: usize) -> bool {
+    pub fn contains_dataset(&self, dataset: DatasetId) -> bool {
         self.series.iter().any(|s| s.dataset == dataset)
     }
 }
@@ -264,7 +264,7 @@ impl DataBinding {
 pub enum ProjectionSource {
     #[default]
     None,
-    Attached(usize),
+    Attached(DatasetId),
     Sum,
     Skyline,
     Slice(usize),
@@ -307,7 +307,7 @@ impl AxisProjections {
     }
 
     /// Every dataset index an `Attached` source references, for save-time id mapping.
-    pub fn attached_datasets(&self) -> Vec<usize> {
+    pub fn attached_datasets(&self) -> Vec<DatasetId> {
         [&self.top, &self.left]
             .iter()
             .filter_map(|a| match a.source {
@@ -566,15 +566,15 @@ impl CanvasObject {
         }
     }
 
-    pub fn dataset(&self) -> Option<usize> {
-        self.plot().map(|plot| plot.primary_dataset())
+    pub fn dataset(&self) -> Option<DatasetId> {
+        self.plot().and_then(|plot| plot.primary_dataset())
     }
 
     /// Every dataset this object binds (all series of a plot; empty for non-plots).
     /// Drives mirroring a board selection into the Data list.
-    pub fn dataset_indices(&self) -> Vec<usize> {
+    pub fn dataset_ids(&self) -> Vec<DatasetId> {
         self.plot()
-            .map(|plot| plot.binding.dataset_indices())
+            .map(|plot| plot.binding.dataset_ids())
             .unwrap_or_default()
     }
 }
@@ -648,7 +648,7 @@ pub fn document_items(canvas: &CanvasDocument) -> Vec<plotx_render::DocumentItem
 #[derive(Clone)]
 pub struct CanvasDocument {
     /// Stable identity used by project bindings, automation and run manifests.
-    pub resource_id: String,
+    pub resource_id: CanvasId,
     pub name: String,
     pub size_mm: [f32; 2],
     /// The size-preset id (`SizePreset::id`) last applied to this page, kept as
@@ -679,7 +679,7 @@ pub struct CanvasDocument {
 impl CanvasDocument {
     pub fn new(name: String, size_mm: [f32; 2]) -> Self {
         Self {
-            resource_id: uuid::Uuid::new_v4().to_string(),
+            resource_id: CanvasId::new(),
             name,
             size_mm,
             size_preset_id: None,
@@ -692,23 +692,23 @@ impl CanvasDocument {
             caption_visible: true,
             panel_label_style: PanelLabelStyle::default(),
             layout: crate::layout::PageLayout::default(),
-            next_object_id: 1,
+            next_object_id: ObjectId::new(1),
             next_group_id: 1,
         }
     }
 
-    /// The sorted, de-duplicated dataset indices every plot on this page binds,
-    /// used to mirror a page selection into the Data list's multi-select.
-    pub fn dataset_indices(&self) -> Vec<usize> {
-        let mut ids: Vec<usize> = self
-            .objects
+    /// The de-duplicated dataset ids every plot on this page binds, in first-
+    /// encounter (page z-fill) order. Deterministic: never depends on DatasetId
+    /// ordering. Callers that need document order should resolve indices through
+    /// [`PlotxApp::page_dataset_indices`], which sorts by document position.
+    pub fn dataset_ids(&self) -> Vec<DatasetId> {
+        let mut seen = std::collections::HashSet::new();
+        self.objects
             .iter()
             .filter_map(CanvasObject::plot)
-            .flat_map(|plot| plot.binding.dataset_indices())
-            .collect();
-        ids.sort_unstable();
-        ids.dedup();
-        ids
+            .flat_map(|plot| plot.binding.dataset_ids())
+            .filter(|id| seen.insert(*id))
+            .collect()
     }
 
     /// The plot objects' ids in list (z / fill) order — the order the grid
@@ -732,7 +732,7 @@ impl CanvasDocument {
 
     pub fn allocate_object_id(&mut self) -> ObjectId {
         let id = self.next_object_id;
-        self.next_object_id += 1;
+        self.next_object_id = self.next_object_id.checked_advance(1);
         id
     }
 
@@ -786,7 +786,7 @@ impl CanvasDocument {
             .or_else(|| self.first_plot_object_id())
     }
 
-    pub fn active_dataset(&self) -> Option<usize> {
+    pub fn active_dataset(&self) -> Option<DatasetId> {
         self.active_plot_object_id()
             .and_then(|id| self.object(id))
             .and_then(CanvasObject::dataset)

@@ -1,7 +1,7 @@
 use egui::{Button, ComboBox, DragValue, Ui};
 use plotx_core::actions::Action;
 use plotx_core::state::{
-    AxisProjection, Dataset, ObjectId, PlotxApp, ProjectionSource, SliceCursor, Tool,
+    AxisProjection, Dataset, DatasetId, ObjectId, PlotxApp, ProjectionSource, SliceCursor, Tool,
 };
 use plotx_processing::{Processed2D, ProjectionMode, SliceKind};
 
@@ -127,13 +127,13 @@ fn projection_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
         .map(|p| p.projections.clone())
         .unwrap_or_default();
 
-    let attachable: Vec<(usize, String)> = app
+    let attachable: Vec<(DatasetId, String)> = app
         .doc
         .datasets
         .iter()
         .enumerate()
         .filter(|(_, d)| d.as_nmr().is_some())
-        .map(|(i, d)| (i, d.display_name()))
+        .map(|(_, d)| (d.resource_id(), d.display_name()))
         .collect();
 
     let (f2_max, f1_max) = match &app.doc.datasets[di].as_nmr2d().unwrap().processed {
@@ -182,7 +182,9 @@ fn active_plot_for(app: &PlotxApp, di: usize) -> Option<(usize, ObjectId)> {
     let id = canvas
         .objects
         .iter()
-        .find(|o| o.plot().map(|p| p.primary_dataset()) == Some(di))
+        .find(|o| {
+            o.plot().and_then(|p| p.primary_dataset()) == Some(app.doc.datasets[di].resource_id())
+        })
         .map(|o| o.id)?;
     Some((ci, id))
 }
@@ -193,7 +195,7 @@ fn axis_projection_row(
     label: &str,
     salt: &str,
     axis: &mut AxisProjection,
-    attachable: &[(usize, String)],
+    attachable: &[(DatasetId, String)],
     slice_seed: Option<usize>,
     slice_max: usize,
 ) {
@@ -257,7 +259,7 @@ fn axis_projection_row(
     }
 }
 
-fn source_label(source: &ProjectionSource, attachable: &[(usize, String)]) -> String {
+fn source_label(source: &ProjectionSource, attachable: &[(DatasetId, String)]) -> String {
     match source {
         ProjectionSource::None => "None".to_owned(),
         ProjectionSource::Sum => "Sum projection".to_owned(),
@@ -277,7 +279,7 @@ fn slice_group_stack(app: &mut PlotxApp, di: usize, increments: usize, ui: &mut 
         .active_canvas
         .and_then(|ci| app.doc.canvases.get(ci))
         .and_then(|c| c.selected_plot_object_id())
-        .unwrap_or(0);
+        .unwrap_or(ObjectId::new(0));
     let mut index = app
         .session
         .ui

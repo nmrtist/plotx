@@ -460,9 +460,9 @@ fn typed_table_revisions(app: &PlotxApp, role: &str) -> BTreeMap<String, TableRe
             let table = dataset.as_table()?;
             let revision = &table.typed_state.envelope.revision;
             Some((
-                table.resource_id.clone(),
+                table.resource_id.to_string(),
                 TableRevisionRecord {
-                    resource_id: table.resource_id.clone(),
+                    resource_id: table.resource_id.to_string(),
                     role: role.into(),
                     table_id: revision.table_id,
                     revision_id: revision.id,
@@ -507,7 +507,7 @@ fn table_run_records(
         .iter()
         .filter_map(|dataset| {
             let table = dataset.as_table()?;
-            if !output_ids.contains(table.resource_id.as_str()) {
+            if !output_ids.contains(table.resource_id.to_string().as_str()) {
                 return None;
             }
             let revision = &table.typed_state.envelope.revision;

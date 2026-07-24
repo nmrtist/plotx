@@ -1,8 +1,8 @@
-use super::{CanvasViewport, PlotObject};
+use super::{CanvasViewport, DatasetId, PlotObject};
 use plotx_figure::Figure;
 
 impl PlotObject {
-    pub fn primary_dataset(&self) -> usize {
+    pub fn primary_dataset(&self) -> Option<DatasetId> {
         self.binding.primary_dataset()
     }
 

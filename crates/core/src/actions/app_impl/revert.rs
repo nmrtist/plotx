@@ -240,7 +240,7 @@ impl PlotxApp {
                 if let Some(c) = self.doc.canvases.get_mut(*canvas) {
                     let at = (*index).min(c.objects.len());
                     c.objects.insert(at, object.as_ref().clone());
-                    c.next_object_id = c.next_object_id.max(object.id + 1);
+                    c.next_object_id = c.next_object_id.max(object.id.checked_advance(1));
                 }
                 self.set_selection(selection_before.clone());
             }
@@ -265,7 +265,9 @@ impl PlotxApp {
                     self.doc.canvases.insert(*index, canvas.clone());
                     self.session.active_canvas = *active_before;
                     if let Some(ci) = self.session.active_canvas {
-                        let active = self.doc.canvases[ci].active_dataset();
+                        let active = self.doc.canvases[ci]
+                            .active_dataset()
+                            .and_then(|id| self.doc.dataset_index(id));
                         self.set_active_dataset(active);
                     }
                 }
