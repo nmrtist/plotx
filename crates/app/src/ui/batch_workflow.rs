@@ -188,7 +188,9 @@ impl AutomationUi {
                     for target in &plan.targets {
                         ui.label(format!(
                             "{:?} · {} · {}",
-                            target.status, target.target.id, target.reason
+                            target.status,
+                            target.target.describe(),
+                            target.reason
                         ));
                     }
                 });
@@ -389,7 +391,37 @@ impl AutomationUi {
                 result.tool_id, result.before_revision.0, result.after_revision.0
             ));
             for target in &result.targets {
-                ui.label(format!("{:?} · {}", target.outcome, target.message));
+                // The target identity has to appear here: a property tool
+                // expands one plot object into one result per series, and
+                // without the component every one of those rows reads the same.
+                ui.label(format!(
+                    "{:?} · {} · {}",
+                    target.outcome,
+                    target.target.describe(),
+                    target.message
+                ));
+            }
+            // The per-target rows report what happened, never what was read: a
+            // tool's readings live in the result value. Without this an inspect
+            // call reports success and shows no numbers at all.
+            if !result.value.is_null() {
+                match serde_json::to_string_pretty(&result.value) {
+                    Ok(text) => {
+                        ui.label("Result value (JSON)");
+                        egui::ScrollArea::vertical()
+                            .max_height(160.0)
+                            .id_salt("automation_result_value")
+                            .show(ui, |ui| {
+                                ui.monospace(text);
+                            });
+                    }
+                    Err(error) => {
+                        ui.colored_label(
+                            ui.visuals().error_fg_color,
+                            format!("The result value could not be shown: {error}"),
+                        );
+                    }
+                }
             }
         }
         ui.small(format!(

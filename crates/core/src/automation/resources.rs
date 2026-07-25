@@ -21,6 +21,13 @@ pub const CAP_EXPORT: &str = "figure.export";
 pub const CAP_PREVIEW: &str = "data.preview";
 pub const CAP_TRANSFORM: &str = "data.transform";
 pub const CAP_PROCESSING_SCHEME: &str = "processing.scheme";
+/// The resource holds components the property catalog can address. It is the
+/// admission gate for the `properties.*` tools, and it is a capability rather
+/// than a resource-kind test on purpose: any future resource that grows
+/// addressable components gains those tools by exposing this, and no encoding
+/// or property registry ever grows a branch naming a data domain or an object
+/// type (§1 principle 3).
+pub const CAP_PROPERTY_CATALOG: &str = "properties.catalog";
 pub const CAP_FIELD_SCALAR_GRID_2D_REGULAR: &str = "field.scalar_grid_2d.regular";
 pub const CAP_FIELD_CURVE_1D: &str = "field.curve_1d";
 pub const CAP_FIELD_COLORED_RASTER_2D: &str = "field.colored_raster_2d";
@@ -295,6 +302,15 @@ impl ResourceProvider for ProjectResourceProvider<'_> {
             let parent = self.canvas_descriptor(index);
             let canvas = &self.app.doc.canvases[index];
             for object in &canvas.objects {
+                let mut capabilities = vec![cap(CAP_RENAME)];
+                // A text box or an image has a name and nothing the catalog
+                // addresses; only an object with a plot binding carries
+                // components. Text objects are therefore skipped by the same
+                // declared-capability gate every other tool uses, with the same
+                // reason, and the property tools need no special case for them.
+                if object.plot().is_some() {
+                    capabilities.push(cap(CAP_PROPERTY_CATALOG));
+                }
                 descriptors.push(ResourceDescriptor {
                     resource: child_ref(
                         canvas.resource_id,
@@ -302,7 +318,7 @@ impl ResourceProvider for ProjectResourceProvider<'_> {
                         KIND_CANVAS_OBJECT,
                     ),
                     name: object.name.clone(),
-                    capabilities: vec![cap(CAP_RENAME)],
+                    capabilities,
                     children: Vec::new(),
                     dimensions: Vec::new(),
                     units: Vec::new(),

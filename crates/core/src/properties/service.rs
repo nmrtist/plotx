@@ -6,7 +6,7 @@
 //! of the targets that were skipped and why.
 
 use super::model::*;
-use super::{contour, definition, permitted_variants};
+use super::{contour, definition, permitted_variants, variant_list};
 use crate::actions::Action;
 use crate::automation::{ComponentRef, ResourceRef, TargetRef, canvas_object_ref};
 use crate::state::{
@@ -63,6 +63,20 @@ impl PlotxApp {
                     })
                     .collect()
             })
+            .unwrap_or_default()
+    }
+
+    /// Every series component of one plot-object *resource*.
+    ///
+    /// This is the expansion an automation plan performs: a selector names
+    /// resources, and a property whose scope is a series has to become one
+    /// target per series before anything can be said about applicability. It
+    /// resolves the reference through the same lookup a property write does, so
+    /// a plan and the commit that follows it cannot disagree about which
+    /// components exist.
+    pub fn resource_series_targets(&self, resource: &ResourceRef) -> Vec<TargetRef> {
+        self.canvas_object(resource)
+            .map(|(canvas, object)| self.series_targets(canvas, object))
             .unwrap_or_default()
     }
 
@@ -146,9 +160,16 @@ impl PlotxApp {
             if let PropertyValue::Enum(choice) = value
                 && !permitted.iter().any(|variant| variant.id == *choice)
             {
+                // Name what this field does allow. A caller told only that its
+                // choice is unavailable has to guess the next one, and the
+                // permitted set is a fact about the target's capabilities that
+                // no caller can derive from the static schema.
                 return Err(PropertyError::InvalidValue {
                     property,
-                    message: format!("'{choice}' needs a capability this field does not expose",),
+                    message: format!(
+                        "'{choice}' needs a capability this field does not expose; this field allows {}",
+                        variant_list(&permitted)
+                    ),
                 });
             }
             contour::write(property, spec, value, &|| {

@@ -183,6 +183,12 @@ impl FloatBounds {
     }
 
     /// Validate a value against the bound, naming the property in the failure.
+    ///
+    /// The failure states the value that was rejected as well as the rule.
+    /// "Level ratio must be greater than 1 and at most 10" leaves a caller that
+    /// sent 10.0000001, or sent a string that parsed to something else
+    /// entirely, unable to tell which end it fell off — and a headless caller
+    /// has no control to look at. Naming both closes that.
     pub fn check(
         self,
         property: PropertyId,
@@ -194,7 +200,10 @@ impl FloatBounds {
         }
         Err(PropertyError::InvalidValue {
             property,
-            message: format!("{subject} must be {}", self.describe()),
+            message: format!(
+                "{subject} {value} is out of range: it must be {}",
+                self.describe()
+            ),
         })
     }
 }

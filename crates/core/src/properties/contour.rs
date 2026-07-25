@@ -370,7 +370,7 @@ pub(super) fn write(
             let updated = with_magnitude(&spec.positive.base, magnitude).ok_or({
                 PropertyError::InvalidValue {
                     property: id,
-                    message: magnitude_message(&spec.positive.base),
+                    message: magnitude_message(&spec.positive.base, magnitude),
                 }
             })?;
             for half in halves(spec) {
@@ -385,7 +385,7 @@ pub(super) fn write(
                 .ok_or(PropertyError::InvalidValue {
                     property: id,
                     message: format!(
-                        "level count must be between 1 and {}",
+                        "level count {count} is out of range: it must be between 1 and {}",
                         ContourLevelSpec::MAX_COUNT
                     ),
                 })?;
@@ -550,16 +550,26 @@ fn bounded_multiplier(value: f64) -> Option<PositiveFiniteF64> {
     PositiveFiniteF64::new(value).filter(|value| value.get() <= MAX_MULTIPLIER)
 }
 
-fn magnitude_message(base: &ContourBasePolicy) -> String {
+/// Why a magnitude was refused, in terms of the anchor that refused it.
+///
+/// The rejected value is part of the message. The bound alone tells a user what
+/// the rule is but not which value broke it, and the anchor's bound is not the
+/// definition's static bound — a multiplier stops at `MAX_MULTIPLIER` while an
+/// absolute level does not — so a caller cannot reconstruct it from the schema.
+fn magnitude_message(base: &ContourBasePolicy, magnitude: f64) -> String {
     match base {
         ContourBasePolicy::Absolute(_) => {
-            "absolute level must be a finite value greater than zero".to_owned()
+            format!(
+                "absolute level {magnitude} is out of range: it must be a finite value greater than zero"
+            )
         }
         ContourBasePolicy::NoiseFloor { .. } | ContourBasePolicy::BackgroundScale { .. } => {
-            format!("multiplier must be greater than 0 and at most {MAX_MULTIPLIER}")
+            format!(
+                "multiplier {magnitude} is out of range: it must be greater than 0 and at most {MAX_MULTIPLIER}"
+            )
         }
         ContourBasePolicy::FractionOfRange(_) => {
-            "fraction must be greater than 0 and at most 1".to_owned()
+            format!("fraction {magnitude} is out of range: it must be greater than 0 and at most 1")
         }
     }
 }

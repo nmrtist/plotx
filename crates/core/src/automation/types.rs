@@ -79,6 +79,22 @@ impl TargetRef {
             component: None,
         }
     }
+
+    /// A one-line identity for a result row or a preflight list.
+    ///
+    /// The component is part of the identity, not decoration: a plan that
+    /// expands one plot object into one target per series produces rows that
+    /// are otherwise byte-identical, and a list of identical rows tells a user
+    /// nothing about which of them applied.
+    pub fn describe(&self) -> String {
+        match &self.component {
+            None => self.resource.id.clone(),
+            Some(ComponentRef::Series(series)) => format!("{} · series {series}", self.resource.id),
+            Some(ComponentRef::ProcessingStep(step)) => {
+                format!("{} · step {}", self.resource.id, step.get())
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -315,7 +331,7 @@ pub enum TargetCompatibility {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlannedTarget {
-    pub target: ResourceRef,
+    pub target: TargetRef,
     pub status: TargetCompatibility,
     pub reason: String,
 }
@@ -342,7 +358,7 @@ pub enum TargetOutcome {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TargetResult {
-    pub target: ResourceRef,
+    pub target: TargetRef,
     pub outcome: TargetOutcome,
     pub message: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

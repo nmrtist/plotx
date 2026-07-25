@@ -45,13 +45,13 @@ fn nmr2d_with(source: &str, values: &[f64]) -> plotx_io::NmrData2D {
 
 /// One page holding one plot bound to a true-2D spectrum, i.e. the exact shape
 /// the driving case has: a contour drawn from a signed scalar grid.
-pub(super) fn contour_app() -> (PlotxApp, TargetRef) {
+pub(crate) fn contour_app() -> (PlotxApp, TargetRef) {
     contour_app_with_plane(&default_plane())
 }
 
 /// The same page over a plane the caller chooses, so a test can put a field of
 /// a given dynamic range in front of the catalog.
-pub(super) fn contour_app_with_plane(values: &[f64]) -> (PlotxApp, TargetRef) {
+pub(crate) fn contour_app_with_plane(values: &[f64]) -> (PlotxApp, TargetRef) {
     let mut app = PlotxApp::new();
     app.doc
         .datasets
@@ -79,7 +79,7 @@ pub(super) fn contour_app_with_plane(values: &[f64]) -> (PlotxApp, TargetRef) {
     (app, target)
 }
 
-pub(super) fn contour_spec(app: &PlotxApp, target: &TargetRef) -> plotx_figure::ContourSpec {
+pub(crate) fn contour_spec(app: &PlotxApp, target: &TargetRef) -> plotx_figure::ContourSpec {
     let Some(ComponentRef::Series(series)) = target.component else {
         panic!("the fixture addresses a series");
     };
@@ -632,4 +632,32 @@ fn the_source_field_is_not_the_component() {
     app.commit_property(commit);
     assert_eq!(contour_spec(&app, &first).positive.count, 14);
     assert_eq!(contour_spec(&app, &second).positive.count, 3);
+}
+
+/// The typed entry point's own out-of-range refusal names both the value that
+/// was rejected and the rule that rejected it.
+///
+/// The automation adapter checks the declared bound before it ever builds a
+/// typed value, so this bound is reached only through the panel's path — and
+/// a panel user who typed a number and saw "must be greater than 1 and at most
+/// 10" still cannot tell which end their number fell off.
+#[test]
+fn the_typed_planner_names_the_rejected_value_and_the_bound() {
+    let (app, target) = contour_app();
+    let error = app
+        .plan_property_write(
+            contour::RATIO,
+            std::slice::from_ref(&target),
+            &PropertyValue::Float(42.0),
+        )
+        .expect_err("42 is above the declared ratio bound");
+    let message = error.to_string();
+    assert!(
+        message.contains("42"),
+        "the rejected value is named: {message}"
+    );
+    assert!(
+        message.contains("greater than 1") && message.contains("at most 10"),
+        "the bound is named: {message}"
+    );
 }

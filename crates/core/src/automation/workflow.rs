@@ -340,9 +340,11 @@ pub fn execute_workflow(
             expected_revision: DocumentRevision(app.doc.automation_revision),
             caller,
         };
+        // The inner executor: this run writes one manifest covering every node,
+        // so a per-node manifest here would record the same work twice.
         let outcome = plan_tool(app, request).and_then(|plan| {
             let frozen = plan.frozen_targets.clone();
-            execute_tool(app, plan, authority).map(|result| (frozen, result))
+            super::tools::execute_planned_tool(app, plan, authority).map(|result| (frozen, result))
         });
         match outcome {
             Ok((frozen_targets, result)) => {
@@ -444,7 +446,7 @@ pub fn execute_workflow(
         table_revisions,
         table_plans,
     };
-    app.doc.automation_runs.push(manifest.clone());
+    super::tools::record_run(&mut app.doc, manifest.clone());
     observer(TaskEvent::Finished {
         id: TaskId(run_id),
         cancelled,
@@ -452,7 +454,10 @@ pub fn execute_workflow(
     Ok(manifest)
 }
 
-fn typed_table_revisions(app: &PlotxApp, role: &str) -> BTreeMap<String, TableRevisionRecord> {
+pub(super) fn typed_table_revisions(
+    app: &PlotxApp,
+    role: &str,
+) -> BTreeMap<String, TableRevisionRecord> {
     app.doc
         .datasets
         .iter()
@@ -474,7 +479,7 @@ fn typed_table_revisions(app: &PlotxApp, role: &str) -> BTreeMap<String, TableRe
         .collect()
 }
 
-fn table_run_records(
+pub(super) fn table_run_records(
     app: &PlotxApp,
     nodes: &[NodeRunRecord],
     start: &BTreeMap<String, TableRevisionRecord>,
@@ -730,7 +735,7 @@ fn known_output_port(port: &str) -> bool {
     )
 }
 
-fn unix_ms() -> u128 {
+pub(super) fn unix_ms() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()

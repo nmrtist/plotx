@@ -60,6 +60,10 @@ pub(super) fn validate_parameters(
         "data.import" => parse::<ImportParams>(tool, value).map(drop),
         "data.transform" => parse::<TransformParams>(tool, value).map(drop),
         "figure.export" => parse::<ExportParams>(tool, value).map(drop),
+        "properties.inspect" | "properties.reset" => {
+            parse::<super::properties::PropertyKeyParams>(tool, value).map(drop)
+        }
+        "properties.set" => parse::<super::properties::PropertyWriteParams>(tool, value).map(drop),
         _ => Err(AutomationError::UnknownTool(tool.to_owned())),
     }
 }
@@ -164,6 +168,23 @@ schema!(SchemeParams, ["path" => "string"], ["compatible_only" => "boolean"]);
 schema!(ImportParams, ["paths" => "array"], []);
 schema!(TransformParams, ["plan" => "object", "name" => "string"], ["memory_limit_bytes" => "integer"]);
 schema!(ExportParams, ["directory" => "string", "format" => "string"], ["dpi" => "integer", "overwrite" => "boolean"]);
+schema!(super::properties::PropertyKeyParams, ["key" => "string"], []);
+// `value` has no single JSON type: which one is admissible is declared by the
+// addressed property's own `ValueSchema` and is therefore decided per call, not
+// per tool. Announcing one type here would be wrong for every other property.
+impl V1Schema for super::properties::PropertyWriteParams {
+    fn schema() -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "key": {"type": "string"},
+                "value": {"description": "typed per the addressed property's value schema"},
+            },
+            "required": ["key", "value"],
+            "additionalProperties": false,
+        })
+    }
+}
 
 struct Spec {
     id: &'static str,
@@ -302,6 +323,40 @@ fn descriptors() -> Vec<ToolDescriptor> {
             [KIND_CANVAS],
             [CAP_EXPORT],
             EffectLevel::ExternalWrite,
+            true
+        ),
+        // The property tools are admitted by capability, never by object type:
+        // any resource that exposes `CAP_PROPERTY_CATALOG` gains them, and a
+        // canvas object without a plot binding is skipped by the same shared
+        // gate that skips a dataset for `figure.apply_theme`.
+        tool!(
+            "properties.inspect",
+            "Inspect a property",
+            "Read one catalog property across the components of the selected resources",
+            super::properties::PropertyKeyParams,
+            [KIND_CANVAS_OBJECT],
+            [CAP_PROPERTY_CATALOG],
+            EffectLevel::ReadOnly,
+            true
+        ),
+        tool!(
+            "properties.set",
+            "Set a property",
+            "Write one catalog property through the same planner the panel controls use",
+            super::properties::PropertyWriteParams,
+            [KIND_CANVAS_OBJECT],
+            [CAP_PROPERTY_CATALOG],
+            EffectLevel::Reversible,
+            true
+        ),
+        tool!(
+            "properties.reset",
+            "Reset a property",
+            "Re-derive one catalog property from its default policy in each target's context",
+            super::properties::PropertyKeyParams,
+            [KIND_CANVAS_OBJECT],
+            [CAP_PROPERTY_CATALOG],
+            EffectLevel::Reversible,
             true
         ),
     ]

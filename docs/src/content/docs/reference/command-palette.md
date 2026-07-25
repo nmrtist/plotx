@@ -28,9 +28,10 @@ Each row shows the name on the left and, in gray on the right, a hint: the
 keyboard shortcut for a command, the panel for a setting, the kind or the page
 for data.
 
-Settings are matched on more than their visible label: their identifier, read
-whole or word by word, and their alternative names. `contour threshold`, `sigma`
-and `series.contour.count` all reach the contour rows.
+Settings match on more than the label you see: their alternative names, and the
+id they carry in [workflows](/guides/automation/), whole or word by word.
+`contour threshold`, `sigma` and `series.contour.count` all reach the contour
+rows.
 
 Activating a setting does not change anything. It opens the panel the setting
 lives in, expands its section, scrolls to the row and highlights it briefly, so
@@ -61,7 +62,7 @@ Commands:
 - Arrange: grid, align, distribute, z-order, and *Tidy up frames*.
 - Applying themes and stacking data.
 - Switching to any tool.
-- *Contour settings*, and raising or lowering the lowest contour level.
+- *Contour settings*, *Raise lowest level* and *Lower lowest level*.
 
 Settings:
 

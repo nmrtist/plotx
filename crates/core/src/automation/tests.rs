@@ -1,7 +1,7 @@
 use super::*;
 use crate::actions::Action;
 use crate::state::{CanvasDocument, Dataset, PlotxApp, TableDataset, TableSeriesBinding};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 fn app_with_table_and_canvas() -> PlotxApp {
     let mut app = PlotxApp::new();
@@ -226,6 +226,85 @@ fn data_transform_executes_the_same_persisted_relplan_and_is_undoable() {
         }
     );
     assert_eq!(manifest.table_revisions.len(), 2);
+}
+
+/// The same transform, called directly by an agent rather than through a
+/// workflow, has to leave the same provenance. A run that names neither the
+/// revisions it read and wrote nor the plan and backend that produced them
+/// cannot be reproduced from its own record, and the caller has no way to know
+/// which of the two entry points it went through.
+#[test]
+fn an_agent_transform_records_its_table_provenance_without_a_workflow() {
+    let mut app = app_with_table_and_canvas();
+    let source = app.doc.datasets[0].as_table().unwrap();
+    let revision = &source.typed_state.envelope.revision;
+    let input_revision = revision.id;
+    let relplan = plotx_data::RelPlanV1::new(plotx_data::Relation::Project {
+        input: Box::new(plotx_data::Relation::SnapshotRead(
+            plotx_data::SnapshotRead {
+                table: revision.table_id,
+                revision: revision.id,
+                fingerprint: revision.snapshot.fingerprint,
+            },
+        )),
+        columns: vec![source.series_bindings[0].value_column],
+    });
+    let resource_id = source.resource_id;
+    let plan = plan_tool(
+        &app,
+        request(
+            "data.transform",
+            serde_json::json!({
+                "plan": relplan.clone(),
+                "name": "Projected",
+                "memory_limit_bytes": 16 * 1024 * 1024,
+            }),
+            vec![resource_id.to_string()],
+            app.doc.automation_revision,
+        ),
+    )
+    .unwrap();
+    execute_tool(&mut app, plan, ExecutionAuthority::ReversibleModify).unwrap();
+
+    let manifest = app
+        .doc
+        .automation_runs
+        .last()
+        .expect("an agent call leaves a manifest");
+    assert_eq!(manifest.table_plans.len(), 1);
+    assert_eq!(
+        manifest.table_plans[0].plan_fingerprint,
+        relplan.fingerprint().unwrap()
+    );
+    assert_eq!(
+        manifest.table_plans[0].backend,
+        if cfg!(feature = "datafusion") {
+            "plotx.datafusion.v1"
+        } else {
+            "plotx.reference.v1"
+        }
+    );
+    assert_eq!(
+        manifest.table_plans[0].input_revisions,
+        vec![input_revision]
+    );
+    let roles = manifest
+        .table_revisions
+        .iter()
+        .map(|record| record.role.as_str())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        roles,
+        BTreeSet::from(["input", "output"]),
+        "both ends of the derivation are named: {:?}",
+        manifest.table_revisions
+    );
+    assert!(
+        manifest
+            .table_revisions
+            .iter()
+            .any(|record| record.role == "input" && record.revision_id == input_revision)
+    );
 }
 
 #[test]

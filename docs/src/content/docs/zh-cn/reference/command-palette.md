@@ -24,8 +24,9 @@ description: 用键盘搜索命令、设置与数据。
 列表每行左侧是名称，右侧以灰色显示提示：命令显示其快捷键，设置显示其所在面板，
 数据显示其类型或所属页面。
 
-设置的匹配范围不止其可见标签：还包括它的标识符（整体或逐词拆开）及其别名。
-`contour threshold`、`sigma` 与 `series.contour.count` 都能命中等高线相关的行。
+设置的匹配范围不止你看到的标签：还包括它的别名，以及它在[工作流](/zh-cn/guides/automation/)
+中使用的 id（整体或逐词拆开）。`contour threshold`、`sigma` 与
+`series.contour.count` 都能命中等高线相关的行。
 
 激活一个设置不会改变任何内容。它会打开该设置所在的面板、展开其分节、滚动到该行
 并短暂高亮，让你先看清当前值再编辑。
@@ -52,7 +53,8 @@ description: 用键盘搜索命令、设置与数据。
 - 排列：网格、对齐、分布、层序与 *Tidy up frames*（一键整理）。
 - 应用主题与堆叠数据。
 - 切换到任意工具。
-- *Contour settings*（等高线设置），以及提高或降低等高线最低层。
+- *Contour settings*（等高线设置）、*Raise lowest level*（提高最低层）与
+  *Lower lowest level*（降低最低层）。
 
 设置：
 

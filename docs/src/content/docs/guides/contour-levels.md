@@ -10,8 +10,10 @@ one place.
 
 Select the plot on the page. The **Contour** section appears in the Object
 inspector at the top of the Secondary Side Bar, and only when something in the
-selection draws a contour. Select several plots and the section edits them
-together; select nothing and it follows the page's active plot.
+selection draws a contour. Its header counts the series you are about to edit —
+*3 series* — so a change you meant for one plot never lands on three unnoticed.
+Select several plots and the section edits them together; select nothing and it
+follows the page's active plot.
 
 ## Lowest level
 
@@ -22,11 +24,11 @@ suppress noise, lower it to reveal weak cross-peaks.
 What the number means depends on the anchor (below). Under the default anchor
 for a phase-sensitive NMR plane it is a multiple of the noise floor, so `5`
 means "start at five times the noise". Because a multiple on its own does not
-tell you where the level actually falls, PlotX shows the resolved value next to
-the control: `5 × σ = 1.2e4`.
+tell you where the level actually falls, the row names its unit and resolves the
+level beside it: `5` `× noise floor` `= 1.2e4`.
 
-Noise and background are estimated in the background, so until the estimate
-arrives the row reads `measuring…` rather than a number. Data with no measurable
+Noise and background are estimated away from the interface, so until the
+estimate arrives the resolved level reads `measuring…`. Data with no measurable
 spread — a perfectly flat or perfectly regular grid — reads `no spread
 measured`: the multiple anchors nothing, and the levels fall back to a ladder
 derived from the data's own peak so the plot is not left blank.
@@ -43,15 +45,14 @@ that hide the spectrum and can exceed what one plot is able to draw at all.
 So the σ anchor never resolves below **0.01 % of the data's peak**. Whichever is
 larger, the estimated σ or that floor, is what the multiple is measured against.
 On ordinary data σ is much larger and nothing changes. On data whose peak is
-more than 10,000 times its noise the floor takes over, and the readout says so
-rather than continuing to name σ:
+more than 10,000 times its noise the floor takes over, and the readout names it
+rather than continuing to name σ: the row resolves to
+`= 1.652e5 (0.01% of peak)`, and the plot corner spells out the whole sentence,
+`5 × 0.01% of peak = 1.652e5 — σ is below this floor`.
 
-- `5 × σ = 1.2e4` — the estimate is in force.
-- `5 × 0.01% of peak = 1.652e5 — σ is below this floor` — the floor is.
-
-Hover the row for the longer explanation. The floor is a floor, not a ceiling on
-what you can ask for: choose the **Absolute level** anchor to set any level you
-like, including one inside the noise.
+Hover the resolved level for the longer explanation. The floor is a floor, not a
+ceiling on what you can ask for: choose the **Absolute level** anchor to set any
+level you like, including one inside the noise.
 
 If you set an **Absolute level** the data never reaches, that half draws nothing
 and the status bar reports both numbers — for example, *The positive contour
@@ -68,9 +69,10 @@ level by one rung of that plot's own **Level ratio**, so one press adds or
 removes roughly one contour ring whatever the intensity scale: the same gesture
 works on a spectrum whose peak is 100 and one whose peak is a billion.
 
-While the keys apply, the current lowest level is shown in the top-right corner
-of the plot, in the same words as the panel; a plot whose contour series do not
-all sit at the same level says so instead of showing one of them. Stepping is an
+Whenever the keys apply, the current lowest level is shown in the top-right
+corner of the plot, resolved the same way as in the panel — `5 × σ = 1.2e4`. A
+plot whose contour series do not all sit at the same level says so instead of
+showing one of them. Stepping is an
 ordinary edit: it can be undone, and a step past the highest value the current
 anchor allows is refused, with the reason in the status bar.
 
@@ -90,6 +92,10 @@ Open **Advanced** for the rest of the ladder.
     plane. It is not offered for data that has both positive and negative
     values, where a fraction of the range is not a meaningful threshold.
   - *Absolute level* — a raw intensity, always available.
+
+  The anchor also sets what **Lowest level** accepts: a multiple of the noise
+  floor or of the spread runs up to 10,000, a fraction of the range is between 0
+  and 1, and an absolute level is any intensity above 0.
 - **Levels** — how many levels the ladder has, from 1 to 256.
 - **Level ratio** — the factor between one level and the next. It must be
   greater than 1, and at most 10.
@@ -172,6 +178,7 @@ Four routes reach a contour setting, and they all end at the same control:
   well as commands and data. Typing `contour threshold`, `sigma` or `levels`
   finds the matching row, opens the panel it lives in, expands its section and
   highlights it. See [Command palette](/reference/command-palette/).
-- **Contour** on the **Figure** tab of the Ribbon jumps to the same place.
+- **Contour** in the **Style** group of the Ribbon's **Figure** tab jumps to the
+  same place.
 - Right-click the plot and choose **Contour settings…**.
 - `+` and `-` change the lowest level directly on the plot.

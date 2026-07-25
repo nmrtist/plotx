@@ -70,9 +70,30 @@ pub fn permitted_variants(
         .collect()
 }
 
+/// The choice ids of a variant set, for an error a caller can act on.
+///
+/// Every rejection of an enumerated value names the alternatives, whether the
+/// value failed to name a choice at all (the wire boundary) or named one this
+/// field's capabilities withhold (the planner). One formatting keeps those two
+/// messages from drifting into two different vocabularies for one list.
+pub fn variant_list(variants: &[&'static EnumVariant]) -> String {
+    if variants.is_empty() {
+        return "no choices at all".to_owned();
+    }
+    variants
+        .iter()
+        .map(|variant| format!("'{}'", variant.id))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+// Visible crate-wide under `cfg(test)` only: the automation adapter's
+// differential tests drive the very same page fixture through the JSON entry
+// point, and building a second copy of it there would let the two entry points
+// be compared against two different documents.
 #[cfg(test)]
 #[path = "tests.rs"]
-mod tests;
+pub(crate) mod tests;
 
 #[cfg(test)]
 #[path = "ladder_tests.rs"]
