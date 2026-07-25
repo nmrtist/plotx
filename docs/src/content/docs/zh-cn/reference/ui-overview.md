@@ -31,10 +31,13 @@ PlotX 的界面为英文；手册中加粗的英文词即界面上的原文标�
 - **任务卡片（task card）**——画布右上角的浮动卡片，引导多步任务
   （区域、曲线拟合、统计）。拖动其右下角手柄可调整大小。
 - **对象检查器（Object inspector）**——所选画板对象的属性面板：图表
-  类型、样式与几何。
+  类型、样式、几何，以及其绘制内容的显示设置，例如
+  [等高线层级](/zh-cn/guides/contour-levels/)。常用设置直接显示，其余收在
+  **Advanced**（高级）折叠区中。
 - **数据表（Data sheet）**——数据表格的电子表格视图，双击表格打开。
 - **命令面板（Command palette）**——<kbd>Ctrl</kbd>+<kbd>K</kbd> 打开
-  的可搜索命令列表；见[命令面板](/zh-cn/reference/command-palette/)。
+  的可搜索列表，涵盖命令、设置与数据；见
+  [命令面板](/zh-cn/reference/command-palette/)。
 - **尺寸标签（Size chip）**——页面左上角上方的标签，显示页面尺寸和匹
   配到的期刊预设。
 

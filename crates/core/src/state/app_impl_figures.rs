@@ -188,29 +188,63 @@ impl PlotxApp {
                 }
                 let key = ContourGeometryCacheKey { source, levels };
                 if let Some(geometry) = self.session.compute.geometry_for(&key) {
+                    // A capped build drew fewer levels than the panel lists.
+                    // Saying so is the difference between a contour the user
+                    // chose and one the renderer silently cut down.
+                    if let Some(omitted) = geometry.omitted {
+                        self.session.status = omitted_levels_status(&omitted);
+                    }
                     return dataset.contour_figure_from_geometry(
                         series.source.field,
                         &geometry,
                         &contour.style,
                     );
                 }
-                let grid = self.contour_grid(dataset, series.source.field, version, summary)?;
-                if let Err(error) = self.session.compute.enqueue_contour(key, grid) {
-                    self.session.status = field_enqueue_error_status(error);
+                // Ask whether the build is already running *before* building
+                // its input. A miss is resolved on every frame for as long as
+                // the job runs, and materializing the grid first would read and
+                // clone the whole plane each time only for the enqueue to
+                // recognize the duplicate and drop it.
+                if !self.session.compute.geometry_in_flight(&key) {
+                    let grid = self.contour_grid(dataset, series.source.field, version, summary)?;
+                    if let Err(error) = self.session.compute.enqueue_contour(key, grid) {
+                        self.session.status = field_enqueue_error_status(error);
+                        return dataset.encoded_field_figure(series.source.field, &series.encoding);
+                    }
+                }
+                // The plot is empty and will stay empty until the worker
+                // answers. An unexplained blank plot is indistinguishable from
+                // a broken one, so the wait is stated where every other slow
+                // operation states it — but never over an unreachable
+                // threshold, which explains a half that will still be blank
+                // once the wait is over and names the edit that fixes it.
+                if unreachable.is_empty() {
+                    self.session.status = CONTOUR_GEOMETRY_PENDING_STATUS.to_owned();
                 }
             }
             ContourResolution::Pending(keys) => {
-                let grid = self.contour_grid(dataset, series.source.field, version, summary)?;
-                for key in keys {
-                    if let Err(error) = self
-                        .session
-                        .compute
-                        .enqueue_estimate(key, Arc::clone(&grid))
-                    {
-                        self.session.status = field_enqueue_error_status(error);
-                        break;
+                let pending_status = estimate_pending_status(&keys);
+                // Same order for the same reason: only the keys that are not
+                // already running need a grid, and when none of them do the
+                // payload is never touched at all.
+                if keys
+                    .iter()
+                    .any(|key| !self.session.compute.estimate_in_flight(key))
+                {
+                    let grid = self.contour_grid(dataset, series.source.field, version, summary)?;
+                    for key in keys {
+                        if let Err(error) = self
+                            .session
+                            .compute
+                            .enqueue_estimate(key, Arc::clone(&grid))
+                        {
+                            self.session.status = field_enqueue_error_status(error);
+                            return dataset
+                                .encoded_field_figure(series.source.field, &series.encoding);
+                        }
                     }
                 }
+                self.session.status = pending_status;
             }
             ContourResolution::Unavailable => {
                 self.session.status = "Contour levels are unavailable for this field.".into();
@@ -230,6 +264,33 @@ impl PlotxApp {
     ) -> Option<Arc<ScalarGrid2D>> {
         let snapshot = dataset.field_snapshot(field, version, Some(summary))?;
         Some(Arc::new(snapshot.payload.scalar_grid()?.clone()))
+    }
+}
+
+/// What the user is told while a field's derived work is still running.
+///
+/// Contour geometry and the estimates it depends on are computed off the
+/// interface thread, and until they land the plot is genuinely empty. Nothing
+/// used to say so: the frame that would have explained the wait drew a blank
+/// axis box, which reads exactly like a plot that failed. These are worded as
+/// progress rather than as failure, and name the work rather than the object —
+/// derived field work is content-addressed and shared between every plot
+/// resolving the same key (§5–§6), so there is no per-object state to report and
+/// none is introduced here.
+const CONTOUR_GEOMETRY_PENDING_STATUS: &str = "Building contour geometry…";
+
+/// Name the measurement being waited on rather than "an estimate": the two kinds
+/// take visibly different times, and a user who knows which one is running knows
+/// whether the anchor they just chose is the reason.
+fn estimate_pending_status(keys: &[EstimateKey]) -> String {
+    let noise = keys.iter().any(|key| key.kind == EstimateKind::Noise);
+    let background = keys.iter().any(|key| key.kind == EstimateKind::Background);
+    match (noise, background) {
+        (true, true) => "Measuring this field's noise scale and background…".to_owned(),
+        (false, true) => "Measuring this field's background…".to_owned(),
+        // An empty list cannot reach here: resolution reports `Pending` only
+        // when it has a key to wait for.
+        (true, false) | (false, false) => "Measuring this field's noise scale…".to_owned(),
     }
 }
 
@@ -265,6 +326,42 @@ fn unreachable_threshold_status(unreachable: &[UnreachableContourThreshold]) -> 
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// Word the levels the renderer's segment budget left undrawn.
+///
+/// The count says how much of the ladder is missing, the magnitude says where
+/// the plot stops being what the panel describes, and the sentence ends on the
+/// one edit that recovers a complete picture. Naming the lowest level that *was*
+/// drawn makes the fix concrete: set the ladder's floor there and every level it
+/// then lists is a level actually on screen.
+fn omitted_levels_status(omitted: &OmittedContourLevels) -> String {
+    let count = usize::from(omitted.positive) + usize::from(omitted.negative);
+    match omitted.lowest_drawn {
+        Some(lowest) => format!(
+            "The lowest {count} contour levels were not drawn: at {highest} and below, this \
+             field crosses more of the grid than one plot can render. Raise the lowest level \
+             to {lowest} or above to see every level the panel lists.",
+            highest = format_magnitude(omitted.highest_omitted.get()),
+            lowest = format_magnitude(lowest.get()),
+        ),
+        None => format!(
+            "No contour levels were drawn: even the highest, {highest}, crosses more of the \
+             field than one plot can render. Raise the lowest level well above {highest}, or \
+             draw fewer levels.",
+            highest = format_magnitude(omitted.highest_omitted.get()),
+        ),
+    }
+}
+
+/// Print a level a ladder computed, as opposed to one a user typed.
+///
+/// `format_level` echoes a threshold back verbatim because the user chose the
+/// digits. A rung of a geometric ladder has no chosen digits — its exact value
+/// is `base·ratio^k` and prints as sixteen of them — so it is shown to four
+/// significant figures, which is both readable and enough to type back in.
+fn format_magnitude(value: f64) -> String {
+    format!("{value:.3e}")
 }
 
 /// Print a contour level so a mistyped magnitude stays legible: plain decimals

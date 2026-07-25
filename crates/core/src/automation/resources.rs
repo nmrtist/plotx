@@ -731,6 +731,15 @@ fn child_ref(parent: impl ToString, local: &str, kind: &str) -> ResourceRef {
     }
 }
 
+/// The child reference that addresses one plot object of a page. Property
+/// targets and descriptors must agree on this shape, so both build it here.
+pub fn canvas_object_ref(
+    canvas: crate::state::CanvasId,
+    object: crate::state::ObjectId,
+) -> ResourceRef {
+    child_ref(canvas, &object.to_string(), KIND_CANVAS_OBJECT)
+}
+
 fn cap(id: &str) -> CapabilityId {
     CapabilityId::new(id)
 }

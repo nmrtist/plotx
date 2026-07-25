@@ -8,6 +8,7 @@ use super::{DatasetId, FieldCapabilities, FieldId, scalar_grid_capabilities};
 use crate::automation::{CAP_FIELD_COLORED_RASTER_2D, CAP_FIELD_CURVE_1D, CapabilityId};
 use plotx_figure::{
     ContourBasePolicy, ContourLevelSpec, ContourSpec, EstimatorSelection, PositiveFiniteF64,
+    UnitInterval,
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use std::cmp::Ordering;
@@ -453,6 +454,31 @@ pub struct ContourGeometry {
     pub negative: Arc<[ContourSegment]>,
     pub positive_levels: u16,
     pub negative_levels: u16,
+    /// The levels the renderer's segment budget left undrawn, or `None` when
+    /// every resolved level was drawn. It travels with the geometry rather than
+    /// beside it because the two are one answer: the segments say what was
+    /// drawn, and this says what the same build refused to draw and why the
+    /// plot is therefore not the ladder the panel shows.
+    pub omitted: Option<OmittedContourLevels>,
+}
+
+/// Levels a contour build dropped because drawing them would have exceeded
+/// [`plotx_render::contour::MAX_CONTOUR_SEGMENTS`].
+///
+/// Whole levels are dropped, outermost kept first, precisely so the omission
+/// stays explainable: a plot that draws its top *n* levels is a plot with a
+/// higher lowest level, which is a picture a user can reason about and fix. A
+/// contour cut off part-way along its own path is not.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OmittedContourLevels {
+    pub positive: u16,
+    pub negative: u16,
+    /// Magnitude of the outermost level that did not fit. Every level at or
+    /// below it was dropped, in both halves.
+    pub highest_omitted: FiniteF64,
+    /// Magnitude of the lowest level actually drawn, or `None` when the budget
+    /// could not fit even one level.
+    pub lowest_drawn: Option<FiniteF64>,
 }
 
 impl ContourGeometry {
@@ -462,6 +488,7 @@ impl ContourGeometry {
             negative: Arc::from([]),
             positive_levels: 0,
             negative_levels: 0,
+            omitted: None,
         }
     }
 }
@@ -497,6 +524,56 @@ pub enum ContourResolution {
     },
     Pending(Vec<EstimateKey>),
     Unavailable,
+}
+
+/// Which term of a floored noise anchor supplied the scale actually in force.
+///
+/// A readout that named only the multiplier would be true of both cases and
+/// informative about neither: `5 × σ` describes a level five thermal-noise units
+/// up, and the same words over a floored anchor describe a level that has
+/// nothing to do with the estimate. The resolver therefore reports which term
+/// won alongside the value, and the interface says so.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NoiseScaleTerm {
+    /// The estimator's own measurement is at or above the policy's floor.
+    Estimated,
+    /// The estimate is below the floor, so the multiple is measured against a
+    /// fraction of the field's peak magnitude instead.
+    PeakFloor,
+}
+
+/// The peak magnitude of a summary: the largest absolute value the field holds,
+/// whatever its sign.
+pub fn summary_peak_magnitude(summary: FieldSummary) -> f64 {
+    summary.max.get().abs().max(summary.min.get().abs())
+}
+
+/// The noise scale a floored anchor resolves against, and the term that supplied
+/// it. Ties go to the estimate: with no floor configured, or with a floor the
+/// estimate already clears, this is exactly the estimator's answer.
+///
+/// A [`EstimatedScale::Degenerate`] result is deliberately *not* floored. The
+/// floor stands for the sampling artefacts a real measurement carries around its
+/// own strongest feature; a field that measures no spread whatsoever — a plane,
+/// an ideal synthetic — has no such structure to be protected from, and
+/// flooring it would trade a ladder that spans the field for fourteen rungs
+/// crowded against zero. "Nothing was measurable" is a different answer from "a
+/// very small scale was measured", which is why the estimate type spells the two
+/// apart, and the degenerate ladder policy in `contour_ladder` stays in force.
+pub fn resolved_noise_scale(
+    scale: EstimatedScale,
+    peak_fraction: UnitInterval,
+    summary: FieldSummary,
+) -> (f64, NoiseScaleTerm) {
+    let EstimatedScale::Positive(estimated) = scale else {
+        return (scale.get(), NoiseScaleTerm::Estimated);
+    };
+    let floor = peak_fraction.get() * summary_peak_magnitude(summary);
+    if floor.is_finite() && floor > estimated.get() {
+        (floor, NoiseScaleTerm::PeakFloor)
+    } else {
+        (estimated.get(), NoiseScaleTerm::Estimated)
+    }
 }
 
 pub fn resolve_contour_levels(
@@ -573,9 +650,26 @@ fn resolve_half(
     }
     let base = match &level.base {
         ContourBasePolicy::Absolute(value) => value.get(),
-        ContourBasePolicy::FractionOfRange(fraction) => min + fraction.get() * (max - min),
-        ContourBasePolicy::NoiseSigma {
+        ContourBasePolicy::FractionOfRange(fraction) => {
+            // A base policy never yields a signed magnitude (§4.3): this half
+            // owns the sign and applies it below. Working across the raw
+            // `min..max` span instead would hand a signed base to a field that
+            // has both signs — for a spectrum running -P..P the positive half's
+            // "four percent" came out at -0.92·P. Measuring from this half's own
+            // floor (the sample closest to zero on its side) up to its peak
+            // keeps the result an unsigned magnitude for every field, and is
+            // identical to the span form on the single-signed fields the
+            // `Bounded` capability admits.
+            let floor = if negative {
+                (-max).max(0.0)
+            } else {
+                min.max(0.0)
+            };
+            floor + fraction.get() * (peak - floor)
+        }
+        ContourBasePolicy::NoiseFloor {
             multiplier,
+            peak_fraction,
             estimator,
         } => {
             let key = EstimateKey {
@@ -587,7 +681,12 @@ fn resolve_half(
                 pending.push(key);
                 return None;
             };
-            result.scale.get() * multiplier.get()
+            // The floor is measured against the *field's* peak, not this half's.
+            // Sampling artefacts are driven by the strongest feature whatever
+            // its sign, and a per-half floor would also split the two halves
+            // onto different ladders, which the geometry budget relies on them
+            // not doing.
+            multiplier.get() * resolved_noise_scale(result.scale, *peak_fraction, summary).0
         }
         ContourBasePolicy::BackgroundScale {
             multiplier,
@@ -645,3 +744,15 @@ mod degenerate_tests;
 #[cfg(test)]
 #[path = "field_runtime_threshold_tests.rs"]
 mod threshold_tests;
+
+#[cfg(test)]
+#[path = "field_runtime_fraction_tests.rs"]
+mod fraction_tests;
+
+#[cfg(test)]
+#[path = "field_runtime_floor_tests.rs"]
+mod floor_tests;
+
+#[cfg(test)]
+#[path = "field_progress_tests.rs"]
+mod progress_tests;

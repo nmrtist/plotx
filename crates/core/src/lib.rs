@@ -9,6 +9,7 @@ pub mod fit_model_library;
 pub mod layout;
 pub mod operation;
 pub mod project;
+pub mod properties;
 pub mod settings;
 pub mod state;
 pub mod templates;

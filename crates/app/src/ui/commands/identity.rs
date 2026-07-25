@@ -5,6 +5,7 @@
 use egui_phosphor::regular as icon;
 use plotx_core::actions::ZOrder;
 use plotx_core::layout::{Align, Distribute, GutterPreset, SpacingMode};
+use plotx_core::properties::PropertyStep;
 use plotx_core::state::{PlotxApp, Tool};
 
 use super::CommandId;
@@ -24,6 +25,8 @@ impl CommandId {
             Self::ZOrder(mode) => format!("arrange.order.{}", zorder_slug(mode)),
             Self::ApplyTheme(id) => format!("view.theme.{id}"),
             Self::SetCanvasSizePreset(id) => format!("figure.canvas_size.{id}"),
+            Self::PropertyGroup(section) => format!("properties.group.{section}"),
+            Self::StepProperty(step) => format!("properties.step.{}", step.as_str()),
             Self::Tool(tool) => format!("tool.{}", tool_slug(tool)),
             _ => simple_stable_id(self).to_owned(),
         }
@@ -224,6 +227,31 @@ pub(super) fn command_identity(
                 .map(|t| format!("Apply Theme: {}", t.name))
                 .unwrap_or_else(|| "Apply Theme".into());
             (label, Some(icon::PALETTE), None)
+        }
+        // Derived from the property catalog: the group supplies its own name
+        // and icon, so declaring a group is all a new one needs.
+        CommandId::PropertyGroup(section) => {
+            let group = crate::ui::properties::discovery::group(section);
+            (
+                group
+                    .map(|group| format!("{} settings", group.label.get()))
+                    .unwrap_or_else(|| "Settings".to_owned()),
+                group.map(|group| group.icon),
+                None,
+            )
+        }
+        // Named after whichever property declared itself steppable, so the
+        // gesture and its command can never describe different settings.
+        CommandId::StepProperty(step) => {
+            let setting = crate::ui::properties::discovery::steppable_in(
+                crate::ui::properties::PRESENTATIONS,
+            )
+            .map(|entry| entry.localized_label.get().to_lowercase())
+            .unwrap_or_else(|| "setting".to_owned());
+            match step {
+                PropertyStep::Raise => (format!("Raise {setting}"), Some(icon::PLUS), None),
+                PropertyStep::Lower => (format!("Lower {setting}"), Some(icon::MINUS), None),
+            }
         }
         CommandId::Tool(tool) => (
             format!("Tool: {}", tool.label()),

@@ -168,14 +168,7 @@ fn canvas_list(app: &mut PlotxApp, ui: &mut Ui) {
         if extend {
             plotx_core::state::toggle_frame_selection_synced(app, FrameRef::Page(ci));
         } else {
-            app.session.active_canvas = Some(ci);
-            let lead = app.doc.canvases[ci]
-                .active_dataset()
-                .and_then(|id| app.doc.dataset_index(id));
-            let datasets = app.doc.page_dataset_indices(ci);
-            app.focus_datasets(&datasets, lead);
-            app.sync_selection_to_active_canvas();
-            app.reset_interaction();
+            app.activate_canvas(ci);
             app.session.ui.panel_note_inline_edit = None;
             app.session.ui.panel_note_edit = None;
             app.session.ui.frame_selection = vec![FrameRef::Page(ci)];

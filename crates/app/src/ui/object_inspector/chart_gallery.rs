@@ -6,6 +6,7 @@ use plotx_core::actions::Action;
 use plotx_core::state::{
     ChartSpec, Dataset, ObjectId, PlotxApp, PresentationProfile, RequestedChart, chart_type,
     chart_types_for_capabilities, default_chart_type, default_encoding, encoding_descriptors_for,
+    field_peak_magnitude,
 };
 
 pub(super) fn chart_gallery(app: &mut PlotxApp, ci: usize, object: ObjectId, ui: &mut Ui) {
@@ -143,11 +144,14 @@ pub(super) fn chart_gallery(app: &mut PlotxApp, ci: usize, object: ObjectId, ui:
                     };
                     let mut after = binding.clone();
                     if let Some(series) = after.series.first_mut() {
+                        let source_field = series.source.field;
+                        let dataset = &app.doc.datasets[primary];
                         series.encoding = default_encoding(
                             &field.capabilities,
                             &field.metadata,
                             requested,
                             &PresentationProfile::default(),
+                            &|| field_peak_magnitude(dataset, source_field),
                         );
                     }
                     app.execute_action(Action::set_data_binding(

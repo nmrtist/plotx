@@ -34,10 +34,12 @@ introduces the same regions in walkthrough form.
   through a multi-step task (Regions, Curve Fit, Statistics). Drag its
   lower-right handle to resize it.
 - **Object inspector** — the properties panel for the selected board object:
-  chart type, styling, and geometry.
+  chart type, styling, geometry, and the display settings of what it draws, such
+  as [contour levels](/guides/contour-levels/). Everyday settings are shown
+  directly; the rest are folded into **Advanced**.
 - **Data sheet** — the spreadsheet view of a data table, opened by
   double-clicking the table.
-- **Command palette** — the searchable command list on
+- **Command palette** — the searchable list of commands, settings, and data on
   <kbd>Ctrl</kbd>+<kbd>K</kbd>; see
   [Command palette](/reference/command-palette/).
 - **Size chip** — the label above a page's top-left corner showing its

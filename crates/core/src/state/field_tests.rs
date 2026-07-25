@@ -240,8 +240,46 @@ fn regular_capability_selects_contour_without_domain_knowledge() {
         &FieldMetadata::default(),
         RequestedChart::Contour,
         &PresentationProfile::default(),
+        crate::state::NO_PEAK,
     );
     assert!(matches!(encoding, SeriesEncoding::Contour(_)));
+}
+
+/// A scalar grid with no capability to anchor a base — no noise estimator, no
+/// background estimator, not bounded — still has to receive a base that draws.
+/// A fixed literal of one intensity unit produced a silently blank plot for
+/// every such field whose peak was below one, so the fallback is anchored to the
+/// field's own peak instead.
+#[test]
+fn an_unanchored_contour_base_follows_the_field_peak() {
+    let capabilities =
+        FieldCapabilities::new([CapabilityId::new(CAP_FIELD_SCALAR_GRID_2D_REGULAR)]);
+    let faint = default_contour_spec(&capabilities, &|| Some(1.0e-3));
+    let plotx_figure::ContourBasePolicy::Absolute(base) = faint.positive.base else {
+        panic!("no capability anchors this field, so the base is absolute");
+    };
+    assert!(
+        base.get() < 1.0e-3,
+        "the lowest level must sit below the peak, got {}",
+        base.get()
+    );
+    assert!(base.get() > 0.0);
+
+    let loud = default_contour_spec(&capabilities, &|| Some(1.0e6));
+    let plotx_figure::ContourBasePolicy::Absolute(loud) = loud.positive.base else {
+        panic!("absolute base");
+    };
+    assert!(
+        loud.get() > base.get(),
+        "the base scales with the field rather than staying a literal"
+    );
+
+    // Without any peak the encoding must still be concrete and valid.
+    let unknown = default_contour_spec(&capabilities, crate::state::NO_PEAK);
+    assert!(matches!(
+        unknown.positive.base,
+        plotx_figure::ContourBasePolicy::Absolute(_)
+    ));
 }
 
 #[test]
@@ -275,6 +313,7 @@ fn colored_raster_auto_materializes_an_image_encoding() {
         &FieldMetadata::default(),
         RequestedChart::Auto,
         &PresentationProfile::default(),
+        crate::state::NO_PEAK,
     );
     assert!(matches!(encoding, SeriesEncoding::Image(_)));
 }
@@ -314,6 +353,7 @@ fn raster_falls_back_to_image_instead_of_a_scalar_or_line_encoding() {
         &FieldMetadata::default(),
         RequestedChart::Contour,
         &PresentationProfile::default(),
+        crate::state::NO_PEAK,
     );
     assert!(matches!(encoding, SeriesEncoding::Image(_)));
 }
@@ -611,6 +651,7 @@ fn default_nmr_contour_never_builds_geometry_inline() {
                 &real.metadata,
                 RequestedChart::Contour,
                 &PresentationProfile::default(),
+                crate::state::NO_PEAK,
             ),
         )
         .unwrap();

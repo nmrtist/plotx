@@ -77,7 +77,7 @@ fn field_overlay_stacks_two_2d_contours_in_distinct_colors() {
         let column = index % signed_grid.cols;
         let row = index / signed_grid.cols;
         // A non-zero robust noise scale keeps this signed test field on the
-        // concrete NoiseSigma path rather than exercising a degenerate plane.
+        // concrete NoiseFloor path rather than exercising a degenerate plane.
         *value = num_complex::Complex64::new(
             column as f64 - 15.5 + ((row * 17 + column * 13) % 11) as f64 * 0.037,
             0.0,

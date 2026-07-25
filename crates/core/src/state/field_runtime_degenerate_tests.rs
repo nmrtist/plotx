@@ -28,8 +28,8 @@ fn contour_binding(app: &PlotxApp) -> DataBinding {
         panic!("a true-2D NMR field defaults to a contour encoding");
     };
     assert!(
-        matches!(contour.positive.base, ContourBasePolicy::NoiseSigma { .. }),
-        "a noise-scale field defaults to a NoiseSigma base"
+        matches!(contour.positive.base, ContourBasePolicy::NoiseFloor { .. }),
+        "a noise-scale field defaults to a NoiseFloor base"
     );
     binding
 }
@@ -97,8 +97,9 @@ fn an_unavailable_estimator_reports_an_error_and_is_not_cached_as_degenerate() {
     };
     *contour = ContourSpec {
         positive: plotx_figure::ContourLevelSpec {
-            base: ContourBasePolicy::NoiseSigma {
+            base: ContourBasePolicy::NoiseFloor {
                 multiplier: PositiveFiniteF64::new(5.0).unwrap(),
+                peak_fraction: plotx_figure::UnitInterval::new(0.0).expect("a zero floor is valid"),
                 estimator: EstimatorSelection::Frozen {
                     estimator: "retired_estimator".to_owned(),
                     version: 99,

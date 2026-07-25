@@ -675,3 +675,7 @@ fn done_identity(done: &Done) -> Option<(DatasetId, ComputeKind, u64)> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "contour_budget_tests.rs"]
+mod contour_budget_tests;

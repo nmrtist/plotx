@@ -341,6 +341,11 @@ fn short_label(command: &CommandDescriptor) -> String {
         .to_owned(),
         CommandId::Align(_) => command.label.trim_start_matches("Align ").to_owned(),
         CommandId::Distribute(_) => command.label.trim_start_matches("Distribute ").to_owned(),
+        // A Ribbon tile shows the group's own short name; the full "… settings"
+        // wording stays in the tooltip, the menus and the palette.
+        CommandId::PropertyGroup(section) => super::properties::discovery::group(section)
+            .map(|group| group.label.get().to_owned())
+            .unwrap_or_else(|| "Settings".to_owned()),
         CommandId::Tool(Tool::BrowseZoom) => "Zoom".to_owned(),
         CommandId::Tool(_) => command.label.trim_start_matches("Tool: ").to_owned(),
         _ => command.label.clone(),

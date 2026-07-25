@@ -66,6 +66,15 @@ impl<K: Eq + Hash + Clone, V> LruMap<K, V> {
         Some(&entry.value)
     }
 
+    /// Read an entry without counting it as a use.
+    ///
+    /// This is the whole reason the borrow can be shared: showing a cached
+    /// number on screen is not a reason to keep it alive ahead of an entry a
+    /// resolve actually needs, so recency is deliberately left untouched.
+    fn peek(&self, key: &K) -> Option<&V> {
+        self.entries.get(key).map(|entry| &entry.value)
+    }
+
     /// Insert `key`, then evict least-recently-used entries until both budgets
     /// hold. `retain` protects keys that must never be dropped — in practice
     /// the in-flight sets, whose completion would otherwise write into a slot
@@ -181,11 +190,37 @@ impl FieldRuntime {
         self.estimates.get(key)
     }
 
+    /// The narrow read-only window onto the derived caches, for on-screen
+    /// readouts. It can report only what is already cached: there is
+    /// deliberately no path from here to minting a version, queueing a job, or
+    /// materializing a payload, so a readout can never start work.
+    pub(crate) fn peek_estimate(&self, key: &EstimateKey) -> Option<&EstimateResult> {
+        self.estimates.peek(key)
+    }
+
+    pub(crate) fn peek_summary(&self, source: VersionedFieldRef) -> Option<FieldSummary> {
+        self.summaries.peek(&source).copied()
+    }
+
     pub(crate) fn geometry(
         &mut self,
         key: &ContourGeometryCacheKey,
     ) -> Option<Arc<ContourGeometry>> {
         self.geometry.get(key).cloned()
+    }
+
+    /// Whether a job for exactly this key is already with the workers.
+    ///
+    /// Deduplication also happens inside `begin_*`, but only once a caller has
+    /// a grid to hand over. These let a caller find out *before* building one,
+    /// which is the difference between one payload materialization per job and
+    /// one per frame for as long as the job runs.
+    pub(crate) fn estimate_in_flight(&self, key: &EstimateKey) -> bool {
+        self.estimates_in_flight.contains(key)
+    }
+
+    pub(crate) fn geometry_in_flight(&self, key: &ContourGeometryCacheKey) -> bool {
+        self.geometry_in_flight.contains(key)
     }
 
     pub(crate) fn begin_estimate(&mut self, key: EstimateKey) -> bool {

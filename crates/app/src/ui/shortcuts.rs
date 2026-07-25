@@ -1,4 +1,5 @@
 use super::*;
+use plotx_core::properties::PropertyStep;
 use plotx_core::state::Tool;
 
 /// A key chord expressed with egui types. `command` means Cmd on macOS and
@@ -142,6 +143,27 @@ static BINDINGS: &[CommandBinding] = &[
         aliases: &[],
         // Owned by `handle_fit_shortcut`, which adds selection-aware status.
         dispatch: false,
+        menu_accelerator: false,
+    },
+    // §8.5 channel 3 / §12: bare `+` and `-` step the canvas-steppable setting.
+    // The bare keys are free because every existing zoom binding takes a
+    // modifier: Cmd/Ctrl for the UI scale above, and Alt+wheel for the y-axis
+    // zoom in `canvas::navigation`. The chord names a direction, not a
+    // property — which setting it moves is derived from the catalog.
+    CommandBinding {
+        id: commands::CommandId::StepProperty(PropertyStep::Raise),
+        primary: plain(egui::Key::Plus),
+        // "+" usually needs Shift, and some layouts report the key as Equals;
+        // the plain matcher ignores Shift, so both spellings are accepted.
+        aliases: &[plain(egui::Key::Equals)],
+        dispatch: true,
+        menu_accelerator: false,
+    },
+    CommandBinding {
+        id: commands::CommandId::StepProperty(PropertyStep::Lower),
+        primary: plain(egui::Key::Minus),
+        aliases: &[],
+        dispatch: true,
         menu_accelerator: false,
     },
     tool_key(Tool::Select, egui::Key::V),

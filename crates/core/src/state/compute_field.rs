@@ -2,9 +2,10 @@
 
 use super::*;
 use crate::state::{
-    Dataset, EstimateKind, EstimateProvenance, EstimatedScale, FieldPayload, FieldProvenance,
-    FieldRef, FieldSnapshot, FieldSummary, FieldVersion, FiniteF64, LocationScaleEstimate,
-    ScaleEstimate, VersionedFieldRef,
+    ContourSegment, Dataset, EstimateKind, EstimateProvenance, EstimatedScale, FieldPayload,
+    FieldProvenance, FieldRef, FieldSnapshot, FieldSummary, FieldVersion, FiniteF64,
+    LocationScaleEstimate, OmittedContourLevels, ResolvedContourLevels, ScaleEstimate,
+    VersionedFieldRef,
 };
 use plotx_analysis::robust::{
     DEPLANED_LOCATION_SCALE_ID, DEPLANED_LOCATION_SCALE_VERSION, ROBUST_DIFFERENCE_MAD_ID,
@@ -125,6 +126,33 @@ impl ComputeService {
         key: &ContourGeometryCacheKey,
     ) -> Option<Arc<ContourGeometry>> {
         self.field_runtime.geometry(key)
+    }
+
+    /// Read-only access for on-screen readouts. Taking `&self` is the point:
+    /// nothing reachable from here can mint a field version, queue an
+    /// `EstimateField` job, or materialize a payload, so displaying a value can
+    /// never schedule the work that would produce one.
+    pub(crate) fn peek_estimate(&self, key: &EstimateKey) -> Option<&EstimateResult> {
+        self.field_runtime.peek_estimate(key)
+    }
+
+    pub(crate) fn peek_field_summary(&self, source: VersionedFieldRef) -> Option<FieldSummary> {
+        self.field_runtime.peek_summary(source)
+    }
+
+    /// Whether the work behind this key is already running.
+    ///
+    /// A caller asks this *before* materializing a grid. The enqueue paths
+    /// deduplicate too, but they can only do so once handed a payload, and a
+    /// rebuild happens on every frame while a job runs: a 2048 × 8192 plane is
+    /// 64 MiB of `f32` that would be read and cloned every one of them, for a
+    /// job that was already accepted on the first.
+    pub(crate) fn estimate_in_flight(&self, key: &EstimateKey) -> bool {
+        self.field_runtime.estimate_in_flight(key)
+    }
+
+    pub(crate) fn geometry_in_flight(&self, key: &ContourGeometryCacheKey) -> bool {
+        self.field_runtime.geometry_in_flight(key)
     }
 
     pub(crate) fn enqueue_estimate(
@@ -257,6 +285,24 @@ fn resolved_estimator(key: &EstimateKey) -> Result<EstimateProvenance, String> {
     }
 }
 
+/// Build the geometry for one resolved ladder, inside the renderer's segment
+/// budget.
+///
+/// The budget is applied *here*, in the worker that produces the geometry,
+/// rather than in the cache or at paint time. Geometry is content-addressed by
+/// `(field version, resolved levels)`, and so is the decision this makes: the
+/// same grid and the same ladder always yield the same kept levels. A capped
+/// result is therefore a normal cache entry — computed once, shared by every
+/// object resolving that key, and never recomputed — where a cache-side or
+/// paint-side cap would either re-run marching squares on an ungrowable result
+/// every frame or quietly hand the renderer more than it can draw.
+///
+/// Levels are drawn outermost first, dropped whole, and grouped by magnitude:
+/// a magnitude enters the geometry in every half that asked for it, or in
+/// neither. Cutting mid-magnitude would leave a signed plot with more positive
+/// lobes than negative ones, and would make the advice wrong — after grouping,
+/// raising the ladder's floor to the lowest drawn magnitude reproduces exactly
+/// the plot on screen.
 pub(super) fn run_build_contour(
     key: ContourGeometryCacheKey,
     grid: Arc<ScalarGrid2D>,
@@ -268,42 +314,121 @@ pub(super) fn run_build_contour(
         return Err("contour geometry requires finite linear axis bounds".to_owned());
     };
     let levels = &key.levels;
-    #[cfg(test)]
-    crate::contour_probe::record_marching_squares();
-    let positive = plotx_render::contour::segments(
-        &grid.values,
-        grid.rows,
-        grid.cols,
-        x0,
-        x1,
-        y0,
-        y1,
-        &levels
-            .positive
-            .iter()
-            .map(|value| value.get())
-            .collect::<Vec<_>>(),
-    );
-    #[cfg(test)]
-    crate::contour_probe::record_marching_squares();
-    let negative = plotx_render::contour::segments(
-        &grid.values,
-        grid.rows,
-        grid.cols,
-        x0,
-        x1,
-        y0,
-        y1,
-        &levels
-            .negative
-            .iter()
-            .map(|value| value.get())
-            .collect::<Vec<_>>(),
-    );
+    let mut positive: Vec<ContourSegment> = Vec::new();
+    let mut negative: Vec<ContourSegment> = Vec::new();
+    let mut scratch: Vec<ContourSegment> = Vec::new();
+    let mut drawn_positive = 0usize;
+    let mut drawn_negative = 0usize;
+    let mut lowest_drawn = None;
+    let mut highest_omitted = None;
+    for magnitude in magnitudes_outermost_first(levels) {
+        // Extract this magnitude's halves into scratch before committing
+        // either: the budget question is whether the whole magnitude fits, and
+        // extraction stops the moment the answer is no.
+        scratch.clear();
+        let remaining = plotx_render::contour::MAX_CONTOUR_SEGMENTS
+            .saturating_sub(positive.len() + negative.len());
+        let bounds = [x0, x1, y0, y1];
+        let mut positive_count = 0usize;
+        let mut negative_count = 0usize;
+        let mut positive_end = 0usize;
+        let mut fits = true;
+        for level in levels.positive.iter().map(|level| level.get()) {
+            if level != magnitude {
+                continue;
+            }
+            positive_count += 1;
+            fits = extract_level(&grid, bounds, level, remaining, &mut scratch);
+            if !fits {
+                break;
+            }
+        }
+        if fits {
+            positive_end = scratch.len();
+            for level in levels.negative.iter().map(|level| level.get()) {
+                if -level != magnitude {
+                    continue;
+                }
+                negative_count += 1;
+                fits = extract_level(&grid, bounds, level, remaining, &mut scratch);
+                if !fits {
+                    break;
+                }
+            }
+        }
+        if !fits {
+            highest_omitted = FiniteF64::new(magnitude);
+            break;
+        }
+        positive.extend_from_slice(&scratch[..positive_end]);
+        negative.extend_from_slice(&scratch[positive_end..]);
+        drawn_positive += positive_count;
+        drawn_negative += negative_count;
+        lowest_drawn = FiniteF64::new(magnitude);
+    }
+
+    let omitted = highest_omitted.map(|highest_omitted| OmittedContourLevels {
+        positive: saturating_u16(levels.positive.len().saturating_sub(drawn_positive)),
+        negative: saturating_u16(levels.negative.len().saturating_sub(drawn_negative)),
+        highest_omitted,
+        lowest_drawn,
+    });
     Ok(ContourGeometry {
         positive: Arc::from(positive),
         negative: Arc::from(negative),
-        positive_levels: u16::try_from(levels.positive.len()).unwrap_or(u16::MAX),
-        negative_levels: u16::try_from(levels.negative.len()).unwrap_or(u16::MAX),
+        positive_levels: saturating_u16(drawn_positive),
+        negative_levels: saturating_u16(drawn_negative),
+        omitted,
     })
+}
+
+/// Every magnitude either half draws, outermost first and without repeats. A
+/// negative half stores signed levels, so its magnitudes are negated here; the
+/// two halves usually share a ladder and therefore collapse onto the same
+/// magnitudes, which is what lets the budget cut them together.
+fn magnitudes_outermost_first(levels: &ResolvedContourLevels) -> Vec<f64> {
+    let mut magnitudes: Vec<f64> = levels
+        .positive
+        .iter()
+        .map(|level| level.get())
+        .chain(levels.negative.iter().map(|level| -level.get()))
+        .collect();
+    magnitudes.sort_by(|left, right| right.total_cmp(left));
+    magnitudes.dedup();
+    magnitudes
+}
+
+/// Extract one level into `out`, stopping if `out` would pass `limit`. Reports
+/// whether the level fit; a level that did not is left partial in `out` for the
+/// caller to discard along with the rest of its magnitude.
+fn extract_level(
+    grid: &ScalarGrid2D,
+    bounds: [f64; 4],
+    level: f64,
+    limit: usize,
+    out: &mut Vec<ContourSegment>,
+) -> bool {
+    #[cfg(test)]
+    crate::contour_probe::record_marching_squares();
+    let [x0, x1, y0, y1] = bounds;
+    plotx_render::contour::level_segments_into(
+        &grid.values,
+        grid.rows,
+        grid.cols,
+        x0,
+        x1,
+        y0,
+        y1,
+        level,
+        out,
+        limit,
+        // The budget replaces cancellation here: this build always runs to a
+        // bounded result rather than being abandoned part-way.
+        &|| false,
+    )
+    .expect("non-cancelling contour extraction")
+}
+
+fn saturating_u16(value: usize) -> u16 {
+    u16::try_from(value).unwrap_or(u16::MAX)
 }

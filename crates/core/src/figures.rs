@@ -10,7 +10,10 @@ use plotx_figure::{
 use plotx_io::NmrData;
 use plotx_processing::{Preset2D, Spectrum, Spectrum2D, StackSpectrum};
 
-use crate::state::{ResolvedPeak, default_contour_spec, scalar_grid_capabilities};
+use crate::state::{
+    EstimatedScale, FieldSummary, FiniteF64, ResolvedPeak, default_contour_spec,
+    scalar_grid_capabilities,
+};
 
 pub fn build_figure(data: &NmrData, spec: &Spectrum, peaks: &[ResolvedPeak]) -> Figure {
     let (ppm_lo, ppm_hi) = spec.ppm_bounds();
@@ -78,8 +81,27 @@ fn contour_levels(
     }
     let base = match &level.base {
         ContourBasePolicy::Absolute(value) => value.get(),
-        ContourBasePolicy::NoiseSigma { multiplier, .. } => {
-            robust_difference_mad(values, rows, cols) * multiplier.get()
+        ContourBasePolicy::NoiseFloor {
+            multiplier,
+            peak_fraction,
+            ..
+        } => {
+            // The floor decision is shared with the versioned resolver for the
+            // same reason the ladder is: two copies of it would drift, and this
+            // path and that one must agree on what a field's noise scale is.
+            let Some(scale) = EstimatedScale::new(robust_difference_mad(values, rows, cols)) else {
+                return Vec::new();
+            };
+            let (Some(min), Some(max)) = (FiniteF64::new(minimum), FiniteF64::new(maximum)) else {
+                return Vec::new();
+            };
+            multiplier.get()
+                * crate::state::resolved_noise_scale(
+                    scale,
+                    *peak_fraction,
+                    FieldSummary { min, max },
+                )
+                .0
         }
         ContourBasePolicy::BackgroundScale { multiplier, .. } => {
             let (location, scale) = deplaned_location_scale(values, rows, cols);
@@ -344,7 +366,8 @@ pub fn build_ilt_figure_cancellable(
 
 fn bounded_scalar_contour_spec() -> ContourSpec {
     let capabilities = scalar_grid_capabilities(true, &[crate::automation::CAP_FIELD_BOUNDED]);
-    default_contour_spec(&capabilities)
+    // `Bounded` anchors the base to the value range, so no peak is consulted.
+    default_contour_spec(&capabilities, crate::state::NO_PEAK)
 }
 
 #[cfg(test)]
@@ -413,8 +436,9 @@ mod tests {
 
     fn noise_sigma_level(count: u16) -> ContourLevelSpec {
         ContourLevelSpec {
-            base: ContourBasePolicy::NoiseSigma {
+            base: ContourBasePolicy::NoiseFloor {
                 multiplier: plotx_figure::PositiveFiniteF64::new(5.0).unwrap(),
+                peak_fraction: plotx_figure::UnitInterval::new(0.0).expect("a zero floor is valid"),
                 estimator: plotx_figure::EstimatorSelection::FollowLatest,
             },
             count,
@@ -638,8 +662,9 @@ mod tests {
     #[test]
     fn one_level_contour_uses_an_interior_fallback_for_degenerate_mad() {
         let level = ContourLevelSpec {
-            base: ContourBasePolicy::NoiseSigma {
+            base: ContourBasePolicy::NoiseFloor {
                 multiplier: plotx_figure::PositiveFiniteF64::new(5.0).unwrap(),
+                peak_fraction: plotx_figure::UnitInterval::new(0.0).expect("a zero floor is valid"),
                 estimator: plotx_figure::EstimatorSelection::FollowLatest,
             },
             count: 1,

@@ -4,87 +4,6 @@ use std::collections::HashSet;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
-/// An in-progress region-band edit on a series plot. Like [`ObjectDrag`], the
-/// live band is recomputed absolutely from the grab state each frame so nothing
-/// accumulates drift. `before` snapshots the dataset's regions for the undoable
-/// commit; `region_id` names the band being resized/moved (`None` while drawing
-/// a new one).
-#[derive(Clone, Debug)]
-pub struct RegionDrag {
-    pub canvas: usize,
-    pub object: ObjectId,
-    pub dataset: usize,
-    pub kind: RegionDragKind,
-    pub region_id: Option<u64>,
-    pub before: Vec<Region>,
-    /// Pointer ppm at grab time (for `Move`) or the fixed anchor (for `NewBand`).
-    pub anchor_ppm: f64,
-    /// The dragged band's lo/hi at grab time (for `Move`).
-    pub grab_lo: f64,
-    pub grab_hi: f64,
-    /// Live pointer ppm, used to paint the `NewBand` preview.
-    pub current_ppm: f64,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RegionDragKind {
-    NewBand,
-    EdgeLo,
-    EdgeHi,
-    Move,
-}
-
-/// An in-progress integral-band edit on a 1D spectrum — the direct analogue of
-/// [`RegionDrag`], reusing [`RegionDragKind`]. `before` snapshots the dataset's
-/// integrals for the undoable commit; `integral_id` names the band being
-/// resized/moved (`None` while drawing a new one).
-#[derive(Clone, Debug)]
-pub struct IntegralDrag {
-    pub canvas: usize,
-    pub object: ObjectId,
-    pub dataset: usize,
-    pub kind: RegionDragKind,
-    pub integral_id: Option<u64>,
-    pub before: Vec<IntegralResult>,
-    pub anchor_ppm: f64,
-    pub grab_lo: f64,
-    pub grab_hi: f64,
-    pub current_ppm: f64,
-}
-
-/// An in-progress true-2D integral rectangle edit. Geometry is updated live,
-/// while volume recomputation is deferred until the gesture commits.
-#[derive(Clone, Debug)]
-pub struct Integral2DDrag {
-    pub canvas: usize,
-    pub object: ObjectId,
-    pub dataset: usize,
-    pub kind: Integral2DDragKind,
-    pub integral_id: Option<u64>,
-    pub before: Vec<Integral2D>,
-    /// Pointer coordinates at grab time, or the fixed corner for a new rectangle.
-    pub anchor: [f64; 2],
-    /// Rectangle bounds at grab time for moves and resizes.
-    pub grab_f2: (f64, f64),
-    pub grab_f1: (f64, f64),
-    /// Live pointer coordinates, used for the new-rectangle preview.
-    pub current: [f64; 2],
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Integral2DDragKind {
-    NewRect,
-    EdgeF2Lo,
-    EdgeF2Hi,
-    EdgeF1Lo,
-    EdgeF1Hi,
-    CornerF2LoF1Lo,
-    CornerF2LoF1Hi,
-    CornerF2HiF1Lo,
-    CornerF2HiF1Hi,
-    Move,
-}
-
 /// The current slice position of the Slice tool: which 2D dataset/plot it
 /// targets, the cut orientation, and the snapped grid index (a row/column index
 /// for a true-2D spectrum, or an increment index for a pseudo-2D stack). Drives
@@ -320,6 +239,31 @@ pub struct FitEditorValidation {
     pub result: Result<(plotx_analysis::fit_model::FitModelDefinition, Vec<String>), String>,
 }
 
+/// A search hit that has to be revealed: open the property's home panel, expand
+/// its section, scroll the row into view and highlight it briefly.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PropertyFocus {
+    pub property: crate::properties::PropertyId,
+    /// Still waiting for its panel to expand and scroll to it.
+    pub pending: bool,
+    /// UI-clock time at which the highlight stops being painted.
+    pub highlight_until: f64,
+}
+
+impl PropertyFocus {
+    /// Long enough to catch the eye after a scroll, short enough not to linger
+    /// as an apparent selection.
+    pub const HIGHLIGHT_SECONDS: f64 = 0.8;
+
+    pub fn request(property: crate::properties::PropertyId, now: f64) -> Self {
+        Self {
+            property,
+            pending: true,
+            highlight_until: now + Self::HIGHLIGHT_SECONDS,
+        }
+    }
+}
+
 pub struct UiState {
     /// The single in-flight direct-manipulation gesture; see [`Interaction`].
     pub interaction: Interaction,
@@ -397,6 +341,9 @@ pub struct UiState {
     /// One-shot request from navigation (for example a double-click in the data
     /// browser) to reveal a contextual group in the Secondary Side Bar.
     pub requested_tool_group: Option<ToolGroup>,
+    /// A property the unified search asked the panels to reveal. Navigation
+    /// state, so it is deliberately absent from the property catalog itself.
+    pub property_focus: Option<PropertyFocus>,
     /// Source dataset whose Regions workflow is shown in the canvas task card.
     pub region_task_dataset: Option<usize>,
     /// Whether the Regions task card is reduced to its one-line summary.
@@ -541,6 +488,7 @@ impl Default for UiState {
             data_browser_selected_node: None,
             data_browser_last_active: None,
             requested_tool_group: None,
+            property_focus: None,
             region_task_dataset: None,
             region_task_collapsed: false,
             curve_fit_task_dataset: None,

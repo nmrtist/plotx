@@ -144,6 +144,21 @@ pub fn execute(
                 app.apply_theme(&theme);
             }
         }
+        // Channels 2 and 4 navigate; they never edit. `reveal_property` opens
+        // the home the presentation names and asks the panel to scroll and
+        // highlight — the same route a palette hit takes.
+        CommandId::PropertyGroup(section) => {
+            let now = ctx.input(|input| input.time);
+            if let Some(property) = super::properties::discovery::entry_property(
+                section,
+                super::properties::PRESENTATIONS,
+            ) {
+                super::command_palette::reveal_property(app, property, now);
+                ctx.request_repaint();
+            }
+        }
+        // Channel 3 edits, and does so through the property planner.
+        CommandId::StepProperty(step) => super::properties::discovery::step_selection(app, step),
         CommandId::Tool(tool) => app.toggle_tool(tool),
     }
 }
@@ -203,8 +218,7 @@ fn open_chart_type(app: &mut PlotxApp) {
     let Some((ci, object)) = commands::chart_plot_target(app, dataset) else {
         return;
     };
-    app.session.active_canvas = Some(ci);
-    app.select_object(ci, object);
+    app.reveal_object(ci, object);
     app.session.secondary_sidebar_visible = true;
 }
 

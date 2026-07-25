@@ -286,8 +286,9 @@ fn equivalent_absolute_levels_share_the_same_geometry_key() {
     let field = source(2, 7, 11);
     let noise_spec = ContourSpec {
         positive: ContourLevelSpec {
-            base: ContourBasePolicy::NoiseSigma {
+            base: ContourBasePolicy::NoiseFloor {
                 multiplier: PositiveFiniteF64::new(5.0).unwrap(),
+                peak_fraction: plotx_figure::UnitInterval::new(0.0).expect("a zero floor is valid"),
                 estimator: EstimatorSelection::Frozen {
                     estimator: plotx_analysis::robust::ROBUST_DIFFERENCE_MAD_ID.to_owned(),
                     version: plotx_analysis::robust::ROBUST_DIFFERENCE_MAD_VERSION,
@@ -505,8 +506,9 @@ fn estimates_are_demand_driven_and_coexist_per_estimator_selection() {
     };
     let noise_only = ContourSpec {
         positive: ContourLevelSpec {
-            base: ContourBasePolicy::NoiseSigma {
+            base: ContourBasePolicy::NoiseFloor {
                 multiplier: PositiveFiniteF64::new(5.0).unwrap(),
+                peak_fraction: plotx_figure::UnitInterval::new(0.0).expect("a zero floor is valid"),
                 estimator: frozen_noise.estimator.clone(),
             },
             count: 3,
@@ -518,7 +520,7 @@ fn estimates_are_demand_driven_and_coexist_per_estimator_selection() {
     assert_eq!(
         resolve_contour_levels(source, &noise_only, summary(), |_| None),
         ContourResolution::Pending(vec![frozen_noise.clone()]),
-        "a NoiseSigma contour does not request an unrelated background fit"
+        "a NoiseFloor contour does not request an unrelated background fit"
     );
     let background_only = ContourSpec {
         positive: ContourLevelSpec {
@@ -555,7 +557,7 @@ fn estimates_are_demand_driven_and_coexist_per_estimator_selection() {
     );
     assert!(
         service.estimate_for(&background).is_none(),
-        "a NoiseSigma contour never schedules an unrelated background fit"
+        "a NoiseFloor contour never schedules an unrelated background fit"
     );
 
     let latest_noise = EstimateKey {

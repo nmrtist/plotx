@@ -256,7 +256,7 @@ pub(crate) fn handle_data_tool_target(
         .and_then(|o| o.plot())
         .is_some()
     {
-        select_object_datasets(app, ci, id);
+        app.focus_object_datasets(ci, id);
     }
 }
 
@@ -309,7 +309,7 @@ pub(crate) fn handle_object_interactions(
                 if matches!(app.interaction(), Interaction::PanelLabel(_)) {
                     app.reset_interaction();
                 }
-                select_object_datasets(app, ci, id);
+                app.focus_object_datasets(ci, id);
                 if let Some(object) = app.doc.canvases[ci].object(id).filter(|o| !o.locked) {
                     let before = object.frame;
                     let start = page_pos.map(|p| [p.x, p.y]).unwrap_or([before.x, before.y]);
@@ -477,23 +477,6 @@ fn finish_marquee(app: &mut PlotxApp, ci: usize, marq: MarqueeDrag) {
     );
 }
 
-fn select_object_datasets(app: &mut PlotxApp, ci: usize, id: ObjectId) {
-    let Some(object) = app.doc.canvases[ci].object(id) else {
-        return;
-    };
-    let active = object.dataset().and_then(|id| app.doc.dataset_index(id));
-    let datasets = object
-        .dataset_ids()
-        .into_iter()
-        .filter_map(|id| app.doc.dataset_index(id))
-        .collect::<Vec<_>>();
-    if !datasets.is_empty() {
-        app.focus_datasets(&datasets, active);
-    } else {
-        app.set_active_dataset(active);
-    }
-}
-
 pub(crate) fn arrange_context_menu(app: &mut PlotxApp, ci: usize, ui: &mut Ui) {
     if ui.button("Copy figure").clicked() {
         let ctx = ui.ctx().clone();
@@ -578,6 +561,10 @@ pub(crate) fn arrange_context_menu(app: &mut PlotxApp, ci: usize, ui: &mut Ui) {
     if ui.checkbox(&mut snap, "Snap to grid & objects").clicked() {
         app.set_snap_enabled(snap);
     }
+    // Channel 4: whatever the selection draws, its settings are one click from
+    // here. Navigation only — the entries jump to the panel section that owns
+    // the controls, and are derived from the catalog rather than listed again.
+    crate::ui::properties::discovery::context_menu(app, ui);
     ui.separator();
     if ui.button("Canvas settings…").clicked() {
         app.session.ui.canvas_settings = Some(ci);

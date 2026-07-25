@@ -186,8 +186,27 @@ impl<'de> Deserialize<'de> for ContourLevelSpec {
 #[serde(rename_all = "snake_case", tag = "policy", content = "value")]
 pub enum ContourBasePolicy {
     Absolute(PositiveFiniteF64),
-    NoiseSigma {
+    /// A multiple of the field's noise scale, where "noise scale" is the larger
+    /// of the estimator's answer and `peak_fraction` of the field's peak
+    /// magnitude.
+    ///
+    /// Both coefficients are carried here rather than one being applied inside
+    /// resolution, because which of the two is in force decides what the number
+    /// beside the control means. A policy that silently substituted a peak
+    /// fraction while the interface still read `5 × σ` would be describing a
+    /// picture the data never produced.
+    ///
+    /// The floor is not a preference: an estimator measures thermal noise, and
+    /// a field with enough dynamic range carries sampling artefacts of its own
+    /// strongest feature far above that. Below `peak_fraction` of the peak a
+    /// contour traces those artefacts rather than signal. A field whose
+    /// estimated scale is large next to its peak never reaches the floor and
+    /// resolves exactly as a plain multiple of σ would.
+    NoiseFloor {
         multiplier: PositiveFiniteF64,
+        /// The smallest noise scale this anchor will accept, as a fraction of
+        /// the field's peak magnitude. Zero disables the floor.
+        peak_fraction: UnitInterval,
         estimator: EstimatorSelection,
     },
     BackgroundScale {

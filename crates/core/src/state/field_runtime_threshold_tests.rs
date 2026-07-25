@@ -106,8 +106,9 @@ fn a_policy_base_above_the_peak_falls_back_to_the_selected_ladder_span() {
     // successful resolution, never a threshold report.
     let spec = ContourSpec {
         positive: ContourLevelSpec {
-            base: ContourBasePolicy::NoiseSigma {
+            base: ContourBasePolicy::NoiseFloor {
                 multiplier: PositiveFiniteF64::new(5.0).unwrap(),
+                peak_fraction: plotx_figure::UnitInterval::new(0.0).expect("a zero floor is valid"),
                 estimator: EstimatorSelection::FollowLatest,
             },
             count: 3,

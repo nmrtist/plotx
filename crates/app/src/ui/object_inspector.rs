@@ -38,6 +38,7 @@ pub(crate) fn render(app: &mut PlotxApp, ui: &mut Ui) {
     }
     if ids.is_empty() {
         commit_panel_note_edit(app);
+        property_sections(app, ci, ui);
         return;
     }
 
@@ -66,6 +67,7 @@ pub(crate) fn render(app: &mut PlotxApp, ui: &mut Ui) {
         note_focused = panel_note_section(app, ci, ids[0], ui);
         data_section(app, ci, ids[0], ui);
     }
+    property_sections(app, ci, ui);
 
     let text_ids = kind_targets(app, ci, &ids, |o| o.text().is_some());
     let shape_ids = kind_targets(app, ci, &ids, |o| o.shape().is_some());
@@ -93,6 +95,21 @@ pub(crate) fn render(app: &mut PlotxApp, ui: &mut Ui) {
     flush_inspector_edit(app, ui, text_focused || note_focused || axes_focused);
     ui.separator();
     ui.add_space(2.0);
+}
+
+/// Catalog-driven rows for whatever the resolved plot selection draws.
+///
+/// The objects come from the same resolution the Ribbon button, the context
+/// menu and the canvas gesture use — every selected plot, or the page's active
+/// plot when nothing is selected — rather than from this panel's own
+/// single-selection guard. Reading the selection differently is what let those
+/// channels enable a jump to a section that then drew nothing, and it put the
+/// cross-target `Mixed` aggregate out of reach of the interface entirely. The
+/// section renders nothing at all when no resolved series has an applicable
+/// encoding.
+fn property_sections(app: &mut PlotxApp, ci: usize, ui: &mut Ui) {
+    let objects = crate::ui::properties::discovery::selection_objects(app);
+    crate::ui::properties::panel::contour_section(app, ci, &objects, ui);
 }
 
 fn geometry_section(app: &mut PlotxApp, ci: usize, ids: &[ObjectId], ui: &mut Ui) {

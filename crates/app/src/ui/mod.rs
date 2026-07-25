@@ -23,6 +23,7 @@ mod object_inspector;
 mod present;
 mod primary_sidebar;
 pub(crate) mod processing_templates;
+pub(crate) mod properties;
 mod ribbon;
 mod secondary_sidebar;
 mod settings_dialog;

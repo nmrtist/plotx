@@ -394,6 +394,77 @@ impl PlotxApp {
         }
     }
 
+    /// Navigate to a page.
+    ///
+    /// Switching pages is never only a change of what is drawn. `ObjectId`s are
+    /// allocated per page and start again at one on each, so a selection left
+    /// over from the page being left resolves, on the page being entered, to an
+    /// unrelated object — and every inspector row, property write and tool that
+    /// follows would act on it. Activation therefore re-derives the selection
+    /// and the data focus from the page it enters, and every entry point that
+    /// switches pages comes through here rather than assigning `active_canvas`
+    /// and leaving the rest of the session pointing at the page it left.
+    pub fn activate_canvas(&mut self, ci: usize) {
+        let Some(canvas) = self.doc.canvases.get(ci) else {
+            return;
+        };
+        let lead = canvas.active_dataset();
+        self.session.active_canvas = Some(ci);
+        let lead = lead.and_then(|id| self.doc.dataset_index(id));
+        let datasets = self.doc.page_dataset_indices(ci);
+        self.focus_datasets(&datasets, lead);
+        self.sync_selection_to_active_canvas();
+        self.reset_interaction();
+    }
+
+    /// Navigate to one object: activate its page, select it, and follow the
+    /// datasets it draws.
+    ///
+    /// This is [`Self::activate_canvas`]'s counterpart for a destination that
+    /// names an object, and it exists for the same reason: selecting an object
+    /// without pointing the data focus at what it draws leaves the two halves of
+    /// the session describing different things.
+    pub fn reveal_object(&mut self, ci: usize, id: ObjectId) {
+        if self
+            .doc
+            .canvases
+            .get(ci)
+            .and_then(|canvas| canvas.object(id))
+            .is_none()
+        {
+            return;
+        }
+        self.session.active_canvas = Some(ci);
+        self.reset_interaction();
+        self.select_object(ci, id);
+        self.focus_object_datasets(ci, id);
+    }
+
+    /// Point the data focus at the datasets one object draws, with the object's
+    /// own active dataset leading.
+    pub fn focus_object_datasets(&mut self, ci: usize, id: ObjectId) {
+        let Some(object) = self
+            .doc
+            .canvases
+            .get(ci)
+            .and_then(|canvas| canvas.object(id))
+        else {
+            return;
+        };
+        let lead = object.dataset();
+        let sources = object.dataset_ids();
+        let lead = lead.and_then(|id| self.doc.dataset_index(id));
+        let datasets: Vec<usize> = sources
+            .into_iter()
+            .filter_map(|id| self.doc.dataset_index(id))
+            .collect();
+        if datasets.is_empty() {
+            self.set_active_dataset(lead);
+        } else {
+            self.focus_datasets(&datasets, lead);
+        }
+    }
+
     /// The group members of `id` with `id` moved to the front (the primary).
     fn group_click_members(&self, ci: usize, id: ObjectId) -> Vec<ObjectId> {
         let Some(c) = self.doc.canvases.get(ci) else {

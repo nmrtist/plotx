@@ -5,6 +5,7 @@
 use plotx_core::actions::ZOrder;
 use plotx_core::export::ExportFormat;
 use plotx_core::layout::{Align, Distribute, GutterPreset, SpacingMode};
+use plotx_core::properties::PropertyStep;
 use plotx_core::state::{Dataset, ObjectId, PlotxApp, Tool, WorkflowTab};
 
 pub use super::command_exec::execute;
@@ -108,6 +109,14 @@ pub enum CommandId {
     Distribute(Distribute),
     ZOrder(ZOrder),
     ApplyTheme(&'static str),
+    /// Reveal a whole group of catalog properties at its canonical home (§8.5
+    /// channel 2). Registered per declared group, so a group gains a Ribbon
+    /// button, a menu entry and a palette hit by being declared once. It
+    /// navigates and never edits: the panel it opens owns the controls.
+    PropertyGroup(&'static str),
+    /// Move the canvas-steppable property one rung (§8.5 channel 3). The
+    /// property is derived from the catalog, so the binding does not name one.
+    StepProperty(PropertyStep),
     Tool(Tool),
 }
 
@@ -272,6 +281,16 @@ pub fn catalog(app: &PlotxApp) -> Vec<CommandDescriptor> {
             .into_iter()
             .map(|theme| CommandId::ApplyTheme(theme.id)),
     );
+    // Every declared property group, and the step gesture. Both are derived
+    // from the property catalog: a group declared once appears here, and a
+    // property that declares itself steppable is driven by the existing
+    // binding without any new command.
+    ids.extend(
+        super::properties::GROUPS
+            .iter()
+            .map(|group| CommandId::PropertyGroup(group.section)),
+    );
+    ids.extend([PropertyStep::Lower, PropertyStep::Raise].map(CommandId::StepProperty));
     ids.extend(tool_commands().into_iter().map(CommandId::Tool));
     ids.into_iter()
         .map(|id| {
@@ -516,6 +535,16 @@ pub fn describe(app: &PlotxApp, id: CommandId) -> CommandDescriptor {
             selected >= 1,
             "Select an object before changing its stacking order.",
         ),
+        CommandId::PropertyGroup(section) => requires(
+            super::properties::discovery::group_applies(app, section),
+            super::properties::discovery::group(section)
+                .map(|group| group.unavailable_reason)
+                .unwrap_or("Select an object that has these settings."),
+        ),
+        CommandId::StepProperty(_) => requires(
+            super::properties::discovery::step_target(app).is_some(),
+            "Select a plot whose series draws contours before stepping its lowest level.",
+        ),
         CommandId::Tool(tool) if tool.is_data_tool() => requires(
             dataset().is_some(),
             "Select a dataset before using this data tool.",
@@ -618,6 +647,12 @@ fn ribbon_placement(id: CommandId) -> Option<RibbonPlacement> {
         CommandId::Tool(
             Tool::Text | Tool::PanelLabel | Tool::Rect | Tool::Ellipse | Tool::Line | Tool::Arrow,
         ) => (Arrange, "Annotate", 3, Always),
+        // The group's own declaration decides where it lands, so a new group
+        // needs no arm here.
+        CommandId::PropertyGroup(section) => {
+            let spot = super::properties::discovery::group(section)?.ribbon;
+            (spot.tab, spot.group, spot.priority, Always)
+        }
         _ => return None,
     };
     Some(RibbonPlacement {

@@ -57,12 +57,21 @@ the cursor, or on the board when the cursor is over empty space.
 | `Ctrl` + `G` | Group the selected objects |
 | `Ctrl` + `Shift` + `G` | Ungroup |
 | `Delete` or `Backspace` | Delete the selected annotation objects; in the Peaks and Integrate tools, delete the selected peak or region |
+| `+` (or `=`) / `-` | Raise / lower the lowest contour level of the selected plot |
 | `F2` | Rename the selected dataset or canvas |
 | `Esc` | Cancel the active drag; further presses clear the Analysis Range and selections one at a time, then leave the active tool |
 | `Ctrl` + `C` | Copy the selected frame (or the active canvas) to the clipboard as bitmap + vector |
 | `Ctrl` + `Shift` + `V` | Paste a delimited table (comma, tab, or semicolon) from the clipboard as a new data table |
 | `Ctrl` + `,` | Open Preferences |
 | `Ctrl` + `K` or `Ctrl` + `Shift` + `P` | Open the [command palette](/reference/command-palette/) |
+
+`+` and `-` act on the plot you have selected, or on the active plot when
+nothing is selected, and only when it draws contours. Each press moves the
+lowest level by one rung of that plot's own level ratio, so one press adds or
+removes roughly one contour ring whatever the intensity scale. The current
+lowest level is shown in the top-right corner of the plot while the keys apply.
+See [Contour levels](/guides/contour-levels/). Holding `Ctrl` changes the UI
+scale instead.
 
 While editing a board note: `Enter` commits, `Shift` + `Enter` inserts a
 newline, `Esc` cancels.

@@ -1,5 +1,6 @@
 use super::{
     Dataset, DatasetId, FieldId, PresentationProfile, RequestedChart, SeriesId, default_encoding,
+    field_peak_magnitude,
 };
 use plotx_figure::Color;
 
@@ -42,6 +43,7 @@ impl SeriesBinding {
                 &descriptor.metadata,
                 RequestedChart::Auto,
                 &PresentationProfile::default(),
+                &|| field_peak_magnitude(dataset, field),
             ),
         })
     }
