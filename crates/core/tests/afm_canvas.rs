@@ -134,20 +134,33 @@ fn map_and_force_gui_insertion_builds_side_by_side_plots() {
 
 #[test]
 fn afm_scalar_field_can_render_a_contour_without_a_domain_chart_branch() {
-    let app = insert(afm_dataset(true));
-    let CanvasObjectKind::Plot(map) = &app.doc.canvases[0].objects[0].kind else {
-        panic!("expected AFM map plot");
+    let mut app = insert(afm_dataset(true));
+    let (mut binding, chart, size) = {
+        let CanvasObjectKind::Plot(map) = &app.doc.canvases[0].objects[0].kind else {
+            panic!("expected AFM map plot");
+        };
+        (
+            map.binding.clone(),
+            map.chart.clone(),
+            app.doc.canvases[0].size_mm,
+        )
     };
-    let mut binding = map.binding.clone();
     binding.series[0].encoding = SeriesEncoding::Contour(
         ContourSpec::absolute(1.5, false).expect("positive literal contour base"),
     );
-    let figure = app.build_binding_figure(
-        &binding,
-        &map.chart,
-        &StackSpec::default(),
-        app.doc.canvases[0].size_mm,
+    let initial = app.build_binding_figure(&binding, &chart, &StackSpec::default(), size);
+    assert!(
+        initial.contours.is_empty(),
+        "geometry is queued, never built inline"
     );
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    while app.compute_busy() && std::time::Instant::now() < deadline {
+        app.poll_compute();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    app.poll_compute();
+    let figure = app.build_binding_figure(&binding, &chart, &StackSpec::default(), size);
     assert!(!figure.contours.is_empty());
     assert!(!figure.contours[0].segments.is_empty());
 }

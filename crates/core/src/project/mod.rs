@@ -439,6 +439,15 @@ pub fn load_project(path: &Path) -> Result<PlotxApp> {
         })?);
         let di = app.doc.datasets.len();
         app.doc.datasets.push(dataset);
+        app.session
+            .compute
+            .register_loaded_dataset_fields(&app.doc.datasets[di])
+            .map_err(|error| {
+                ProjectError::Invalid(format!(
+                    "could not allocate runtime field versions for dataset {}: {error:?}",
+                    binding.data
+                ))
+            })?;
         recipe_to_dataset.insert(binding.recipe.clone(), di);
         data_to_dataset.insert(binding.data.clone(), di);
     }

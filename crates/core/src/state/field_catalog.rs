@@ -1,5 +1,6 @@
-use super::FieldId;
+use super::{FieldAlgorithmProvenance, FieldId, FieldProvenance};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -10,6 +11,9 @@ use std::sync::Arc;
 pub struct FieldCatalog {
     next_id: u64,
     key_to_id: BTreeMap<String, FieldId>,
+    /// Persisted source and algorithm provenance for each stable child field.
+    /// Runtime `FieldVersion` deliberately does not live here.
+    provenance: BTreeMap<FieldId, FieldProvenance>,
 }
 
 impl FieldCatalog {
@@ -17,6 +21,7 @@ impl FieldCatalog {
         let mut catalog = Self {
             next_id: 0,
             key_to_id: BTreeMap::new(),
+            provenance: BTreeMap::new(),
         };
         for key in keys {
             catalog.allocate(key);
@@ -26,6 +31,39 @@ impl FieldCatalog {
 
     pub fn id_for_key(&self, key: &str) -> Option<FieldId> {
         self.key_to_id.get(key).copied()
+    }
+
+    pub(crate) fn provenance_for(&self, id: FieldId) -> Option<&FieldProvenance> {
+        self.provenance.get(&id)
+    }
+
+    /// Record source identity and implementation identity independently of the
+    /// session-only runtime version. The catalog itself is already persisted in
+    /// each project's `plotx.fields` data extension.
+    pub(crate) fn attach_provenance(
+        &mut self,
+        source: &str,
+        algorithm: Option<FieldAlgorithmProvenance>,
+    ) {
+        for id in self.key_to_id.values().copied() {
+            self.provenance
+                .insert(id, Self::make_provenance(source, id, algorithm.clone()));
+        }
+    }
+
+    pub(crate) fn make_provenance(
+        source: &str,
+        id: FieldId,
+        algorithm: Option<FieldAlgorithmProvenance>,
+    ) -> FieldProvenance {
+        let mut digest = Sha256::new();
+        digest.update(source.as_bytes());
+        digest.update(id.get().to_le_bytes());
+        FieldProvenance {
+            source_fingerprint: Some(format!("{:x}", digest.finalize())),
+            algorithm,
+            metadata: BTreeMap::new(),
+        }
     }
 
     fn allocate(&mut self, key: String) {
@@ -60,6 +98,11 @@ impl FieldCatalog {
         if self.next_id < minimum_next {
             return Err("field catalog allocator would reuse an existing identity".to_owned());
         }
+        if self.provenance.len() != self.key_to_id.len()
+            || !ids.iter().all(|id| self.provenance.contains_key(id))
+        {
+            return Err("field catalog does not carry provenance for every field".to_owned());
+        }
         Ok(())
     }
 }
@@ -83,7 +126,9 @@ pub(crate) fn table_field_catalog() -> FieldCatalog {
 #[cfg(test)]
 pub(crate) fn afm_field_catalog(data: &plotx_io::AfmData) -> FieldCatalog {
     let image_keys = afm_channel_keys(data);
-    afm_field_catalog_for_keys(data, &image_keys)
+    let mut catalog = afm_field_catalog_for_keys(data, &image_keys);
+    catalog.attach_provenance(&data.source, None);
+    catalog
 }
 
 pub(crate) fn afm_channel_keys(data: &plotx_io::AfmData) -> Arc<[String]> {
@@ -229,4 +274,34 @@ pub(crate) fn reset_afm_channel_key_computations() {
 #[cfg(test)]
 pub(crate) fn afm_channel_key_computations() -> usize {
     AFM_CHANNEL_KEY_COMPUTATIONS.with(std::cell::Cell::get)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn field_provenance_round_trips_with_the_persisted_catalog() {
+        let mut catalog = FieldCatalog::for_keys(["grid".to_owned()]);
+        catalog.attach_provenance(
+            "source.raw",
+            Some(FieldAlgorithmProvenance {
+                algorithm: "process_2d".to_owned(),
+                version: 1,
+            }),
+        );
+        let encoded = serde_json::to_value(&catalog).unwrap();
+        let decoded: FieldCatalog = serde_json::from_value(encoded).unwrap();
+        let provenance = decoded
+            .provenance_for(FieldId::new(0))
+            .expect("a catalog field keeps provenance");
+        assert!(provenance.source_fingerprint.is_some());
+        assert_eq!(
+            provenance.algorithm,
+            Some(FieldAlgorithmProvenance {
+                algorithm: "process_2d".to_owned(),
+                version: 1,
+            })
+        );
+    }
 }

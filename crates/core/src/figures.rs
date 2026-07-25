@@ -39,23 +39,10 @@ pub fn apply_peak_labels(mut fig: Figure, peaks: &[ResolvedPeak]) -> Figure {
     fig
 }
 
-/// Build a contour figure from a processed true-2D spectrum. F2 (direct) is the
-/// x-axis with high ppm on the left; F1 (indirect) is the y-axis with high ppm
-/// at the bottom (low ppm at the top) — the standard 2D NMR orientation.
-pub fn build_figure_2d(spec: &Spectrum2D, preset: Preset2D, contour: &ContourSpec) -> Figure {
-    build_figure_2d_cancellable(spec, preset, contour, &|| false)
-        .expect("non-cancelling contour figure")
-}
-
-pub fn build_figure_2d_cancellable(
-    spec: &Spectrum2D,
-    preset: Preset2D,
-    contour: &ContourSpec,
-    cancelled: &impl Fn() -> bool,
-) -> Option<Figure> {
-    if cancelled() {
-        return None;
-    }
+/// Build the non-geometric shell of a processed true-2D figure. Contour
+/// geometry is supplied later by the versioned field cache; this convenience
+/// builder intentionally never runs marching squares on the caller's thread.
+pub fn build_figure_2d(spec: &Spectrum2D, preset: Preset2D) -> Figure {
     let (f2_lo, f2_hi) = spec.f2_bounds();
     let (f1_lo, f1_hi) = spec.f1_bounds();
     let x = Axis::new(axis_label(&spec.direct.nucleus), f2_lo, f2_hi).reversed(true);
@@ -65,114 +52,12 @@ pub fn build_figure_2d_cancellable(
         .with_axis_frame(AxisFrame::Box);
     // Homonuclear spectra share a nucleus/range on both axes; render them square.
     fig.lock_aspect = preset.homonuclear();
-
-    if spec.f2_size >= 2 && spec.f1_size >= 2 {
-        let z = spec.real();
-        // Grid columns run low→high ppm (index 0 = f2_ppm[0]); rows likewise.
-        let bounds = [
-            spec.f2_ppm[0],
-            spec.f2_ppm[spec.f2_size - 1],
-            spec.f1_ppm[0],
-            spec.f1_ppm[spec.f1_size - 1],
-        ];
-        let positive = contour_levels(&z, spec.f1_size, spec.f2_size, &contour.positive, false);
-        let segments = if positive.is_empty() {
-            Vec::new()
-        } else {
-            contour_segments(&z, spec.f1_size, spec.f2_size, bounds, &positive, cancelled)?
-        };
-        if !segments.is_empty() {
-            fig = fig.with_contour(Contour {
-                segments,
-                color: contour.style.positive_color.resolve(),
-                width: contour.style.width.get(),
-            });
-        }
-        if let Some(negative) = contour.negative.as_ref() {
-            let levels = contour_levels(&z, spec.f1_size, spec.f2_size, negative, true);
-            let segments = if levels.is_empty() {
-                Vec::new()
-            } else {
-                contour_segments(&z, spec.f1_size, spec.f2_size, bounds, &levels, cancelled)?
-            };
-            if !segments.is_empty() {
-                fig = fig.with_contour(Contour {
-                    segments,
-                    color: contour.style.negative_color.resolve(),
-                    width: contour.style.width.get(),
-                });
-            }
-        }
-    }
-    Some(fig)
+    fig
 }
 
-fn contour_segments(
-    values: &[f32],
-    rows: usize,
-    cols: usize,
-    bounds: [f64; 4],
-    levels: &[f64],
-    cancelled: &impl Fn() -> bool,
-) -> Option<Vec<[[f64; 2]; 2]>> {
-    plotx_render::contour::segments_cancellable(
-        values, rows, cols, bounds[0], bounds[1], bounds[2], bounds[3], levels, cancelled,
-    )
-}
-
-pub(crate) fn scalar_contour_overlays(
-    values: &[f32],
-    rows: usize,
-    cols: usize,
-    bounds: [f64; 4],
-    contour: &ContourSpec,
-) -> Vec<Contour> {
-    scalar_contour_overlays_cancellable(values, rows, cols, bounds, contour, &|| false)
-        .unwrap_or_default()
-}
-
-pub(crate) fn scalar_contour_overlays_cancellable(
-    values: &[f32],
-    rows: usize,
-    cols: usize,
-    bounds: [f64; 4],
-    contour: &ContourSpec,
-    cancelled: &impl Fn() -> bool,
-) -> Option<Vec<Contour>> {
-    if cancelled() {
-        return None;
-    }
-    let mut overlays = Vec::new();
-    let positive = contour_levels(values, rows, cols, &contour.positive, false);
-    if !positive.is_empty() {
-        let segments = contour_segments(values, rows, cols, bounds, &positive, cancelled)?;
-        if !segments.is_empty() {
-            overlays.push(Contour {
-                segments,
-                color: contour.style.positive_color.resolve(),
-                width: contour.style.width.get(),
-            });
-        }
-    }
-    if let Some(negative) = contour.negative.as_ref() {
-        let levels = contour_levels(values, rows, cols, negative, true);
-        if !levels.is_empty() {
-            let segments = contour_segments(values, rows, cols, bounds, &levels, cancelled)?;
-            if !segments.is_empty() {
-                overlays.push(Contour {
-                    segments,
-                    color: contour.style.negative_color.resolve(),
-                    width: contour.style.width.get(),
-                });
-            }
-        }
-    }
-    Some(overlays)
-}
-
-/// Resolve a level policy directly for the current model-layer renderer. The
-/// phase-4 cache/job split will memoize estimates; this pure calculation keeps
-/// policy state out of marching squares in the meantime.
+/// Resolve levels for the existing DOSY/ILT analysis-map workers. Ordinary
+/// `FieldPayload::ScalarGrid2D` contours use the versioned field resolver and
+/// never reach this legacy analysis-only helper on the UI thread.
 fn contour_levels(
     values: &[f32],
     rows: usize,
@@ -191,7 +76,7 @@ fn contour_levels(
     if peak <= 0.0 {
         return Vec::new();
     }
-    let mut base = match &level.base {
+    let base = match &level.base {
         ContourBasePolicy::Absolute(value) => value.get(),
         ContourBasePolicy::NoiseSigma { multiplier, .. } => {
             robust_difference_mad(values, rows, cols) * multiplier.get()
@@ -204,37 +89,12 @@ fn contour_levels(
             minimum + fraction.get() * (maximum - minimum)
         }
     };
-    if level.count == 1 {
-        // One level always means one visible, interior contour. A policy at the
-        // exact peak has no crossing, so degenerate estimates resolve halfway
-        // to the signed peak rather than silently yielding an empty figure.
-        if !base.is_finite() || base <= 0.0 || base >= peak {
-            base = peak / 2.0;
-        }
-        return (base > 0.0 && base < peak)
-            .then_some(if negative { -base } else { base })
-            .into_iter()
-            .collect();
-    }
-    if !base.is_finite() || base <= 0.0 || base >= peak {
-        // A perfectly synthetic/noiseless grid has a zero MAD estimate. Use
-        // the user-selected ladder span rather than restoring a hidden peak
-        // fraction, so the concrete `ContourLevelSpec` still controls output.
-        base = peak
-            / level
-                .ratio
-                .get()
-                .powi(i32::from(level.count.saturating_sub(1)));
-    }
-    if !base.is_finite() || base <= 0.0 || base >= peak {
-        return Vec::new();
-    }
-    let levels = plotx_render::contour::geometric_levels(
-        base,
-        peak,
-        usize::from(level.count),
-        level.ratio.get(),
-    );
+    // The ladder — including which policies may be rewritten when their base is
+    // unusable — is shared with the versioned field resolver, and works purely
+    // in positive magnitudes; this half applies its own sign afterwards. These
+    // analysis maps are `FractionOfRange` (see `bounded_scalar_contour_spec`),
+    // so they never carry an explicit threshold for the ladder to report on.
+    let levels = crate::contour_ladder::contour_level_ladder(base, peak, level).levels;
     if negative {
         levels.into_iter().map(|value| -value).collect()
     } else {
@@ -387,6 +247,8 @@ pub fn build_dosy_figure_cancellable(
     let levels = contour_levels(&grid, NY, NX, &contour.positive, false);
     if !levels.is_empty() {
         // Grid rows map onto [logd_lo, logd_hi], cols onto [ppm_lo, ppm_hi].
+        #[cfg(test)]
+        crate::contour_probe::record_marching_squares();
         let segments = plotx_render::contour::segments_cancellable(
             &grid, NY, NX, ppm_lo, ppm_hi, logd_lo, logd_hi, &levels, cancelled,
         )?;
@@ -458,6 +320,8 @@ pub fn build_ilt_figure_cancellable(
     let contour = bounded_scalar_contour_spec();
     let levels = contour_levels(&grid, ny, nx, &contour.positive, false);
     if !levels.is_empty() {
+        #[cfg(test)]
+        crate::contour_probe::record_marching_squares();
         let segments = plotx_render::contour::segments_cancellable(
             &grid,
             ny,
@@ -486,9 +350,130 @@ fn bounded_scalar_contour_spec() -> ContourSpec {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::{
+        ContourResolution, DatasetId, EstimateProvenance, EstimateResult, EstimatedScale, FieldId,
+        FieldRef, FieldSummary, FieldVersion, FiniteF64, ScaleEstimate, VersionedFieldRef,
+        resolve_contour_levels,
+    };
     use num_complex::Complex64;
+    use plotx_figure::ContourStyle;
     use plotx_processing::AxisMeta;
     use plotx_render::{Margins, Projector, Rect};
+
+    /// A tilted plane: every first difference is identical, so its robust MAD is
+    /// exactly zero — the degenerate estimate an ideal noiseless grid produces.
+    fn planar_values() -> Vec<f32> {
+        (0..4u8)
+            .flat_map(|row| (0..4u8).map(move |col| 1.0 + f32::from(row) + f32::from(col)))
+            .collect()
+    }
+
+    /// Resolve the same positive half through both contour paths: the legacy
+    /// analysis-map helper, and the versioned field resolver fed the degenerate
+    /// estimate its worker would produce for these values.
+    fn both_paths(values: &[f32], level: &ContourLevelSpec) -> (Vec<f64>, Vec<f64>) {
+        let legacy = contour_levels(values, 4, 4, level, false);
+        let (minimum, maximum) = finite_range(values).expect("fixture values are finite");
+        let spec = ContourSpec {
+            positive: level.clone(),
+            negative: None,
+            style: ContourStyle::default(),
+        };
+        let source = VersionedFieldRef {
+            field: FieldRef {
+                resource: DatasetId::from_uuid(uuid::Uuid::from_u128(77)),
+                field: FieldId::new(0),
+            },
+            version: FieldVersion(1),
+        };
+        let summary = FieldSummary {
+            min: FiniteF64::new(minimum).expect("finite"),
+            max: FiniteF64::new(maximum).expect("finite"),
+        };
+        let resolution = resolve_contour_levels(source, &spec, summary, |_| {
+            Some(EstimateResult::Scale(ScaleEstimate {
+                scale: EstimatedScale::Degenerate,
+                provenance: EstimateProvenance {
+                    estimator: plotx_analysis::robust::ROBUST_DIFFERENCE_MAD_ID.to_owned(),
+                    version: plotx_analysis::robust::ROBUST_DIFFERENCE_MAD_VERSION,
+                },
+            }))
+        });
+        let ContourResolution::Ready {
+            levels: resolved, ..
+        } = resolution
+        else {
+            panic!("the estimate is supplied, so resolution is not pending");
+        };
+        (
+            legacy,
+            resolved.positive.iter().map(|level| level.get()).collect(),
+        )
+    }
+
+    fn noise_sigma_level(count: u16) -> ContourLevelSpec {
+        ContourLevelSpec {
+            base: ContourBasePolicy::NoiseSigma {
+                multiplier: plotx_figure::PositiveFiniteF64::new(5.0).unwrap(),
+                estimator: plotx_figure::EstimatorSelection::FollowLatest,
+            },
+            count,
+            ratio: plotx_figure::PositiveFiniteF64::new(1.5).unwrap(),
+        }
+    }
+
+    // The whole point of extracting `contour_ladder`: there is one policy for
+    // what an unusable base means, so the legacy ILT/DOSY path and the versioned
+    // field resolver cannot drift apart before ILT/DOSY move onto
+    // `FieldId`/`FieldVersion`.
+    #[test]
+    fn degenerate_bases_resolve_identically_on_both_contour_paths() {
+        let planar = planar_values();
+
+        // One level, degenerate (zero) base.
+        let (legacy, resolved) = both_paths(&planar, &noise_sigma_level(1));
+        assert_eq!(legacy, resolved);
+        assert_eq!(legacy.len(), 1);
+
+        // A ladder of levels, degenerate (zero) base.
+        let (legacy, resolved) = both_paths(&planar, &noise_sigma_level(5));
+        assert_eq!(legacy, resolved);
+        assert!(!legacy.is_empty());
+
+        // An explicit threshold beyond the peak has no crossing, and is obeyed
+        // literally rather than rewritten — on both paths alike.
+        let above_peak = ContourLevelSpec {
+            base: ContourBasePolicy::Absolute(
+                plotx_figure::PositiveFiniteF64::new(1_000.0).unwrap(),
+            ),
+            count: 4,
+            ratio: plotx_figure::PositiveFiniteF64::new(1.5).unwrap(),
+        };
+        let (legacy, resolved) = both_paths(&planar, &above_peak);
+        assert_eq!(legacy, resolved);
+        assert!(legacy.is_empty());
+    }
+
+    #[test]
+    fn one_level_specs_draw_exactly_one_level_on_both_paths() {
+        let planar = planar_values();
+        // A usable base stays exactly where the user put it.
+        let usable = ContourLevelSpec {
+            base: ContourBasePolicy::Absolute(plotx_figure::PositiveFiniteF64::new(2.0).unwrap()),
+            count: 1,
+            ratio: plotx_figure::PositiveFiniteF64::new(1.5).unwrap(),
+        };
+        let (legacy, resolved) = both_paths(&planar, &usable);
+        assert_eq!(legacy, [2.0]);
+        assert_eq!(resolved, [2.0]);
+
+        // A degenerate one resolves halfway to the peak, on both paths.
+        let (legacy, resolved) = both_paths(&planar, &noise_sigma_level(1));
+        assert_eq!(legacy.len(), 1);
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(legacy, [7.0 / 2.0]);
+        assert_eq!(resolved, [7.0 / 2.0]);
+    }
 
     fn spectrum_2d() -> Spectrum2D {
         let f2_ppm = vec![0.0, 1.0, 2.0, 3.0];
@@ -518,11 +503,7 @@ mod tests {
     // share the projector, so a wrong flip is invisible in preview).
     #[test]
     fn contour_places_low_f1_ppm_near_the_top() {
-        let fig = build_figure_2d(
-            &spectrum_2d(),
-            Preset2D::Hsqc,
-            &bounded_scalar_contour_spec(),
-        );
+        let fig = build_figure_2d(&spectrum_2d(), Preset2D::Hsqc);
         assert_eq!(fig.axis_frame, AxisFrame::Box);
         let proj = Projector::new(&fig, Rect::new(0.0, 0.0, 400.0, 300.0), &Margins::default());
         let (_, py_low_ppm) = proj.project([1.5, 0.0]);
@@ -531,6 +512,35 @@ mod tests {
         assert!(
             py_low_ppm < py_high_ppm,
             "low F1 ppm ({py_low_ppm}) should sit above high F1 ppm ({py_high_ppm})"
+        );
+    }
+
+    // Positive control for the marching-squares probe. Every "no synchronous
+    // contour build" assertion elsewhere reads zero from the same counter, so
+    // that counter must be shown to move at least once: this test fails the
+    // moment an increment is dropped from a call site.
+    //
+    // It also pins the remaining synchronous path: ILT/DOSY analysis maps still
+    // contour on the caller's thread and have not been moved onto the versioned
+    // field cache.
+    #[test]
+    fn ilt_figure_runs_marching_squares_on_the_calling_thread() {
+        crate::contour_probe::reset();
+        let result = IltResult {
+            ppm: vec![0.0, 1.0, 2.0, 3.0],
+            d_grid: vec![1.0e-10, 2.0e-10, 4.0e-10, 8.0e-10],
+            amp: vec![vec![0.0, 0.5, 1.0, 0.5]; 4],
+        };
+
+        let figure = build_ilt_figure(&result, "1H", "probe");
+
+        assert!(
+            !figure.contours.is_empty(),
+            "the fixture must actually reach contour extraction"
+        );
+        assert!(
+            crate::contour_probe::marching_squares_on_this_thread() > 0,
+            "the marching-squares probe must observe a build on the calling thread"
         );
     }
 
@@ -583,6 +593,46 @@ mod tests {
         };
         assert_eq!(contour_levels(&[-40.0, -5.0], 1, 2, &level, true), [-10.0]);
         assert!(contour_levels(&[-40.0, -5.0], 1, 2, &level, false).is_empty());
+
+        // The shared ladder speaks only in positive magnitudes, so each path
+        // must still apply its own half's sign. The versioned resolver agrees.
+        let spec = ContourSpec {
+            positive: level.clone(),
+            negative: Some(level),
+            style: ContourStyle::default(),
+        };
+        let source = VersionedFieldRef {
+            field: FieldRef {
+                resource: DatasetId::from_uuid(uuid::Uuid::from_u128(78)),
+                field: FieldId::new(0),
+            },
+            version: FieldVersion(1),
+        };
+        let summary = FieldSummary {
+            min: FiniteF64::new(-40.0).expect("finite"),
+            max: FiniteF64::new(-5.0).expect("finite"),
+        };
+        let ContourResolution::Ready {
+            levels: resolved,
+            unreachable,
+        } = resolve_contour_levels(source, &spec, summary, |_| None)
+        else {
+            panic!("an absolute contour needs no estimate");
+        };
+        assert!(
+            unreachable.is_empty(),
+            "an all-negative field has no positive signal at all; that is the \
+             field's shape, not a mistyped threshold"
+        );
+        assert_eq!(
+            resolved
+                .negative
+                .iter()
+                .map(|level| level.get())
+                .collect::<Vec<_>>(),
+            [-10.0]
+        );
+        assert!(resolved.positive.is_empty());
     }
 
     #[test]

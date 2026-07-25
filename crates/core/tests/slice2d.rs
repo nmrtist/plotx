@@ -2,10 +2,13 @@
 //! SVG export. No files needed.
 
 use num_complex::Complex64;
-use plotx_core::{build_figure_2d, build_stack_figure};
+use plotx_core::build_stack_figure;
+use plotx_core::state::{CanvasDocument, Dataset, Nmr2DDataset, ObjectFrame, PlotxApp};
 use plotx_io::{Dim, Domain, NmrData2D, QuadMode};
 use plotx_processing::{Layout2D, Params2D, Preset2D, Processed2D, process_2d, recommend_preset};
 use std::f64::consts::TAU;
+use std::thread;
+use std::time::{Duration, Instant};
 
 fn dim(sw: f64, obs: f64, nucleus: &str) -> Dim {
     Dim {
@@ -90,15 +93,33 @@ fn contour_slice_places_peak_and_exports_svg() {
         spec.f1_ppm[br]
     );
 
-    let capabilities = plotx_core::state::FieldCapabilities::new([
-        plotx_core::automation::CapabilityId::new(
-            plotx_core::automation::CAP_FIELD_SCALAR_GRID_2D_REGULAR,
-        ),
-        plotx_core::automation::CapabilityId::new(plotx_core::automation::CAP_FIELD_SIGNED),
-        plotx_core::automation::CapabilityId::new(plotx_core::automation::CAP_FIELD_NOISE_SCALE),
-    ]);
-    let contour = plotx_core::state::default_contour_spec(&capabilities);
-    let fig = build_figure_2d(&spec, preset, &contour);
+    let mut app = PlotxApp::new();
+    app.doc
+        .datasets
+        .push(Dataset::Nmr2D(Box::new(Nmr2DDataset::load(data))));
+    let mut canvas = CanvasDocument::new("contour".to_owned(), [120.0, 80.0]);
+    let [width, height] = canvas.size_pt();
+    let object = app.build_plot_object(
+        0,
+        ObjectFrame::new(0.0, 0.0, width, height),
+        canvas.allocate_object_id(),
+        "Contour".to_owned(),
+    );
+    canvas.objects.push(object);
+    app.doc.canvases.push(canvas);
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while app.compute_busy() && Instant::now() < deadline {
+        app.poll_compute();
+        thread::sleep(Duration::from_millis(5));
+    }
+    app.poll_compute();
+    assert!(!app.compute_busy(), "contour jobs did not settle");
+    let fig = app.doc.canvases[0].objects[0]
+        .plot()
+        .unwrap()
+        .figure
+        .clone();
     assert!(!fig.contours.is_empty());
     assert!(!fig.contours[0].segments.is_empty());
 

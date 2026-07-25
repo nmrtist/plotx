@@ -99,7 +99,7 @@ impl PlotxApp {
     /// (resize, binding/chart/stack/projection edit, load) routes through, so the
     /// projections survive every rebuild.
     pub fn build_object_figure(
-        &self,
+        &mut self,
         binding: &DataBinding,
         chart: &ChartSpec,
         stack: &StackSpec,
@@ -186,7 +186,7 @@ impl PlotxApp {
     }
 
     pub fn build_plot_object(
-        &self,
+        &mut self,
         dataset: usize,
         frame: ObjectFrame,
         id: ObjectId,
@@ -199,11 +199,21 @@ impl PlotxApp {
             id,
             name,
         );
+        let Some((binding, chart, stack, projections, size_mm)) = object.plot().map(|plot| {
+            (
+                plot.binding.clone(),
+                plot.chart.clone(),
+                plot.stack,
+                plot.projections.clone(),
+                [frame.width / MM_TO_PT, frame.height / MM_TO_PT],
+            )
+        }) else {
+            return object;
+        };
+        let figure = self.build_object_figure(&binding, &chart, &stack, &projections, size_mm);
         if let Some(plot) = object.plot_mut() {
-            plot.figure.typography = self.doc.style_library.figure_typography;
-            if let Some(nmr) = self.doc.datasets[dataset].as_nmr() {
-                plot.figure.integral_curves = nmr.integral_curves();
-            }
+            plot.viewport = CanvasViewport::from_figure(&figure);
+            plot.figure = figure;
         }
         object
     }

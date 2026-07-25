@@ -1,4 +1,5 @@
-use super::{DatasetId, FieldCatalog, FieldId, electrophysiology_channel_key};
+use super::field_runtime::*;
+use super::{FieldCatalog, FieldId, electrophysiology_channel_key};
 use crate::automation::{
     CAP_FIELD_AFM_MAP, CAP_FIELD_BOUNDED, CAP_FIELD_COLORED_RASTER_2D, CAP_FIELD_CURVE_1D,
     CAP_FIELD_FORCE_CURVE, CAP_FIELD_LOCATION_SCALE, CAP_FIELD_NMR_CONTOUR, CAP_FIELD_NMR_SPECTRUM,
@@ -11,23 +12,29 @@ use plotx_figure::{
     UnitInterval,
 };
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
 
 impl super::Dataset {
     /// Describes the stable child fields a dataset currently exposes. This is a
     /// data adapter, not an encoding registry: callers decide applicability
     /// solely from the returned capabilities.
     pub fn field_descriptors(&self) -> Vec<FieldDescriptor> {
-        let curve = |extra: &[&str]| {
+        let capabilities = |id: FieldId, extra: &[&str]| {
+            // Capabilities are derived from the field's actual representation,
+            // never from its data domain — and via the cheap query, so a
+            // descriptor lookup on the UI thread costs O(rows + cols) rather
+            // than materializing the whole grid.
+            let intrinsic = self
+                .field_representation(id)
+                .map(FieldRepresentation::intrinsic_capabilities)
+                .unwrap_or_default();
             FieldCapabilities::new(
-                std::iter::once(CapabilityId::new(CAP_FIELD_CURVE_1D)).chain(
+                intrinsic.iter().cloned().chain(
                     extra
                         .iter()
                         .map(|capability| CapabilityId::new(*capability)),
                 ),
             )
         };
-        let scalar = |regular, extra: &[&str]| scalar_grid_capabilities(regular, extra);
         let descriptor =
             |id, local_id: &str, name: &str, capabilities, dimensions, units, recommended: &str| {
                 FieldDescriptor {
@@ -53,7 +60,7 @@ impl super::Dataset {
                         id,
                         "nmr.real",
                         "Real",
-                        curve(&[CAP_FIELD_NMR_SPECTRUM]),
+                        capabilities(id, &[CAP_FIELD_NMR_SPECTRUM]),
                         vec![nmr.spectrum.values.len()],
                         vec!["ppm".to_owned()],
                         "line",
@@ -66,8 +73,8 @@ impl super::Dataset {
                         id,
                         "nmr.real",
                         "Real",
-                        scalar(
-                            nmr_grid_is_regular(nmr),
+                        capabilities(
+                            id,
                             &[
                                 CAP_FIELD_SIGNED,
                                 CAP_FIELD_NOISE_SCALE,
@@ -84,7 +91,7 @@ impl super::Dataset {
                         id,
                         "nmr.magnitude",
                         "Magnitude",
-                        scalar(nmr_grid_is_regular(nmr), &[CAP_FIELD_BOUNDED]),
+                        capabilities(id, &[CAP_FIELD_BOUNDED]),
                         vec![nmr.data.rows, nmr.data.cols],
                         vec!["ppm".to_owned(), "ppm".to_owned()],
                         "heatmap",
@@ -103,7 +110,7 @@ impl super::Dataset {
                         id,
                         "nmr.stack",
                         "Stack",
-                        curve(&[CAP_FIELD_NMR_STACK]),
+                        capabilities(id, &[CAP_FIELD_NMR_STACK]),
                         vec![nmr.data.cols],
                         vec!["ppm".to_owned()],
                         "line",
@@ -125,7 +132,7 @@ impl super::Dataset {
                             id,
                             "table.default_series",
                             "Default series",
-                            curve(&[CAP_FIELD_TABLE]),
+                            capabilities(id, &[CAP_FIELD_TABLE]),
                             vec![row_count],
                             Vec::new(),
                             "line",
@@ -145,7 +152,7 @@ impl super::Dataset {
                         id,
                         &key,
                         &channel.name,
-                        curve(&[CAP_FIELD_SWEEP_COLLECTION]),
+                        capabilities(id, &[CAP_FIELD_SWEEP_COLLECTION]),
                         vec![recording.data.sweeps.len()],
                         vec![channel.unit.symbol.clone()],
                         "line",
@@ -164,8 +171,8 @@ impl super::Dataset {
                             id,
                             key,
                             &channel.name,
-                            scalar(
-                                true,
+                            capabilities(
+                                id,
                                 &[
                                     CAP_FIELD_LOCATION_SCALE,
                                     CAP_FIELD_BOUNDED,
@@ -185,7 +192,7 @@ impl super::Dataset {
                         id,
                         "afm.force_curve",
                         "Force curve",
-                        curve(&[CAP_FIELD_FORCE_CURVE]),
+                        capabilities(id, &[CAP_FIELD_FORCE_CURVE]),
                         vec![forces.samples_per_curve],
                         vec![forces.signal_scale.unit.clone()],
                         "line",
@@ -268,10 +275,26 @@ impl super::Dataset {
             },
             Self::Afm(afm) => match encoding {
                 SeriesEncoding::Line(_) => afm.force_figure(id),
-                SeriesEncoding::Contour(contour) => afm.contour_figure(id, contour),
+                SeriesEncoding::Contour(_) => afm.contour_base_figure(id),
                 SeriesEncoding::Heatmap(heatmap) => afm.map_figure(id, heatmap.colormap),
                 SeriesEncoding::Image(_) => None,
             },
+        }
+    }
+
+    /// Assemble cached contour geometry with this series' style. Geometry has
+    /// already been resolved and built independently, so style-only edits never
+    /// invoke marching squares.
+    pub(crate) fn contour_figure_from_geometry(
+        &self,
+        id: FieldId,
+        geometry: &ContourGeometry,
+        style: &ContourStyle,
+    ) -> Option<plotx_figure::Figure> {
+        match self {
+            Self::Nmr2D(nmr) => nmr.contour_figure_from_geometry(id, geometry, style),
+            Self::Afm(afm) => afm.contour_figure_from_geometry(id, geometry, style),
+            Self::Nmr(_) | Self::Table(_) | Self::Electrophysiology(_) => None,
         }
     }
 
@@ -283,7 +306,7 @@ impl super::Dataset {
         catalog.validate_for_keys(self.all_field_keys())
     }
 
-    fn field_catalog(&self) -> &FieldCatalog {
+    pub(super) fn field_catalog(&self) -> &FieldCatalog {
         match self {
             Self::Nmr(dataset) => &dataset.field_catalog,
             Self::Nmr2D(dataset) => &dataset.field_catalog,
@@ -337,158 +360,6 @@ pub fn scalar_grid_capabilities(regular: bool, extra: &[&str]) -> FieldCapabilit
                     .map(|capability| CapabilityId::new(*capability)),
             ),
     )
-}
-
-fn nmr_grid_is_regular(dataset: &super::Nmr2DDataset) -> bool {
-    let plotx_processing::Processed2D::Ft(spectrum) = &dataset.processed else {
-        return false;
-    };
-    axis_is_linear(&spectrum.f1_ppm) && axis_is_linear(&spectrum.f2_ppm)
-}
-
-pub(crate) fn axis_is_linear(values: &[f64]) -> bool {
-    let Some((&first, rest)) = values.split_first() else {
-        return false;
-    };
-    if rest.is_empty() {
-        return true;
-    }
-    let last = *rest.last().unwrap_or(&first);
-    let step = (last - first) / (values.len() - 1) as f64;
-    values.iter().enumerate().all(|(index, value)| {
-        let expected = first + step * index as f64;
-        (*value - expected).abs() <= 1e-9 * expected.abs().max(1.0)
-    })
-}
-
-/// A reference to a field child resource. It is a data source, never a plot
-/// component: contour properties remain addressed by the owning `SeriesId`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct FieldRef {
-    pub resource: DatasetId,
-    pub field: FieldId,
-}
-
-/// Runtime-only revision of immutable field data. It is purposefully separate
-/// from persisted field identity and is not part of the project format yet.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct FieldVersion(pub u64);
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct VersionedFieldRef {
-    pub field: FieldRef,
-    pub version: FieldVersion,
-}
-
-#[derive(Clone, Debug)]
-pub struct FieldSnapshot {
-    pub source: VersionedFieldRef,
-    pub payload: FieldPayload,
-    pub provenance: FieldProvenance,
-}
-
-/// Field payloads stay arity- and representation-specific. In particular, a
-/// colored raster has no scalar statistics and cannot reach contour resolution.
-#[derive(Clone, Debug)]
-pub enum FieldPayload {
-    ScalarGrid2D(ScalarGrid2D),
-    Curve1D(Curve1D),
-    ColoredRaster2D(ColoredRaster2D),
-}
-
-impl FieldPayload {
-    pub fn scalar_grid(&self) -> Option<&ScalarGrid2D> {
-        match self {
-            Self::ScalarGrid2D(grid) => Some(grid),
-            Self::Curve1D(_) | Self::ColoredRaster2D(_) => None,
-        }
-    }
-
-    pub fn summary(&self) -> Option<FieldSummary> {
-        self.scalar_grid().and_then(ScalarGrid2D::summary)
-    }
-
-    /// Capabilities implied by the concrete payload representation. Providers
-    /// may add semantic capabilities (signed, noise scale, units), but must not
-    /// claim a regular scalar grid for an explicitly sampled one.
-    pub fn intrinsic_capabilities(&self) -> FieldCapabilities {
-        match self {
-            Self::ScalarGrid2D(grid) if grid.is_regular() => scalar_grid_capabilities(true, &[]),
-            Self::ScalarGrid2D(_) => scalar_grid_capabilities(false, &[]),
-            Self::Curve1D(_) => FieldCapabilities::new([CapabilityId::new(CAP_FIELD_CURVE_1D)]),
-            Self::ColoredRaster2D(_) => {
-                FieldCapabilities::new([CapabilityId::new(CAP_FIELD_COLORED_RASTER_2D)])
-            }
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct ScalarGrid2D {
-    pub values: Arc<[f32]>,
-    pub rows: usize,
-    pub cols: usize,
-    pub x: AxisSampling,
-    pub y: AxisSampling,
-}
-
-impl ScalarGrid2D {
-    pub fn is_regular(&self) -> bool {
-        matches!(self.x, AxisSampling::Linear { .. })
-            && matches!(self.y, AxisSampling::Linear { .. })
-    }
-
-    pub fn summary(&self) -> Option<FieldSummary> {
-        let mut values = self
-            .values
-            .iter()
-            .copied()
-            .filter(|value| value.is_finite());
-        let first = values.next()? as f64;
-        let (min, max) = values.fold((first, first), |(min, max), value| {
-            let value = value as f64;
-            (min.min(value), max.max(value))
-        });
-        Some(FieldSummary { min, max })
-    }
-}
-
-#[derive(Clone, Debug)]
-pub enum AxisSampling {
-    Linear { start: f64, end: f64 },
-    Explicit(Arc<[f64]>),
-}
-
-#[derive(Clone, Debug)]
-pub struct Curve1D {
-    pub x: Arc<[f64]>,
-    pub values: Arc<[f32]>,
-}
-
-#[derive(Clone, Debug)]
-pub struct ColoredRaster2D {
-    pub pixels: Arc<[u8]>,
-    pub rows: usize,
-    pub cols: usize,
-    pub format: RasterFormat,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum RasterFormat {
-    Rgb8,
-    Rgba8,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
-pub struct FieldProvenance {
-    pub source_fingerprint: Option<String>,
-    pub metadata: BTreeMap<String, String>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct FieldSummary {
-    pub min: f64,
-    pub max: f64,
 }
 
 /// Stable child-resource metadata, including the capabilities used by encoding
@@ -633,19 +504,21 @@ pub fn default_encoding(
 }
 
 pub fn default_contour_spec(capabilities: &FieldCapabilities) -> ContourSpec {
-    let estimator = EstimatorSelection::Frozen {
-        estimator: "robust_difference_mad".to_owned(),
-        version: 1,
-    };
     let base = if capabilities.contains(CAP_FIELD_NOISE_SCALE) {
         ContourBasePolicy::NoiseSigma {
             multiplier: PositiveFiniteF64::new(5.0).expect("literal multiplier is valid"),
-            estimator,
+            estimator: EstimatorSelection::Frozen {
+                estimator: plotx_analysis::robust::ROBUST_DIFFERENCE_MAD_ID.to_owned(),
+                version: plotx_analysis::robust::ROBUST_DIFFERENCE_MAD_VERSION,
+            },
         }
     } else if capabilities.contains(CAP_FIELD_LOCATION_SCALE) {
         ContourBasePolicy::BackgroundScale {
             multiplier: PositiveFiniteF64::new(5.0).expect("literal multiplier is valid"),
-            estimator,
+            estimator: EstimatorSelection::Frozen {
+                estimator: plotx_analysis::robust::DEPLANED_LOCATION_SCALE_ID.to_owned(),
+                version: plotx_analysis::robust::DEPLANED_LOCATION_SCALE_VERSION,
+            },
         }
     } else if capabilities.contains(CAP_FIELD_BOUNDED) {
         ContourBasePolicy::FractionOfRange(

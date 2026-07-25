@@ -1,20 +1,7 @@
 use super::*;
-use plotx_figure::{Axis, AxisFrame, HeatmapGrid, HeatmapSpec, SeriesEncoding};
-
-#[cfg(test)]
-thread_local! {
-    static SYNCHRONOUS_CONTOUR_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-
-#[cfg(test)]
-pub(crate) fn reset_synchronous_contour_builds() {
-    SYNCHRONOUS_CONTOUR_BUILDS.with(|builds| builds.set(0));
-}
-
-#[cfg(test)]
-pub(crate) fn synchronous_contour_builds() -> usize {
-    SYNCHRONOUS_CONTOUR_BUILDS.with(std::cell::Cell::get)
-}
+use plotx_figure::{
+    Axis, AxisFrame, Contour, ContourStyle, HeatmapGrid, HeatmapSpec, SeriesEncoding,
+};
 
 impl Nmr2DDataset {
     pub fn figure(&self) -> Figure {
@@ -62,15 +49,8 @@ impl Nmr2DDataset {
             return None;
         };
         match (field.local_id.as_str(), encoding) {
-            ("nmr.real", SeriesEncoding::Contour(contour)) => {
-                let cached = default_contour_spec(&field.capabilities);
-                if *contour == cached {
-                    Some((*self.processed_figure).clone())
-                } else {
-                    #[cfg(test)]
-                    SYNCHRONOUS_CONTOUR_BUILDS.with(|builds| builds.set(builds.get() + 1));
-                    Some(crate::build_figure_2d(spectrum, self.preset, contour))
-                }
+            ("nmr.real", SeriesEncoding::Contour(_)) => {
+                Some(nmr_contour_base(spectrum, self.preset, "Real"))
             }
             ("nmr.real", SeriesEncoding::Heatmap(heatmap)) => Some(nmr_scalar_heatmap(
                 spectrum,
@@ -84,11 +64,34 @@ impl Nmr2DDataset {
                 "Magnitude",
                 heatmap,
             )),
-            ("nmr.magnitude", SeriesEncoding::Contour(contour)) => {
-                Some(nmr_magnitude_contour(spectrum, contour))
+            ("nmr.magnitude", SeriesEncoding::Contour(_)) => {
+                Some(nmr_contour_base(spectrum, self.preset, "Magnitude"))
             }
             _ => None,
         }
+    }
+
+    pub(crate) fn contour_figure_from_geometry(
+        &self,
+        field: FieldId,
+        geometry: &ContourGeometry,
+        style: &ContourStyle,
+    ) -> Option<Figure> {
+        let Processed2D::Ft(spectrum) = &self.processed else {
+            return None;
+        };
+        let name = if self.field_catalog.id_for_key("nmr.real") == Some(field) {
+            "Real"
+        } else if self.field_catalog.id_for_key("nmr.magnitude") == Some(field) {
+            "Magnitude"
+        } else {
+            return None;
+        };
+        Some(apply_contour_geometry(
+            nmr_contour_base(spectrum, self.preset, name),
+            geometry,
+            style,
+        ))
     }
 }
 
@@ -149,60 +152,47 @@ fn nmr_scalar_heatmap(
     figure
 }
 
-fn nmr_magnitude_contour(
+fn nmr_contour_base(
     spectrum: &plotx_processing::Spectrum2D,
-    contour: &plotx_figure::ContourSpec,
+    preset: Preset2D,
+    field_name: &str,
 ) -> Figure {
-    let mut figure = nmr_scalar_heatmap(
-        spectrum,
-        spectrum.magnitude(),
-        "Magnitude",
-        &HeatmapSpec::default(),
-    );
-    figure.heatmap = None;
-    figure.contours = crate::figures::scalar_contour_overlays(
-        &spectrum.magnitude(),
-        spectrum.f1_size,
-        spectrum.f2_size,
-        [
-            spectrum.f2_ppm.first().copied().unwrap_or(0.0),
-            spectrum.f2_ppm.last().copied().unwrap_or(0.0),
-            spectrum.f1_ppm.first().copied().unwrap_or(0.0),
-            spectrum.f1_ppm.last().copied().unwrap_or(0.0),
-        ],
-        contour,
-    );
+    let (x, y) = nmr_axes(spectrum);
+    let mut figure = Figure::new(
+        format!("{field_name} — {} — {}", preset.label(), spectrum.source),
+        x,
+        y,
+    )
+    .with_axis_frame(AxisFrame::Box);
+    figure.lock_aspect = preset.homonuclear();
+    figure
+}
+
+pub(crate) fn apply_contour_geometry(
+    mut figure: Figure,
+    geometry: &ContourGeometry,
+    style: &ContourStyle,
+) -> Figure {
+    if !geometry.positive.is_empty() {
+        figure.contours.push(Contour {
+            segments: geometry.positive.as_ref().to_vec(),
+            color: style.positive_color.resolve(),
+            width: style.width.get(),
+        });
+    }
+    if !geometry.negative.is_empty() {
+        figure.contours.push(Contour {
+            segments: geometry.negative.as_ref().to_vec(),
+            color: style.negative_color.resolve(),
+            width: style.width.get(),
+        });
+    }
     figure
 }
 
 pub(crate) fn build_processed_figure(processed: &Processed2D, preset: Preset2D) -> Figure {
-    build_processed_figure_cancellable(processed, preset, &|| false)
-        .expect("non-cancelling processed figure")
-}
-
-pub(crate) fn build_processed_figure_cancellable(
-    processed: &Processed2D,
-    preset: Preset2D,
-    cancelled: &impl Fn() -> bool,
-) -> Option<Figure> {
-    if cancelled() {
-        return None;
-    }
     match processed {
-        Processed2D::Ft(spectrum) => {
-            let capabilities = scalar_grid_capabilities(
-                axis_is_linear(&spectrum.f1_ppm) && axis_is_linear(&spectrum.f2_ppm),
-                &[
-                    crate::automation::CAP_FIELD_SIGNED,
-                    crate::automation::CAP_FIELD_NOISE_SCALE,
-                ],
-            );
-            let contour = default_contour_spec(&capabilities);
-            build_figure_2d_cancellable(spectrum, preset, &contour, cancelled)
-        }
-        Processed2D::Stack(stack) => {
-            let figure = build_stack_figure(stack);
-            (!cancelled()).then_some(figure)
-        }
+        Processed2D::Ft(spectrum) => nmr_contour_base(spectrum, preset, "Real"),
+        Processed2D::Stack(stack) => build_stack_figure(stack),
     }
 }

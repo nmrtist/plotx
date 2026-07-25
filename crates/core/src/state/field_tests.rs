@@ -1,5 +1,223 @@
 use super::*;
 use crate::state::{AfmDataset, Dataset, ElectrophysiologyDataset, Nmr2DDataset};
+use std::sync::Arc;
+
+/// Every field of every dataset variant must derive the same capabilities from
+/// the cheap `field_representation` query as from a fully materialized payload.
+///
+/// This is the guard against the debt this design exists to remove: a second,
+/// cheaper-but-separate capability criterion that silently drifts from the one
+/// the workers actually see. If a provider gains a field, it must answer both
+/// queries or this fails.
+fn assert_representation_matches_payload(dataset: &Dataset, label: &str) {
+    let mut ids = dataset
+        .field_descriptors()
+        .iter()
+        .map(|field| field.id)
+        .collect::<Vec<_>>();
+    assert!(!ids.is_empty(), "{label} exposes no field to compare");
+    // Allocated-but-inactive ids (`nmr.stack` on a true-2D dataset, say) must
+    // agree as well: a cheap query that answered for a field the payload
+    // refuses would advertise a capability no worker can ever satisfy.
+    ids.extend((0..6).map(FieldId::new));
+    ids.sort_unstable();
+    ids.dedup();
+
+    for id in ids {
+        let cheap = dataset.field_representation(id);
+        let payload = dataset.field_payload(id);
+        assert_eq!(
+            cheap.is_some(),
+            payload.is_some(),
+            "{label}: {id:?} is answered by only one of the two queries"
+        );
+        let (Some(cheap), Some(payload)) = (cheap, payload) else {
+            continue;
+        };
+        assert_eq!(
+            cheap,
+            payload.representation(),
+            "{label}: {id:?} representation drifted"
+        );
+        assert_eq!(
+            cheap.intrinsic_capabilities(),
+            payload.intrinsic_capabilities(),
+            "{label}: {id:?} capabilities drifted"
+        );
+    }
+}
+
+fn nmr2d_data(source: &str, pseudo: Option<plotx_io::PseudoAxis>) -> plotx_io::NmrData2D {
+    let dimension = |nucleus: &str| plotx_io::Dim {
+        spectral_width_hz: 4_000.0,
+        observe_freq_mhz: 400.0,
+        carrier_ppm: 0.0,
+        nucleus: nucleus.to_owned(),
+        group_delay: 0.0,
+    };
+    plotx_io::NmrData2D {
+        data: vec![num_complex::Complex64::new(1.0, 0.5); 16],
+        rows: 4,
+        cols: 4,
+        domain: plotx_io::Domain::Frequency,
+        direct: dimension("1H"),
+        indirect: dimension("13C"),
+        quad: plotx_io::QuadMode::Complex,
+        indirect_conjugate: false,
+        experiment: None,
+        pseudo_axis: pseudo,
+        diffusion: None,
+        nus: None,
+        source: source.to_owned(),
+    }
+}
+
+fn afm_dataset(scan_size_x: f64, raw: Vec<i32>, forces: bool) -> Dataset {
+    let channel = plotx_io::AfmImageChannel {
+        name: "Height".to_owned(),
+        width: 2,
+        height: 2,
+        scan_size_x,
+        scan_size_y: 3.0,
+        lateral_unit: "nm".to_owned(),
+        scale: plotx_io::AfmScale {
+            multiplier: 1.0,
+            offset: 0.0,
+            unit: "nm".to_owned(),
+        },
+        raw: Arc::from(raw),
+        frame_direction: plotx_io::AfmFrameDirection::Trace,
+    };
+    Dataset::Afm(Box::new(AfmDataset::load(plotx_io::AfmData {
+        images: vec![channel],
+        forces: forces.then(|| plotx_io::AfmForceSet {
+            grid_width: 1,
+            grid_height: 1,
+            samples_per_curve: 2,
+            raw: Arc::from(vec![0, 1]),
+            signal_scale: plotx_io::AfmScale {
+                multiplier: 1.0,
+                offset: 0.0,
+                unit: "V".to_owned(),
+            },
+            sample_period_s: None,
+            z_positions: None,
+            display_order: Arc::from(vec![0, 1]),
+            approach_samples: 1,
+            deflection_sensitivity_m_per_v: None,
+            spring_constant_n_per_m: None,
+        }),
+        source: "representation test".to_owned(),
+        import_warnings: Vec::new(),
+    })))
+}
+
+#[test]
+fn cheap_representation_matches_the_materialized_payload() {
+    let nmr_1d = Dataset::Nmr(Box::new(crate::state::NmrDataset::load(
+        plotx_io::NmrData {
+            points: vec![num_complex::Complex64::new(1.0, 0.0); 8],
+            domain: plotx_io::Domain::Frequency,
+            spectral_width_hz: 4_000.0,
+            observe_freq_mhz: 400.0,
+            carrier_ppm: 0.0,
+            nucleus: "1H".to_owned(),
+            source: "representation test".to_owned(),
+            group_delay: 0.0,
+        },
+    )));
+    assert_representation_matches_payload(&nmr_1d, "nmr 1d");
+
+    let nmr_2d = Dataset::Nmr2D(Box::new(Nmr2DDataset::load(nmr2d_data("true 2d", None))));
+    assert_representation_matches_payload(&nmr_2d, "nmr 2d");
+
+    let mut irregular = Dataset::Nmr2D(Box::new(Nmr2DDataset::load(nmr2d_data("explicit", None))));
+    let Dataset::Nmr2D(nmr) = &mut irregular else {
+        panic!("fixture is NMR 2D");
+    };
+    let plotx_processing::Processed2D::Ft(spectrum) = &mut nmr.processed else {
+        panic!("frequency-domain input produces a scalar grid");
+    };
+    Arc::make_mut(spectrum).f1_ppm[2] += 0.25;
+    assert_representation_matches_payload(&irregular, "nmr 2d, explicitly sampled");
+
+    let pseudo = Dataset::Nmr2D(Box::new(Nmr2DDataset::load(nmr2d_data(
+        "pseudo 2d",
+        Some(plotx_io::PseudoAxis {
+            name: "delay".to_owned(),
+            kind: plotx_io::PseudoKind::Delay,
+            values: vec![0.1, 0.2, 0.3, 0.4],
+            unit: "s".to_owned(),
+            source: plotx_io::AxisSource::EmbeddedList,
+        }),
+    ))));
+    assert!(
+        !matches!(&pseudo, Dataset::Nmr2D(nmr) if nmr.is_true_2d()),
+        "the pseudo-2D fixture must exercise the stack branch"
+    );
+    assert_representation_matches_payload(&pseudo, "nmr pseudo 2d");
+
+    let table = Dataset::Table(Box::new(
+        crate::state::materialized_float_series_table(
+            ("x".into(), "".into(), vec![Some(0.0), Some(1.0)]),
+            Vec::new(),
+            "plotx.test.representation-table.v1",
+        )
+        .expect("fixture table materializes"),
+    ));
+    assert_representation_matches_payload(&table, "table");
+
+    let recording = Dataset::Electrophysiology(Box::new(ElectrophysiologyDataset::load(
+        plotx_io::ElectrophysiologyData {
+            abf_version: "2.0".to_owned(),
+            sample_rate_hz: 10_000.0,
+            channels: vec![plotx_io::RecordedChannel {
+                name: "Response".to_owned(),
+                unit: plotx_io::ElectricalUnit {
+                    symbol: "mV".to_owned(),
+                    quantity: plotx_io::ElectricalQuantity::Voltage,
+                },
+            }],
+            sweeps: vec![plotx_io::Sweep {
+                start_time_s: 0.0,
+                channels: vec![vec![1.0, 2.0]],
+                commands: Vec::new(),
+            }],
+            protocol: None,
+            source: "representation test".to_owned(),
+            import_warnings: Vec::new(),
+        },
+    )));
+    assert_representation_matches_payload(&recording, "electrophysiology");
+
+    let afm = afm_dataset(2.0, vec![1, 2, 3, 4], true);
+    assert_representation_matches_payload(&afm, "afm");
+    assert!(
+        afm.field_descriptors()[0]
+            .capabilities
+            .contains(CAP_FIELD_SCALAR_GRID_2D_REGULAR)
+    );
+
+    // A non-finite scan size falls back to explicit sampling, and a buffer that
+    // does not match the declared shape is not a regular grid either. Both must
+    // be visible without materializing values.
+    let explicit_afm = afm_dataset(f64::NAN, vec![1, 2, 3, 4], false);
+    assert_representation_matches_payload(&explicit_afm, "afm, explicitly sampled");
+    assert!(
+        !explicit_afm.field_descriptors()[0]
+            .capabilities
+            .contains(CAP_FIELD_SCALAR_GRID_2D_REGULAR)
+    );
+
+    let malformed = afm_dataset(2.0, vec![1, 2, 3], false);
+    assert_representation_matches_payload(&malformed, "afm, malformed shape");
+    assert!(
+        !malformed.field_descriptors()[0]
+            .capabilities
+            .contains(CAP_FIELD_SCALAR_GRID_2D_REGULAR),
+        "a buffer that does not match rows x cols is never regular"
+    );
+}
 
 #[test]
 fn colored_raster_cannot_supply_scalar_statistics() {
@@ -356,7 +574,7 @@ fn magnitude_field_renders_magnitude_instead_of_falling_back_to_real() {
 }
 
 #[test]
-fn default_nmr_contour_uses_the_processed_figure_cache() {
+fn default_nmr_contour_never_builds_geometry_inline() {
     let dimension = |nucleus: &str| plotx_io::Dim {
         spectral_width_hz: 4_000.0,
         observe_freq_mhz: 400.0,
@@ -384,7 +602,7 @@ fn default_nmr_contour_uses_the_processed_figure_cache() {
         .into_iter()
         .find(|field| field.local_id == "nmr.real")
         .unwrap();
-    crate::state::datasets_2d_figure::reset_synchronous_contour_builds();
+    crate::contour_probe::reset();
     dataset
         .encoded_field_figure(
             real.id,
@@ -397,8 +615,8 @@ fn default_nmr_contour_uses_the_processed_figure_cache() {
         )
         .unwrap();
     assert_eq!(
-        crate::state::datasets_2d_figure::synchronous_contour_builds(),
+        crate::contour_probe::marching_squares_on_this_thread(),
         0,
-        "the default contour must clone the background-built processed figure"
+        "the default contour base must not run marching squares on its caller"
     );
 }

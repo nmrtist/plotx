@@ -41,7 +41,7 @@ fn stacked_binding_builds_distinctly_coloured_series_with_legend() {
 #[test]
 fn single_table_color_override_recolors_points_and_error_bars() {
     use crate::state::{ChartSpec, DataBinding, DataDomain, SeriesBinding, StackSpec};
-    let (app, _) = table_app_with_sigma(vec![0.1, 0.1, 0.1]);
+    let (mut app, _) = table_app_with_sigma(vec![0.1, 0.1, 0.1]);
     let color = plotx_figure::Color::rgb(0xaa, 0x22, 0x44);
     let mut series = SeriesBinding::from_dataset(&app.doc.datasets[0]).unwrap();
     series.set_primary_color(color);
@@ -65,7 +65,7 @@ fn single_table_color_override_recolors_points_and_error_bars() {
 #[test]
 fn single_table_color_override_recolors_bar_polygons() {
     use crate::state::{ChartSpec, DataBinding, SeriesBinding, StackSpec};
-    let (app, _) = table_app_with_sigma(vec![0.1, 0.1, 0.1]);
+    let (mut app, _) = table_app_with_sigma(vec![0.1, 0.1, 0.1]);
     let color = plotx_figure::Color::rgb(0xaa, 0x22, 0x44);
     let mut series = SeriesBinding::from_dataset(&app.doc.datasets[0]).unwrap();
     series.set_primary_color(color);

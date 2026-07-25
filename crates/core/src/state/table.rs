@@ -225,9 +225,11 @@ pub struct TableSeriesBinding {
 impl TableDataset {
     /// Construct a generic typed table with no implicit x/y assumptions.
     pub fn from_typed(typed_state: TypedTableState) -> Self {
+        let mut field_catalog = crate::state::table_field_catalog();
+        field_catalog.attach_provenance("table", None);
         Self {
             resource_id: new_resource_id(),
-            field_catalog: crate::state::table_field_catalog(),
+            field_catalog,
             provenance: None,
             meta: TableMeta::default(),
             curve_fit_analyses: Vec::new(),

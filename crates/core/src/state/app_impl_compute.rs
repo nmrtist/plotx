@@ -23,7 +23,30 @@ fn enqueue_error_status(error: EnqueueError) -> String {
     }
 }
 
+fn field_enqueue_error_status(error: FieldEnqueueError) -> String {
+    match error {
+        FieldEnqueueError::WorkersUnavailable => {
+            "Background contour computation is unavailable in this session.".into()
+        }
+        FieldEnqueueError::VersionExhausted => {
+            "Field runtime versions are exhausted; reopen PlotX to continue.".into()
+        }
+    }
+}
+
 impl PlotxApp {
+    /// Register the immutable fields that entered this session with runtime
+    /// versions before an action makes the dataset visible to rendering.
+    pub(crate) fn register_loaded_dataset_fields(&mut self, dataset: &Dataset) -> bool {
+        match self.session.compute.register_loaded_dataset_fields(dataset) {
+            Ok(()) => true,
+            Err(error) => {
+                self.session.status = field_enqueue_error_status(error);
+                false
+            }
+        }
+    }
+
     /// Async twin of `build_dosy_map_for`: same validation, but hand the heavy
     /// per-column diffusion fit to the compute worker instead of blocking the UI.
     pub fn request_dosy_map(&mut self, dataset: usize) {
@@ -220,24 +243,13 @@ impl PlotxApp {
                     }
                 }
                 Done::Processing2D {
-                    generation,
                     dataset,
-                    epoch,
                     base,
                     processed,
-                    figure,
+                    fields,
                     params,
+                    ..
                 } => {
-                    if epoch != self.session.dataset_epoch
-                        || (base.is_some()
-                            && !self.session.compute.is_current(
-                                dataset,
-                                ComputeKind::Processing2D,
-                                generation,
-                            ))
-                    {
-                        continue;
-                    }
                     let Some(dataset) = self.doc.dataset_index(dataset) else {
                         continue;
                     };
@@ -249,10 +261,10 @@ impl PlotxApp {
                     else {
                         continue;
                     };
-                    // Full results replace the cached base and therefore pass the
-                    // strict generation check above. A Reapply result has no base
-                    // to overwrite and may be shown while a newer recipe is queued;
-                    // single-flight execution prevents out-of-order rollback.
+                    // ComputeService emits only the active processing completion.
+                    // A Reapply result has no base to overwrite and may be shown
+                    // while a newer recipe is queued; single-flight execution
+                    // prevents out-of-order rollback.
                     // `params` may also lag `d2.params` for a paused edit, which is
                     // the intended display-trails-recipe contract.
                     if let Some(base) = base {
@@ -261,15 +273,90 @@ impl PlotxApp {
                         d2.base_stale = false;
                     }
                     d2.processed = processed;
-                    d2.processed_figure = figure;
+                    d2.processed_figure =
+                        std::sync::Arc::new(build_processed_figure(&d2.processed, d2.preset));
                     d2.dosy_map = None;
                     d2.ilt_map = None;
                     d2.dosy_figure = None;
                     d2.ilt_figure = None;
+                    for field in fields {
+                        self.session
+                            .compute
+                            .promote_field_version(field.source, field.summary);
+                    }
                     self.recompute_integrals_2d_after_processing(dataset);
                     self.rebuild_canvases_for(dataset);
                     self.doc.dirty = true;
                     self.session.status = "Updated 2D processing.".into();
+                }
+                Done::EstimateField { key, result } => {
+                    let dataset =
+                        self.doc
+                            .dataset_index(key.source.field.resource)
+                            .filter(|&index| {
+                                self.doc.datasets.get(index).is_some_and(|dataset| {
+                                    dataset.has_field(key.source.field.field)
+                                })
+                            });
+                    let current = dataset
+                        .and_then(|_| self.session.compute.current_field_version(key.source.field));
+                    if self.session.compute.finish_estimate(key, result, current)
+                        && let Some(dataset) = dataset
+                    {
+                        // The completed job only populated a content-addressed
+                        // cache. Rebuilding resolves each binding's current key;
+                        // it never writes a worker result into a plot directly.
+                        self.rebuild_canvases_for(dataset);
+                    }
+                }
+                Done::EstimateFieldFailed { key, message } => {
+                    let current = self
+                        .doc
+                        .dataset_index(key.source.field.resource)
+                        .filter(|&index| {
+                            self.doc
+                                .datasets
+                                .get(index)
+                                .is_some_and(|dataset| dataset.has_field(key.source.field.field))
+                        })
+                        .and_then(|_| self.session.compute.current_field_version(key.source.field));
+                    if current == Some(key.source.version) {
+                        self.session.status =
+                            format!("Field estimate could not be computed: {message}");
+                    }
+                }
+                Done::BuildContour { key, geometry } => {
+                    let dataset =
+                        self.doc
+                            .dataset_index(key.source.field.resource)
+                            .filter(|&index| {
+                                self.doc.datasets.get(index).is_some_and(|dataset| {
+                                    dataset.has_field(key.source.field.field)
+                                })
+                            });
+                    let current = dataset
+                        .and_then(|_| self.session.compute.current_field_version(key.source.field));
+                    if self.session.compute.finish_contour(key, geometry, current)
+                        && let Some(dataset) = dataset
+                    {
+                        self.rebuild_canvases_for(dataset);
+                    }
+                }
+                Done::BuildContourFailed { key, message } => {
+                    let current = self
+                        .doc
+                        .dataset_index(key.source.field.resource)
+                        .filter(|&index| {
+                            self.doc
+                                .datasets
+                                .get(index)
+                                .is_some_and(|dataset| dataset.has_field(key.source.field.field))
+                        })
+                        .and_then(|_| self.session.compute.current_field_version(key.source.field));
+                    if current == Some(key.source.version) {
+                        self.session.status =
+                            format!("Contour geometry could not be computed: {message}");
+                    }
                 }
                 Done::Cancelled { .. } => {}
                 Done::Failed { dataset, kind, .. } => {
@@ -311,24 +398,42 @@ impl PlotxApp {
             || d2.base_stale
             || plotx_processing::needs_retransform_2d(&d2.params, &d2.base_params);
         let params = d2.params.clone();
-        let preset = d2.preset;
         let dataset_id = d2.resource_id;
-        let aborted = if full {
+        let fields = [
+            d2.field_catalog
+                .id_for_key("nmr.real")
+                .map(|field| ProcessingField {
+                    field,
+                    component: ProcessedFieldComponent::Real,
+                }),
+            d2.field_catalog
+                .id_for_key("nmr.magnitude")
+                .map(|field| ProcessingField {
+                    field,
+                    component: ProcessedFieldComponent::Magnitude,
+                }),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+        let outcome = if full {
             self.session.compute.request_2d_full(
                 dataset_id,
-                self.session.dataset_epoch,
+                &fields,
                 std::sync::Arc::clone(&d2.data),
                 params,
-                preset,
             )
         } else {
-            self.session.compute.request_2d_reapply(
-                dataset_id,
-                self.session.dataset_epoch,
-                d2.base.clone(),
-                params,
-                preset,
-            )
+            self.session
+                .compute
+                .request_2d_reapply(dataset_id, &fields, d2.base.clone(), params)
+        };
+        let aborted = match outcome {
+            Ok(aborted) => aborted,
+            Err(error) => {
+                self.session.status = field_enqueue_error_status(error);
+                return false;
+            }
         };
         self.session.status = match aborted.first() {
             Some(kind) => format!(

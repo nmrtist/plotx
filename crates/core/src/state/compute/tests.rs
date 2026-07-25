@@ -1,7 +1,7 @@
 use super::*;
 use num_complex::Complex64;
 use plotx_io::{Dim, Domain, QuadMode};
-use plotx_processing::{PhaseParams, ProcessingStep, StepKind, process_2d};
+use plotx_processing::{PhaseParams, Preset2D, ProcessingStep, StepKind, process_2d};
 
 fn dataset(value: u128) -> DatasetId {
     DatasetId::from_uuid(uuid::Uuid::from_u128(value))
@@ -55,6 +55,19 @@ fn diffusion_meta() -> DiffusionMeta {
     }
 }
 
+fn processing_fields() -> [ProcessingField; 2] {
+    [
+        ProcessingField {
+            field: FieldId::new(0),
+            component: ProcessedFieldComponent::Real,
+        },
+        ProcessingField {
+            field: FieldId::new(1),
+            component: ProcessedFieldComponent::Magnitude,
+        },
+    ]
+}
+
 #[test]
 fn repeated_processing_requests_coalesce_to_latest_recipe() {
     let mut service = ComputeService::new();
@@ -67,8 +80,13 @@ fn repeated_processing_requests_coalesce_to_latest_recipe() {
         plotx_processing::StepSource::User,
     ));
 
-    service.request_2d_full(dataset(0), 4, data_2d(), first, preset);
-    service.request_2d_full(dataset(0), 4, data_2d(), latest.clone(), preset);
+    let fields = processing_fields();
+    service
+        .request_2d_full(dataset(0), &fields, data_2d(), first)
+        .unwrap();
+    service
+        .request_2d_full(dataset(0), &fields, data_2d(), latest.clone())
+        .unwrap();
     assert_eq!(service.deferred_processing.len(), 1);
 
     let deadline = Instant::now() + Duration::from_secs(2);
@@ -80,11 +98,22 @@ fn repeated_processing_requests_coalesce_to_latest_recipe() {
     completed.extend(service.try_drain());
     assert!(!service.is_busy());
     assert_eq!(completed.len(), 1);
-    let Done::Processing2D { params, epoch, .. } = &completed[0] else {
+    let Done::Processing2D {
+        fields,
+        params,
+        version,
+        ..
+    } = &completed[0]
+    else {
         panic!("expected processing result");
     };
     assert_eq!(params, &latest);
-    assert_eq!(*epoch, 4);
+    assert!(version.0 > 0);
+    assert_eq!(fields.len(), 2);
+    assert!(
+        fields.iter().all(|field| field.summary.is_some()),
+        "successful scalar Process2D artifacts carry their cheap FieldSummary"
+    );
 }
 
 #[test]
@@ -93,7 +122,10 @@ fn an_idle_processing_request_dispatches_immediately() {
     let preset = Preset2D::Cosy;
     let params = Params2D::default_for(preset);
 
-    service.request_2d_full(dataset(0), 0, data_2d(), params, preset);
+    let fields = processing_fields();
+    service
+        .request_2d_full(dataset(0), &fields, data_2d(), params)
+        .unwrap();
     assert!(service.deferred_processing.is_empty());
     assert!(
         service
@@ -125,13 +157,18 @@ fn reapply_to_reapply_keeps_the_active_job_and_replaces_the_deferred_recipe() {
         StepKind::Phase(PhaseParams::MANUAL_ZERO),
         plotx_processing::StepSource::User,
     ));
-    service.request_2d_reapply(dataset(0), 0, base.clone(), first, preset);
+    let fields = processing_fields();
+    service
+        .request_2d_reapply(dataset(0), &fields, base.clone(), first)
+        .unwrap();
     assert!(!token.load(Ordering::Relaxed));
-    let first_generation = service.deferred_processing[&dataset(0)].generation;
+    let first_version = service.deferred_processing[&dataset(0)].version;
 
-    service.request_2d_reapply(dataset(0), 0, base, Params2D::default_for(preset), preset);
+    service
+        .request_2d_reapply(dataset(0), &fields, base, Params2D::default_for(preset))
+        .unwrap();
     assert!(!token.load(Ordering::Relaxed));
-    assert!(service.deferred_processing[&dataset(0)].generation > first_generation);
+    assert!(service.deferred_processing[&dataset(0)].version > first_version);
 }
 
 #[test]
@@ -149,13 +186,15 @@ fn any_full_retransform_cancels_an_active_reapply() {
     );
 
     let preset = Preset2D::Cosy;
-    service.request_2d_full(
-        dataset(0),
-        0,
-        data_2d(),
-        Params2D::default_for(preset),
-        preset,
-    );
+    let fields = processing_fields();
+    service
+        .request_2d_full(
+            dataset(0),
+            &fields,
+            data_2d(),
+            Params2D::default_for(preset),
+        )
+        .unwrap();
     assert!(token.load(Ordering::Relaxed));
     assert!(matches!(
         service.deferred_processing[&dataset(0)].input,
@@ -182,13 +221,15 @@ fn a_processing_request_reports_the_analysis_it_cancels() {
         .expect("an idle dataset accepts a DOSY job");
 
     let preset = Preset2D::Cosy;
-    let aborted = service.request_2d_full(
-        dataset(1),
-        0,
-        data_2d(),
-        Params2D::default_for(preset),
-        preset,
-    );
+    let fields = processing_fields();
+    let aborted = service
+        .request_2d_full(
+            dataset(1),
+            &fields,
+            data_2d(),
+            Params2D::default_for(preset),
+        )
+        .unwrap();
     assert_eq!(aborted, vec![ComputeKind::Dosy]);
 }
 
@@ -230,13 +271,15 @@ fn a_cancelled_analysis_stops_blocking_a_re_run() {
 fn pending_processing_blocks_dosy_under_its_own_name() {
     let mut service = ComputeService::new();
     let preset = Preset2D::Cosy;
-    service.request_2d_full(
-        dataset(4),
-        0,
-        data_2d(),
-        Params2D::default_for(preset),
-        preset,
-    );
+    let fields = processing_fields();
+    service
+        .request_2d_full(
+            dataset(4),
+            &fields,
+            data_2d(),
+            Params2D::default_for(preset),
+        )
+        .unwrap();
     assert_eq!(
         service.blocking_work_for(dataset(4)),
         Some(ComputeKind::Processing2D)
@@ -247,13 +290,15 @@ fn pending_processing_blocks_dosy_under_its_own_name() {
 fn cancelling_processing_discards_its_result_and_releases_the_service() {
     let mut service = ComputeService::new();
     let preset = Preset2D::Cosy;
-    service.request_2d_full(
-        dataset(3),
-        2,
-        data_2d(),
-        Params2D::default_for(preset),
-        preset,
-    );
+    let fields = processing_fields();
+    service
+        .request_2d_full(
+            dataset(3),
+            &fields,
+            data_2d(),
+            Params2D::default_for(preset),
+        )
+        .unwrap();
 
     assert!(service.cancel(dataset(3), ComputeKind::Processing2D));
     assert_eq!(

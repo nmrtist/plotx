@@ -1,5 +1,14 @@
 //! Robust scale estimators shared by scientific field providers.
 
+/// Stable identity and implementation version for the 2D NMR noise estimator.
+pub const ROBUST_DIFFERENCE_MAD_ID: &str = "robust_difference_mad";
+pub const ROBUST_DIFFERENCE_MAD_VERSION: u32 = 1;
+
+/// Stable identity and implementation version for the de-planed background
+/// estimator used by scalar height-like fields.
+pub const DEPLANED_LOCATION_SCALE_ID: &str = "deplaned_location_scale";
+pub const DEPLANED_LOCATION_SCALE_VERSION: u32 = 1;
+
 /// Estimate white-noise scale from horizontal and vertical first differences.
 /// Differences never cross a row boundary; combining both axes avoids giving a
 /// preferred direction to a regular 2D spectrum.

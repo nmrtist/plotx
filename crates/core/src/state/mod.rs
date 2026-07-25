@@ -5,8 +5,7 @@ use crate::actions::{
 use crate::export::{ExportDialogState, ExportFormat, ExportSettings};
 use crate::{
     DosyMethod, IltParams, Integral2D, IntegralResult, PseudoDisplay, apply_peak_labels,
-    build_dosy_figure, build_figure, build_figure_2d_cancellable, build_ilt_figure,
-    build_stack_figure, extract_region_series,
+    build_dosy_figure, build_figure, build_ilt_figure, build_stack_figure, extract_region_series,
 };
 use plotx_analysis::diffusion::{DiffusionMap, diffusion_map};
 use plotx_analysis::ilt::{IltResult, ilt_map, log_grid};
@@ -52,7 +51,10 @@ mod document;
 mod document_identity;
 mod electrophysiology;
 mod field;
+mod field_cache;
 mod field_catalog;
+mod field_payload;
+mod field_runtime;
 mod fit_selection;
 mod identity;
 mod interaction;
@@ -96,10 +98,11 @@ pub use board::*;
 pub use charts::*;
 pub use compute::*;
 pub use datasets::*;
-pub(crate) use datasets_2d_figure::{build_processed_figure, build_processed_figure_cancellable};
+pub(crate) use datasets_2d_figure::build_processed_figure;
 pub use document::*;
 pub use electrophysiology::*;
 pub use field::*;
+pub(crate) use field_cache::FieldRuntime;
 pub use field_catalog::FieldCatalog;
 #[cfg(test)]
 pub(crate) use field_catalog::{
@@ -111,6 +114,8 @@ pub(crate) use field_catalog::{
     electrophysiology_channel_keys, electrophysiology_field_catalog_for_keys, nmr_field_catalog,
     nmr2d_field_catalog, table_field_catalog,
 };
+pub(crate) use field_payload::nmr_scalar_grid;
+pub use field_runtime::*;
 pub use identity::*;
 pub use interaction::*;
 pub use lineage::*;

@@ -28,7 +28,7 @@ impl PlotxApp {
     /// [`StackKind`] and the stack `mode`: Line kinds overlay/offset traces; the
     /// Field kind overlays each dataset's 2D contour in a distinct colour.
     pub fn build_stacked_figure(
-        &self,
+        &mut self,
         binding: &DataBinding,
         stack: &StackSpec,
         size_mm: [f32; 2],
@@ -48,7 +48,7 @@ impl PlotxApp {
     /// registry (its domain's line chart); `stack` controls per-trace scale,
     /// visibility, normalization and vertical/horizontal offset.
     fn build_line_stack(
-        &self,
+        &mut self,
         binding: &DataBinding,
         stack: &StackSpec,
         size_mm: [f32; 2],
@@ -170,7 +170,7 @@ impl PlotxApp {
     /// contour on one canvas, each recoloured from the palette (or its per-series
     /// override), merging the datasets' x/y ranges. The primary supplies the axis
     /// labels and orientation; hidden series are skipped.
-    fn build_contour_overlay(&self, binding: &DataBinding, size_mm: [f32; 2]) -> Figure {
+    fn build_contour_overlay(&mut self, binding: &DataBinding, size_mm: [f32; 2]) -> Figure {
         let chart = ChartSpec::default_for(DataDomain::Nmr2d);
         let primary = binding
             .primary_dataset()

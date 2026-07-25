@@ -122,9 +122,11 @@ impl ElectrophysiologyDataset {
             .fold(0.0, f64::max);
         let stimulus = stimulus.or_else(|| data.protocol.as_deref().and_then(suggested_stimulus));
         let field_keys = crate::state::electrophysiology_channel_keys(&data);
+        let mut field_catalog = crate::state::electrophysiology_field_catalog_for_keys(&field_keys);
+        field_catalog.attach_provenance(&data.source, None);
         Self {
             resource_id: new_resource_id(),
-            field_catalog: crate::state::electrophysiology_field_catalog_for_keys(&field_keys),
+            field_catalog,
             data,
             field_keys: OnceLock::from(field_keys),
             name: None,

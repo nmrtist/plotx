@@ -21,6 +21,9 @@ pub mod xlsx;
 /// Backend arrays remain private to `plotx-data`.
 pub use plotx_data as data;
 
+mod contour_ladder;
+#[cfg(test)]
+mod contour_probe;
 mod figures;
 pub use figures::*;
 

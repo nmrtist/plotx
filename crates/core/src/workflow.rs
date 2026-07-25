@@ -11,12 +11,13 @@ use crate::export::{
 use crate::state::{
     AxisOverrides, AxisProjections, CanvasDocument, CanvasObject, CanvasObjectKind, CanvasViewport,
     ChartSpec, DEFAULT_CANVAS_SIZE_MM, DataBinding, Dataset, MM_TO_PT, Nmr2DDataset, NmrDataset,
-    ObjectFrame, ObjectId, PanelMeta, PlotObject, StackSpec, default_chart_type,
+    ObjectFrame, ObjectId, PanelMeta, PlotObject, PlotxApp, StackSpec, default_chart_type,
 };
 use plotx_figure::{Axis, Figure};
 use plotx_io::{Acquisition, DataFormat, Domain, LoadWarning, LoadWarningCode, Provenance};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 pub const INSPECTION_SCHEMA: &str = "plotx.inspect.v1";
 
@@ -122,6 +123,8 @@ pub enum WorkflowError {
     Integration(#[from] plotx_analysis::integrate_2d::IntegrateError),
     #[error("default figure is unavailable for {0}")]
     FigureUnavailable(&'static str),
+    #[error("field runtime setup failed: {0}")]
+    FieldRuntime(String),
     #[error("export failed: {0}")]
     Export(#[from] ExportError),
 }
@@ -150,7 +153,31 @@ pub fn process_file(
 ) -> Result<ProcessResult, WorkflowError> {
     let mut loaded = load_dataset(input)?;
     loaded.apply_scheme_file(scheme)?;
-    let canvas = loaded.default_canvas();
+    // Headless exports use the same worker-only contour path as the desktop
+    // app. This waits for queued jobs rather than reintroducing a synchronous
+    // marching-squares shortcut in the export caller.
+    let mut app = PlotxApp::new_with_settings(crate::settings::Settings::default());
+    app.session
+        .compute
+        .register_loaded_dataset_fields(&loaded.dataset)
+        .map_err(|error| {
+            WorkflowError::FieldRuntime(match error {
+                crate::state::FieldEnqueueError::WorkersUnavailable => {
+                    "background workers are unavailable".to_owned()
+                }
+                crate::state::FieldEnqueueError::VersionExhausted => {
+                    "FieldVersion allocator is exhausted".to_owned()
+                }
+            })
+        })?;
+    app.doc.datasets.push(loaded.dataset);
+    let canvas = build_default_canvas(&app.doc.datasets[0], &loaded.source);
+    app.doc.canvases.push(canvas);
+    app.rebuild_canvases_for(0);
+    while app.compute_busy() {
+        app.poll_compute();
+        std::thread::sleep(Duration::from_millis(5));
+    }
     let settings = ExportSettings {
         format,
         scope: ExportPageScope::Current,
@@ -158,7 +185,7 @@ pub fn process_file(
         target_width_mm: None,
         trim_to_visible_content: false,
     };
-    let output_paths = export_canvases(&[canvas], Some(0), &settings, output)?;
+    let output_paths = export_canvases(&app.doc.canvases, Some(0), &settings, output)?;
     Ok(ProcessResult {
         inspection: loaded.inspection,
         output_paths,

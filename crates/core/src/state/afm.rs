@@ -1,5 +1,5 @@
 use super::*;
-use plotx_figure::{AxisFrame, ColormapId, ContourSpec, HeatmapGrid, Series};
+use plotx_figure::{AxisFrame, ColormapId, Contour, ContourStyle, HeatmapGrid, Series};
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -21,9 +21,11 @@ impl AfmDataset {
             [forces.grid_width / 2, forces.grid_height / 2]
         });
         let image_field_keys = crate::state::afm_channel_keys(&data);
+        let mut field_catalog = crate::state::afm_field_catalog_for_keys(&data, &image_field_keys);
+        field_catalog.attach_provenance(&data.source, None);
         Self {
             resource_id: DatasetId::new(),
-            field_catalog: crate::state::afm_field_catalog_for_keys(&data, &image_field_keys),
+            field_catalog,
             data: Arc::new(data),
             image_field_keys,
             name: None,
@@ -65,27 +67,39 @@ impl AfmDataset {
         Some(figure)
     }
 
-    pub fn contour_figure(&self, field: FieldId, contour: &ContourSpec) -> Option<Figure> {
+    pub(crate) fn contour_base_figure(&self, field: FieldId) -> Option<Figure> {
         let channel = self.image_for_field(field)?;
-        let values: Vec<f32> = channel
-            .raw
-            .iter()
-            .map(|value| channel.scale.apply(*value) as f32)
-            .collect();
         let mut figure = Figure::new(
             &channel.name,
             Axis::new(&channel.lateral_unit, 0.0, channel.scan_size_x),
             Axis::new(&channel.lateral_unit, 0.0, channel.scan_size_y),
         );
-        figure.contours = crate::figures::scalar_contour_overlays(
-            &values,
-            channel.height,
-            channel.width,
-            [0.0, channel.scan_size_x, 0.0, channel.scan_size_y],
-            contour,
-        );
         figure.lock_aspect = true;
         figure.axis_frame = AxisFrame::Box;
+        Some(figure)
+    }
+
+    pub(crate) fn contour_figure_from_geometry(
+        &self,
+        field: FieldId,
+        geometry: &ContourGeometry,
+        style: &ContourStyle,
+    ) -> Option<Figure> {
+        let mut figure = self.contour_base_figure(field)?;
+        if !geometry.positive.is_empty() {
+            figure.contours.push(Contour {
+                segments: geometry.positive.as_ref().to_vec(),
+                color: style.positive_color.resolve(),
+                width: style.width.get(),
+            });
+        }
+        if !geometry.negative.is_empty() {
+            figure.contours.push(Contour {
+                segments: geometry.negative.as_ref().to_vec(),
+                color: style.negative_color.resolve(),
+                width: style.width.get(),
+            });
+        }
         Some(figure)
     }
 

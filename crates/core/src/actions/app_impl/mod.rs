@@ -1,12 +1,10 @@
 use super::*;
-
 mod axis_overrides;
 mod meta_edits;
 mod processing;
 mod revert;
 mod table_edit;
 mod validate;
-
 pub use validate::ActionApplyError;
 use validate::{ValidationShape, validate_action};
 
@@ -18,9 +16,7 @@ impl PlotxApp {
         }
     }
 
-    /// Validate and atomically commit one action transaction. Validation walks
-    /// composites before the first child is applied, so a stale later child can
-    /// never leave a partially modified document.
+    /// Validate a whole action before applying it, preventing partial stale composites.
     pub fn try_execute_action(&mut self, action: Action) -> Result<(), ActionApplyError> {
         if action.is_noop() {
             return Ok(());
@@ -400,6 +396,9 @@ impl PlotxApp {
                 if *dataset_index != self.doc.datasets.len() {
                     return;
                 }
+                if !self.register_loaded_dataset_fields(dataset.as_ref()) {
+                    return;
+                }
                 self.doc.datasets.push(dataset.as_ref().clone());
                 if let Some(ci) = inserted_into_existing_canvas {
                     let Some(canvas) = self.doc.canvases.get(*ci) else {
@@ -438,6 +437,7 @@ impl PlotxApp {
                         }
                     }
                     self.doc.canvases.push(canvas);
+                    self.rebuild_canvases_for(*dataset_index);
                     self.session.active_canvas = Some(*canvas_index);
                 }
                 self.focus_single(*dataset_index);

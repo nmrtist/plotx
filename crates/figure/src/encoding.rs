@@ -97,7 +97,7 @@ impl ColorSource {
 
 /// An estimator identity selected by an encoding. The concrete estimate and its
 /// provenance are deliberately owned by the field provider rather than here.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "mode")]
 pub enum EstimatorSelection {
     FollowLatest,

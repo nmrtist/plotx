@@ -14,7 +14,10 @@ fn stacked_figure_is_domain_generic_with_offset_scale_and_hide() {
     let second = second_table_with_sigma(vec![0.2, 0.2, 0.2]);
     table.doc.datasets.push(Dataset::Table(Box::new(second)));
 
-    for (app, domain) in [(&nmr, DataDomain::Nmr1d), (&table, DataDomain::Table)] {
+    for (app, domain) in [
+        (&mut nmr, DataDomain::Nmr1d),
+        (&mut table, DataDomain::Table),
+    ] {
         let chart = ChartSpec::default_for(domain);
         let binding = DataBinding {
             series: vec![
@@ -72,7 +75,13 @@ fn field_overlay_stacks_two_2d_contours_in_distinct_colors() {
     signed_grid.domain = plotx_io::Domain::Frequency;
     for (index, value) in signed_grid.data.iter_mut().enumerate() {
         let column = index % signed_grid.cols;
-        *value = num_complex::Complex64::new(column as f64 - 15.5, 0.0);
+        let row = index / signed_grid.cols;
+        // A non-zero robust noise scale keeps this signed test field on the
+        // concrete NoiseSigma path rather than exercising a degenerate plane.
+        *value = num_complex::Complex64::new(
+            column as f64 - 15.5 + ((row * 17 + column * 13) % 11) as f64 * 0.037,
+            0.0,
+        );
     }
     app.doc
         .datasets
@@ -96,6 +105,26 @@ fn field_overlay_stacks_two_2d_contours_in_distinct_colors() {
         mode: StackMode::ColorOverlay,
         ..StackSpec::default()
     };
+    let initial = app.build_binding_figure(&binding, &chart, &stack, [120.0, 80.0]);
+    assert!(
+        initial.contours.is_empty(),
+        "contours are resolved asynchronously"
+    );
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    while app.compute_busy() && std::time::Instant::now() < deadline {
+        app.poll_compute();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    app.poll_compute();
+    // The first completion supplies the estimate. Resolving the binding again
+    // then queues its geometry, which is a separate worker stage.
+    let geometry_pending = app.build_binding_figure(&binding, &chart, &stack, [120.0, 80.0]);
+    assert!(geometry_pending.contours.is_empty());
+    while app.compute_busy() && std::time::Instant::now() < deadline {
+        app.poll_compute();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    app.poll_compute();
     let fig = app.build_binding_figure(&binding, &chart, &stack, [120.0, 80.0]);
 
     assert!(fig.show_legend, "a Field overlay shows a legend");

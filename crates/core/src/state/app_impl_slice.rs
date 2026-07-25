@@ -45,9 +45,11 @@ impl NmrDataset {
                 StepSource::Default,
             )],
         };
+        let mut field_catalog = nmr_field_catalog();
+        field_catalog.attach_provenance(&data.source, None);
         Self {
             resource_id: DatasetId::new(),
-            field_catalog: nmr_field_catalog(),
+            field_catalog,
             data,
             base: spectrum.clone(),
             pipeline,

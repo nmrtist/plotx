@@ -78,3 +78,63 @@ fn process_2d_result_follows_dataset_identity_after_earlier_deletion() {
         "the completed result must land on the same DatasetId after index shift"
     );
 }
+
+#[test]
+fn successful_processing_promotes_fresh_runtime_versions_for_each_scalar_field() {
+    let mut app = PlotxApp::new();
+    app.doc
+        .datasets
+        .push(Dataset::Nmr2D(Box::new(Nmr2DDataset::load(data_2d(
+            "versioned target",
+        )))));
+    let resource = app.doc.datasets[0].resource_id();
+    let fields = app.doc.datasets[0]
+        .field_descriptors()
+        .into_iter()
+        .filter(|field| matches!(field.local_id.as_str(), "nmr.real" | "nmr.magnitude"))
+        .map(|field| FieldRef {
+            resource,
+            field: field.id,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(fields.len(), 2);
+    assert!(
+        fields
+            .iter()
+            .all(|field| { app.session.compute.current_field_version(*field).is_none() })
+    );
+
+    assert!(app.schedule_2d_processing(0, true));
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while app.compute_busy() && Instant::now() < deadline {
+        app.poll_compute();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    app.poll_compute();
+    let first = fields
+        .iter()
+        .map(|field| app.session.compute.current_field_version(*field).unwrap())
+        .collect::<Vec<_>>();
+    assert_ne!(first[0], first[1], "each FieldId has its own version token");
+
+    let dataset = app.doc.datasets[0].as_nmr2d_mut().unwrap();
+    let id = dataset.allocate_step_id();
+    dataset.params.f2.steps.push(ProcessingStep {
+        id,
+        kind: StepKind::Invert,
+        enabled: true,
+        source: StepSource::User,
+    });
+    assert!(app.schedule_2d_processing(0, false));
+    while app.compute_busy() && Instant::now() < deadline {
+        app.poll_compute();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    app.poll_compute();
+    for (field, previous) in fields.iter().zip(first) {
+        assert!(
+            app.session.compute.current_field_version(*field).unwrap() > previous,
+            "a successfully installed processing artifact advances its field version"
+        );
+    }
+}

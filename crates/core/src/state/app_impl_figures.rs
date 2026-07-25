@@ -1,5 +1,6 @@
 use super::*;
 use plotx_figure::Figure;
+use std::sync::Arc;
 
 impl PlotxApp {
     /// Build a dataset's figure through the chart registry: resolve `chart`'s
@@ -27,7 +28,7 @@ impl PlotxApp {
     /// datasets share one stackable (line-series) domain is combined into one
     /// figure honouring `stack`; any other binding renders the primary alone.
     pub fn build_binding_figure(
-        &self,
+        &mut self,
         binding: &DataBinding,
         chart: &ChartSpec,
         stack: &StackSpec,
@@ -139,12 +140,152 @@ impl PlotxApp {
         figure
     }
 
-    pub(super) fn build_encoded_series_figure(&self, series: &SeriesBinding) -> Option<Figure> {
+    pub(super) fn build_encoded_series_figure(&mut self, series: &SeriesBinding) -> Option<Figure> {
         let dataset = self.doc.dataset_by_id(series.source.resource)?;
         if !dataset.supports_encoding(series.source.field, &series.encoding) {
             return None;
         }
+        let plotx_figure::SeriesEncoding::Contour(contour) = &series.encoding else {
+            return dataset.encoded_field_figure(series.source.field, &series.encoding);
+        };
+
+        let field = FieldRef {
+            resource: series.source.resource,
+            field: series.source.field,
+        };
+        let version = match self.session.compute.field_version_for(field) {
+            Ok(version) => version,
+            Err(error) => {
+                self.session.status = field_enqueue_error_status(error);
+                return dataset.encoded_field_figure(series.source.field, &series.encoding);
+            }
+        };
+        // A cache hit must not touch the values: the summary is looked up first,
+        // and the payload is materialized only on the paths that actually hand a
+        // grid to a worker.
+        let source = VersionedFieldRef { field, version };
+        let summary = match self.session.compute.cached_field_summary(source) {
+            Some(summary) => summary,
+            None => {
+                let snapshot = dataset.field_snapshot(series.source.field, version, None)?;
+                self.session.compute.remember_field_summary(&snapshot);
+                snapshot.summary?
+            }
+        };
+        let resolution = resolve_contour_levels(source, contour, summary, |key| {
+            self.session.compute.estimate_for(key).cloned()
+        });
+        match resolution {
+            ContourResolution::Ready {
+                levels,
+                unreachable,
+            } => {
+                // A threshold the field never reaches draws nothing, which is
+                // exactly what the user asked for — but silently is how a
+                // mistyped magnitude becomes an unexplained blank plot.
+                if !unreachable.is_empty() {
+                    self.session.status = unreachable_threshold_status(&unreachable);
+                }
+                let key = ContourGeometryCacheKey { source, levels };
+                if let Some(geometry) = self.session.compute.geometry_for(&key) {
+                    return dataset.contour_figure_from_geometry(
+                        series.source.field,
+                        &geometry,
+                        &contour.style,
+                    );
+                }
+                let grid = self.contour_grid(dataset, series.source.field, version, summary)?;
+                if let Err(error) = self.session.compute.enqueue_contour(key, grid) {
+                    self.session.status = field_enqueue_error_status(error);
+                }
+            }
+            ContourResolution::Pending(keys) => {
+                let grid = self.contour_grid(dataset, series.source.field, version, summary)?;
+                for key in keys {
+                    if let Err(error) = self
+                        .session
+                        .compute
+                        .enqueue_estimate(key, Arc::clone(&grid))
+                    {
+                        self.session.status = field_enqueue_error_status(error);
+                        break;
+                    }
+                }
+            }
+            ContourResolution::Unavailable => {
+                self.session.status = "Contour levels are unavailable for this field.".into();
+            }
+        }
         dataset.encoded_field_figure(series.source.field, &series.encoding)
+    }
+
+    /// Materialize the worker-owned grid. Only the enqueue paths call this;
+    /// resolving against a warm geometry cache never does.
+    fn contour_grid(
+        &self,
+        dataset: &Dataset,
+        field: FieldId,
+        version: FieldVersion,
+        summary: FieldSummary,
+    ) -> Option<Arc<ScalarGrid2D>> {
+        let snapshot = dataset.field_snapshot(field, version, Some(summary))?;
+        Some(Arc::new(snapshot.payload.scalar_grid()?.clone()))
+    }
+}
+
+/// Word the thresholds a field never reaches.
+///
+/// Both numbers appear side by side because that is what makes the common
+/// mistake legible: a threshold of 20 against a peak of 10 reads as an extra
+/// zero at a glance, where "no contours available" reads as a broken plot. The
+/// message ends on the action that fixes it rather than on the failure.
+fn unreachable_threshold_status(unreachable: &[UnreachableContourThreshold]) -> String {
+    unreachable
+        .iter()
+        .map(|report| {
+            let half = if report.negative {
+                "negative"
+            } else {
+                "positive"
+            };
+            // The negative half's threshold and peak are magnitudes, so name the
+            // peak as one instead of implying a signed comparison.
+            let peak_label = if report.negative {
+                "peak magnitude"
+            } else {
+                "peak"
+            };
+            let peak = format_level(report.peak.get());
+            format!(
+                "The {half} contour threshold {threshold} is above this field's {half} \
+                 {peak_label} {peak}, so no {half} contours are drawn. \
+                 Lower the threshold below {peak}.",
+                threshold = format_level(report.threshold.get()),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Print a contour level so a mistyped magnitude stays legible: plain decimals
+/// across the range users type by hand, scientific notation once a digit count
+/// stops being readable. Only strictly positive magnitudes reach this.
+fn format_level(value: f64) -> String {
+    if value.abs() >= 1e5 || value.abs() < 1e-3 {
+        format!("{value:.3e}")
+    } else {
+        format!("{value}")
+    }
+}
+
+fn field_enqueue_error_status(error: FieldEnqueueError) -> String {
+    match error {
+        FieldEnqueueError::WorkersUnavailable => {
+            "Background contour computation is unavailable in this session.".into()
+        }
+        FieldEnqueueError::VersionExhausted => {
+            "Field runtime versions are exhausted; reopen PlotX to continue.".into()
+        }
     }
 }
 

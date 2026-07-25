@@ -10,15 +10,26 @@ use plotx_analysis::ilt::{IltResult, ilt_map_cancellable};
 use plotx_figure::Figure;
 use plotx_io::{DiffusionMeta, NmrData2D};
 use plotx_processing::{
-    Params2D, Preset2D, Processed2D, StackSpectrum, process_2d_cancellable, reapply_2d_cancellable,
+    Params2D, Processed2D, StackSpectrum, process_2d_cancellable, reapply_2d_cancellable,
 };
 
 use super::DatasetId;
-use super::build_processed_figure_cancellable;
+use super::{
+    ContourGeometry, ContourGeometryCacheKey, EstimateKey, EstimateResult, FieldId, FieldRef,
+    FieldRuntime, FieldSummary, FieldVersion, ScalarGrid2D, VersionedFieldRef, nmr_scalar_grid,
+};
 use crate::{IltParams, build_dosy_figure_cancellable, build_ilt_figure_cancellable};
 
-/// Which heavy operation a job/result belongs to, keying the per-dataset
-/// newest-generation map that rejects stale results.
+#[path = "compute_field.rs"]
+mod compute_field;
+pub(crate) use compute_field::FieldEnqueueError;
+#[path = "compute_worker.rs"]
+mod compute_worker;
+use compute_worker::run_job;
+
+/// Which user-visible heavy operation is running. ILT/DOSY retain their own
+/// generation guard; scalar field artifacts use `FieldVersion` and
+/// content-addressed caches instead.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ComputeKind {
     Ilt,
@@ -44,6 +55,33 @@ pub enum EnqueueError {
     Busy(ComputeKind),
     /// The worker pool is gone, so no background work can run this session.
     WorkersUnavailable,
+}
+
+/// Which scalar payload a processing result populates. The field identity is
+/// carried beside it, so real and magnitude never accidentally share a version
+/// or geometry cache entry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ProcessedFieldComponent {
+    Real,
+    Magnitude,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ProcessingField {
+    pub field: FieldId,
+    pub component: ProcessedFieldComponent,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct VersionedProcessingField {
+    source: VersionedFieldRef,
+    component: ProcessedFieldComponent,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct ProcessedFieldArtifact {
+    pub source: VersionedFieldRef,
+    pub summary: Option<FieldSummary>,
 }
 
 enum Job {
@@ -72,13 +110,20 @@ enum Job {
         source: String,
     },
     Process2D {
-        generation: u64,
+        version: FieldVersion,
         dataset: DatasetId,
-        epoch: u64,
         token: Arc<AtomicBool>,
         input: ProcessingInput,
         params: Params2D,
-        preset: Preset2D,
+        fields: Vec<VersionedProcessingField>,
+    },
+    EstimateField {
+        key: EstimateKey,
+        grid: Arc<ScalarGrid2D>,
+    },
+    BuildContour {
+        key: ContourGeometryCacheKey,
+        grid: Arc<ScalarGrid2D>,
     },
 }
 
@@ -103,12 +148,11 @@ impl ProcessingInput {
 }
 
 struct DeferredProcessing {
-    generation: u64,
+    version: FieldVersion,
     dataset: DatasetId,
-    epoch: u64,
     input: ProcessingInput,
     params: Params2D,
-    preset: Preset2D,
+    fields: Vec<VersionedProcessingField>,
 }
 
 struct ActiveJob {
@@ -118,8 +162,9 @@ struct ActiveJob {
     processing_input: Option<ProcessingInputKind>,
 }
 
-/// A finished computation handed back to the main thread. `generation` is
-/// checked against the newest request before the result is installed.
+/// A finished computation handed back to the main thread. ILT/DOSY generations
+/// are checked against their newest request; field-derived results validate the
+/// `FieldVersion` embedded in their content-addressed key.
 pub enum Done {
     Ilt {
         generation: u64,
@@ -137,13 +182,28 @@ pub enum Done {
         figure: Arc<Figure>,
     },
     Processing2D {
-        generation: u64,
+        version: FieldVersion,
         dataset: DatasetId,
-        epoch: u64,
         base: Option<Processed2D>,
         processed: Processed2D,
-        figure: Arc<Figure>,
+        fields: Vec<ProcessedFieldArtifact>,
         params: Params2D,
+    },
+    EstimateField {
+        key: EstimateKey,
+        result: EstimateResult,
+    },
+    EstimateFieldFailed {
+        key: EstimateKey,
+        message: String,
+    },
+    BuildContour {
+        key: ContourGeometryCacheKey,
+        geometry: ContourGeometry,
+    },
+    BuildContourFailed {
+        key: ContourGeometryCacheKey,
+        message: String,
     },
     Cancelled {
         generation: u64,
@@ -172,6 +232,7 @@ pub struct ComputeService {
     latest: HashMap<(DatasetId, ComputeKind), u64>,
     active: HashMap<(DatasetId, ComputeKind), ActiveJob>,
     deferred_processing: HashMap<DatasetId, DeferredProcessing>,
+    field_runtime: FieldRuntime,
     /// Dispatch failures awaiting collection by `try_drain`.
     failures: Vec<Done>,
 }
@@ -198,6 +259,7 @@ impl ComputeService {
             latest: HashMap::new(),
             active: HashMap::new(),
             deferred_processing: HashMap::new(),
+            field_runtime: FieldRuntime::default(),
             failures: Vec::new(),
         }
     }
@@ -300,61 +362,68 @@ impl ComputeService {
 
     /// Queue a retransform-from-FID. Returns the user-initiated analyses this
     /// request aborted, so the caller can say so.
-    pub fn request_2d_full(
+    pub(crate) fn request_2d_full(
         &mut self,
         dataset: DatasetId,
-        epoch: u64,
+        fields: &[ProcessingField],
         data: Arc<NmrData2D>,
         params: Params2D,
-        preset: Preset2D,
-    ) -> Vec<ComputeKind> {
-        self.request_2d(dataset, epoch, ProcessingInput::Full(data), params, preset)
+    ) -> Result<Vec<ComputeKind>, FieldEnqueueError> {
+        self.request_2d(dataset, fields, ProcessingInput::Full(data), params)
     }
 
     /// Queue a re-apply from the cached base. Returns the aborted analyses, as
     /// [`Self::request_2d_full`] does.
-    pub fn request_2d_reapply(
+    pub(crate) fn request_2d_reapply(
         &mut self,
         dataset: DatasetId,
-        epoch: u64,
+        fields: &[ProcessingField],
         base: Processed2D,
         params: Params2D,
-        preset: Preset2D,
-    ) -> Vec<ComputeKind> {
-        self.request_2d(
-            dataset,
-            epoch,
-            ProcessingInput::Reapply(base),
-            params,
-            preset,
-        )
+    ) -> Result<Vec<ComputeKind>, FieldEnqueueError> {
+        self.request_2d(dataset, fields, ProcessingInput::Reapply(base), params)
     }
 
     fn request_2d(
         &mut self,
         dataset: DatasetId,
-        epoch: u64,
+        fields: &[ProcessingField],
         input: ProcessingInput,
         params: Params2D,
-        preset: Preset2D,
-    ) -> Vec<ComputeKind> {
+    ) -> Result<Vec<ComputeKind>, FieldEnqueueError> {
         let input_kind = input.kind();
         let aborted = self.cancel_incompatible_for_processing(dataset, input_kind);
-        let generation = self.next_generation(dataset, ComputeKind::Processing2D);
+        let mut versioned_fields = Vec::with_capacity(fields.len());
+        for field in fields {
+            let version = self.reserve_field_version()?;
+            versioned_fields.push(VersionedProcessingField {
+                source: VersionedFieldRef {
+                    field: FieldRef {
+                        resource: dataset,
+                        field: field.field,
+                    },
+                    version,
+                },
+                component: field.component,
+            });
+        }
+        let version = versioned_fields
+            .first()
+            .map(|field| field.source.version)
+            .ok_or(FieldEnqueueError::VersionExhausted)?;
         self.deferred_processing.insert(
             dataset,
             DeferredProcessing {
-                generation,
+                version,
                 dataset,
-                epoch,
                 input,
                 params,
-                preset,
+                fields: versioned_fields,
             },
         );
         // Avoid waiting for the next UI poll when no processing job is active.
         self.dispatch_ready_processing();
-        aborted
+        Ok(aborted)
     }
 
     fn next_generation(&mut self, dataset: DatasetId, kind: ComputeKind) -> u64 {
@@ -391,7 +460,7 @@ impl ComputeService {
             self.active.insert(
                 (dataset, ComputeKind::Processing2D),
                 ActiveJob {
-                    generation: request.generation,
+                    generation: request.version.0,
                     started_at: Instant::now(),
                     token: Arc::clone(&token),
                     processing_input: Some(input_kind),
@@ -400,19 +469,18 @@ impl ComputeService {
             if self
                 .job_tx
                 .send(Job::Process2D {
-                    generation: request.generation,
+                    version: request.version,
                     dataset: request.dataset,
-                    epoch: request.epoch,
                     token,
                     input: request.input,
                     params: request.params,
-                    preset: request.preset,
+                    fields: request.fields,
                 })
                 .is_err()
             {
-                self.cancel_failed_enqueue(dataset, ComputeKind::Processing2D, request.generation);
+                self.cancel_failed_enqueue(dataset, ComputeKind::Processing2D, request.version.0);
                 self.failures.push(Done::Failed {
-                    generation: request.generation,
+                    generation: request.version.0,
                     dataset,
                     kind: ComputeKind::Processing2D,
                 });
@@ -424,7 +492,26 @@ impl ComputeService {
         self.dispatch_ready_processing();
         let mut out = std::mem::take(&mut self.failures);
         while let Ok(done) = self.done_rx.try_recv() {
-            let (dataset, kind, generation) = done_identity(&done);
+            match &done {
+                Done::EstimateField { key, .. } | Done::EstimateFieldFailed { key, .. } => {
+                    self.field_runtime.finish_estimate_request(key);
+                    out.push(done);
+                    continue;
+                }
+                Done::BuildContour { key, .. } | Done::BuildContourFailed { key, .. } => {
+                    self.field_runtime.finish_geometry_request(key);
+                    out.push(done);
+                    continue;
+                }
+                Done::Ilt { .. }
+                | Done::Dosy { .. }
+                | Done::Processing2D { .. }
+                | Done::Cancelled { .. }
+                | Done::Failed { .. } => {}
+            }
+            let Some((dataset, kind, generation)) = done_identity(&done) else {
+                continue;
+            };
             let matching_active = self
                 .active
                 .get(&(dataset, kind))
@@ -448,7 +535,9 @@ impl ComputeService {
     }
 
     pub fn is_busy(&self) -> bool {
-        !self.active.is_empty() || !self.deferred_processing.is_empty()
+        !self.active.is_empty()
+            || !self.deferred_processing.is_empty()
+            || self.field_runtime.has_in_flight()
     }
 
     pub fn progress(&self, dataset: DatasetId, kind: ComputeKind) -> Option<Duration> {
@@ -507,11 +596,7 @@ impl ComputeService {
                 aborted.push(*kind);
             }
         }
-        for kind in [
-            ComputeKind::Ilt,
-            ComputeKind::Dosy,
-            ComputeKind::Processing2D,
-        ] {
+        for kind in [ComputeKind::Ilt, ComputeKind::Dosy] {
             self.latest.remove(&(dataset, kind));
         }
         aborted
@@ -527,7 +612,7 @@ impl ComputeService {
         {
             cancelled = true;
         }
-        if cancelled {
+        if cancelled && kind != ComputeKind::Processing2D {
             self.latest.remove(&(dataset, kind));
         }
         cancelled
@@ -556,172 +641,21 @@ fn worker_loop(job_rx: Arc<Mutex<Receiver<Job>>>, done_tx: Sender<Done>) {
     }
 }
 
-fn run_job(job: Job) -> Done {
-    match job {
-        Job::Ilt {
-            generation,
-            dataset,
-            epoch,
-            token,
-            stack,
-            b_factors,
-            d_grid,
-            lambda,
-            params,
-            nucleus,
-            source,
-        } => {
-            let cancelled = || token.load(Ordering::Relaxed);
-            match ilt_map_cancellable(&*stack, &b_factors, &d_grid, lambda, &cancelled) {
-                Some(result) if !cancelled() => {
-                    let Some(figure) =
-                        build_ilt_figure_cancellable(&result, &nucleus, &source, &cancelled)
-                            .map(Arc::new)
-                    else {
-                        return Done::Cancelled {
-                            generation,
-                            dataset,
-                            kind: ComputeKind::Ilt,
-                        };
-                    };
-                    Done::Ilt {
-                        generation,
-                        dataset,
-                        epoch,
-                        result,
-                        params,
-                        figure,
-                    }
-                }
-                None => Done::Cancelled {
-                    generation,
-                    dataset,
-                    kind: ComputeKind::Ilt,
-                },
-                Some(_) => Done::Cancelled {
-                    generation,
-                    dataset,
-                    kind: ComputeKind::Ilt,
-                },
-            }
-        }
-        Job::Dosy {
-            generation,
-            dataset,
-            epoch,
-            token,
-            stack,
-            values,
-            meta,
-            nucleus,
-            source,
-        } => {
-            let cancelled = || token.load(Ordering::Relaxed);
-            match diffusion_map_cancellable(&*stack, &values, &meta, 0.05, &cancelled) {
-                Some(result) if !cancelled() => {
-                    let Some(figure) =
-                        build_dosy_figure_cancellable(&result, &nucleus, &source, &cancelled)
-                            .map(Arc::new)
-                    else {
-                        return Done::Cancelled {
-                            generation,
-                            dataset,
-                            kind: ComputeKind::Dosy,
-                        };
-                    };
-                    Done::Dosy {
-                        generation,
-                        dataset,
-                        epoch,
-                        result,
-                        figure,
-                    }
-                }
-                None => Done::Cancelled {
-                    generation,
-                    dataset,
-                    kind: ComputeKind::Dosy,
-                },
-                Some(_) => Done::Cancelled {
-                    generation,
-                    dataset,
-                    kind: ComputeKind::Dosy,
-                },
-            }
-        }
-        Job::Process2D {
-            generation,
-            dataset,
-            epoch,
-            token,
-            input,
-            params,
-            preset,
-        } => {
-            let cancelled = || token.load(Ordering::Relaxed);
-            let (base, processed) = match input {
-                ProcessingInput::Full(data) => {
-                    let Some(base) = process_2d_cancellable(&data, &params, &cancelled) else {
-                        return cancelled_done(generation, dataset);
-                    };
-                    let Some(processed) = reapply_2d_cancellable(&base, &params, &cancelled) else {
-                        return cancelled_done(generation, dataset);
-                    };
-                    (Some(base), processed)
-                }
-                ProcessingInput::Reapply(base) => {
-                    let Some(processed) = reapply_2d_cancellable(&base, &params, &cancelled) else {
-                        return cancelled_done(generation, dataset);
-                    };
-                    (None, processed)
-                }
-            };
-            if cancelled() {
-                return cancelled_done(generation, dataset);
-            }
-            let Some(figure) =
-                build_processed_figure_cancellable(&processed, preset, &cancelled).map(Arc::new)
-            else {
-                return cancelled_done(generation, dataset);
-            };
-            Done::Processing2D {
-                generation,
-                dataset,
-                epoch,
-                base,
-                processed,
-                figure,
-                params,
-            }
-        }
-    }
-}
-
-fn cancelled_done(generation: u64, dataset: DatasetId) -> Done {
-    Done::Cancelled {
-        generation,
-        dataset,
-        kind: ComputeKind::Processing2D,
-    }
-}
-
-fn done_identity(done: &Done) -> (DatasetId, ComputeKind, u64) {
+fn done_identity(done: &Done) -> Option<(DatasetId, ComputeKind, u64)> {
     match done {
         Done::Ilt {
             dataset,
             generation,
             ..
-        } => (*dataset, ComputeKind::Ilt, *generation),
+        } => Some((*dataset, ComputeKind::Ilt, *generation)),
         Done::Dosy {
             dataset,
             generation,
             ..
-        } => (*dataset, ComputeKind::Dosy, *generation),
+        } => Some((*dataset, ComputeKind::Dosy, *generation)),
         Done::Processing2D {
-            dataset,
-            generation,
-            ..
-        } => (*dataset, ComputeKind::Processing2D, *generation),
+            dataset, version, ..
+        } => Some((*dataset, ComputeKind::Processing2D, version.0)),
         Done::Cancelled {
             dataset,
             generation,
@@ -731,7 +665,11 @@ fn done_identity(done: &Done) -> (DatasetId, ComputeKind, u64) {
             dataset,
             generation,
             kind,
-        } => (*dataset, *kind, *generation),
+        } => Some((*dataset, *kind, *generation)),
+        Done::EstimateField { .. }
+        | Done::EstimateFieldFailed { .. }
+        | Done::BuildContour { .. }
+        | Done::BuildContourFailed { .. } => None,
     }
 }
 

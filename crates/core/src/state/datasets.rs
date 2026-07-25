@@ -65,9 +65,11 @@ impl NmrDataset {
         let has_imaginary = data.domain == Domain::Time || data.points.iter().any(|v| v.im != 0.0);
         let base = fft::transform_base(&data, &pipeline, group_delay_correct);
         let spectrum = reapply(&base, &pipeline);
+        let mut field_catalog = nmr_field_catalog();
+        field_catalog.attach_provenance(&data.source, None);
         let mut result = Self {
             resource_id: DatasetId::new(),
-            field_catalog: nmr_field_catalog(),
+            field_catalog,
             data,
             base,
             pipeline,
@@ -208,9 +210,17 @@ impl Nmr2DDataset {
         let base = process_2d(&data, &params);
         let processed = reapply_2d(&base, &params);
         let processed_figure = Arc::new(build_processed_figure(&processed, preset));
+        let mut field_catalog = nmr2d_field_catalog();
+        field_catalog.attach_provenance(
+            &data.source,
+            Some(FieldAlgorithmProvenance {
+                algorithm: "process_2d".to_owned(),
+                version: 1,
+            }),
+        );
         let mut result = Self {
             resource_id: DatasetId::new(),
-            field_catalog: nmr2d_field_catalog(),
+            field_catalog,
             data: Arc::new(data),
             base_params: params.clone(),
             base_stale: false,

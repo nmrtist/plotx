@@ -449,9 +449,10 @@ fn fail_automation(error: AutomationError) -> Status {
 fn fail(error: WorkflowError) -> Status {
     let status = match &error {
         WorkflowError::Load(_) => Status::Input,
-        WorkflowError::Scheme(_) | WorkflowError::Processing(_) | WorkflowError::Integration(_) => {
-            Status::Scheme
-        }
+        WorkflowError::Scheme(_)
+        | WorkflowError::Processing(_)
+        | WorkflowError::Integration(_)
+        | WorkflowError::FieldRuntime(_) => Status::Scheme,
         WorkflowError::FigureUnavailable(_) => Status::Canvas,
         WorkflowError::Export(_) => Status::Export,
     };
