@@ -1,4 +1,5 @@
 use super::*;
+use plotx_processing::ProcessingStep;
 
 impl DatasetProcessingState {
     pub fn from_dataset(dataset: &Dataset) -> Self {
@@ -15,6 +16,24 @@ impl DatasetProcessingState {
             Dataset::Electrophysiology(d) => Self::Electrophysiology(d.processing),
             Dataset::Afm(_) => Self::Afm,
         }
+    }
+
+    /// Every step of every axis this recipe carries.
+    ///
+    /// A caller that holds a `StepId` wants the step, not the dimension it
+    /// happens to sit in: step identity is owner-local and stable, while the
+    /// axis split is a detail of how a recipe is stored. Answering it here keeps
+    /// that detail with the type that owns the variants instead of copying the
+    /// split into every editor that addresses a step.
+    pub fn steps_mut(&mut self) -> impl Iterator<Item = &mut ProcessingStep> {
+        let pipelines: Vec<&mut AxisPipeline> = match self {
+            Self::Nmr { pipeline, .. } => vec![pipeline],
+            Self::Nmr2D { params, .. } => vec![&mut params.f2, &mut params.f1],
+            Self::Table | Self::Electrophysiology(_) | Self::Afm => Vec::new(),
+        };
+        pipelines
+            .into_iter()
+            .flat_map(|pipeline| pipeline.steps.iter_mut())
     }
 
     /// Apply this recipe to a canonical dataset and rebuild only as much cached

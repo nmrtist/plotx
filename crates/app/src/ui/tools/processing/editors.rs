@@ -4,6 +4,7 @@ use super::{commit_kind, edit_step, set_phase_method};
 use egui::{DragValue, Ui};
 use egui_phosphor::regular as icon;
 use plotx_core::actions::DatasetProcessingState;
+use plotx_core::automation::{ComponentRef, ResourceRef, TargetRef};
 use plotx_core::state::{Dataset, PhaseAxis, PlotxApp};
 use plotx_processing::{
     Apodization, AutoPhaseMethod, BaselineMethod, NormalizeMethod, PhaseParams, ProcessingStep,
@@ -36,7 +37,16 @@ pub(super) fn editor(
     ui: &mut Ui,
 ) {
     match &step.kind {
-        StepKind::Apodize(a) => apodize_editor(app, di, axis, step.id, *a, ui),
+        StepKind::Apodize(_) => {
+            let Some(dataset) = app.doc.datasets.get(di) else {
+                return;
+            };
+            let target = TargetRef {
+                resource: ResourceRef::from(dataset.resource_id()),
+                component: Some(ComponentRef::ProcessingStep(step.id)),
+            };
+            crate::ui::properties::panel::apodization_section(app, &target, ui);
+        }
         StepKind::ZeroFill(z) => zero_fill_editor(app, di, axis, step.id, *z, ui),
         StepKind::Phase(p) => phase_editor(app, di, axis, step.id, *p, ui),
         StepKind::Baseline(m) => baseline_editor(app, di, axis, step.id, *m, ui),
@@ -60,90 +70,6 @@ pub(super) fn editor(
             ui.small("Multiplies every intensity by −1.");
         }
         StepKind::Fft => {}
-    }
-}
-
-fn apodize_editor(
-    app: &mut PlotxApp,
-    di: usize,
-    axis: PhaseAxis,
-    id: StepId,
-    cur: Apodization,
-    ui: &mut Ui,
-) {
-    let mut kind = apo_variant(cur);
-    ui.horizontal(|ui| {
-        ui.label("Window");
-        egui::ComboBox::from_id_salt((di, id, "apo"))
-            .selected_text(kind.label())
-            .show_ui(ui, |ui| {
-                for v in ApoVariant::ALL {
-                    ui.selectable_value(&mut kind, v, v.label());
-                }
-            });
-    });
-    if kind != apo_variant(cur) {
-        commit_kind(app, di, axis, id, StepKind::Apodize(kind.apodization(cur)));
-        return;
-    }
-
-    match cur {
-        Apodization::Exponential { lb_hz } => {
-            param_drag(
-                app,
-                di,
-                axis,
-                id,
-                ui,
-                "LB (Hz)",
-                lb_hz,
-                0.5,
-                true,
-                true,
-                |k, v| {
-                    if let StepKind::Apodize(Apodization::Exponential { lb_hz }) = k {
-                        *lb_hz = v;
-                    }
-                },
-            );
-        }
-        Apodization::Gaussian { lb_hz, gb_hz } => {
-            param_drag(
-                app,
-                di,
-                axis,
-                id,
-                ui,
-                "LB (Hz)",
-                lb_hz,
-                0.5,
-                true,
-                true,
-                |k, v| {
-                    if let StepKind::Apodize(Apodization::Gaussian { lb_hz, .. }) = k {
-                        *lb_hz = v;
-                    }
-                },
-            );
-            param_drag(
-                app,
-                di,
-                axis,
-                id,
-                ui,
-                "GB (Hz)",
-                gb_hz,
-                0.5,
-                true,
-                true,
-                |k, v| {
-                    if let StepKind::Apodize(Apodization::Gaussian { gb_hz, .. }) = k {
-                        *gb_hz = v;
-                    }
-                },
-            );
-        }
-        Apodization::None | Apodization::CosineBell => {}
     }
 }
 
@@ -607,58 +533,6 @@ impl BaselineVariant {
             Self::Offset => "Offset",
             Self::Polynomial => "Polynomial",
         }
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ApoVariant {
-    None,
-    CosineBell,
-    Exponential,
-    Gaussian,
-}
-
-impl ApoVariant {
-    const ALL: [Self; 4] = [
-        Self::None,
-        Self::CosineBell,
-        Self::Exponential,
-        Self::Gaussian,
-    ];
-
-    fn label(self) -> &'static str {
-        match self {
-            Self::None => "None",
-            Self::CosineBell => "Cosine bell",
-            Self::Exponential => "Exponential",
-            Self::Gaussian => "Gaussian",
-        }
-    }
-
-    fn apodization(self, cur: Apodization) -> Apodization {
-        let (lb, gb) = match cur {
-            Apodization::Exponential { lb_hz } => (lb_hz, 0.0),
-            Apodization::Gaussian { lb_hz, gb_hz } => (lb_hz, gb_hz),
-            _ => (1.0, 1.0),
-        };
-        match self {
-            Self::None => Apodization::None,
-            Self::CosineBell => Apodization::CosineBell,
-            Self::Exponential => Apodization::Exponential { lb_hz: lb },
-            Self::Gaussian => Apodization::Gaussian {
-                lb_hz: lb,
-                gb_hz: gb,
-            },
-        }
-    }
-}
-
-fn apo_variant(a: Apodization) -> ApoVariant {
-    match a {
-        Apodization::None => ApoVariant::None,
-        Apodization::CosineBell => ApoVariant::CosineBell,
-        Apodization::Exponential { .. } => ApoVariant::Exponential,
-        Apodization::Gaussian { .. } => ApoVariant::Gaussian,
     }
 }
 

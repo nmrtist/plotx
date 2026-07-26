@@ -17,8 +17,8 @@ use super::registry::parse;
 use super::*;
 use crate::properties::{
     AggregateValue, Availability, EnumVariant, FloatBounds, PropertyAccess, PropertyAddress,
-    PropertyDefinition, PropertyError, PropertyValue, ResolvedProperty, ResolvedSchema,
-    ValueSchema, definition_by_key, variant_list,
+    PropertyDefinition, PropertyError, PropertySkip, PropertyValue, ResolvedProperty,
+    ResolvedSchema, ValueSchema, definition_by_key, variant_list,
 };
 use crate::state::PlotxApp;
 use serde::{Deserialize, Serialize};
@@ -82,26 +82,28 @@ pub(super) fn refine_plan(
             expanded.push(planned);
             continue;
         }
-        let components = app.resource_series_targets(&planned.target.resource);
+        let components = app.resource_property_targets(&planned.target.resource, definition);
         if components.is_empty() {
             expanded.push(PlannedTarget {
                 target: planned.target,
                 status: TargetCompatibility::Skipped,
-                reason: "this plot has no series to address".to_owned(),
+                reason: format!(
+                    "this resource has no {} component to address",
+                    definition.applicability.component.as_str()
+                ),
             });
             continue;
         }
         for target in components {
-            // Applicability per component comes from the definition, resolved
-            // against the series' own field — never from the tool descriptor,
-            // which cannot see a series at all. A read is the cheapest form of
-            // that same question, and asking it here means the plan preview and
-            // the commit agree by construction.
+            // Applicability per component comes from the definition, never from
+            // the tool descriptor. A read is the cheapest form of that same
+            // question, and asking it here means the plan preview and the
+            // commit agree by construction.
             let address = PropertyAddress::new(target.clone(), definition.id);
             let (status, reason) = match app.resolve_property(&address) {
                 Ok(_) => (
                     TargetCompatibility::Compatible,
-                    format!("{} applies to this series", definition.canonical_label),
+                    format!("{} applies to this component", definition.canonical_label),
                 ),
                 Err(error) => (TargetCompatibility::Skipped, error.to_string()),
             };
@@ -162,6 +164,7 @@ fn inspect(
         target: address.target.clone(),
         outcome: TargetOutcome::Succeeded,
         message: "read".to_owned(),
+        skip_reason: None,
         fingerprints: Vec::new(),
     }));
     targets.extend(skipped_results(&set.skipped_targets));
@@ -187,10 +190,11 @@ fn inspect(
 
 /// Execute a validated commit and report every target exactly once.
 ///
-/// A commit that applies to nothing is not executed at all. Running an empty
-/// composite would advance the document revision and land in the undo stack,
-/// so a call that changed nothing would be indistinguishable from one that did
-/// — and would give a caller an undo entry that undoes nothing.
+/// A commit that applies to nothing is not executed at all. What that buys is
+/// the *report*, not the document: an empty composite is a no-op the action
+/// layer already drops, so nothing would reach history either way. Stopping
+/// here is what lets the result say the targets were skipped, and why, instead
+/// of reporting a success a caller cannot tell apart from a real change.
 fn commit_and_report(
     app: &mut PlotxApp,
     plan: &ToolPlan,
@@ -209,6 +213,7 @@ fn commit_and_report(
         target: address.target.clone(),
         outcome: TargetOutcome::Succeeded,
         message: verb.to_owned(),
+        skip_reason: None,
         fingerprints: Vec::new(),
     }));
     targets.extend(skipped_results(&skipped));
@@ -229,8 +234,12 @@ fn commit_and_report(
         verification: vec![VerificationRecord {
             check: "revision_advanced".to_owned(),
             passed: applied.is_empty() || after > before,
+            // A commit can apply to nothing because every target refused the
+            // property *or* because every target already held the value, and
+            // those are opposite answers to "did I address the right thing?".
+            // The per-target reasons say which; this line must not assert one.
             message: if applied.is_empty() {
-                "no target accepted this property; nothing was committed".to_owned()
+                "nothing was committed; see each target's reason".to_owned()
             } else {
                 "atomic document commit completed".to_owned()
             },
@@ -249,6 +258,12 @@ fn skipped_from_plan(plan: &ToolPlan) -> Vec<TargetResult> {
             target: target.target.clone(),
             outcome: TargetOutcome::Skipped,
             message: target.reason.clone(),
+            // Plan-time skips keep prose only. Some come from the shared
+            // kind/capability gate, which runs before the catalog sees the
+            // target at all; the rest are `refine_plan`'s own applicability
+            // answer. Neither is ever a same-value no-op, so the absence of a
+            // reason here is itself the distinction a caller needs.
+            skip_reason: None,
             fingerprints: Vec::new(),
         })
         .collect()
@@ -256,25 +271,24 @@ fn skipped_from_plan(plan: &ToolPlan) -> Vec<TargetResult> {
 
 /// The targets the *planner* skipped, as opposed to the shared gate.
 ///
-/// Through these tools this is currently always empty, and deliberately so:
-/// `refine_plan` decides applicability by asking `resolve_property`, which is
-/// the same question the planner asks, so a target the planner would skip has
-/// already been marked `Skipped` at plan time and never reaches the commit. The
-/// only way the two could disagree is a document that changed between planning
-/// and execution, which the revision check rejects outright.
+/// The ordinary way this is non-empty is a write whose value a target already
+/// holds: `refine_plan` decides applicability by asking `resolve_property`, so
+/// every target that is merely inapplicable was already marked `Skipped` at plan
+/// time — but "does this apply" and "would this change anything" are different
+/// questions, and only the planner asks the second. A `properties.set` that
+/// re-sends the value a series is already showing reports every target here.
 ///
-/// It is kept rather than dropped because the planner's contract is that it
-/// reports skips, and this adapter's job is to forward what it reports. Deleting
-/// this would replace an empty list with a silent discard, and the first planner
-/// rule that does not have a read-side equivalent — a write refused for a reason
-/// a read cannot see — would vanish from the result with nothing to notice it.
-fn skipped_results(skipped: &[(TargetRef, String)]) -> Vec<TargetResult> {
+/// Each skip carries a typed reason as well as its prose, so a caller can tell
+/// a same-value no-op from a target that refused the property without matching
+/// on wording.
+fn skipped_results(skipped: &[PropertySkip]) -> Vec<TargetResult> {
     skipped
         .iter()
-        .map(|(target, reason)| TargetResult {
-            target: target.clone(),
+        .map(|skip| TargetResult {
+            target: skip.target.clone(),
             outcome: TargetOutcome::Skipped,
-            message: reason.clone(),
+            message: skip.message.clone(),
+            skip_reason: Some(skip.reason.as_str().to_owned()),
             fingerprints: Vec::new(),
         })
         .collect()

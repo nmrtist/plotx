@@ -6,11 +6,15 @@
 
 use super::*;
 use crate::properties::tests::{contour_app, contour_spec};
-use crate::properties::{contour, definition_by_key};
+use crate::properties::{
+    AggregateValue, PropertyAddress, PropertyValue, apodization, contour, definition_by_key,
+    typography,
+};
 use crate::state::{
     CONTOUR_BASE_FRACTION_OF_RANGE, CONTOUR_BASE_NOISE_FLOOR, CanvasObject, CanvasObjectKind,
-    ObjectFrame, PlotxApp, SeriesBinding, TextBox,
+    Dataset, NmrDataset, ObjectFrame, PlotxApp, SeriesBinding, TextBox,
 };
+use plotx_io::{Domain, NmrData};
 
 pub(super) fn request(
     app: &PlotxApp,
@@ -319,6 +323,104 @@ fn inspect_reads_the_value_and_reports_skips() {
     );
 }
 
+/// A document-scoped property expands to the document root itself instead of
+/// pretending it owns a series. This is the `ComponentKind::None` counterpart
+/// to the existing plot-object expansion test.
+#[test]
+fn document_property_tools_address_the_document_root() {
+    let (mut app, _) = contour_app();
+    let request = request(
+        &app,
+        TOOL_SET,
+        serde_json::json!({"key": typography::TICK_PT.as_str(), "value": 9.5}),
+        vec![DOCUMENT_RESOURCE_ID.to_owned()],
+        CallerType::Agent,
+    );
+    let plan = plan_tool(&app, request).expect("the document property plans");
+    assert_eq!(plan.targets.len(), 1);
+    assert_eq!(plan.targets[0].status, TargetCompatibility::Compatible);
+    assert!(plan.targets[0].target.component.is_none());
+    let authority = plan.required_authority;
+    let result = execute_tool(&mut app, plan, authority).expect("the document property executes");
+    assert!(
+        result
+            .targets
+            .iter()
+            .any(|target| target.outcome == TargetOutcome::Succeeded),
+        "the document root is reported as an applied target"
+    );
+    assert_eq!(app.doc.style_library.figure_typography.tick_pt, 9.5);
+}
+
+/// Dataset resources expand to their stable processing-step components. Only
+/// the apodization step accepts this property; the other real pipeline steps
+/// remain visible as reported skips rather than being silently omitted.
+#[test]
+fn dataset_property_tools_expand_processing_steps_and_report_non_apodization_skips() {
+    let mut app = PlotxApp::new();
+    app.doc
+        .datasets
+        .push(Dataset::Nmr(Box::new(NmrDataset::load(NmrData {
+            points: (0..32)
+                .map(|value| num_complex::Complex64::new(f64::from(value), 0.0))
+                .collect(),
+            domain: Domain::Time,
+            spectral_width_hz: 4_000.0,
+            observe_freq_mhz: 400.0,
+            carrier_ppm: 0.0,
+            nucleus: "1H".to_owned(),
+            source: "automation apodization".to_owned(),
+            group_delay: 0.0,
+        }))));
+    let dataset = app.doc.datasets[0].resource_id().to_string();
+    let request = request(
+        &app,
+        TOOL_SET,
+        serde_json::json!({
+            "key": apodization::KIND.as_str(),
+            "value": apodization::APODIZATION_EXPONENTIAL,
+        }),
+        vec![dataset],
+        CallerType::Agent,
+    );
+    let plan = plan_tool(&app, request).expect("the dataset step property plans");
+    let compatible = plan
+        .targets
+        .iter()
+        .filter(|target| target.status == TargetCompatibility::Compatible)
+        .collect::<Vec<_>>();
+    assert_eq!(compatible.len(), 1, "only the apodization step accepts it");
+    assert!(
+        plan.targets
+            .iter()
+            .any(|target| target.status == TargetCompatibility::Skipped),
+        "the rest of the real pipeline is reported as skipped"
+    );
+    let target = compatible[0].target.clone();
+    let authority = plan.required_authority;
+    let result = execute_tool(&mut app, plan, authority).expect("the accepted step executes");
+    assert!(
+        result
+            .targets
+            .iter()
+            .any(|target| target.outcome == TargetOutcome::Succeeded),
+        "the apodization component reports success"
+    );
+    assert!(
+        result
+            .targets
+            .iter()
+            .any(|target| target.outcome == TargetOutcome::Skipped),
+        "the non-apodization components report their skips"
+    );
+    assert_eq!(
+        app.resolve_property(&PropertyAddress::new(target, apodization::KIND))
+            .expect("the stable step target still resolves")
+            .value,
+        AggregateValue::Uniform(PropertyValue::Enum(apodization::APODIZATION_EXPONENTIAL)),
+    );
+}
+
 /// A read-only tool must not be usable to write, and the refusal has to happen
 /// before anything is planned.
 #[test]
@@ -446,7 +548,11 @@ fn the_property_tools_are_gated_by_capability() {
         );
         assert_eq!(
             descriptor.target_kinds,
-            vec![ResourceKindId::new(KIND_CANVAS_OBJECT)],
+            vec![
+                ResourceKindId::new(KIND_DOCUMENT),
+                ResourceKindId::new(KIND_DATASET),
+                ResourceKindId::new(KIND_CANVAS_OBJECT),
+            ],
             "{id}"
         );
     }
@@ -486,4 +592,97 @@ fn every_property_definition_is_reachable_by_key() {
             definition.id
         );
     }
+}
+
+/// Admission to the property tools is a capability question, and the capability
+/// is the catalog's own answer about whether a resource has components to
+/// address. Deriving it from the dataset variant instead would put a data-domain
+/// branch in the admission gate — the one thing the encoding and property
+/// registries exist to avoid — and would drift the moment a kind gained or lost
+/// addressable components.
+#[test]
+fn the_catalog_capability_follows_addressable_components_not_the_dataset_kind() {
+    let (mut app, _) = contour_app();
+    app.doc
+        .datasets
+        .push(Dataset::Nmr(Box::new(NmrDataset::load(NmrData {
+            points: (0..8)
+                .map(|value| num_complex::Complex64::new(f64::from(value), 0.0))
+                .collect(),
+            domain: Domain::Frequency,
+            spectral_width_hz: 4_000.0,
+            observe_freq_mhz: 400.0,
+            carrier_ppm: 0.0,
+            nucleus: "1H".to_owned(),
+            source: "capability gate".to_owned(),
+            group_delay: 0.0,
+        }))));
+    let catalog = CapabilityId::new(CAP_PROPERTY_CATALOG);
+    let provider = ProjectResourceProvider::new(&app);
+    let descriptors = provider.descriptors();
+    let mut checked = 0;
+    for dataset in &app.doc.datasets {
+        let id = dataset.resource_id().to_string();
+        let descriptor = descriptors
+            .iter()
+            .find(|descriptor| descriptor.resource.id == id)
+            .unwrap_or_else(|| panic!("dataset {id} has a descriptor"));
+        assert_eq!(
+            descriptor.capabilities.contains(&catalog),
+            crate::properties::has_addressable_components(dataset),
+            "the capability of {id} disagrees with what the catalog can address"
+        );
+        checked += 1;
+    }
+    assert!(
+        checked >= 2,
+        "the fixture covers more than one dataset kind"
+    );
+}
+
+/// A caller has to be able to tell "that is already the value" from "that does
+/// not apply here" without reading English. The two are opposite answers to
+/// whether the call addressed the right thing, and a re-sent value is the
+/// ordinary way a skip reaches the result at all.
+#[test]
+fn a_same_value_write_reports_a_typed_skip_rather_than_a_denial() {
+    let (mut app, _) = contour_app();
+    add_line_series(&mut app);
+    let request = set_request(&app, contour::COUNT.as_str(), serde_json::json!(9));
+    run(&mut app, request).expect("the contour series accepts the write");
+
+    let request = set_request(&app, contour::COUNT.as_str(), serde_json::json!(9));
+    let result = run(&mut app, request).expect("re-sending the same value is not an error");
+    let skipped: Vec<_> = result
+        .targets
+        .iter()
+        .filter(|target| target.outcome == TargetOutcome::Skipped)
+        .collect();
+    assert_eq!(skipped.len(), 2, "{:?}", result.targets);
+
+    let reasons: Vec<Option<&str>> = skipped
+        .iter()
+        .map(|target| target.skip_reason.as_deref())
+        .collect();
+    assert!(
+        reasons.contains(&Some("already_at_value")),
+        "the contour series held the value already: {reasons:?}"
+    );
+    // The line series was ruled out at plan time, by the same applicability
+    // question, and reaches the result through the shared gate's own list. It
+    // carries no catalog reason — which is precisely what makes the two
+    // distinguishable without reading either message.
+    assert!(
+        reasons.contains(&None),
+        "the line series never had this property: {reasons:?}"
+    );
+
+    // The verification line may not claim the property was refused: one of these
+    // targets accepted it and simply had nothing to change.
+    let verification = &result.verification[0];
+    assert!(
+        !verification.message.contains("no target accepted"),
+        "a same-value write is not a denial: {}",
+        verification.message
+    );
 }

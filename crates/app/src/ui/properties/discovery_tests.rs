@@ -87,11 +87,11 @@ fn one_registration_joins_its_group_without_a_second_entry() {
     );
     assert_eq!(
         members.len(),
-        PRESENTATIONS.len() + 1,
+        discovery::members_of(panel::CONTOUR_SECTION, PRESENTATIONS).len() + 1,
         "membership is derived, so it grows with the table and nothing else"
     );
     // The group table itself is untouched: the newcomer contributed no entry.
-    assert_eq!(GROUPS.len(), 1);
+    assert_eq!(GROUPS.len(), 4);
 }
 
 /// Channel 3: the gesture picks up whichever property declared itself
@@ -196,4 +196,46 @@ fn the_gesture_is_a_catalog_command_with_a_reason_when_it_cannot_run() {
         );
         assert!(!descriptor.label.is_empty());
     }
+}
+
+/// Locking a plot means "do not change this", not "stop telling me about this".
+/// The read-only channels — the canvas corner readout, the palette's
+/// applicability answer, the context menu — all resolve through
+/// `selection_objects`, and filtering the lock in there made them vanish from a
+/// plot that was plainly selected, with nothing on screen to explain it.
+#[test]
+fn a_locked_plot_is_still_read_and_only_refuses_the_write() {
+    use crate::ui::properties::fixture;
+
+    let (mut app, ids) = fixture::contour_page(2);
+    assert_eq!(discovery::selection_objects(&app).len(), 2);
+    assert_eq!(discovery::editable_objects(&app).len(), 2);
+
+    if let Some(object) = app.doc.canvases[0].object_mut(ids[0]) {
+        object.locked = true;
+    }
+    assert_eq!(
+        discovery::selection_objects(&app).len(),
+        2,
+        "a locked plot stays in the set every read-only channel resolves"
+    );
+    assert_eq!(discovery::editable_objects(&app), vec![ids[1]]);
+    assert!(
+        !discovery::selection_targets(&app).is_empty(),
+        "the readout still has a series to describe"
+    );
+
+    if let Some(object) = app.doc.canvases[0].object_mut(ids[1]) {
+        object.locked = true;
+    }
+    assert_eq!(discovery::selection_objects(&app).len(), 2);
+    assert!(discovery::editable_objects(&app).is_empty());
+    assert!(
+        !discovery::selection_targets(&app).is_empty(),
+        "every plot being locked silences the write, never the reading"
+    );
+
+    // And the gesture says why rather than doing nothing.
+    discovery::step_selection(&mut app, PropertyStep::Raise);
+    assert_eq!(app.session.status, discovery::LOCKED_REASON);
 }

@@ -15,10 +15,11 @@ selection** 载入当前选择——再选择一个工具，点击 **Preflight**
 哪些目标、哪些会被跳过。**Confirm and execute** 执行，整批操作合并为
 一次 **Undo automation** 撤销。
 
-### 图的参数
+### 参数设置
 
-有三个工具能改到对象检查器（**Object inspector**）里的等高线参数，于是一个
-层级、一种颜色或一个线宽可以经一次可预检的批处理，应用到项目中的所有二维图：
+有三个工具能改到对象检查器（**Object inspector**）和处理面板里的设置，于是
+一个层级、一种颜色、一个线宽、一个字号或一种窗函数，都可以经一次可预检的批
+处理应用到整个项目：
 
 | 工具 | 作用 |
 | --- | --- |
@@ -26,10 +27,13 @@ selection** 载入当前选择——再选择一个工具，点击 **Preflight**
 | **Set a property** | 写入一个值 |
 | **Reset a property** | 按当前数据重新推导该值，与面板上的重置按钮一致 |
 
-勾选要处理的图对象——不是页面，也不是数据集——然后在 **Parameters (JSON)**
-中用 id 指定参数：**Set a property** 用
+在 **Parameters (JSON)** 中用 id 指定参数：**Set a property** 用
 `{"key": "series.contour.count", "value": 12}`，另外两个用
 `{"key": "series.contour.count"}`。
+
+三个工具都接受图对象、数据集，以及文档本身（列为 **PlotX document**）。该勾
+选哪一类由参数本身决定：等高线和线条参数在图对象上，切趾参数在数据集上，图形
+排印参数在文档上。
 
 | 对象检查器中的设置 | id | 取值 |
 | --- | --- | --- |
@@ -41,23 +45,68 @@ selection** 载入当前选择——再选择一个工具，点击 **Preflight**
 | **Positive colour** | `series.contour.positive_color` | `"#rrggbb"` |
 | **Negative colour** | `series.contour.negative_color` | `"#rrggbb"` |
 | **Line width** | `series.contour.line_width` | 0.05 到 10 |
+| **Stroke width**（**Line** 区域） | `series.line.stroke_width` | 0.05 到 10 |
+| **Tick-label size**（**Figure typography** 区域） | `document.figure.typography.tick_pt` | 1 到 72 |
 
-各参数的含义、以及每种锚定方式需要什么样的数据，见
-[等高线层级](/zh-cn/guides/contour-levels/)。
+| 切趾步骤上的设置 | id | 取值 |
+| --- | --- | --- |
+| **Window** | `dataset.processing.apodization.kind` | `none`、`cosine_bell`、`exponential`、`gaussian` |
+| **LB** | `dataset.processing.apodization.lb_hz` | −10000 到 10000 |
+| **GB** | `dataset.processing.apodization.gb_hz` | 大于 0，最大 10000 |
 
-一个图可以包含多条序列，因此这些工具按序列处理：预检和结果列表为每条序列
-各列一行，并指明是哪个图对象里的哪条序列。参数够不到的序列——例如等高线
-下方的热图——会标为 **Skipped** 并给出原因，其余序列照常应用；没有可寻址
-内容的对象（如文本框）同样被跳过。
+各等高线参数的含义、以及每种锚定方式需要什么样的数据，见
+[等高线层级](/zh-cn/guides/contour-levels/)；切趾各行的说明见
+[数据处理](/zh-cn/guides/processing/)。
+
+#### 勾选的目标会展开成什么
+
+被勾选的资源往往并不是真正被写入的对象——展开成什么由参数决定：图对象展开
+为它的各条序列，数据集展开为它的各个处理步骤，文档就是它自己。预检和结果列
+表按展开后的部件逐行列出，因此一个含三条序列的图会给出三行，并指明是哪个图
+对象里的哪条序列。
+
+参数够不到的部件会标为 **Skipped** 并给出原因，其余部件照常应用：等高线下方
+的热图、参数属于切趾时列表里的零填充步骤，或对一个窗函数为 *Exponential* 的
+步骤索取 **GB**，都是这种情况。完全没有可寻址内容的资源（文本框、没有管线的
+数据集）同样被跳过。
+
+结果行和运行记录会在资源旁写出部件：
+
+```json
+{
+  "resource": { "id": "…", "kind": "plotx.dataset" },
+  "component": { "kind": "processing_step", "id": 3 }
+}
+```
+
+序列部件写作 `{"kind": "series", "id": 2}`。两种 id 都只在它所属的资源内有
+意义，换一个数据集，同一个步骤 id 就什么也不代表。
+
+#### 为什么某个目标被跳过
+
+每一条被跳过的行都带有一句供人阅读的说明。由写入本身跳过的行还带有
+`skip_reason`——一个稳定的标记，工作流据此分支即可，不必去匹配文字：
+
+| `skip_reason` | 含义 |
+| --- | --- |
+| `already_at_value` | 目标本来就是这个值，没有写入任何内容 |
+| `not_applicable` | 该参数不适用于这个目标 |
+| `target_missing` | 这个地址在文档里已经指不到任何东西 |
+
+在预检阶段就被排除的行只有那句说明。它们绝不会是「值本来就一样」这种情况，
+因此没有这个标记本身就是区分。
+
+如果 **Set a property** 的所有目标本来就是这个值，那么它什么也不会写入：每个
+目标都报告为跳过，文档版本号不变，撤销栈上也不会多出一步。
 
 超出范围的值在 **Preflight** 阶段、也就是确认之前就会被拒绝，并同时给出你
-填的值和拒绝它的边界。过了这一步，列出的序列要么全部生效，要么全部不变，
+填的值和拒绝它的边界。过了这一步，列出的部件要么全部生效，要么全部不变，
 写入的改动合并为一次 **Undo automation** 撤销。
 
 **Inspect a property** 把读数返回给调用方：作为工作流的一步运行时，读数会
 进入运行记录，[命令行](/zh-cn/reference/cli/)写出的清单文件里也是同一份
-内容。在窗口里，数值显示在逐序列结果下方的 **Result value (JSON)** 区域：
-每条序列一份读数，包含当前值、默认值和它接受的范围。
+内容。在窗口里，数值显示在逐部件结果下方的 **Result value (JSON)** 区域：
+每个部件一份读数，包含当前值、默认值和它接受的范围。
 
 ## External Inputs
 

@@ -1,0 +1,216 @@
+//! Cross-scope provider slices that would otherwise make the contour fixture
+//! module too large.
+
+use super::*;
+
+/// The document scope is not a disguised canvas-object scope. Typography can
+/// be addressed before a page or plot exists, and its provider compiles the
+/// edit to the document action that already owns undo/rebuild semantics.
+#[test]
+fn document_typography_is_addressable_without_a_canvas_object() {
+    let mut app = PlotxApp::new();
+    let target = app.document_target();
+    assert!(target.component.is_none());
+    assert_eq!(target.resource.kind.0, "plotx.document");
+
+    let address = PropertyAddress::new(target.clone(), typography::TICK_PT);
+    let before = app
+        .resolve_property(&address)
+        .expect("the document resolves");
+    assert_eq!(
+        before.value,
+        AggregateValue::Uniform(PropertyValue::Float(7.0))
+    );
+    assert_eq!(before.default_value, Some(PropertyValue::Float(7.0)));
+
+    let commit = app
+        .plan_property_write(
+            typography::TICK_PT,
+            std::slice::from_ref(&target),
+            &PropertyValue::Float(9.5),
+        )
+        .expect("the document property plans");
+    let Action::Composite(actions) = &commit.action else {
+        panic!("a catalog commit is composite");
+    };
+    assert!(matches!(
+        actions.as_slice(),
+        [Action::SetFigureTypography { .. }]
+    ));
+    assert_eq!(app.commit_property(commit), 1);
+    assert_eq!(app.doc.style_library.figure_typography.tick_pt, 9.5);
+}
+
+/// A write of the value already in typed storage is not an applied edit. The
+/// caller gets an explicit skip, and the empty composite cannot create a fake
+/// undo/revision entry.
+#[test]
+fn a_same_value_write_is_reported_without_an_empty_commit() {
+    let mut app = PlotxApp::new();
+    let target = app.document_target();
+    let commit = app
+        .plan_property_write(
+            typography::TICK_PT,
+            std::slice::from_ref(&target),
+            &PropertyValue::Float(7.0),
+        )
+        .expect("the existing value is a valid request");
+    assert!(
+        commit.applied.is_empty(),
+        "a no-op is not reported as applied"
+    );
+    assert_eq!(commit.skipped.len(), 1);
+    assert!(commit.skipped[0].message.contains("already has that value"));
+    let Action::Composite(actions) = &commit.action else {
+        panic!("a no-op still has the catalog composite shape");
+    };
+    assert!(
+        actions.is_empty(),
+        "the transaction contains no typed action"
+    );
+    let revision = app.doc.automation_revision;
+    assert_eq!(app.commit_property(commit), 0);
+    assert_eq!(
+        app.doc.automation_revision, revision,
+        "a no-op does not create an automation revision"
+    );
+}
+
+/// A heterogeneous plot selection must retain both facts: the two line series
+/// disagree (`Mixed`), and a contour in the same selection was not silently
+/// treated as a line. Compatible targets still compile to one atomic composite.
+#[test]
+fn line_stroke_width_reports_mixed_values_and_skips_other_encodings() {
+    let (mut app, contour) = contour_app();
+    app.doc
+        .datasets
+        .push(Dataset::Nmr(Box::new(NmrDataset::load(nmr1d_with(
+            "lines",
+        )))));
+    let mut line_targets = Vec::new();
+    for name in ["Line A", "Line B"] {
+        let id = app.doc.canvases[0].allocate_object_id();
+        let object = app.build_plot_object(
+            1,
+            ObjectFrame::new(0.0, 0.0, 100.0, 40.0),
+            id,
+            name.to_owned(),
+        );
+        app.doc.canvases[0].objects.push(object);
+        line_targets.push(
+            app.series_targets(0, id)
+                .into_iter()
+                .next()
+                .expect("one line series"),
+        );
+    }
+    let second = line_targets[1].clone();
+    let object: crate::state::ObjectId = second
+        .resource
+        .local_id
+        .as_deref()
+        .expect("object id")
+        .parse()
+        .expect("object id parses");
+    let Some(ComponentRef::Series(series)) = second.component else {
+        panic!("line target addresses its series");
+    };
+    let line = app.doc.canvases[0]
+        .object_mut(object)
+        .and_then(|object| object.plot_mut())
+        .and_then(|plot| {
+            plot.binding
+                .series
+                .iter_mut()
+                .find(|candidate| candidate.id == series)
+        })
+        .expect("second line series");
+    let plotx_figure::SeriesEncoding::Line(line) = &mut line.encoding else {
+        panic!("the 1D field materializes a line encoding");
+    };
+    line.width = plotx_figure::PositiveFiniteF32::new(2.0).expect("literal width");
+
+    let targets = vec![
+        line_targets[0].clone(),
+        line_targets[1].clone(),
+        contour.clone(),
+    ];
+    let set = app.resolve_property_set(line::STROKE_WIDTH, &targets);
+    assert_eq!(set.value, AggregateValue::Mixed);
+    assert_eq!(set.applicable_targets.len(), 2);
+    assert_eq!(set.skipped_targets.len(), 1);
+    assert!(
+        set.skipped_targets[0].message.contains("line")
+            && set.skipped_targets[0].message.contains("contour"),
+        "the incompatible target is named rather than discarded: {}",
+        set.skipped_targets[0].message
+    );
+
+    let commit = app
+        .plan_property_write(line::STROKE_WIDTH, &targets, &PropertyValue::Float(3.0))
+        .expect("the compatible line series plan together");
+    assert_eq!(commit.applied.len(), 2);
+    assert_eq!(commit.skipped.len(), 1);
+    let Action::Composite(actions) = &commit.action else {
+        panic!("a multi-object edit is composite");
+    };
+    assert_eq!(
+        actions.len(),
+        2,
+        "each line object keeps its typed binding action"
+    );
+    assert!(
+        actions
+            .iter()
+            .all(|action| matches!(action, Action::SetDataBinding { .. }))
+    );
+    app.commit_property(commit);
+    for target in line_targets {
+        let resolved = app
+            .resolve_property(&PropertyAddress::new(target, line::STROKE_WIDTH))
+            .expect("line width still resolves");
+        assert_eq!(
+            resolved.value,
+            AggregateValue::Uniform(PropertyValue::Float(3.0))
+        );
+    }
+    assert!(
+        matches!(
+            app.resolve_property(&PropertyAddress::new(contour, line::STROKE_WIDTH)),
+            Err(PropertyError::NotApplicable(_))
+        ),
+        "the contour did not receive a line-only write"
+    );
+}
+
+/// A second steppable encoding reads through the property-address dispatch, not
+/// through the old contour-only target lookup. Its ordinary scalar payload is
+/// deliberately distinct from the contour provider's richer semantic payload.
+#[test]
+fn a_line_readout_dispatches_by_property_address() {
+    let (mut app, _) = contour_app();
+    app.doc
+        .datasets
+        .push(Dataset::Nmr(Box::new(NmrDataset::load(nmr1d_with(
+            "line readout",
+        )))));
+    let id = app.doc.canvases[0].allocate_object_id();
+    let object = app.build_plot_object(
+        1,
+        ObjectFrame::new(0.0, 0.0, 100.0, 40.0),
+        id,
+        "Line".to_owned(),
+    );
+    app.doc.canvases[0].objects.push(object);
+    let target = app
+        .series_targets(0, id)
+        .into_iter()
+        .next()
+        .expect("one line series");
+
+    assert_eq!(
+        app.property_readout(&PropertyAddress::new(target, line::STROKE_WIDTH))
+            .expect("the line readout resolves"),
+        PropertyReadout::Value(PropertyValue::Float(1.0))
+    );
+}

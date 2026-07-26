@@ -33,7 +33,15 @@ PlotX 的界面为英文；手册中加粗的英文词即界面上的原文标�
 - **对象检查器（Object inspector）**——所选画板对象的属性面板：图表
   类型、样式、几何，以及其绘制内容的显示设置，例如
   [等高线层级](/zh-cn/guides/contour-levels/)。常用设置直接显示，其余收在
-  **Advanced**（高级）折叠区中。
+  **Advanced**（高级）折叠区中。其中 **Contour** 与 **Line** 两个区域只在
+  所选内容确实这样绘制时才出现；**Figure typography** 属于文档，始终显示。
+- **设置分组（settings group）**——一组同属一处的相关设置。Ribbon 为每个
+  分组提供一个按钮，它只负责打开这些设置的所在处，而不重复摆一套控件：
+  **Figure → Style** 中的 **Contour settings**、**Line settings** 与
+  **Figure typography settings**，**Process → Processing** 中的
+  **Apodization settings**。画布右键菜单会列出当前适用的同一批分组，形如
+  *Contour settings…*；<kbd>Ctrl</kbd>+<kbd>K</kbd> 则能找到分组里的单项
+  设置。
 - **数据表（Data sheet）**——数据表格的电子表格视图，双击表格打开。
 - **命令面板（Command palette）**——<kbd>Ctrl</kbd>+<kbd>K</kbd> 打开
   的可搜索列表，涵盖命令、设置与数据；见

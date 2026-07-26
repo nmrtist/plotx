@@ -6,12 +6,13 @@
 //! keys move is visible where the keys are pressed.
 //!
 //! It is a label and nothing more: it reads a cached value through
-//! [`PlotxApp::contour_base_readout`] and never resolves, measures or queues
+//! [`PlotxApp::property_readout`] and never resolves, measures or queues
 //! anything. A plot whose estimate has not arrived says so.
 
 use super::{object_screen_rect, plot_rect};
 use crate::ui::properties;
 use egui::{Align2, Color32, FontId};
+use plotx_core::properties::PropertyReadout;
 use plotx_core::state::PlotxApp;
 
 const READOUT_FONT_PT: f32 = 11.0;
@@ -42,13 +43,13 @@ pub(crate) fn paint_property_readouts(
         // level while the keys moved the contour that does — or, with several
         // contours, present one of them as the whole plot's threshold.
         let targets = app.series_targets(ci, object);
-        let readouts: Vec<_> = app
+        let readouts: Vec<PropertyReadout> = app
             .resolve_property_set(property, &targets)
             .applicable_targets
             .iter()
-            .filter_map(|address| app.contour_base_readout(&address.target))
+            .filter_map(|address| app.property_readout(address).ok())
             .collect();
-        let Some(text) = properties::readout::aggregate_summary(&readouts) else {
+        let Some(text) = properties::readout::aggregate_property_summary(&readouts) else {
             continue;
         };
         let Some(frame) = object_screen_rect(app.session.board, canvas, object, rect) else {

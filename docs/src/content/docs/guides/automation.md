@@ -17,11 +17,11 @@ selection — then pick a tool and press **Preflight** to see which targets it
 will affect and which will be skipped. **Confirm and execute** applies
 it, and the whole batch collapses into a single **Undo automation** step.
 
-### Plot settings
+### Settings
 
-Three tools reach the contour settings the **Object inspector** edits, so one
-level, colour or line width can be applied across every 2D plot in the project
-as a single reviewed batch:
+Three tools reach the settings the **Object inspector** and the **Processing**
+panel edit, so one level, colour, width, type size or window function can be
+applied across a whole project as a single reviewed batch:
 
 | Tool | What it does |
 | --- | --- |
@@ -29,10 +29,14 @@ as a single reviewed batch:
 | **Set a property** | Writes a value |
 | **Reset a property** | Re-derives the value from the current data, as the panel's reset button does |
 
-Check the plot objects you want — not the page or the dataset — then name the
-setting in **Parameters (JSON)** by its id:
+Name the setting in **Parameters (JSON)** by its id:
 `{"key": "series.contour.count", "value": 12}` for **Set a property**, and
 `{"key": "series.contour.count"}` for the other two.
+
+All three tools accept plot objects, datasets, and the document itself — listed
+as **PlotX document**. Which of those to check follows from the setting: a
+contour or line setting lives on a plot object, an apodization setting on a
+dataset, and figure typography on the document.
 
 | Setting in the Object inspector | id | Accepts |
 | --- | --- | --- |
@@ -44,28 +48,76 @@ setting in **Parameters (JSON)** by its id:
 | **Positive colour** | `series.contour.positive_color` | `"#rrggbb"` |
 | **Negative colour** | `series.contour.negative_color` | `"#rrggbb"` |
 | **Line width** | `series.contour.line_width` | 0.05 to 10 |
+| **Stroke width**, in the **Line** section | `series.line.stroke_width` | 0.05 to 10 |
+| **Tick-label size**, in the **Figure typography** section | `document.figure.typography.tick_pt` | 1 to 72 |
 
-[Contour levels](/guides/contour-levels/) explains what each setting does and
-which data each anchor needs.
+| Setting on an apodization step | id | Accepts |
+| --- | --- | --- |
+| **Window** | `dataset.processing.apodization.kind` | `none`, `cosine_bell`, `exponential`, `gaussian` |
+| **LB** | `dataset.processing.apodization.lb_hz` | −10000 to 10000 |
+| **GB** | `dataset.processing.apodization.gb_hz` | greater than 0, at most 10000 |
 
-One plot can hold several series, so these tools work per series: preflight and
-the result list show a row for each, naming the plot object and the series
-inside it. A series the setting does not reach — a heatmap drawn under a
-contour — is listed as **Skipped** with the reason, and the remaining series are
-still applied. An object with nothing to address, such as a text box, is skipped
-the same way.
+[Contour levels](/guides/contour-levels/) explains what each contour setting
+does and which data each anchor needs; [Processing](/guides/processing/) does
+the same for the apodization rows.
+
+#### What a checked target expands to
+
+The resource you check is rarely the thing that is written — the setting decides
+what inside it is. A plot object expands to its series, a dataset to its
+processing steps, and the document to itself. Preflight and the result list show
+one row per component, so a plot holding three series produces three rows,
+naming the object and the series inside it.
+
+A component the setting does not reach is listed as **Skipped** with the reason,
+and the rest still apply: a heatmap drawn under a contour, a zero-fill step when
+the setting belongs to apodization, or a **GB** asked of a step whose window is
+*Exponential*. A resource with nothing to address at all — a text box, a dataset
+with no pipeline — is skipped the same way.
+
+Result rows and the run record name the component beside the resource:
+
+```json
+{
+  "resource": { "id": "…", "kind": "plotx.dataset" },
+  "component": { "kind": "processing_step", "id": 3 }
+}
+```
+
+Series components read `{"kind": "series", "id": 2}`. Both ids are local to the
+resource they travel with, so a step id means nothing next to a different
+dataset.
+
+#### Why a target was skipped
+
+Every skipped row carries a sentence written to be read. Rows the write itself
+passed over also carry `skip_reason`, a stable token a workflow can branch on
+without matching on wording:
+
+| `skip_reason` | Means |
+| --- | --- |
+| `already_at_value` | The target already held that value, so nothing was written |
+| `not_applicable` | The setting does not apply to this target |
+| `target_missing` | The address no longer names anything in the document |
+
+Rows already ruled out at preflight carry the sentence alone. They are never
+same-value no-ops, so the absence of the token is itself the distinction.
+
+A **Set a property** whose every target already holds the value writes nothing
+at all: each target is reported as skipped, the document revision does not move,
+and nothing is added to the undo stack.
 
 A value outside the range is refused at **Preflight**, before you confirm, and
 names both the value you gave and the limit that rejected it. Past that point
-either every listed series takes the value or none does, and what is written
+either every listed component takes the value or none does, and what is written
 collapses into one **Undo automation** step.
 
 **Inspect a property** returns its readings to whoever ran it: run it as a
 workflow step and the values land in the run record, which is also what
 [the command line](/reference/cli/) writes to its manifest file. In the window
-the numbers appear under **Result value (JSON)**, below the per-series rows:
-one reading per series, each with its current value, its default and the range
-it accepts.
+the numbers appear under **Result value (JSON)**, below the per-component rows:
+one reading per component, each with its current value, its default and the
+range it accepts.
 
 ## External Inputs
 

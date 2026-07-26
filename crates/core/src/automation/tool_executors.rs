@@ -256,6 +256,7 @@ pub(super) fn execute_import(
                     target: external,
                     outcome: TargetOutcome::Failed,
                     message: error.to_string(),
+                    skip_reason: None,
                     fingerprints: fingerprint_file(path, "selected_input")
                         .into_iter()
                         .collect(),
@@ -290,6 +291,7 @@ pub(super) fn execute_import(
             target: external,
             outcome: TargetOutcome::Succeeded,
             message: "imported into the canonical PlotX data model".to_owned(),
+            skip_reason: None,
             fingerprints,
         });
     }
@@ -381,6 +383,7 @@ pub(super) fn execute_transform(
                 target,
                 outcome: TargetOutcome::Succeeded,
                 message: "executed as a pinned PlotX RelPlanV1 input".into(),
+                skip_reason: None,
                 fingerprints: Vec::new(),
             })
             .collect(),
@@ -427,6 +430,7 @@ pub(super) fn execute_export(
             target: target.target.clone(),
             outcome: TargetOutcome::Skipped,
             message: target.reason.clone(),
+            skip_reason: None,
             fingerprints: Vec::new(),
         })
         .collect::<Vec<_>>();
@@ -443,6 +447,7 @@ pub(super) fn execute_export(
                 target: TargetRef::resource(target.clone()),
                 outcome: TargetOutcome::Failed,
                 message: "output already exists and overwrite is false".to_owned(),
+                skip_reason: None,
                 fingerprints: expected
                     .iter()
                     .filter_map(|path| fingerprint_file(path, "existing_output"))
@@ -475,6 +480,7 @@ pub(super) fn execute_export(
                     target: TargetRef::resource(target.clone()),
                     outcome: TargetOutcome::Failed,
                     message: error.to_string(),
+                    skip_reason: None,
                     fingerprints: Vec::new(),
                 });
                 continue;
@@ -489,6 +495,7 @@ pub(super) fn execute_export(
                 .map(|path| path.display().to_string())
                 .collect::<Vec<_>>()
                 .join(", "),
+            skip_reason: None,
             fingerprints: written
                 .iter()
                 .filter_map(|path| fingerprint_file(path, "output"))
@@ -545,6 +552,7 @@ fn commit_actions(
                 } else {
                     target.reason.clone()
                 },
+                skip_reason: None,
                 fingerprints: Vec::new(),
             })
             .collect(),

@@ -217,3 +217,70 @@ fn empty_state_is_constructible() {
     let state = plotx_core::state::CommandPaletteState::default();
     assert!(state.query.is_empty());
 }
+
+/// The palette disables a setting it cannot reveal, and the reason has to name
+/// the state that blocks it. A locked plot used to disappear from the selection
+/// entirely, so the palette reported "Select a plot whose series draws
+/// contours…" about a contour plot the user had selected.
+#[test]
+fn a_locked_selection_disables_a_setting_with_the_reason_that_actually_applies() {
+    use crate::ui::properties::fixture;
+
+    let (mut app, ids) = fixture::contour_page(1);
+    let targets = properties::discovery::targets_for_property(&app, contour::BASE_MAGNITUDE);
+    assert!(property_unavailable_reason(&app, contour::BASE_MAGNITUDE, &targets).is_none());
+
+    if let Some(object) = app.doc.canvases[0].object_mut(ids[0]) {
+        object.locked = true;
+    }
+    let targets = properties::discovery::targets_for_property(&app, contour::BASE_MAGNITUDE);
+    let reason = property_unavailable_reason(&app, contour::BASE_MAGNITUDE, &targets)
+        .expect("a locked plot cannot receive the write");
+    assert_eq!(reason, properties::discovery::LOCKED_REASON);
+    assert!(
+        !reason.contains("draws contours"),
+        "the plot does draw contours; saying otherwise sends the user to fix the wrong thing"
+    );
+}
+
+/// Revealing a setting that lives on a processing step has to open that step,
+/// and has to do it by moving the panel's own expansion state.
+///
+/// The previous arrangement derived the expansion from the property focus while
+/// rendering, so the focus's ~800 ms highlight timer collapsed the row again
+/// with no user action behind it — the crate's layout-stability rule forbids
+/// exactly that — and, because a focus names a property rather than a step, it
+/// opened every step that could carry the setting at once.
+#[test]
+fn revealing_a_step_setting_opens_that_step_and_leaves_it_open() {
+    use plotx_core::properties::apodization;
+
+    let mut app = PlotxApp::new_with_settings(plotx_core::settings::Settings::default());
+    app.doc
+        .datasets
+        .push(crate::ui::properties::fixture::time_domain_2d());
+    app.set_active_dataset(Some(0));
+
+    let expected = properties::discovery::targets_for_property(&app, apodization::KIND)
+        .into_iter()
+        .find_map(|target| match target.component {
+            Some(plotx_core::automation::ComponentRef::ProcessingStep(step)) => Some(step),
+            _ => None,
+        })
+        .expect("the time-domain factory recipe has an apodization step");
+
+    reveal_property(&mut app, apodization::KIND, 10.0);
+    assert_eq!(
+        app.session.ui.proc_expanded_step.map(|(_, step)| step),
+        Some(expected),
+        "the reveal opens the step that carries the setting"
+    );
+
+    // The highlight expires on a timer. The expansion may not follow it.
+    app.session.ui.property_focus = None;
+    assert_eq!(
+        app.session.ui.proc_expanded_step.map(|(_, step)| step),
+        Some(expected),
+        "a timer must never collapse a row the user asked to see"
+    );
+}

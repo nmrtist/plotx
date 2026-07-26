@@ -150,7 +150,21 @@ fn apodization_from_dto(a: &ApodizationDto) -> Apodization {
         ApodizationDto::None => Apodization::None,
         ApodizationDto::CosineBell => Apodization::CosineBell,
         ApodizationDto::Exponential { lb_hz } => Apodization::Exponential { lb_hz },
-        ApodizationDto::Gaussian { lb_hz, gb_hz } => Apodization::Gaussian { lb_hz, gb_hz },
+        // A Gaussian window's time-domain term is `(pi*gb)^2 / (4 ln 2)`, so a
+        // stored `gb` of zero leaves nothing but exponential growth and a
+        // negative one behaves as its own magnitude. Neither is a window this
+        // application can show or edit, so a file carrying one is repaired to
+        // the neutral value rather than opened into a state the panel refuses.
+        // Not to the bound's smallest admissible value: that is the next number
+        // above zero, and the resulting gain overflows to infinity.
+        ApodizationDto::Gaussian { lb_hz, gb_hz } => Apodization::Gaussian {
+            lb_hz,
+            gb_hz: if gb_hz.is_finite() && gb_hz > 0.0 {
+                gb_hz
+            } else {
+                crate::properties::apodization::GB_DEFAULT_HZ
+            },
+        },
     }
 }
 

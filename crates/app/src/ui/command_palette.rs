@@ -12,7 +12,7 @@ use super::properties::{self, PanelRoute};
 use super::*;
 use egui::{Align2, FontId, Key, TextEdit, vec2};
 use plotx_core::properties::PropertyId;
-use plotx_core::state::{ObjectId, PropertyFocus};
+use plotx_core::state::{ObjectId, PropertyFocus, ToolGroup};
 
 const PANEL_WIDTH: f32 = 540.0;
 const LIST_HEIGHT: f32 = 320.0;
@@ -175,11 +175,8 @@ pub(super) fn search_set(app: &PlotxApp) -> Vec<PaletteItem> {
         .map(PaletteItem::from_command)
         .collect();
 
-    // Resolved once for the whole property half of the set: applicability is a
-    // question about the current selection, and every hit asks it of the same
-    // selection the panel and the other discovery channels read.
-    let targets = properties::discovery::selection_targets(app);
     for hit in properties::property_hits() {
+        let targets = properties::discovery::targets_for_property(app, hit.id);
         let unavailable = property_unavailable_reason(app, hit.id, &targets);
         items.push(PaletteItem {
             haystack: hit.terms.join(" "),
@@ -254,11 +251,22 @@ fn property_unavailable_reason(
 ) -> Option<String> {
     let resolved = app.resolve_property_set(property, targets);
     if !resolved.applicable_targets.is_empty() {
+        // The setting applies. Whether it can be *changed* is a separate
+        // question with its own answer: a locked plot is still described, still
+        // read out on the canvas, and still findable by name here.
+        let editable = properties::discovery::editable_targets_for_property(app, property);
+        if app
+            .resolve_property_set(property, &editable)
+            .applicable_targets
+            .is_empty()
+        {
+            return Some(properties::discovery::LOCKED_REASON.to_owned());
+        }
         return None;
     }
     // Nothing was even a candidate: the group already declares the sentence
     // that names the fix, and the catalog has nothing more specific to add.
-    let Some((_, reason)) = resolved.skipped_targets.first() else {
+    let Some(skip) = resolved.skipped_targets.first() else {
         return Some(
             properties::presentation(property)
                 .and_then(|entry| properties::discovery::group(entry.home_route.section))
@@ -267,7 +275,10 @@ fn property_unavailable_reason(
                 .to_owned(),
         );
     };
-    Some(format!("Select a series this setting applies to: {reason}"))
+    Some(format!(
+        "Select a series this setting applies to: {}",
+        skip.message
+    ))
 }
 
 fn activate(
@@ -308,8 +319,48 @@ pub(super) fn reveal_property(app: &mut PlotxApp, property: PropertyId, now: f64
     }
     match route.panel {
         PanelRoute::SecondarySidebar => app.session.secondary_sidebar_visible = true,
+        PanelRoute::Processing => {
+            app.session.secondary_sidebar_visible = true;
+            app.session.ui.requested_tool_group = Some(ToolGroup::Processing);
+        }
+    }
+    // A property owned by an owner-local component needs that component opened,
+    // or the row it names is not on screen to scroll to. The step is chosen here
+    // — once, from the user's activation — rather than recomputed every frame
+    // while the panel renders.
+    if route.panel == PanelRoute::Processing
+        && let Some(step) = revealed_step(app, property)
+    {
+        app.session.ui.proc_expanded_step = Some(step);
     }
     app.session.ui.property_focus = Some(PropertyFocus::request(property, now));
+}
+
+/// The first processing step that actually carries `property`, addressed the way
+/// the catalog addresses it. Applicability is the catalog's answer, so a step
+/// whose current settings do not expose the property is passed over rather than
+/// opened onto a row that is not there.
+fn revealed_step(
+    app: &PlotxApp,
+    property: PropertyId,
+) -> Option<(plotx_core::state::DatasetId, plotx_processing::StepId)> {
+    use plotx_core::automation::ComponentRef;
+    use plotx_core::properties::PropertyAddress;
+
+    properties::discovery::targets_for_property(app, property)
+        .into_iter()
+        .find(|target| {
+            app.resolve_property(&PropertyAddress::new(target.clone(), property))
+                .is_ok()
+        })
+        .and_then(|target| match target.component {
+            Some(ComponentRef::ProcessingStep(step)) => {
+                plotx_core::state::DatasetId::try_from(&target.resource)
+                    .ok()
+                    .map(|dataset| (dataset, step))
+            }
+            _ => None,
+        })
 }
 
 fn filter(items: &[PaletteItem], query: &str) -> Vec<usize> {

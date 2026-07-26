@@ -66,6 +66,57 @@ Some spectrometers record a digital filter delay at the start of the FID that
 shows up as distorted first points. Digital group-delay correction removes it;
 it is a per-dataset switch next to the step list, applied before the pipeline.
 
+## Apodization
+
+Click the **Apodize** row in the step list to open its settings. All of them are
+shown at once, under an **Apodization** heading:
+
+- **Window** — *None*, *Cosine bell*, *Exponential*, or *Gaussian*.
+- **LB** — line broadening in Hz, offered for an exponential or Gaussian window.
+  It accepts −10000 to 10000, and the negative half is deliberate: under a
+  Gaussian window a positive LB narrows lines — the Lorentz-to-Gauss resolution
+  enhancement — and a negative one broadens them further.
+- **GB** — Gaussian broadening in Hz, offered only for a Gaussian window. It
+  must be **greater than 0**, up to 10000. At zero the Gaussian term vanishes
+  and what is left grows without limit instead of decaying, so it is not a
+  window at all.
+
+Switching a step to an exponential or Gaussian window starts any broadening it
+did not already carry at 1 Hz.
+
+Dragging **LB** or **GB** previews continuously but leaves a single undo step
+for the whole drag, so one <kbd>Ctrl</kbd>+<kbd>Z</kbd> takes back the gesture
+rather than one frame of it.
+
+### Changed values and reset
+
+A value that differs from the one the standard pipeline for this dataset puts in
+the step is marked with a dot. Hover the dot to see the default; use the reset
+button beside it to go back.
+
+A step you added yourself has no such default — nothing in the standard pipeline
+corresponds to it — so it carries no marker and no reset button. Asking for a
+reset through [Automation](/guides/automation/) reports that step as skipped
+rather than turning a window you chose into *None*.
+
+### While auto-recompute is paused
+
+**Pause auto-recompute**, in the ⋮ menu at the top of the Processing panel under
+**Advanced**, governs these rows as well. Change **Window**, **LB** or **GB**
+while it is on and the recipe records the change without recomputing: the panel
+shows **Changes pending** with an **Apply** button, and nothing is recalculated
+until you press it.
+
+### Finding these settings
+
+- <kbd>Ctrl</kbd>+<kbd>K</kbd> (<kbd>Cmd</kbd> on macOS) searches settings as
+  well as commands and data. `LB`, `line broadening`, `apodization window` and
+  `gaussian broadening` all reach these rows; activating one opens the
+  Processing panel, expands the first step that carries the setting and
+  highlights it. See [Command palette](/reference/command-palette/).
+- **Apodization settings** in the **Processing** group of the Ribbon's
+  **Process** tab goes to the same place.
+
 ## Phase correction
 
 Automatic phase correction is enabled by default; you can switch methods or

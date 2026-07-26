@@ -361,6 +361,12 @@ pub struct TargetResult {
     pub target: TargetRef,
     pub outcome: TargetOutcome,
     pub message: String,
+    /// Why a skipped target was skipped, as a stable enumerated token. `message`
+    /// is prose written to be read and free to be reworded; a caller that has to
+    /// tell "already this value" from "does not apply" branches on this instead.
+    /// Absent unless the outcome is `Skipped`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skip_reason: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fingerprints: Vec<FingerprintRecord>,
 }

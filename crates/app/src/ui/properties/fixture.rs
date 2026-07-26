@@ -129,3 +129,11 @@ pub(crate) fn set_lowest_level(app: &mut PlotxApp, object: ObjectId, multiplier:
         .expect("the fixture writes a valid multiplier");
     app.commit_property(commit);
 }
+
+/// A time-domain 2D acquisition, whose factory recipe carries the apodization
+/// step the processing-panel tests address.
+pub(crate) fn time_domain_2d() -> Dataset {
+    let mut data = nmr2d("time domain");
+    data.domain = plotx_io::Domain::Time;
+    Dataset::Nmr2D(Box::new(Nmr2DDataset::load(data)))
+}

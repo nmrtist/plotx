@@ -7,12 +7,15 @@ use crate::state::{Dataset, PlotxApp};
 use std::collections::BTreeMap;
 
 pub const KIND_DATASET: &str = "plotx.dataset";
+pub const KIND_DOCUMENT: &str = "plotx.document";
 pub const KIND_CANVAS: &str = "plotx.canvas";
 pub const KIND_TABLE_ROW: &str = "plotx.table.row";
 pub const KIND_TABLE_COLUMN: &str = "plotx.table.column";
 pub const KIND_FIELD: &str = "plotx.field";
 pub const KIND_CANVAS_OBJECT: &str = "plotx.canvas.object";
 pub const KIND_EXTERNAL_INPUT: &str = "plotx.external_input";
+/// The one document root inside a `PlotxApp` target space.
+pub const DOCUMENT_RESOURCE_ID: &str = "document";
 
 pub const CAP_RENAME: &str = "resource.rename";
 pub const CAP_RENDER: &str = "figure.render";
@@ -87,6 +90,13 @@ impl<'a> ProjectResourceProvider<'a> {
         let mut capabilities = vec![cap(CAP_RENAME), cap(CAP_PREVIEW)];
         if matches!(dataset, Dataset::Nmr(_) | Dataset::Nmr2D(_)) {
             capabilities.push(cap(CAP_PROCESSING_SCHEME));
+        }
+        // Asked of the catalog, not of the variant: the gate is "does this
+        // resource hold components the catalog can address", and the catalog is
+        // the only thing that knows. A resource kind that grows addressable
+        // components later gains the tools without a branch being added here.
+        if crate::properties::has_addressable_components(dataset) {
+            capabilities.push(cap(CAP_PROPERTY_CATALOG));
         }
         let mut metadata = BTreeMap::new();
         metadata.insert("domain".to_owned(), format!("{:?}", dataset.domain()));
@@ -253,7 +263,22 @@ impl ResourceProvider for ProjectResourceProvider<'_> {
     }
 
     fn descriptors(&self) -> Vec<ResourceDescriptor> {
-        let mut descriptors = Vec::new();
+        let mut descriptors = vec![ResourceDescriptor {
+            resource: ResourceRef {
+                id: DOCUMENT_RESOURCE_ID.to_owned(),
+                kind: ResourceKindId::new(KIND_DOCUMENT),
+                parent_id: None,
+                local_id: None,
+            },
+            name: "PlotX document".to_owned(),
+            capabilities: vec![cap(CAP_PROPERTY_CATALOG)],
+            children: Vec::new(),
+            dimensions: Vec::new(),
+            units: Vec::new(),
+            metadata: BTreeMap::new(),
+            lineage: Vec::new(),
+            revision: self.revision(),
+        }];
         for (index, dataset) in self.app.doc.datasets.iter().enumerate() {
             let parent = self.dataset_descriptor(index, dataset);
             if let Dataset::Table(table) = dataset {

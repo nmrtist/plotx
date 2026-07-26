@@ -277,6 +277,8 @@ pub struct UiState {
     pub page_layout_edit: Option<PendingPageLayoutEdit>,
     pub processing_edit: Option<PendingProcessingEdit>,
     pub processing_session: Option<PendingProcessingEdit>,
+    /// The continuous property-catalog control currently being dragged, if any.
+    pub property_gesture: Option<crate::actions::PendingPropertyGesture>,
     pub inspector_edit: Option<PendingInspectorEdit>,
     /// Pre-edit snapshot for a plot-local axis text/range gesture.
     pub axis_overrides_before: Option<(usize, ObjectId, AxisOverrides)>,
@@ -451,6 +453,7 @@ impl Default for UiState {
             page_layout_edit: None,
             processing_edit: None,
             processing_session: None,
+            property_gesture: None,
             inspector_edit: None,
             axis_overrides_before: None,
             canvas_settings: None,

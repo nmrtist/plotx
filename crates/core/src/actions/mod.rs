@@ -83,6 +83,32 @@ pub struct PendingPageLayoutEdit {
     pub before: PageLayout,
 }
 
+/// Coalesces one continuous property-catalog control gesture into a single undo
+/// step.
+///
+/// A drag emits one write per frame. Recording each of them would spend the
+/// whole bounded undo history on a single gesture and evict everything the user
+/// did before it, so the frames are applied live and outside history and the
+/// gesture keeps only the two actions that bound it: `first` still carries the
+/// state the gesture started from, `last` the state it ended at. Both hold
+/// absolute before/after snapshots of the stores they touch, so reverting the
+/// pair restores the pre-gesture state and re-applying it reproduces the final
+/// one.
+///
+/// A recipe edit is not represented here at all. Processing already owns a
+/// mechanism for exactly this — a processing session, whose live edits are
+/// recorded once when it ends — and the gesture borrows it rather than keeping
+/// a second copy of the same frames.
+pub struct PendingPropertyGesture {
+    pub property: crate::properties::PropertyId,
+    pub first: Option<Action>,
+    pub last: Option<Action>,
+    /// Set when this gesture opened the processing session it writes through,
+    /// and must therefore be the one to close it. A session opened by something
+    /// else — on-plot phasing, say — outlives the gesture.
+    pub owns_processing_session: bool,
+}
+
 /// Coalesces a single object-inspector interaction (a DragValue drag, a colour
 /// pick, a text edit) into one undo step: the pre-edit frames and styles of the
 /// touched objects, committed once the interaction ends.

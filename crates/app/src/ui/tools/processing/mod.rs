@@ -144,6 +144,13 @@ fn row(
     op: &mut Option<(StepId, RowOp)>,
 ) {
     let id = step.id;
+    // Expansion is this panel's own state and nothing else's. A search hit that
+    // wants a step opened sets it in `reveal_property`, once, as the direct
+    // consequence of the user activating the hit; deriving it here from the
+    // property focus instead let the focus's own highlight timer collapse the
+    // row again ~800 ms later — a layout change with no user action behind it —
+    // and, because a focus names a property rather than a step, opened every
+    // step that could carry the setting at once and asked each to scroll.
     let expanded = app.session.ui.proc_expanded_step == Some((owner, id));
     ui.horizontal(|ui| {
         ui.weak(icon::DOTS_SIX_VERTICAL);

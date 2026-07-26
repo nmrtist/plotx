@@ -37,16 +37,25 @@ Activating a setting does not change anything. It opens the panel the setting
 lives in, expands its section, scrolls to the row and highlights it briefly, so
 you can see the current value before editing it.
 
+A setting that belongs to one processing step also opens the Processing panel
+and expands the first step that actually carries it — a step whose window has no
+**GB**, for instance, is passed over rather than opened onto a row that is not
+there.
+
 ## Availability
 
 Commands that don't apply in the current context are grayed out — for
 example, export commands without an active canvas, or align and distribute
 without enough selected objects.
 
-Settings are grayed out the same way when nothing in the current selection can
-receive them — no plot selected, or a selected series that draws something other
-than a contour. They stay in the list so you can still find them by name; hover
-one to see why it is unavailable.
+Settings are grayed out the same way when nothing in the current context can
+receive them — no plot selected, a selected series that draws something other
+than a contour, or a dataset with no apodization step. They stay in the list so
+you can still find them by name; hover one to see why it is unavailable.
+
+A setting that applies to the selection but cannot be changed there is grayed
+out too. A locked plot reads *Unlock this plot to change its settings; it can
+still be read while locked.*
 
 ## What's included
 
@@ -62,13 +71,24 @@ Commands:
 - Arrange: grid, align, distribute, z-order, and *Tidy up frames*.
 - Applying themes and stacking data.
 - Switching to any tool.
-- *Contour settings*, *Raise lowest level* and *Lower lowest level*.
+- *Contour settings*, *Line settings*, *Figure typography settings*,
+  *Apodization settings*, *Raise lowest level* and *Lower lowest level*.
 
 Settings:
 
-- The contour rows of the Object inspector — lowest level, anchor, levels, level
-  ratio, negative contours, colours, and line width. See
+- The **Contour** rows of the Object inspector — lowest level, anchor, levels,
+  level ratio, negative contours, colours, and line width. See
   [Contour levels](/guides/contour-levels/).
+- **Stroke width**, the width of a line series, in the Object inspector's
+  **Line** section. `line width`, `stroke width`, `trace thickness` and `line
+  thickness` all reach it.
+- **Tick-label size** in the Object inspector's **Figure typography** section.
+  `font size`, `tick size`, `points` and `figure typography` reach it. See
+  [Layout and export](/guides/layout-and-export/).
+- **Window**, **LB** and **GB** on an apodization step in the Processing panel.
+  `apodization`, `window function`, `exponential`, `gaussian`, `LB`, `line
+  broadening`, `GB` and `gaussian broadening` reach them. See
+  [Processing](/guides/processing/).
 
 Data:
 

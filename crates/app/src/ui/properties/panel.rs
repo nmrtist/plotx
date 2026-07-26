@@ -12,14 +12,20 @@ use egui_phosphor::regular as icon;
 use plotx_core::automation::TargetRef;
 use plotx_core::properties::{
     AggregateValue, ContourBaseReadout, EncodingKind, PropertyDefinition, PropertyId,
-    PropertyValue, ResolvedProperty, ResolvedPropertySet, ResolvedSchema, ValueCopies, ValueSchema,
-    contour,
+    PropertyReadout, PropertyValue, ResolvedProperty, ResolvedPropertySet, ResolvedSchema,
+    ValueCopies, ValueSchema, contour,
 };
 use plotx_core::state::{ObjectId, PlotxApp, PropertyFocus};
 
 /// The home-route section id of the contour rows. The route table and the
 /// collapsing header below must agree on it, so both read this constant.
 pub(crate) const CONTOUR_SECTION: &str = "object.contour";
+/// The home section for line-encoding rows on selected plot objects.
+pub(crate) const LINE_SECTION: &str = "object.line";
+/// The document root's figure typography rows.
+pub(crate) const TYPOGRAPHY_SECTION: &str = "document.figure_typography";
+/// The processing editor's per-step apodization rows.
+pub(crate) const APODIZATION_SECTION: &str = "dataset.apodization";
 
 /// What a control shows in place of a number or a choice when there is none:
 /// the sources behind the row do not agree, so no value may be presented as the
@@ -46,6 +52,34 @@ fn no_single_value_hint(targets: usize, copies: ValueCopies) -> String {
         (_, false) => "the selected series do not all hold the same value",
     };
     format!("No single value: {sources}. Setting it now applies to all of them.")
+}
+
+/// What a section counts itself in, in both grammatical numbers.
+///
+/// English does not pluralize by appending an `s` — "2 contour seriess" is what
+/// that produces — so both forms are declared rather than derived.
+#[derive(Clone, Copy)]
+struct SectionNoun {
+    singular: &'static str,
+    plural: &'static str,
+}
+
+impl SectionNoun {
+    const fn new(singular: &'static str, plural: &'static str) -> Self {
+        Self { singular, plural }
+    }
+
+    fn of(self, count: usize) -> &'static str {
+        if count == 1 {
+            self.singular
+        } else {
+            self.plural
+        }
+    }
+
+    fn counted(self, count: usize) -> String {
+        format!("{count} {}", self.of(count))
+    }
 }
 
 /// One catalog row, already resolved against the selection.
@@ -90,7 +124,19 @@ impl Row {
 enum Pending {
     Write(PropertyId, PropertyValue),
     Reset(PropertyId),
-    ResetEncoding,
+    ResetEncoding(EncodingKind),
+}
+
+/// What a continuous control did to the gesture it belongs to this frame.
+///
+/// A drag writes every frame; only the release ends the gesture. The control
+/// reports the transition and the section acts on it once the immutable borrows
+/// are done, so every catalog row coalesces the same way regardless of which
+/// typed store it happens to write.
+#[derive(Clone, Copy, PartialEq)]
+enum GestureEdge {
+    Started,
+    Stopped,
 }
 
 /// Render the contour section for the current selection. Returns `false` when
@@ -106,10 +152,82 @@ pub(crate) fn contour_section(
         .iter()
         .flat_map(|&object| app.series_targets(canvas, object))
         .collect();
+    render_section(
+        app,
+        CONTOUR_SECTION,
+        "Contour",
+        SectionNoun::new("contour series", "contour series"),
+        &targets,
+        Some(EncodingKind::Contour),
+        ui,
+    )
+}
+
+/// Render line properties over the current plot selection.
+pub(crate) fn line_section(
+    app: &mut PlotxApp,
+    canvas: usize,
+    objects: &[ObjectId],
+    ui: &mut Ui,
+) -> bool {
+    let targets: Vec<TargetRef> = objects
+        .iter()
+        .flat_map(|&object| app.series_targets(canvas, object))
+        .collect();
+    render_section(
+        app,
+        LINE_SECTION,
+        "Line",
+        SectionNoun::new("line series", "line series"),
+        &targets,
+        None,
+        ui,
+    )
+}
+
+/// Render document-owned typography without requiring any canvas object.
+pub(crate) fn typography_section(app: &mut PlotxApp, ui: &mut Ui) -> bool {
+    let target = app.document_target();
+    render_section(
+        app,
+        TYPOGRAPHY_SECTION,
+        "Figure typography",
+        SectionNoun::new("document", "documents"),
+        std::slice::from_ref(&target),
+        None,
+        ui,
+    )
+}
+
+/// Render the catalog rows for one expanded apodization step in the existing
+/// processing editor. The step list supplies the stable component target; this
+/// panel supplies the same schema, reset and action path as every other scope.
+pub(crate) fn apodization_section(app: &mut PlotxApp, target: &TargetRef, ui: &mut Ui) -> bool {
+    render_section(
+        app,
+        APODIZATION_SECTION,
+        "Apodization",
+        SectionNoun::new("processing step", "processing steps"),
+        std::slice::from_ref(target),
+        None,
+        ui,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_section(
+    app: &mut PlotxApp,
+    section: &'static str,
+    title: &'static str,
+    status_noun: SectionNoun,
+    targets: &[TargetRef],
+    reset_encoding: Option<EncodingKind>,
+    ui: &mut Ui,
+) -> bool {
     if targets.is_empty() {
         return false;
     }
-    let rows = resolve_rows(app, &targets);
+    let rows = resolve_rows_for(app, targets, section);
     if rows.is_empty() {
         return false;
     }
@@ -119,29 +237,32 @@ pub(crate) fn contour_section(
     let focused_here =
         focus.is_some_and(|focus| rows.iter().any(|row| row.presentation.id == focus.property));
 
+    // Every target in the selection is not what this section acts on: the
+    // heading counts the ones that actually supply one of its rows, so a page
+    // holding one contour plot and one line plot does not report two of each.
+    let applicable = applicable_targets(&rows);
+
     ui.separator();
     ui.horizontal(|ui| {
-        ui.strong("Contour");
+        ui.strong(title);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.weak(match targets.len() {
-                1 => "1 series".to_owned(),
-                count => format!("{count} series"),
-            });
+            ui.weak(status_noun.counted(applicable.len()));
         });
     });
 
     // The rows rendered without expanding anything are exactly the list the
     // budget check counts, so the check cannot pass while the panel shows more.
-    let essential: Vec<PropertyId> = super::essential_in(CONTOUR_SECTION)
+    let essential: Vec<PropertyId> = super::essential_in(section)
         .into_iter()
         .map(|entry| entry.id)
         .collect();
     let mut pending: Option<Pending> = None;
+    let mut gesture: Option<(PropertyId, GestureEdge)> = None;
     for row in rows
         .iter()
         .filter(|row| essential.contains(&row.presentation.id))
     {
-        property_row(row, focus, now, &mut pending, ui);
+        property_row(row, focus, now, &mut pending, &mut gesture, ui);
     }
 
     let advanced: Vec<&Row> = rows
@@ -149,7 +270,7 @@ pub(crate) fn contour_section(
         .filter(|row| !essential.contains(&row.presentation.id))
         .collect();
     if !advanced.is_empty() {
-        let id = ui.make_persistent_id(("property_section", CONTOUR_SECTION));
+        let id = ui.make_persistent_id(("property_section", section));
         let mut state =
             egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false);
         if focused_here
@@ -163,20 +284,21 @@ pub(crate) fn contour_section(
             state.store(ui.ctx());
         }
         egui::CollapsingHeader::new("Advanced")
-            .id_salt(("property_section", CONTOUR_SECTION))
+            .id_salt(("property_section", section))
             .show(ui, |ui| {
                 for row in advanced {
-                    property_row(row, focus, now, &mut pending, ui);
+                    property_row(row, focus, now, &mut pending, &mut gesture, ui);
                 }
             });
     }
 
-    if ui
-        .small_button("Reset contour")
-        .on_hover_text("Rebuild this series' encoding from its defaults")
-        .clicked()
+    if let Some(encoding) = reset_encoding
+        && ui
+            .small_button("Reset contour")
+            .on_hover_text("Rebuild this series' encoding from its defaults")
+            .clicked()
     {
-        pending = Some(Pending::ResetEncoding);
+        pending = Some(Pending::ResetEncoding(encoding));
     }
 
     // The reveal is one-shot: once the section has been drawn with the row in
@@ -190,20 +312,35 @@ pub(crate) fn contour_section(
         app.session.ui.property_focus = None;
     }
 
+    // Opened before the write and closed after it, so the frame that starts a
+    // drag is already inside the gesture and the frame that ends one is the last
+    // it records.
+    if let Some((property, GestureEdge::Started)) = gesture {
+        app.begin_property_gesture(property);
+    }
     if let Some(pending) = pending {
-        apply(app, &targets, pending);
+        // Still the whole selection: a target this section cannot supply is
+        // reported as a skip rather than quietly left out of the write.
+        apply(app, targets, pending, status_noun);
+    }
+    if let Some((_, GestureEdge::Stopped)) = gesture {
+        app.end_property_gesture();
     }
     true
 }
 
+#[cfg(test)]
 fn resolve_rows(app: &PlotxApp, targets: &[TargetRef]) -> Vec<Row> {
+    resolve_rows_for(app, targets, CONTOUR_SECTION)
+}
+
+fn resolve_rows_for(app: &PlotxApp, targets: &[TargetRef], section: &str) -> Vec<Row> {
     let mut rows = Vec::new();
     for presentation in PRESENTATIONS {
         let Some(definition) = presentation.definition() else {
             continue;
         };
-        if definition.applicability.encoding != Some(plotx_core::properties::EncodingKind::Contour)
-        {
+        if presentation.home_route.section != section {
             continue;
         }
         let set = app.resolve_property_set(presentation.id, targets);
@@ -219,9 +356,15 @@ fn resolve_rows(app: &PlotxApp, targets: &[TargetRef]) -> Vec<Row> {
         // as the row's would pass one series' threshold off as the selection's,
         // which is the same misrepresentation the control itself refuses when it
         // blanks its number.
-        let readout = (presentation.id == contour::BASE_MAGNITUDE && set.value.uniform().is_some())
-            .then(|| app.contour_base_readout(&first.target))
-            .flatten();
+        let readout = if presentation.id == contour::BASE_MAGNITUDE && set.value.uniform().is_some()
+        {
+            match app.property_readout(first) {
+                Ok(PropertyReadout::ContourBase(readout)) => Some(readout),
+                Ok(PropertyReadout::Value(_)) | Err(_) => None,
+            }
+        } else {
+            None
+        };
         rows.push(Row {
             presentation,
             definition,
@@ -238,6 +381,7 @@ fn property_row(
     focus: Option<PropertyFocus>,
     now: f64,
     pending: &mut Option<Pending>,
+    gesture: &mut Option<(PropertyId, GestureEdge)>,
     ui: &mut Ui,
 ) {
     let highlighted = focus
@@ -247,7 +391,7 @@ fn property_row(
             ui.horizontal(|ui| {
                 ui.label(row.presentation.localized_label.get())
                     .on_hover_text(row.definition.canonical_label);
-                control(row, pending, ui);
+                control(row, pending, gesture, ui);
                 if row.modified() {
                     modified_marker(row, pending, ui);
                 }
@@ -300,7 +444,12 @@ fn modified_marker(row: &Row, pending: &mut Option<Pending>, ui: &mut Ui) {
 /// be enough to make the whole selection agree — but it displays nothing that
 /// could be read as the current setting: an em dash instead of a number or a
 /// choice, and no checkbox state at all.
-fn control(row: &Row, pending: &mut Option<Pending>, ui: &mut Ui) {
+fn control(
+    row: &Row,
+    pending: &mut Option<Pending>,
+    gesture: &mut Option<(PropertyId, GestureEdge)>,
+    ui: &mut Ui,
+) {
     let mixed = row.mixed();
     let Some(value) = row.editing_value() else {
         ui.weak("unavailable");
@@ -332,7 +481,9 @@ fn control(row: &Row, pending: &mut Option<Pending>, ui: &mut Ui) {
         (ResolvedSchema::Int { min, max }, PropertyValue::Int(current)) => {
             let mut current = current;
             let drag = DragValue::new(&mut current).speed(0.25).range(*min..=*max);
-            if ui.add(hide_value(drag, mixed)).changed() {
+            let response = ui.add(hide_value(drag, mixed));
+            note_gesture(row, &response, gesture);
+            if response.changed() {
                 *pending = Some(Pending::Write(
                     row.presentation.id,
                     PropertyValue::Int(current),
@@ -341,12 +492,16 @@ fn control(row: &Row, pending: &mut Option<Pending>, ui: &mut Ui) {
         }
         (ResolvedSchema::Float { bounds, log, unit }, PropertyValue::Float(current)) => {
             let mut next = current;
-            // A logarithmic quantity spans many decades, so the drag step has
-            // to follow the value rather than the (unbounded) range.
-            let speed = if *log {
-                (current.abs() * 0.02).max(f64::MIN_POSITIVE)
-            } else {
-                ((bounds.max - bounds.min) / 200.0).max(1.0e-3)
+            // The definition's own notch wins. Deriving one from the range is
+            // the last resort, because a range states what is admissible, not
+            // what is usual: line broadening is legal out to +-10 kHz and is set
+            // in tenths of a hertz.
+            let speed = match declared_drag_step(row) {
+                Some(step) => step,
+                // A logarithmic quantity spans many decades, so the drag step
+                // has to follow the value rather than the (unbounded) range.
+                None if *log => (current.abs() * 0.02).max(f64::MIN_POSITIVE),
+                None => ((bounds.max - bounds.min) / 200.0).max(1.0e-3),
             };
             // An egui range is inclusive, so an open bound is entered here by
             // asking the schema for the smallest value it admits rather than by
@@ -354,7 +509,9 @@ fn control(row: &Row, pending: &mut Option<Pending>, ui: &mut Ui) {
             let drag = DragValue::new(&mut next)
                 .speed(speed)
                 .range(bounds.lowest()..=bounds.max);
-            if ui.add(hide_value(drag, mixed)).changed() {
+            let response = ui.add(hide_value(drag, mixed));
+            note_gesture(row, &response, gesture);
+            if response.changed() {
                 *pending = Some(Pending::Write(
                     row.presentation.id,
                     PropertyValue::Float(next),
@@ -424,6 +581,28 @@ fn control(row: &Row, pending: &mut Option<Pending>, ui: &mut Ui) {
     }
 }
 
+/// The drag notch this row's definition declares, if it declares one.
+fn declared_drag_step(row: &Row) -> Option<f64> {
+    match row.definition.value_schema {
+        ValueSchema::Float { drag_step, .. } => drag_step,
+        _ => None,
+    }
+}
+
+/// Report a continuous control's drag edges to the section that owns the
+/// gesture. Only the edges: what happens in between is an ordinary write.
+fn note_gesture(
+    row: &Row,
+    response: &egui::Response,
+    gesture: &mut Option<(PropertyId, GestureEdge)>,
+) {
+    if response.drag_started() {
+        *gesture = Some((row.presentation.id, GestureEdge::Started));
+    } else if response.drag_stopped() {
+        *gesture = Some((row.presentation.id, GestureEdge::Stopped));
+    }
+}
+
 /// Blank a drag control's readout while leaving it draggable and typable. The
 /// number it still carries only decides where a drag starts; it is never shown.
 fn hide_value(drag: DragValue<'_>, hidden: bool) -> DragValue<'_> {
@@ -454,14 +633,28 @@ fn describe(row: &Row, value: PropertyValue) -> String {
     }
 }
 
-fn apply(app: &mut PlotxApp, targets: &[TargetRef], pending: Pending) {
+/// The union of the targets this section's rows apply to, in selection order.
+fn applicable_targets(rows: &[Row]) -> Vec<TargetRef> {
+    let mut targets: Vec<TargetRef> = Vec::new();
+    for address in rows
+        .iter()
+        .flat_map(|row| row.set.applicable_targets.iter())
+    {
+        if !targets.contains(&address.target) {
+            targets.push(address.target.clone());
+        }
+    }
+    targets
+}
+
+fn apply(app: &mut PlotxApp, targets: &[TargetRef], pending: Pending, status_noun: SectionNoun) {
     let planned = match pending {
         Pending::Write(property, value) => app.plan_property_write(property, targets, &value),
         Pending::Reset(property) => app.plan_property_reset(property, targets),
         // Scoped to the encoding this section is about: a plot that stacks a
         // contour over a heatmap must not have the heatmap rebuilt by a button
         // that names the contour.
-        Pending::ResetEncoding => app.plan_encoding_reset(EncodingKind::Contour, targets),
+        Pending::ResetEncoding(encoding) => app.plan_encoding_reset(encoding, targets),
     };
     match planned {
         Ok(commit) => {
@@ -470,17 +663,18 @@ fn apply(app: &mut PlotxApp, targets: &[TargetRef], pending: Pending) {
             // A skipped target is reported, never silently dropped: the user
             // asked for the whole selection and must learn what it did not do.
             app.session.status = if skipped.is_empty() {
-                format!("Updated {applied} contour series.")
+                format!("Updated {}.", status_noun.counted(applied))
             } else {
                 format!(
-                    "Updated {applied} contour series; skipped {}: {}",
+                    "Updated {}; skipped {}: {}",
+                    status_noun.counted(applied),
                     skipped.len(),
-                    skipped[0].1
+                    skipped[0].message
                 )
             };
         }
         Err(error) => {
-            app.session.status = format!("Could not change the contour: {error}");
+            app.session.status = format!("Could not change {}: {error}", status_noun.plural);
         }
     }
 }

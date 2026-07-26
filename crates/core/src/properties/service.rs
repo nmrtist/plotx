@@ -1,41 +1,42 @@
-//! Reading and writing catalog properties against the live document.
+//! Selection-wide property planning and commit execution.
 //!
-//! One planner serves every entry point. A UI control, and later an automation
-//! tool, both hand a typed [`PropertyValue`] to [`PlotxApp::plan_property_write`]
-//! and receive a single atomic [`crate::actions::Action`] plus an explicit list
-//! of the targets that were skipped and why.
+//! Providers own one addressed target. This service is intentionally the only
+//! place that loops over targets, reports skips, and produces an atomic action;
+//! duplicating those responsibilities in each provider would create a second
+//! planner for every property family.
 
-use super::model::*;
-use super::{contour, definition, permitted_variants, variant_list};
-use crate::actions::Action;
+use super::target::{
+    canvas_object, document_target, processing_step_targets, series_context_unchecked,
+    series_targets,
+};
+use super::{
+    AggregateValue, ComponentKind, EditOp, EncodingKind, PropertyAccess, PropertyAddress,
+    PropertyCommit, PropertyDefinition, PropertyError, PropertyId, PropertySkip, PropertyStep,
+    PropertyTransaction, PropertyValue, ResolvedProperty, ResolvedPropertySet, SkipReason,
+    definition, provider_for,
+};
+use crate::actions::{Action, DatasetProcessingState, PendingPropertyGesture};
 use crate::automation::{ComponentRef, ResourceRef, TargetRef, canvas_object_ref};
 use crate::state::{
-    CanvasId, DataBinding, Dataset, FieldCapabilities, FieldId, ObjectId, PlotxApp,
-    PresentationProfile, RequestedChart, SeriesId, default_contour_spec, default_encoding,
+    DatasetId, ObjectId, PlotxApp, PresentationProfile, RequestedChart, default_encoding,
     field_peak_magnitude,
 };
 use plotx_figure::SeriesEncoding;
 
-/// A target resolved down to the one series it names, plus everything
-/// applicability and defaults need. Indices here are one-shot lookup positions
-/// and never leave this struct.
-pub(super) struct SeriesContext<'a> {
-    canvas: usize,
-    object: ObjectId,
-    series: SeriesId,
-    pub(super) dataset: &'a Dataset,
-    pub(super) field: FieldId,
-    capabilities: FieldCapabilities,
-    pub(super) encoding: &'a SeriesEncoding,
-}
-
 impl PlotxApp {
-    /// The address of one contour-style property on one series of a plot.
+    /// The target of a document-owned property. It deliberately has no canvas
+    /// or object component: figure typography belongs to the document even
+    /// when the document currently contains no pages.
+    pub fn document_target(&self) -> TargetRef {
+        document_target()
+    }
+
+    /// The address of one series-owned property on one plot object.
     pub fn series_target(
         &self,
         canvas: usize,
         object: ObjectId,
-        series: SeriesId,
+        series: crate::state::SeriesId,
     ) -> Option<TargetRef> {
         let canvas_id = self.doc.canvases.get(canvas)?.resource_id;
         Some(TargetRef {
@@ -46,73 +47,56 @@ impl PlotxApp {
 
     /// Every series of one plot object, in binding order.
     pub fn series_targets(&self, canvas: usize, object: ObjectId) -> Vec<TargetRef> {
-        let Some(canvas_document) = self.doc.canvases.get(canvas) else {
-            return Vec::new();
-        };
-        let resource = canvas_object_ref(canvas_document.resource_id, object);
-        canvas_document
-            .object(object)
-            .and_then(|object| object.plot())
-            .map(|plot| {
-                plot.binding
-                    .series
-                    .iter()
-                    .map(|series| TargetRef {
-                        resource: resource.clone(),
-                        component: Some(ComponentRef::Series(series.id)),
-                    })
-                    .collect()
-            })
-            .unwrap_or_default()
+        series_targets(self, canvas, object)
     }
 
-    /// Every series component of one plot-object *resource*.
+    /// Every series component of one plot-object resource.
     ///
-    /// This is the expansion an automation plan performs: a selector names
-    /// resources, and a property whose scope is a series has to become one
-    /// target per series before anything can be said about applicability. It
-    /// resolves the reference through the same lookup a property write does, so
-    /// a plan and the commit that follows it cannot disagree about which
-    /// components exist.
+    /// Automation selectors choose resources. A provider definition then
+    /// determines the component shape the resource expands to; series are the
+    /// only shape implemented at this point.
     pub fn resource_series_targets(&self, resource: &ResourceRef) -> Vec<TargetRef> {
-        self.canvas_object(resource)
+        canvas_object(self, resource)
             .map(|(canvas, object)| self.series_targets(canvas, object))
             .unwrap_or_default()
     }
 
-    /// Read one property against one target.
+    /// Every processing-step component of one dataset resource.
+    pub fn resource_processing_step_targets(&self, resource: &ResourceRef) -> Vec<TargetRef> {
+        processing_step_targets(self, resource)
+    }
+
+    /// Expand one resource according to a definition's component shape.
+    ///
+    /// This is target-shape dispatch only. Providers still choose typed storage
+    /// through [`PropertyTransaction`]; the service never chooses storage by
+    /// scope kind.
+    pub fn resource_property_targets(
+        &self,
+        resource: &ResourceRef,
+        definition: &'static PropertyDefinition,
+    ) -> Vec<TargetRef> {
+        match definition.applicability.component {
+            ComponentKind::None => vec![TargetRef::resource(resource.clone())],
+            ComponentKind::Series => self.resource_series_targets(resource),
+            ComponentKind::ProcessingStep => self.resource_processing_step_targets(resource),
+        }
+    }
+
+    /// Read one property against one target through its registered provider.
     pub fn resolve_property(
         &self,
         address: &PropertyAddress,
     ) -> Result<ResolvedProperty, PropertyError> {
-        let definition = self.definition_for(address.definition)?;
-        let context = self.series_context(&address.target, definition)?;
-        let SeriesEncoding::Contour(spec) = context.encoding else {
-            return Err(not_applicable_encoding(definition, context.encoding));
-        };
-        let value = contour::read(definition.id, spec)
-            .ok_or_else(|| PropertyError::UnknownProperty(definition.id.as_str().to_owned()))?;
-        let default_value = match definition.default_policy {
-            DefaultPolicy::None => None,
-            DefaultPolicy::Fixed(value) => Some(value),
-            DefaultPolicy::EncodingFactory => self.factory_default(definition.id, &context),
-        };
-        let availability = match definition.access {
-            PropertyAccess::ReadOnly => Availability::ReadOnly,
-            PropertyAccess::ReadWrite => Availability::Editable,
-        };
-        Ok(ResolvedProperty {
-            address: address.clone(),
-            value,
-            default_value,
-            availability,
-            schema: contour::resolved_schema(definition.id, spec)
-                .unwrap_or_else(|| resolved_schema(definition, &context.capabilities)),
-        })
+        self.definition_for(address.definition)?;
+        let provider = provider_for(address.definition).ok_or_else(|| {
+            PropertyError::UnknownProperty(address.definition.as_str().to_owned())
+        })?;
+        provider.read(self, address)
     }
 
     /// Read one property across a selection, reporting both the aggregate value
-    /// and every target the property does not apply to.
+    /// and every target that cannot supply the property.
     pub fn resolve_property_set(
         &self,
         property: PropertyId,
@@ -120,10 +104,6 @@ impl PlotxApp {
     ) -> ResolvedPropertySet {
         let mut applicable_targets = Vec::new();
         let mut skipped_targets = Vec::new();
-        // Each target already answers with an aggregate over its own copies of
-        // the setting, so folding the selection in with the same operation makes
-        // an asymmetric ladder inside one target and a disagreement between two
-        // targets compose rather than mask each other.
         let mut value = AggregateValue::Unavailable;
         for target in targets {
             let address = PropertyAddress::new(target.clone(), property);
@@ -132,7 +112,9 @@ impl PlotxApp {
                     value = value.merge(resolved.value);
                     applicable_targets.push(address);
                 }
-                Err(error) => skipped_targets.push((target.clone(), error.to_string())),
+                Err(error) => {
+                    skipped_targets.push(PropertySkip::from_error(target.clone(), &error))
+                }
             }
         }
         ResolvedPropertySet {
@@ -142,128 +124,78 @@ impl PlotxApp {
         }
     }
 
-    /// Validate a write against every applicable target and fold it into one
-    /// atomic action. Nothing is executed here, and a single validation failure
-    /// aborts the whole commit rather than landing on part of the selection.
+    /// Read one property's display value through its owning provider.
+    ///
+    /// This is deliberately address-based rather than encoding-based: a new
+    /// steppable encoding gets a readout by registering its provider, not by
+    /// adding another `SeriesEncoding` branch to UI callers.
+    pub fn property_readout(
+        &self,
+        address: &PropertyAddress,
+    ) -> Result<super::PropertyReadout, PropertyError> {
+        self.definition_for(address.definition)?;
+        let provider = provider_for(address.definition).ok_or_else(|| {
+            PropertyError::UnknownProperty(address.definition.as_str().to_owned())
+        })?;
+        provider.readout(self, address)
+    }
+
+    /// Validate a set operation across every applicable target and fold the
+    /// result into one atomic action.
     pub fn plan_property_write(
         &self,
         property: PropertyId,
         targets: &[TargetRef],
         value: &PropertyValue,
     ) -> Result<PropertyCommit, PropertyError> {
-        let definition = self.definition_for(property)?;
-        if definition.access == PropertyAccess::ReadOnly {
-            return Err(PropertyError::ReadOnly(property));
-        }
-        self.plan(definition, targets, &mut |spec, context| {
-            let permitted = permitted_variants(&definition.value_schema, &context.capabilities);
-            if let PropertyValue::Enum(choice) = value
-                && !permitted.iter().any(|variant| variant.id == *choice)
-            {
-                // Name what this field does allow. A caller told only that its
-                // choice is unavailable has to guess the next one, and the
-                // permitted set is a fact about the target's capabilities that
-                // no caller can derive from the static schema.
-                return Err(PropertyError::InvalidValue {
-                    property,
-                    message: format!(
-                        "'{choice}' needs a capability this field does not expose; this field allows {}",
-                        variant_list(&permitted)
-                    ),
-                });
-            }
-            contour::write(property, spec, value, &|| {
-                field_peak_magnitude(context.dataset, context.field)
-            })
-        })
+        self.plan_edit(property, targets, EditOp::Set(*value))
     }
 
-    /// Move one property one step along its own scale, from whatever each
-    /// target currently holds.
-    ///
-    /// This is the entry point for direct-manipulation gestures. It does not
-    /// compute a value somewhere else and hand it over: the gesture names a
-    /// direction, and the step is taken inside the same planner, against the
-    /// same working copy, and validated by the same rules as a value typed into
-    /// the panel. A gesture therefore cannot become a second source of state,
-    /// and cannot reach a value the panel would have rejected.
+    /// Move a property along the scale its provider owns.
     pub fn plan_property_step(
         &self,
         property: PropertyId,
         targets: &[TargetRef],
         step: PropertyStep,
     ) -> Result<PropertyCommit, PropertyError> {
-        let definition = self.definition_for(property)?;
-        if definition.access == PropertyAccess::ReadOnly {
-            return Err(PropertyError::ReadOnly(property));
-        }
-        self.plan(definition, targets, &mut |spec, _context| {
-            contour::step(property, spec, step)
-        })
+        self.plan_edit(property, targets, EditOp::Step(step))
     }
 
-    /// Reset one property by re-deriving it from the default policy in each
-    /// target's current context.
+    /// Reset one property in each target's current context.
     pub fn plan_property_reset(
         &self,
         property: PropertyId,
         targets: &[TargetRef],
     ) -> Result<PropertyCommit, PropertyError> {
-        let definition = self.definition_for(property)?;
-        if definition.access == PropertyAccess::ReadOnly {
-            return Err(PropertyError::ReadOnly(property));
-        }
-        self.plan(definition, targets, &mut |spec, context| {
-            let value = match definition.default_policy {
-                DefaultPolicy::Fixed(value) => value,
-                DefaultPolicy::None => return Err(PropertyError::ReadOnly(property)),
-                DefaultPolicy::EncodingFactory => {
-                    self.factory_default(property, context)
-                        .ok_or(PropertyError::InvalidValue {
-                            property,
-                            message: "the default factory has no single value for this setting"
-                                .to_owned(),
-                        })?
-                }
-            };
-            contour::write(property, spec, &value, &|| {
-                field_peak_magnitude(context.dataset, context.field)
-            })
-        })
+        self.plan_edit(property, targets, EditOp::Reset)
     }
 
-    /// Reset a whole encoding by calling the default factory again, replacing it
-    /// with a freshly materialized concrete encoding.
+    /// Reset a complete encoding through its existing default factory.
     ///
-    /// The caller names *which* encoding it is resetting, and a target drawn as
-    /// anything else is skipped with a reason rather than rebuilt. A property
-    /// write gets that filter for free — a control belongs to a definition, and
-    /// the definition's applicability skips whatever it does not describe — but
-    /// an encoding reset has no property to compare against, so the scope has to
-    /// be part of the request. Without it, a reset offered inside one encoding's
-    /// section reaches every series of the object: the heatmap underneath a
-    /// contour would be silently rebuilt from defaults by a button that names
-    /// only the contour, and reported back to the user as a contour.
+    /// This remains an encoding operation rather than a catalog provider
+    /// operation: it deliberately names an encoding kind so resetting a contour
+    /// cannot silently rebuild a heatmap stacked below it.
     pub fn plan_encoding_reset(
         &self,
         encoding: EncodingKind,
         targets: &[TargetRef],
     ) -> Result<PropertyCommit, PropertyError> {
-        let mut plan = BindingPlan::default();
+        let mut transaction = PropertyTransaction::default();
         let mut skipped = Vec::new();
         let mut applied = Vec::new();
         for target in targets {
-            let context = match self.series_context_unchecked(target) {
+            let context = match series_context_unchecked(self, target) {
                 Ok(context) => context,
                 Err(error) => {
-                    skipped.push((target.clone(), error.to_string()));
+                    skipped.push(PropertySkip::from_error(target.clone(), &error));
                     continue;
                 }
             };
             let actual = EncodingKind::of(context.encoding);
             if actual != encoding {
-                skipped.push((
+                skipped.push(PropertySkip::new(
                     target.clone(),
+                    SkipReason::NotApplicable,
                     format!(
                         "this reset rebuilds a {} and this series is drawn as a {}",
                         encoding.as_str(),
@@ -273,7 +205,11 @@ impl PlotxApp {
                 continue;
             }
             let Some(descriptor) = context.dataset.field_descriptor(context.field) else {
-                skipped.push((target.clone(), "the source field is gone".to_owned()));
+                skipped.push(PropertySkip::new(
+                    target.clone(),
+                    SkipReason::TargetMissing,
+                    "the source field is gone".to_owned(),
+                ));
                 continue;
             };
             let requested = match context.encoding {
@@ -282,310 +218,242 @@ impl PlotxApp {
                 SeriesEncoding::Heatmap(_) => RequestedChart::Heatmap,
                 SeriesEncoding::Image(_) => RequestedChart::Image,
             };
-            let encoding = default_encoding(
+            let replacement = default_encoding(
                 &descriptor.capabilities,
                 &descriptor.metadata,
                 requested,
                 &PresentationProfile::default(),
                 &|| field_peak_magnitude(context.dataset, context.field),
             );
-            let binding = plan.entry(self, context.canvas, context.object)?;
+            // Measured the same way the individual controls in this section
+            // measure themselves, so a reset that finds the series already at
+            // its factory encoding reports a skip instead of an update nobody
+            // can see.
+            transaction.begin_target();
+            let binding = transaction.data_binding(self, context.canvas, context.object)?;
             let Some(series) = binding
                 .series
                 .iter_mut()
                 .find(|series| series.id == context.series)
             else {
-                skipped.push((target.clone(), "the series is gone".to_owned()));
+                skipped.push(PropertySkip::new(
+                    target.clone(),
+                    SkipReason::TargetMissing,
+                    "the series is gone".to_owned(),
+                ));
                 continue;
             };
-            series.encoding = encoding;
-            applied.push(PropertyAddress::new(target.clone(), PropertyId("encoding")));
+            series.encoding = replacement;
+            if transaction.target_changed() {
+                applied.push(PropertyAddress::new(target.clone(), PropertyId("encoding")));
+            } else {
+                skipped.push(PropertySkip::new(
+                    target.clone(),
+                    SkipReason::AlreadyAtValue,
+                    format!(
+                        "this {} is already what its factory produces",
+                        encoding.as_str()
+                    ),
+                ));
+            }
         }
         Ok(PropertyCommit {
-            action: plan.into_action(),
+            action: transaction.into_action(),
             applied,
             skipped,
         })
     }
 
-    /// Execute a validated commit and report what was skipped. Returns the
-    /// number of targets actually changed.
+    /// Execute a validated commit and report the number of targets that were
+    /// actually changed.
     pub fn commit_property(&mut self, commit: PropertyCommit) -> usize {
         let applied = commit.applied.len();
-        self.execute_action(commit.action);
+        // A same-value write changes nothing, so its composite is empty and
+        // `try_execute_action` would drop it anyway. Stopping here is about the
+        // *report*: the caller is told the target was skipped and why, instead
+        // of being told an update succeeded that it cannot tell apart from one
+        // that moved a value.
+        if applied != 0 {
+            self.execute_property_action(commit.action);
+        }
         applied
+    }
+
+    /// Open a continuous gesture on one catalog control.
+    ///
+    /// Between this call and [`Self::end_property_gesture`], commits are applied
+    /// live but kept out of undo history; the gesture is recorded as one step
+    /// when it closes. A drag that recorded a step per frame would fill the
+    /// bounded history and leave the user unable to undo past it.
+    pub fn begin_property_gesture(&mut self, property: PropertyId) {
+        if self
+            .session
+            .ui
+            .property_gesture
+            .as_ref()
+            .is_some_and(|gesture| gesture.property == property)
+        {
+            return;
+        }
+        self.end_property_gesture();
+        self.session.ui.property_gesture = Some(PendingPropertyGesture {
+            property,
+            first: None,
+            last: None,
+            owns_processing_session: false,
+        });
+    }
+
+    /// Close the open gesture, recording everything it did as one undo step.
+    pub fn end_property_gesture(&mut self) {
+        let Some(gesture) = self.session.ui.property_gesture.take() else {
+            return;
+        };
+        if gesture.owns_processing_session {
+            self.finish_processing_session();
+        }
+        let Some(first) = gesture.first else {
+            return;
+        };
+        // `first` alone would undo the gesture but redo only its first frame.
+        // Both bounds carry absolute snapshots, so the pair is the whole
+        // gesture: reverting it restores the state before, applying it
+        // reproduces the state after.
+        let action = match gesture.last {
+            Some(last) => Action::Composite(vec![first, last]),
+            None => first,
+        };
+        if let Err(error) = self.record_applied_action(action) {
+            self.session.status = error.to_string();
+        }
+    }
+
+    /// Execute a catalog action, letting every store it touches keep its own
+    /// commit rules.
+    ///
+    /// A processing recipe is why this exists. "Pause auto-recompute" is a
+    /// judgement about when a recipe change becomes visible, and
+    /// [`Self::commit_processing_edit`] is the one place that makes it. Running
+    /// the composite through the generic executor would recompute immediately
+    /// and never stage the pending edit, so the switch would silently do
+    /// nothing for anything the catalog writes — and the catalog must not carry
+    /// a second copy of the decision to avoid that.
+    fn execute_property_action(&mut self, action: Action) {
+        let mut recipes = Vec::new();
+        let mut rest = Vec::new();
+        split_property_action(action, &mut recipes, &mut rest);
+        for (dataset, before, after) in recipes {
+            let Some(index) = self.doc.dataset_index(dataset) else {
+                continue;
+            };
+            // A gesture borrows the processing session, whose live edits are
+            // already recorded once when it ends. Opening it here rather than
+            // in the panel keeps the panel from having to know which store a
+            // property writes to.
+            if let Some(gesture) = self.session.ui.property_gesture.as_mut()
+                && !gesture.owns_processing_session
+                && self.session.ui.processing_session.is_none()
+            {
+                gesture.owns_processing_session = true;
+                self.begin_processing_session(index);
+            }
+            self.commit_processing_edit(index, before, after);
+        }
+        if rest.is_empty() {
+            return;
+        }
+        let action = Action::Composite(rest);
+        let Some(gesture) = self.session.ui.property_gesture.as_mut() else {
+            self.execute_action(action);
+            return;
+        };
+        if gesture.first.is_none() {
+            gesture.first = Some(action.clone());
+        } else {
+            gesture.last = Some(action.clone());
+        }
+        self.apply_action(&action);
+        self.doc.dirty = true;
+    }
+
+    fn plan_edit(
+        &self,
+        property: PropertyId,
+        targets: &[TargetRef],
+        operation: EditOp,
+    ) -> Result<PropertyCommit, PropertyError> {
+        let definition = self.definition_for(property)?;
+        if definition.access == PropertyAccess::ReadOnly {
+            return Err(PropertyError::ReadOnly(property));
+        }
+        let provider = provider_for(property)
+            .ok_or_else(|| PropertyError::UnknownProperty(property.as_str().to_owned()))?;
+        let mut transaction = PropertyTransaction::default();
+        let mut skipped = Vec::new();
+        let mut applied = Vec::new();
+        for target in targets {
+            let address = PropertyAddress::new(target.clone(), property);
+            transaction.begin_target();
+            match provider.edit(self, &mut transaction, &address, operation) {
+                Ok(()) if transaction.target_changed() => applied.push(address),
+                Ok(()) => skipped.push(PropertySkip::new(
+                    target.clone(),
+                    SkipReason::AlreadyAtValue,
+                    format!("{} already has that value", definition.canonical_label),
+                )),
+                Err(error) if skipped_target(&error) => {
+                    transaction.rollback_target();
+                    skipped.push(PropertySkip::from_error(target.clone(), &error));
+                }
+                // The transaction only contains working copies. Returning here
+                // drops all of them, so a bad value can never land on a prefix
+                // of a multi-target selection.
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(PropertyCommit {
+            action: transaction.into_action(),
+            applied,
+            skipped,
+        })
     }
 
     fn definition_for(
         &self,
         property: PropertyId,
-    ) -> Result<&'static PropertyDefinition, PropertyError> {
+    ) -> Result<&'static super::PropertyDefinition, PropertyError> {
         definition(property)
             .ok_or_else(|| PropertyError::UnknownProperty(property.as_str().to_owned()))
     }
+}
 
-    /// Shared planning body: resolve, validate, mutate a working copy, and fold
-    /// every touched object into one action.
-    fn plan(
-        &self,
-        definition: &'static PropertyDefinition,
-        targets: &[TargetRef],
-        edit: &mut dyn FnMut(
-            &mut plotx_figure::ContourSpec,
-            &SeriesContext<'_>,
-        ) -> Result<(), PropertyError>,
-    ) -> Result<PropertyCommit, PropertyError> {
-        let mut plan = BindingPlan::default();
-        let mut skipped = Vec::new();
-        let mut applied = Vec::new();
-        for target in targets {
-            let context = match self.series_context(target, definition) {
-                Ok(context) => context,
-                Err(error) => {
-                    skipped.push((target.clone(), error.to_string()));
-                    continue;
-                }
-            };
-            if !matches!(context.encoding, SeriesEncoding::Contour(_)) {
-                skipped.push((
-                    target.clone(),
-                    not_applicable_encoding(definition, context.encoding).to_string(),
-                ));
-                continue;
+/// Separate the recipe edits of a catalog action from everything else, so each
+/// half reaches the surface that owns its commit rules.
+fn split_property_action(
+    action: Action,
+    recipes: &mut Vec<(DatasetId, DatasetProcessingState, DatasetProcessingState)>,
+    rest: &mut Vec<Action>,
+) {
+    match action {
+        Action::Composite(actions) => {
+            for action in actions {
+                split_property_action(action, recipes, rest);
             }
-            let binding = plan.entry(self, context.canvas, context.object)?;
-            let Some(series) = binding
-                .series
-                .iter_mut()
-                .find(|series| series.id == context.series)
-            else {
-                skipped.push((target.clone(), "the series is gone".to_owned()));
-                continue;
-            };
-            let SeriesEncoding::Contour(spec) = &mut series.encoding else {
-                skipped.push((
-                    target.clone(),
-                    "the series is no longer a contour".to_owned(),
-                ));
-                continue;
-            };
-            // A failure here aborts the whole commit: the working copies are
-            // dropped and no action is ever built, so nothing lands partially.
-            edit(spec, &context)?;
-            applied.push(PropertyAddress::new(target.clone(), definition.id));
         }
-        Ok(PropertyCommit {
-            action: plan.into_action(),
-            applied,
-            skipped,
-        })
-    }
-
-    /// What the default policy resolves to for this property in the target's
-    /// current context.
-    ///
-    /// The context is the target as it stands now, not only the field it draws:
-    /// a setting whose meaning depends on another setting the user has changed
-    /// is re-derived under that change (§8.1). The factory writes one ladder to
-    /// both halves, so its answer is always `Uniform`; `None` reports the ways
-    /// that can fail to hold — a target that is no longer a contour, an id the
-    /// contour reader does not know, or a factory that grew an asymmetric
-    /// default — instead of inventing a value to reset to.
-    fn factory_default(
-        &self,
-        property: PropertyId,
-        context: &SeriesContext<'_>,
-    ) -> Option<PropertyValue> {
-        let SeriesEncoding::Contour(current) = context.encoding else {
-            return None;
-        };
-        let defaults = self.default_contour_spec_for(context);
-        contour::default_for(property, &defaults, current, &|| {
-            field_peak_magnitude(context.dataset, context.field)
-        })?
-        .uniform()
-        .copied()
-    }
-
-    fn default_contour_spec_for(&self, context: &SeriesContext<'_>) -> plotx_figure::ContourSpec {
-        default_contour_spec(&context.capabilities, &|| {
-            field_peak_magnitude(context.dataset, context.field)
-        })
-    }
-
-    /// Resolve a target and enforce the definition's applicability. The
-    /// component shape is checked before any domain lookup happens, so a
-    /// misaddressed property is rejected rather than reaching plot code.
-    fn series_context(
-        &self,
-        target: &TargetRef,
-        definition: &'static PropertyDefinition,
-    ) -> Result<SeriesContext<'_>, PropertyError> {
-        let actual = ComponentKind::of(target.component.as_ref());
-        if actual != definition.applicability.component {
-            return Err(PropertyError::ComponentKind {
-                property: definition.id,
-                expected: definition.applicability.component.as_str(),
-                actual: actual.as_str(),
-            });
-        }
-        let context = self.series_context_unchecked(target)?;
-        let missing = definition
-            .applicability
-            .required_capabilities
-            .iter()
-            .find(|capability| !context.capabilities.contains(capability));
-        if let Some(missing) = missing {
-            return Err(PropertyError::NotApplicable(format!(
-                "{} needs a field that exposes {missing}",
-                definition.canonical_label
-            )));
-        }
-        if let Some(expected) = definition.applicability.encoding
-            && EncodingKind::of(context.encoding) != expected
-        {
-            return Err(not_applicable_encoding(definition, context.encoding));
-        }
-        Ok(context)
-    }
-
-    /// Address resolution only: object, series, source field and capabilities.
-    pub(super) fn series_context_unchecked(
-        &self,
-        target: &TargetRef,
-    ) -> Result<SeriesContext<'_>, PropertyError> {
-        let Some(ComponentRef::Series(series)) = target.component else {
-            return Err(PropertyError::ComponentKind {
-                property: PropertyId("series"),
-                expected: ComponentKind::Series.as_str(),
-                actual: ComponentKind::of(target.component.as_ref()).as_str(),
-            });
-        };
-        let (canvas, object) = self.canvas_object(&target.resource)?;
-        let plot = self.doc.canvases[canvas]
-            .object(object)
-            .and_then(|object| object.plot())
-            .ok_or_else(|| PropertyError::UnknownTarget(target.resource.id.clone()))?;
-        let binding = plot
-            .binding
-            .series
-            .iter()
-            .find(|binding| binding.id == series)
-            .ok_or_else(|| {
-                PropertyError::UnknownTarget(format!("{}/series/{series}", target.resource.id))
-            })?;
-        let dataset = self
-            .doc
-            .dataset_by_id(binding.source.resource)
-            .ok_or_else(|| PropertyError::UnknownTarget(binding.source.resource.to_string()))?;
-        let capabilities = dataset
-            .field_descriptor(binding.source.field)
-            .map(|descriptor| descriptor.capabilities)
-            .unwrap_or_default();
-        Ok(SeriesContext {
-            canvas,
-            object,
-            series,
+        Action::UpdateDatasetProcessing {
             dataset,
-            field: binding.source.field,
-            capabilities,
-            encoding: &binding.encoding,
-        })
-    }
-
-    /// Turn a canvas-object resource reference into a one-shot lookup position.
-    fn canvas_object(&self, resource: &ResourceRef) -> Result<(usize, ObjectId), PropertyError> {
-        let unknown = || PropertyError::UnknownTarget(resource.id.clone());
-        if resource.kind.0 != crate::automation::KIND_CANVAS_OBJECT {
-            return Err(PropertyError::NotApplicable(format!(
-                "expected a plot object, got {}",
-                resource.kind.0
-            )));
-        }
-        let parent = resource.parent_id.as_deref().ok_or_else(unknown)?;
-        let local = resource.local_id.as_deref().ok_or_else(unknown)?;
-        let canvas_id: CanvasId = parent.parse().map_err(|_| unknown())?;
-        let object: ObjectId = local.parse().map_err(|_| unknown())?;
-        let canvas = self.doc.canvas_index(canvas_id).ok_or_else(unknown)?;
-        Ok((canvas, object))
+            before,
+            after,
+        } => recipes.push((dataset, before, after)),
+        other => rest.push(other),
     }
 }
 
-/// Working copies of every plot binding a commit touches, so two series of the
-/// same object collapse into one action rather than two whose snapshots would
-/// overwrite each other.
-#[derive(Default)]
-struct BindingPlan {
-    entries: Vec<(usize, ObjectId, DataBinding, DataBinding)>,
-}
-
-impl BindingPlan {
-    fn entry(
-        &mut self,
-        app: &PlotxApp,
-        canvas: usize,
-        object: ObjectId,
-    ) -> Result<&mut DataBinding, PropertyError> {
-        if let Some(index) = self
-            .entries
-            .iter()
-            .position(|entry| entry.0 == canvas && entry.1 == object)
-        {
-            return Ok(&mut self.entries[index].3);
-        }
-        let binding = app
-            .doc
-            .canvases
-            .get(canvas)
-            .and_then(|canvas| canvas.object(object))
-            .and_then(|object| object.plot())
-            .map(|plot| plot.binding.clone())
-            .ok_or_else(|| PropertyError::UnknownTarget(object.to_string()))?;
-        self.entries
-            .push((canvas, object, binding.clone(), binding));
-        let last = self.entries.len() - 1;
-        Ok(&mut self.entries[last].3)
-    }
-
-    fn into_action(self) -> Action {
-        Action::Composite(
-            self.entries
-                .into_iter()
-                .filter(|(_, _, before, after)| before != after)
-                .map(|(canvas, object, before, after)| {
-                    Action::set_data_binding(canvas, object, before, after)
-                })
-                .collect(),
-        )
-    }
-}
-
-fn not_applicable_encoding(
-    definition: &'static PropertyDefinition,
-    encoding: &SeriesEncoding,
-) -> PropertyError {
-    PropertyError::NotApplicable(format!(
-        "{} applies to a contour, and this series is drawn as a {}",
-        definition.canonical_label,
-        EncodingKind::of(encoding).as_str()
-    ))
-}
-
-fn resolved_schema(
-    definition: &'static PropertyDefinition,
-    capabilities: &FieldCapabilities,
-) -> ResolvedSchema {
-    match definition.value_schema {
-        ValueSchema::Bool => ResolvedSchema::Bool,
-        ValueSchema::Int { min, max } => ResolvedSchema::Int { min, max },
-        ValueSchema::Float { bounds, log } => ResolvedSchema::Float {
-            bounds,
-            log,
-            unit: "",
-        },
-        ValueSchema::Enum { .. } => ResolvedSchema::Enum {
-            variants: permitted_variants(&definition.value_schema, capabilities),
-        },
-        ValueSchema::Color => ResolvedSchema::Color,
-    }
+fn skipped_target(error: &PropertyError) -> bool {
+    matches!(
+        error,
+        PropertyError::ComponentKind { .. }
+            | PropertyError::UnknownTarget(_)
+            | PropertyError::NotApplicable(_)
+    )
 }

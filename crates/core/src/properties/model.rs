@@ -214,9 +214,27 @@ impl FloatBounds {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ValueSchema {
     Bool,
-    Int { min: i64, max: i64 },
-    Float { bounds: FloatBounds, log: bool },
-    Enum { variants: &'static [EnumVariant] },
+    Int {
+        min: i64,
+        max: i64,
+    },
+    Float {
+        bounds: FloatBounds,
+        log: bool,
+        /// How far one notch of a direct-manipulation drag moves the value.
+        ///
+        /// A control that has to invent this can only derive it from the range,
+        /// and a range is a statement about what is *admissible*, not about what
+        /// is *usual*: line broadening is legal out to ±10 kHz and typically set
+        /// between 0.3 and 5 Hz, so a range-derived notch moves it by a hundred
+        /// hertz a pixel. The quantity's own scale is knowledge the definition
+        /// has and the control does not, so the definition states it. `None`
+        /// leaves the control to fall back on the range.
+        drag_step: Option<f64>,
+    },
+    Enum {
+        variants: &'static [EnumVariant],
+    },
     Color,
 }
 
@@ -297,9 +315,13 @@ pub enum DefaultPolicy {
     /// Re-run the same factory that materializes a new encoding, in the
     /// target's current context, and read this property out of the result.
     EncodingFactory,
+    /// Re-run the typed processing recipe factory appropriate to the addressed
+    /// step. Unlike an encoding factory, this is owned by a dataset pipeline
+    /// and can vary between a 1D and a 2D default recipe.
+    ProcessingFactory,
     /// A literal that does not depend on the target.
     Fixed(PropertyValue),
-    /// Read-only values have no default to reset to.
+    /// Values with no meaningful reset target, normally read-only provenance.
     None,
 }
 
@@ -339,6 +361,19 @@ impl PropertyStep {
             Self::Lower => "lower",
         }
     }
+}
+
+/// One typed edit operation shared by all catalog entry points.
+///
+/// The service owns selection-wide planning; a provider receives one target and
+/// this operation, applies it to its typed working copy, or explains why that
+/// target cannot accept it. Keeping the operation here prevents set/reset/step
+/// from growing three structurally identical planners as new providers arrive.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum EditOp {
+    Set(PropertyValue),
+    Reset,
+    Step(PropertyStep),
 }
 
 /// Which owner-local component the address must name. Field and column
@@ -570,12 +605,71 @@ impl<T: PartialEq> AggregateValue<T> {
     }
 }
 
+/// Why one target of a selection-wide read or write did nothing.
+///
+/// The reason is typed because callers branch on it. "This target already holds
+/// the value you asked for" is a success a caller should carry on from; "this
+/// property does not apply to that target" means it addressed the wrong thing.
+/// Leaving the two indistinguishable behind free text forces a caller to match
+/// on prose that exists to be read by a person and is free to be reworded.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SkipReason {
+    /// The target already holds the requested value, so nothing was written.
+    AlreadyAtValue,
+    /// The property does not apply to this target.
+    NotApplicable,
+    /// The address no longer names anything in the document.
+    TargetMissing,
+}
+
+impl SkipReason {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::AlreadyAtValue => "already_at_value",
+            Self::NotApplicable => "not_applicable",
+            Self::TargetMissing => "target_missing",
+        }
+    }
+
+    /// The reason a failed read or edit amounts to.
+    pub const fn of(error: &PropertyError) -> Self {
+        match error {
+            PropertyError::UnknownTarget(_) => Self::TargetMissing,
+            _ => Self::NotApplicable,
+        }
+    }
+}
+
+/// One target a selection-wide operation passed over, carrying the reason in
+/// both the form a caller branches on and the form a person reads.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PropertySkip {
+    pub target: TargetRef,
+    pub reason: SkipReason,
+    pub message: String,
+}
+
+impl PropertySkip {
+    pub fn new(target: TargetRef, reason: SkipReason, message: String) -> Self {
+        Self {
+            target,
+            reason,
+            message,
+        }
+    }
+
+    /// The skip a failed read or edit amounts to, keeping the error's own words.
+    pub fn from_error(target: TargetRef, error: &PropertyError) -> Self {
+        Self::new(target, SkipReason::of(error), error.to_string())
+    }
+}
+
 /// One property read across a selection. Targets the property does not apply to
 /// are reported with a reason rather than silently dropped.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ResolvedPropertySet {
     pub applicable_targets: Vec<PropertyAddress>,
-    pub skipped_targets: Vec<(TargetRef, String)>,
+    pub skipped_targets: Vec<PropertySkip>,
     pub value: AggregateValue<PropertyValue>,
 }
 
@@ -586,7 +680,7 @@ pub struct ResolvedPropertySet {
 pub struct PropertyCommit {
     pub action: crate::actions::Action,
     pub applied: Vec<PropertyAddress>,
-    pub skipped: Vec<(TargetRef, String)>,
+    pub skipped: Vec<PropertySkip>,
 }
 
 impl fmt::Debug for PropertyCommit {

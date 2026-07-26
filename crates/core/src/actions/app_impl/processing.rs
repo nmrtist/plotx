@@ -4,8 +4,10 @@ use super::*;
 
 impl PlotxApp {
     /// Record an action whose final state is already live, without applying it
-    /// again. Multi-surface processing sessions use this for their final commit.
-    fn record_applied_processing_action(&mut self, action: Action) -> Result<(), ActionApplyError> {
+    /// again. Multi-surface processing sessions and coalesced catalog gestures
+    /// use this for their final commit: both have been writing the live document
+    /// all along and need only the one history entry that covers the run.
+    pub(crate) fn record_applied_action(&mut self, action: Action) -> Result<(), ActionApplyError> {
         if action.is_noop() {
             return Ok(());
         }
@@ -43,6 +45,30 @@ impl PlotxApp {
             }
             _ => {}
         }
+    }
+
+    /// Write a recipe into the live dataset and re-derive from it now. Whether
+    /// that means a full retransform or a cheap re-apply is decided by comparing
+    /// the recipes, not by the caller. Lives beside the pause gate because it is
+    /// the other half of it: this is what "not paused" does.
+    pub fn set_dataset_processing_state(&mut self, dataset: usize, state: &DatasetProcessingState) {
+        if let (Some(Dataset::Nmr2D(current)), DatasetProcessingState::Nmr2D { params, preset }) =
+            (self.doc.datasets.get_mut(dataset), state)
+        {
+            current.params = params.clone();
+            current.preset = *preset;
+            self.schedule_2d_processing(dataset, false);
+            return;
+        }
+        let Some(current) = self.doc.datasets.get_mut(dataset) else {
+            return;
+        };
+        if let Err(error) = state.apply_to(current) {
+            self.session.status = error.to_string();
+            return;
+        }
+        self.recompute_integrals_2d_after_processing(dataset);
+        self.rebuild_canvases_for(dataset);
     }
 
     /// Commit a processing edit through the pause gate: recompute now when
@@ -119,7 +145,7 @@ impl PlotxApp {
         let dataset = &self.doc.datasets[dataset_index];
         let after = DatasetProcessingState::from_dataset(dataset);
         let action = Action::update_dataset_processing(edit.dataset, edit.before, after);
-        if let Err(error) = self.record_applied_processing_action(action) {
+        if let Err(error) = self.record_applied_action(action) {
             self.session.status = error.to_string();
         }
     }

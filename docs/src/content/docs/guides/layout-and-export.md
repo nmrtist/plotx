@@ -139,7 +139,26 @@ What you control directly:
 - **Figure Typography…** on the Figure Ribbon tab sets the axis text sizes
   (tick labels, axis titles, and the figure title) for every plot at once, in
   absolute points — a document-level style, so resizing a panel never changes
-  its type size.
+  its type size. Tick labels accept 1 to 72 pt; axis titles and the figure title
+  accept 4 to 24 pt.
+- **Figure typography** in the Object inspector holds the same tick-label size
+  as **Tick-label size**, over the same 1 to 72 pt range, and changing it in
+  either place changes the one document-wide value. Because it belongs to the
+  document rather than to a plot, the section is shown whatever is selected —
+  including when nothing is.
+- **Line** in the Object inspector sets the **Stroke width** of the selected
+  plot's line series, from 0.05 to 10. The section appears only when something
+  in the selection is drawn as a line, and its header counts the series it is
+  about to change. Select several plots and it edits them together; select
+  nothing and it follows the page's active plot.
+
+  When the selected series do not all carry the same width the control shows an
+  em dash and the word *mixed* rather than presenting one of them as the
+  setting; setting the row is what makes them agree. A selected series that is
+  drawn as something else — a contour, say — is reported as skipped in the
+  status bar, and the rest still take the value. A width that differs from the
+  one PlotX would choose for this data is marked with a dot, and the reset
+  button beside it re-derives that default.
 - **Canvas themes** carry matching sizes — the Presentation Dark theme, for
   example, enlarges the axis text for slides.
 

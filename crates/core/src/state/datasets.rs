@@ -676,6 +676,31 @@ impl Dataset {
         }
     }
 
+    /// The recipe this dataset would be loaded with today, for one axis.
+    ///
+    /// Produced by re-running the very factory that built the live one, so "what
+    /// does reset give me" and "what does a new document get" stay one answer
+    /// rather than two derivations that agree only until one of them changes.
+    pub fn factory_pipeline(&self, axis: PhaseAxis) -> Option<AxisPipeline> {
+        match self {
+            Dataset::Nmr(n) if axis == PhaseAxis::Direct => Some(match n.data.domain {
+                Domain::Time => AxisPipeline::default_1d(),
+                Domain::Frequency => AxisPipeline::frequency_1d(),
+            }),
+            Dataset::Nmr2D(n) => {
+                let params = match n.data.domain {
+                    Domain::Time => Params2D::default_for(n.preset),
+                    Domain::Frequency => Params2D::frequency_domain(n.preset),
+                };
+                Some(match axis {
+                    PhaseAxis::F1 => params.f1,
+                    _ => params.f2,
+                })
+            }
+            _ => None,
+        }
+    }
+
     pub fn phase_params_mut(&mut self, axis: PhaseAxis) -> Option<&mut PhaseParams> {
         self.axis_pipeline_mut(axis).and_then(|pipe| {
             pipe.steps

@@ -8,13 +8,22 @@
 //! model. Presentation — localized labels and panel routing — belongs to the
 //! application crate and is keyed by the same [`PropertyId`].
 
+pub mod apodization;
 pub mod contour;
+pub mod line;
 mod model;
+mod provider;
 mod readout;
 mod service;
+mod target;
+mod transaction;
+pub mod typography;
 
 pub use model::*;
-pub use readout::{ContourAnchor, ContourBaseReadout};
+pub use readout::{ContourAnchor, ContourBaseReadout, PropertyReadout};
+
+pub(crate) use provider::{PropertyProvider, PropertyProviderGroup};
+pub(crate) use transaction::PropertyTransaction;
 
 use crate::state::FieldCapabilities;
 use std::sync::LazyLock;
@@ -22,11 +31,39 @@ use std::sync::LazyLock;
 /// The single aggregation point. Each area exports its own slice of
 /// definitions; adding one here is what makes it addressable, searchable and
 /// resettable everywhere at once.
-static CATALOG: LazyLock<Vec<&'static PropertyDefinition>> =
-    LazyLock::new(|| contour::DEFINITIONS.iter().collect());
+pub(crate) static GROUPS: &[PropertyProviderGroup] = &[
+    PropertyProviderGroup {
+        provider: &apodization::PROVIDER,
+    },
+    PropertyProviderGroup {
+        provider: &contour::PROVIDER,
+    },
+    PropertyProviderGroup {
+        provider: &line::PROVIDER,
+    },
+    PropertyProviderGroup {
+        provider: &typography::PROVIDER,
+    },
+];
+
+static CATALOG: LazyLock<Vec<&'static PropertyDefinition>> = LazyLock::new(|| {
+    GROUPS
+        .iter()
+        .flat_map(|group| group.provider.definitions())
+        .collect()
+});
 
 pub fn catalog() -> &'static [&'static PropertyDefinition] {
     &CATALOG
+}
+
+/// Whether a dataset holds any component this catalog can address.
+///
+/// The automation resource gate asks this instead of testing what kind of data
+/// the dataset holds, so admission to the `properties.*` tools stays a
+/// capability question (§1 principle 3).
+pub fn has_addressable_components(dataset: &crate::state::Dataset) -> bool {
+    target::dataset_has_property_components(dataset)
 }
 
 pub fn definition(id: PropertyId) -> Option<&'static PropertyDefinition> {
@@ -43,6 +80,19 @@ pub fn definition_by_key(key: &str) -> Option<&'static PropertyDefinition> {
         .iter()
         .copied()
         .find(|definition| definition.id.as_str() == key)
+}
+
+pub(crate) fn provider_for(id: PropertyId) -> Option<&'static dyn PropertyProvider> {
+    GROUPS
+        .iter()
+        .find(|group| {
+            group
+                .provider
+                .definitions()
+                .iter()
+                .any(|definition| definition.id == id)
+        })
+        .map(|group| group.provider)
 }
 
 /// The enum choices a field's capabilities actually permit. Capability decides
@@ -106,3 +156,7 @@ mod step_tests;
 #[cfg(test)]
 #[path = "scope_tests.rs"]
 mod scope_tests;
+
+#[cfg(test)]
+#[path = "apodization_tests.rs"]
+mod apodization_tests;

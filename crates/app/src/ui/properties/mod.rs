@@ -17,7 +17,9 @@ pub(crate) mod fixture;
 
 pub(crate) use search::property_hits;
 
-use plotx_core::properties::{PropertyDefinition, PropertyId, Tier, contour, definition};
+use plotx_core::properties::{
+    PropertyDefinition, PropertyId, Tier, apodization, contour, definition, line, typography,
+};
 use plotx_core::state::WorkflowTab;
 
 /// A user-facing string in the active locale. PlotX ships one locale today; the
@@ -36,6 +38,7 @@ impl LocalizedText {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PanelRoute {
     SecondarySidebar,
+    Processing,
 }
 
 impl PanelRoute {
@@ -44,13 +47,19 @@ impl PanelRoute {
     /// test checks.
     pub const fn sections(self) -> &'static [&'static str] {
         match self {
-            Self::SecondarySidebar => &[panel::CONTOUR_SECTION],
+            Self::SecondarySidebar => &[
+                panel::CONTOUR_SECTION,
+                panel::LINE_SECTION,
+                panel::TYPOGRAPHY_SECTION,
+            ],
+            Self::Processing => &[panel::APODIZATION_SECTION],
         }
     }
 
     pub const fn title(self) -> &'static str {
         match self {
             Self::SecondarySidebar => "Object inspector",
+            Self::Processing => "Processing tools",
         }
     }
 }
@@ -106,17 +115,52 @@ pub struct PropertyGroup {
     pub unavailable_reason: &'static str,
 }
 
-pub const GROUPS: &[PropertyGroup] = &[PropertyGroup {
-    section: panel::CONTOUR_SECTION,
-    label: LocalizedText("Contour"),
-    icon: egui_phosphor::regular::CHART_POLAR,
-    ribbon: RibbonSpot {
-        tab: WorkflowTab::Figure,
-        group: "Style",
-        priority: 2,
+pub const GROUPS: &[PropertyGroup] = &[
+    PropertyGroup {
+        section: panel::CONTOUR_SECTION,
+        label: LocalizedText("Contour"),
+        icon: egui_phosphor::regular::CHART_POLAR,
+        ribbon: RibbonSpot {
+            tab: WorkflowTab::Figure,
+            group: "Style",
+            priority: 2,
+        },
+        unavailable_reason: "Select a plot whose series draws contours before changing contour levels.",
     },
-    unavailable_reason: "Select a plot whose series draws contours before changing contour levels.",
-}];
+    PropertyGroup {
+        section: panel::LINE_SECTION,
+        label: LocalizedText("Line"),
+        icon: egui_phosphor::regular::LINE_SEGMENT,
+        ribbon: RibbonSpot {
+            tab: WorkflowTab::Figure,
+            group: "Style",
+            priority: 3,
+        },
+        unavailable_reason: "Select a plot whose series draws lines before changing line style.",
+    },
+    PropertyGroup {
+        section: panel::TYPOGRAPHY_SECTION,
+        label: LocalizedText("Figure typography"),
+        icon: egui_phosphor::regular::TEXT_T,
+        ribbon: RibbonSpot {
+            tab: WorkflowTab::Figure,
+            group: "Style",
+            priority: 3,
+        },
+        unavailable_reason: "Open a PlotX document before changing figure typography.",
+    },
+    PropertyGroup {
+        section: panel::APODIZATION_SECTION,
+        label: LocalizedText("Apodization"),
+        icon: egui_phosphor::regular::WAVEFORM,
+        ribbon: RibbonSpot {
+            tab: WorkflowTab::Process,
+            group: "Processing",
+            priority: 1,
+        },
+        unavailable_reason: "Select a dataset with an apodization processing step.",
+    },
+];
 
 impl PropertyPresentation {
     /// The tier lives on the definition; presentation reads it so the panel
@@ -133,6 +177,21 @@ impl PropertyPresentation {
 const CONTOUR_HOME: HomeRoute = HomeRoute {
     panel: PanelRoute::SecondarySidebar,
     section: panel::CONTOUR_SECTION,
+};
+
+const LINE_HOME: HomeRoute = HomeRoute {
+    panel: PanelRoute::SecondarySidebar,
+    section: panel::LINE_SECTION,
+};
+
+const TYPOGRAPHY_HOME: HomeRoute = HomeRoute {
+    panel: PanelRoute::SecondarySidebar,
+    section: panel::TYPOGRAPHY_SECTION,
+};
+
+const APODIZATION_HOME: HomeRoute = HomeRoute {
+    panel: PanelRoute::Processing,
+    section: panel::APODIZATION_SECTION,
 };
 
 pub const PRESENTATIONS: &[PropertyPresentation] = &[
@@ -199,6 +258,41 @@ pub const PRESENTATIONS: &[PropertyPresentation] = &[
         localized_label: LocalizedText("Line width"),
         localized_aliases: &[LocalizedText("contour width")],
         home_route: CONTOUR_HOME,
+        canvas_step: false,
+    },
+    PropertyPresentation {
+        id: line::STROKE_WIDTH,
+        localized_label: LocalizedText("Stroke width"),
+        localized_aliases: &[LocalizedText("line thickness")],
+        home_route: LINE_HOME,
+        canvas_step: false,
+    },
+    PropertyPresentation {
+        id: typography::TICK_PT,
+        localized_label: LocalizedText("Tick-label size"),
+        localized_aliases: &[LocalizedText("figure font size")],
+        home_route: TYPOGRAPHY_HOME,
+        canvas_step: false,
+    },
+    PropertyPresentation {
+        id: apodization::KIND,
+        localized_label: LocalizedText("Window"),
+        localized_aliases: &[LocalizedText("apodization window")],
+        home_route: APODIZATION_HOME,
+        canvas_step: false,
+    },
+    PropertyPresentation {
+        id: apodization::LB_HZ,
+        localized_label: LocalizedText("LB"),
+        localized_aliases: &[LocalizedText("line broadening")],
+        home_route: APODIZATION_HOME,
+        canvas_step: false,
+    },
+    PropertyPresentation {
+        id: apodization::GB_HZ,
+        localized_label: LocalizedText("GB"),
+        localized_aliases: &[LocalizedText("gaussian broadening")],
+        home_route: APODIZATION_HOME,
         canvas_step: false,
     },
 ];

@@ -15,8 +15,10 @@
 
 use super::{PRESENTATIONS, PropertyGroup, PropertyPresentation};
 use egui::Ui;
-use plotx_core::automation::TargetRef;
-use plotx_core::properties::{PropertyId, PropertyStep, Tier};
+use plotx_core::automation::{ResourceRef, TargetRef};
+use plotx_core::properties::{
+    ComponentKind, PropertyId, PropertyStep, ScopeKind, Tier, definition,
+};
 use plotx_core::state::{ObjectId, PlotxApp};
 
 /// The declared groups, in Ribbon order.
@@ -70,12 +72,21 @@ pub(crate) fn steppable_in(
     presentations.iter().find(|entry| entry.canvas_step)
 }
 
-/// The plot objects the discovery channels act on: the current selection, or
+/// What to say when the only plots a setting applies to are locked. It names
+/// the state and the way out, per the crate's hide-vs-disable rule.
+pub(crate) const LOCKED_REASON: &str =
+    "Unlock this plot to change its settings; it can still be read while locked.";
+
+/// The plot objects the discovery channels *refer* to: the current selection, or
 /// the page's active plot when nothing is selected.
 ///
 /// Every channel shares this, so the Ribbon button, the context menu, the
 /// gesture and the on-canvas readout can never disagree about what they refer
-/// to.
+/// to. A lock is deliberately not applied here. Locking a plot means "do not
+/// change this", not "stop telling me about this": the corner readout, the
+/// palette's applicability answer and the context menu all describe a plot
+/// rather than edit it, and filtering here made them vanish with no explanation
+/// on a plot that was plainly selected.
 pub(crate) fn selection_objects(app: &PlotxApp) -> Vec<ObjectId> {
     let Some(canvas) = app
         .session
@@ -84,7 +95,7 @@ pub(crate) fn selection_objects(app: &PlotxApp) -> Vec<ObjectId> {
     else {
         return Vec::new();
     };
-    let selected: Vec<ObjectId> = app
+    let selected: Vec<_> = app
         .session
         .ui
         .selection
@@ -103,26 +114,90 @@ pub(crate) fn selection_objects(app: &PlotxApp) -> Vec<ObjectId> {
     canvas.active_plot_object_id().into_iter().collect()
 }
 
-/// Every series target of [`selection_objects`], in binding order.
-pub(crate) fn selection_targets(app: &PlotxApp) -> Vec<TargetRef> {
-    let Some(canvas) = app.session.active_canvas else {
+/// The subset of [`selection_objects`] a write may land on. This is the one
+/// place the lock is applied, so no editing path can forget it and no reading
+/// path can accidentally inherit it.
+pub(crate) fn editable_objects(app: &PlotxApp) -> Vec<ObjectId> {
+    let Some(canvas) = app
+        .session
+        .active_canvas
+        .and_then(|index| app.doc.canvases.get(index))
+    else {
         return Vec::new();
     };
     selection_objects(app)
         .into_iter()
+        .filter(|&id| canvas.object(id).is_some_and(|object| !object.locked))
+        .collect()
+}
+
+/// Every series target of [`selection_objects`], in binding order.
+pub(crate) fn selection_targets(app: &PlotxApp) -> Vec<TargetRef> {
+    targets_of(app, selection_objects(app))
+}
+
+/// Every series target a write may land on.
+pub(crate) fn editable_targets(app: &PlotxApp) -> Vec<TargetRef> {
+    targets_of(app, editable_objects(app))
+}
+
+/// The subset of [`targets_for_property`] a write may land on. Only object-owned
+/// properties can be locked out; a document or dataset setting has no plot to
+/// lock, so it passes through unchanged.
+pub(crate) fn editable_targets_for_property(
+    app: &PlotxApp,
+    property: PropertyId,
+) -> Vec<TargetRef> {
+    match definition(property).map(|definition| definition.applicability.component) {
+        Some(ComponentKind::Series) => editable_targets(app),
+        _ => targets_for_property(app, property),
+    }
+}
+
+fn targets_of(app: &PlotxApp, objects: Vec<ObjectId>) -> Vec<TargetRef> {
+    let Some(canvas) = app.session.active_canvas else {
+        return Vec::new();
+    };
+    objects
+        .into_iter()
         .flat_map(|object| app.series_targets(canvas, object))
         .collect()
+}
+
+/// Derive the targets for one property from its catalog shape. This is target
+/// discovery only: providers still decide how a target maps to typed storage.
+/// Keeping this here lets document, object and processing-step presentations
+/// share the same search and Ribbon applicability checks without inventing a
+/// separate registry for each scope.
+pub(crate) fn targets_for_property(app: &PlotxApp, property: PropertyId) -> Vec<TargetRef> {
+    let Some(definition) = definition(property) else {
+        return Vec::new();
+    };
+    match definition.applicability.component {
+        ComponentKind::None if definition.scope_kind == ScopeKind::Document => {
+            vec![app.document_target()]
+        }
+        ComponentKind::None => Vec::new(),
+        ComponentKind::Series => selection_targets(app),
+        ComponentKind::ProcessingStep => {
+            let Some(dataset) = app
+                .active_dataset()
+                .and_then(|index| app.doc.datasets.get(index))
+            else {
+                return Vec::new();
+            };
+            let resource = ResourceRef::from(dataset.resource_id());
+            app.resource_property_targets(&resource, definition)
+        }
+    }
 }
 
 /// Whether any member of a group currently applies to the selection. This is
 /// the group's own applicability, derived from its members' definitions —
 /// capability and encoding gates included — not a second rule written here.
 pub(crate) fn group_applies(app: &PlotxApp, section: &str) -> bool {
-    let targets = selection_targets(app);
-    if targets.is_empty() {
-        return false;
-    }
     members_of(section, PRESENTATIONS).into_iter().any(|entry| {
+        let targets = targets_for_property(app, entry.id);
         !app.resolve_property_set(entry.id, &targets)
             .applicable_targets
             .is_empty()
@@ -145,9 +220,21 @@ pub(crate) fn step_target(app: &PlotxApp) -> Option<(PropertyId, Vec<TargetRef>)
 /// the catalog decides what a step is, validates it and compiles it into the
 /// same atomic action the panel produces, so the two entry points cannot drift.
 pub(crate) fn step_selection(app: &mut PlotxApp, step: PropertyStep) {
-    let Some((property, targets)) = step_target(app) else {
+    let Some((property, _)) = step_target(app) else {
         return;
     };
+    // The readout above the gesture describes every selected plot; the gesture
+    // itself may only move the ones that are not locked, and says so when that
+    // leaves it nothing to move.
+    let targets = editable_targets_for_property(app, property);
+    if app
+        .resolve_property_set(property, &targets)
+        .applicable_targets
+        .is_empty()
+    {
+        app.session.status = LOCKED_REASON.to_owned();
+        return;
+    }
     match app.plan_property_step(property, &targets, step) {
         Ok(commit) => {
             let skipped = commit.skipped.len();

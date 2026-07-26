@@ -8,11 +8,11 @@
 
 use num_complex::Complex64;
 use plotx_core::automation::{
-    CallerType, DocumentRevision, TOOL_RESET, TOOL_SET, TargetOutcome, TargetRef, TargetSelector,
-    ToolRequest, execute_tool, plan_tool,
+    CallerType, ComponentRef, DocumentRevision, ResourceRef, TOOL_RESET, TOOL_SET, TargetOutcome,
+    TargetRef, TargetSelector, ToolRequest, execute_tool, plan_tool,
 };
 use plotx_core::build_stack_figure;
-use plotx_core::properties::{PropertyId, PropertyValue, contour};
+use plotx_core::properties::{PropertyId, PropertyValue, apodization, contour};
 use plotx_core::state::{
     CanvasDocument, Dataset, Nmr2DDataset, ObjectFrame, ObjectId, PlotxApp, SeriesBinding,
 };
@@ -194,6 +194,35 @@ fn object_resource_id(app: &PlotxApp, object: ObjectId) -> String {
 
 fn series_targets(app: &PlotxApp, object: ObjectId) -> Vec<TargetRef> {
     app.series_targets(0, object)
+}
+
+/// The default F2 apodization is a dataset-local component. The address carries
+/// its stable `StepId`, not an axis index or a pipeline path.
+fn apodization_target(app: &PlotxApp) -> TargetRef {
+    let Dataset::Nmr2D(dataset) = &app.doc.datasets[0] else {
+        panic!("the fixture owns a 2D NMR dataset");
+    };
+    let step = dataset
+        .params
+        .f2
+        .steps
+        .iter()
+        .find(|step| matches!(step.kind, plotx_processing::StepKind::Apodize(_)))
+        .expect("the time-domain pipeline starts with apodization");
+    TargetRef {
+        resource: ResourceRef::from(dataset.resource_id),
+        component: Some(ComponentRef::ProcessingStep(step.id)),
+    }
+}
+
+fn processed_samples(app: &PlotxApp) -> Vec<Complex64> {
+    let Dataset::Nmr2D(dataset) = &app.doc.datasets[0] else {
+        panic!("the fixture owns a 2D NMR dataset");
+    };
+    let Processed2D::Ft(spectrum) = &dataset.processed else {
+        panic!("the HSQC fixture stays a true 2D spectrum");
+    };
+    spectrum.data.iter().take(32).copied().collect()
 }
 
 /// Every series of the plot, reduced to the state a property write owns.
@@ -545,6 +574,64 @@ fn a_json_property_write_reaches_the_drawn_figure() {
     );
     let svg = plotx_render::svg::export(&plot.figure);
     assert!(svg.contains("<path"), "the figure still exports geometry");
+}
+
+/// A processing-step property must not stop at an action snapshot. This uses
+/// the real synthetic FID, schedules the real `process_2d` path, and waits for
+/// both the reprocessing and contour rebuild before inspecting the result.
+#[test]
+fn an_apodization_property_reprocesses_a_real_2d_fid_after_jobs_settle() {
+    let (mut app, object) = contour_page();
+    let target = apodization_target(&app);
+    let before = processed_samples(&app);
+
+    let commit = app
+        .plan_property_write(
+            apodization::KIND,
+            std::slice::from_ref(&target),
+            &PropertyValue::Enum(apodization::APODIZATION_EXPONENTIAL),
+        )
+        .expect("the processing-step property plans");
+    assert_eq!(app.commit_property(commit), 1);
+    assert!(
+        app.compute_busy(),
+        "a time-domain apodization edit schedules processing before geometry can be inspected"
+    );
+    settle(&mut app);
+
+    let after = processed_samples(&app);
+    assert_ne!(
+        after, before,
+        "the settled spectrum came from the edited real processing pipeline"
+    );
+    let Some(ComponentRef::ProcessingStep(id)) = target.component else {
+        panic!("the helper builds a step target");
+    };
+    let Dataset::Nmr2D(dataset) = &app.doc.datasets[0] else {
+        panic!("the fixture owns a 2D NMR dataset");
+    };
+    assert!(
+        dataset.params.f2.steps.iter().any(|step| {
+            step.id == id
+                && matches!(
+                    step.kind,
+                    plotx_processing::StepKind::Apodize(
+                        plotx_processing::Apodization::Exponential { lb_hz: 1.0 }
+                    )
+                )
+        }),
+        "the property changed the same stable step after the job settled"
+    );
+    let figure = app.doc.canvases[0]
+        .object(object)
+        .and_then(|object| object.plot())
+        .expect("the page still owns its plot")
+        .figure
+        .clone();
+    assert!(
+        !figure.contours.is_empty() && !figure.contours[0].segments.is_empty(),
+        "the rebuilt figure still consumes the reprocessed field"
+    );
 }
 
 #[test]

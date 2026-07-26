@@ -6,7 +6,7 @@
 //! unmeasured or degenerate anchor looks like — honestly, and without ever
 //! asking for the measurement.
 
-use plotx_core::properties::{ContourAnchor, ContourBaseReadout};
+use plotx_core::properties::{ContourAnchor, ContourBaseReadout, PropertyReadout, PropertyValue};
 use plotx_core::state::{
     CONTOUR_BASE_ABSOLUTE, CONTOUR_BASE_BACKGROUND_SCALE, CONTOUR_BASE_FRACTION_OF_RANGE,
     CONTOUR_BASE_NOISE_FLOOR,
@@ -91,6 +91,52 @@ pub(crate) fn aggregate_summary(readouts: &[ContourBaseReadout]) -> Option<Strin
         "{} contour series — no single lowest level",
         readouts.len()
     ))
+}
+
+/// The canvas readout is selected by a property id, not by an encoding type.
+/// Contours retain their scientific sentence; ordinary providers get their
+/// resolved scalar rendered through the same aggregation rule, so adding a
+/// steppable encoding cannot accidentally revive a contour-only lookup path.
+pub(crate) fn aggregate_property_summary(readouts: &[PropertyReadout]) -> Option<String> {
+    let first = readouts.first()?;
+    match first {
+        PropertyReadout::ContourBase(_) => {
+            let contours: Vec<ContourBaseReadout> = readouts
+                .iter()
+                .filter_map(|readout| match readout {
+                    PropertyReadout::ContourBase(readout) => Some(*readout),
+                    PropertyReadout::Value(_) => None,
+                })
+                .collect();
+            if contours.len() != readouts.len() {
+                return Some(format!(
+                    "{} series — no single property readout",
+                    readouts.len()
+                ));
+            }
+            aggregate_summary(&contours)
+        }
+        PropertyReadout::Value(value) => {
+            if readouts.iter().all(|readout| readout == first) {
+                Some(value_summary(*value))
+            } else {
+                Some(format!(
+                    "{} series — no single property value",
+                    readouts.len()
+                ))
+            }
+        }
+    }
+}
+
+fn value_summary(value: PropertyValue) -> String {
+    match value {
+        PropertyValue::Bool(value) => value.to_string(),
+        PropertyValue::Int(value) => value.to_string(),
+        PropertyValue::Float(value) => number(value),
+        PropertyValue::Enum(value) => value.to_owned(),
+        PropertyValue::Color(color) => format!("#{:02x}{:02x}{:02x}", color.r, color.g, color.b),
+    }
 }
 
 /// Just the resolved half, for a row that already shows the number the control

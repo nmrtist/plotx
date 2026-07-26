@@ -141,3 +141,33 @@ fn a_uniform_row_still_carries_its_resolved_level() {
         .expect("a single agreeing series states what its multiple means");
     assert_eq!(readout.magnitude, 5.0);
 }
+
+/// The heading is a count of what the section acts on, and it has to be a
+/// sentence. Appending an `s` produced "2 contour seriess", and counting the
+/// whole selection produced a two where only one plot draws a contour — both
+/// are the heading claiming something the rows do not do.
+#[test]
+fn the_heading_counts_what_the_section_supplies_and_says_it_in_english() {
+    let (mut app, ids) = fixture::contour_page(2);
+    fixture::draw_as_heatmap(&mut app, ids[1]);
+    let targets: Vec<TargetRef> = ids
+        .iter()
+        .flat_map(|&id| app.series_targets(0, id))
+        .collect();
+    assert_eq!(targets.len(), 2, "both plots are in the selection");
+
+    let rows = resolve_rows(&app, &targets);
+    let applicable = applicable_targets(&rows);
+    assert_eq!(
+        applicable.len(),
+        1,
+        "only one of the two selected series draws a contour"
+    );
+
+    let series = SectionNoun::new("contour series", "contour series");
+    assert_eq!(series.counted(applicable.len()), "1 contour series");
+    assert_eq!(series.counted(2), "2 contour series");
+    let document = SectionNoun::new("document", "documents");
+    assert_eq!(document.counted(1), "1 document");
+    assert_eq!(document.counted(2), "2 documents");
+}

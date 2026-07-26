@@ -36,7 +36,16 @@ introduces the same regions in walkthrough form.
 - **Object inspector** — the properties panel for the selected board object:
   chart type, styling, geometry, and the display settings of what it draws, such
   as [contour levels](/guides/contour-levels/). Everyday settings are shown
-  directly; the rest are folded into **Advanced**.
+  directly; the rest are folded into **Advanced**. Its **Contour** and **Line**
+  sections appear only when the selection draws one; **Figure typography**
+  belongs to the document and is always shown.
+- **Settings group** — a named set of related settings with one home. The Ribbon
+  carries a button per group that opens that home rather than repeating the
+  controls: **Contour settings**, **Line settings** and **Figure typography
+  settings** in **Figure → Style**, **Apodization settings** in
+  **Process → Processing**. The canvas right-click menu lists the same groups
+  that currently apply, as *Contour settings…* and so on, and
+  <kbd>Ctrl</kbd>+<kbd>K</kbd> finds the individual settings inside them.
 - **Data sheet** — the spreadsheet view of a data table, opened by
   double-clicking the table.
 - **Command palette** — the searchable list of commands, settings, and data on

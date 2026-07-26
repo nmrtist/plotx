@@ -75,6 +75,7 @@ impl PlotxApp {
         self.session.ui.canvas_size_edit = None;
         self.session.ui.processing_edit = None;
         self.session.ui.processing_session = None;
+        self.session.ui.property_gesture = None;
         self.session.ui.inspector_edit = None;
         self.session.ui.axis_overrides_before = None;
         self.session.ui.selection = Selection::None;
@@ -84,25 +85,6 @@ impl PlotxApp {
         self.session.ui.processing_scheme_dialog = None;
     }
 
-    pub fn set_dataset_processing_state(&mut self, dataset: usize, state: &DatasetProcessingState) {
-        if let (Some(Dataset::Nmr2D(current)), DatasetProcessingState::Nmr2D { params, preset }) =
-            (self.doc.datasets.get_mut(dataset), state)
-        {
-            current.params = params.clone();
-            current.preset = *preset;
-            self.schedule_2d_processing(dataset, false);
-            return;
-        }
-        let Some(current) = self.doc.datasets.get_mut(dataset) else {
-            return;
-        };
-        if let Err(error) = state.apply_to(current) {
-            self.session.status = error.to_string();
-            return;
-        }
-        self.recompute_integrals_2d_after_processing(dataset);
-        self.rebuild_canvases_for(dataset);
-    }
     pub fn finish_pending_wheel_zoom(&mut self, now: f64, force: bool) {
         let Some(pending) = self.session.ui.wheel_zoom.clone() else {
             return;
@@ -126,7 +108,10 @@ impl PlotxApp {
             );
         }
     }
-    fn apply_action(&mut self, action: &Action) {
+    /// Apply an action's `after` state to the live document without touching
+    /// history. Callers that record the step themselves — a paused processing
+    /// commit, a coalesced gesture — use this and then record once.
+    pub(crate) fn apply_action(&mut self, action: &Action) {
         macro_rules! dataset_index {
             ($id:expr) => {
                 match self.doc.dataset_index($id) {

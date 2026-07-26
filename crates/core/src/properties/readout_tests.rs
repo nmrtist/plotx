@@ -6,7 +6,9 @@
 
 use crate::contour_probe;
 use crate::properties::tests::contour_app;
-use crate::properties::{ContourAnchor, PropertyValue, contour};
+use crate::properties::{
+    ContourAnchor, ContourBaseReadout, PropertyAddress, PropertyReadout, PropertyValue, contour,
+};
 use crate::state::{
     CONTOUR_BASE_ABSOLUTE, CONTOUR_BASE_NOISE_FLOOR, ChartSpec, DataBinding, DataDomain, PlotxApp,
     StackSpec,
@@ -21,6 +23,20 @@ fn binding(app: &PlotxApp) -> DataBinding {
         .expect("the fixture holds one plot")
         .binding
         .clone()
+}
+
+/// Read the contour's semantic payload through the generic per-property seam.
+fn contour_readout(app: &PlotxApp, target: &crate::automation::TargetRef) -> ContourBaseReadout {
+    match app
+        .property_readout(&PropertyAddress::new(
+            target.clone(),
+            contour::BASE_MAGNITUDE,
+        ))
+        .expect("the fixture draws a contour")
+    {
+        PropertyReadout::ContourBase(readout) => readout,
+        PropertyReadout::Value(value) => panic!("expected a contour payload, got {value:?}"),
+    }
 }
 
 /// Draw the fixture's plot once, the way a frame does.
@@ -59,9 +75,7 @@ fn an_unmeasured_anchor_reads_as_measuring_without_queueing_anything() {
     let (app, target) = contour_app();
 
     contour_probe::reset();
-    let readout = app
-        .contour_base_readout(&target)
-        .expect("the fixture draws a contour");
+    let readout = contour_readout(&app, &target);
 
     assert_eq!(readout.kind, CONTOUR_BASE_NOISE_FLOOR);
     assert_eq!(readout.anchor, ContourAnchor::Measuring);
@@ -81,9 +95,7 @@ fn a_cached_estimate_resolves_the_level_and_reading_it_stays_free() {
     warm(&mut app);
 
     contour_probe::reset();
-    let readout = app
-        .contour_base_readout(&target)
-        .expect("the fixture draws a contour");
+    let readout = contour_readout(&app, &target);
 
     assert_eq!(readout.anchor, ContourAnchor::Measured);
     assert_eq!(readout.kind, CONTOUR_BASE_NOISE_FLOOR);
@@ -95,7 +107,7 @@ fn a_cached_estimate_resolves_the_level_and_reading_it_stays_free() {
     );
 
     for _ in 0..8 {
-        assert_eq!(app.contour_base_readout(&target), Some(readout));
+        assert_eq!(contour_readout(&app, &target), readout);
     }
     assert_eq!(
         contour_probe::queued_estimates(),
@@ -131,9 +143,7 @@ fn a_field_whose_sigma_falls_under_the_floor_reads_as_floored() {
     warm(&mut app);
 
     contour_probe::reset();
-    let readout = app
-        .contour_base_readout(&target)
-        .expect("the fixture draws a contour");
+    let readout = contour_readout(&app, &target);
 
     assert_eq!(readout.kind, CONTOUR_BASE_NOISE_FLOOR);
     assert_eq!(
@@ -168,7 +178,7 @@ fn a_directly_anchored_base_needs_no_estimate() {
     warm(&mut app);
 
     contour_probe::reset();
-    let readout = app.contour_base_readout(&target).expect("still a contour");
+    let readout = contour_readout(&app, &target);
 
     assert_eq!(readout.anchor, ContourAnchor::Direct);
     assert_eq!(contour_probe::field_payload_materializations(), 0);

@@ -119,7 +119,10 @@ fn aliases_are_indexed_by_the_unified_search() {
 /// panel, and the remedy is to move rows to `Advanced`, not to raise the limit.
 #[test]
 fn no_panel_section_exceeds_its_essential_budget() {
-    for panel in [PanelRoute::SecondarySidebar] {
+    // Every route, not a hand-picked one: a section whose panel is missing here
+    // has no build-time budget at all, which is how the processing rows grew
+    // theirs unchecked.
+    for panel in [PanelRoute::SecondarySidebar, PanelRoute::Processing] {
         for section in panel.sections() {
             let essential = essential_in(section);
             assert!(

@@ -31,9 +31,11 @@ pub(crate) fn render(app: &mut PlotxApp, ui: &mut Ui) {
     });
     commit_if_target_changed(app, axis_target);
     let Some(ci) = app.session.active_canvas else {
+        crate::ui::properties::panel::typography_section(app, ui);
         return;
     };
     if ci >= app.doc.canvases.len() {
+        crate::ui::properties::panel::typography_section(app, ui);
         return;
     }
     if ids.is_empty() {
@@ -107,9 +109,18 @@ pub(crate) fn render(app: &mut PlotxApp, ui: &mut Ui) {
 /// cross-target `Mixed` aggregate out of reach of the interface entirely. The
 /// section renders nothing at all when no resolved series has an applicable
 /// encoding.
+/// The typography section is deliberately unconditional: it is a *document*
+/// property, so it applies whenever a document is open, whatever is selected.
+/// Gating it on the selection would hide an always-applicable control for a
+/// transient reason, which the crate's hide-vs-disable rule forbids.
 fn property_sections(app: &mut PlotxApp, ci: usize, ui: &mut Ui) {
-    let objects = crate::ui::properties::discovery::selection_objects(app);
+    // The write side of the shared selection: these sections carry controls, so
+    // they take the editable subset. The lock lives in one place rather than
+    // being re-derived here.
+    let objects = crate::ui::properties::discovery::editable_objects(app);
     crate::ui::properties::panel::contour_section(app, ci, &objects, ui);
+    crate::ui::properties::panel::line_section(app, ci, &objects, ui);
+    crate::ui::properties::panel::typography_section(app, ui);
 }
 
 fn geometry_section(app: &mut PlotxApp, ci: usize, ids: &[ObjectId], ui: &mut Ui) {
@@ -767,5 +778,20 @@ mod tests {
 
         let ctx = egui::Context::default();
         let _ = ctx.run_ui(egui::RawInput::default(), |ui| render(&mut app, ui));
+    }
+
+    #[test]
+    fn property_target_filter_excludes_locked_plot_objects() {
+        let (mut app, ids) = crate::ui::properties::fixture::contour_page(1);
+        let object = ids[0];
+        app.doc.canvases[0]
+            .object_mut(object)
+            .expect("the fixture plot exists")
+            .locked = true;
+        let targets = kind_targets(&app, 0, &ids, |candidate| candidate.plot().is_some());
+        assert!(
+            targets.is_empty(),
+            "a locked plot must be excluded before catalog targets are built"
+        );
     }
 }

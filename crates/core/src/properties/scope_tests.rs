@@ -85,6 +85,19 @@ fn stacked_app() -> (PlotxApp, TargetRef, TargetRef) {
 fn resetting_one_encoding_leaves_a_stacked_encoding_untouched() {
     let (mut app, contour, heatmap) = stacked_app();
     let before = encoding_of(&app, &heatmap);
+    // Move the contour off its factory encoding first, so the reset has
+    // something to do. A reset that finds a series already at its default now
+    // reports a skip like every other control in the section, and the scope this
+    // test is about would be invisible behind that.
+    let levels = contour_spec(&app, &contour).positive.count;
+    let commit = app
+        .plan_property_write(
+            contour::COUNT,
+            std::slice::from_ref(&contour),
+            &PropertyValue::Int(i64::from(levels) + 1),
+        )
+        .expect("the level count is writable");
+    app.commit_property(commit);
 
     let commit = app
         .plan_encoding_reset(EncodingKind::Contour, &[contour.clone(), heatmap.clone()])
@@ -101,9 +114,9 @@ fn resetting_one_encoding_leaves_a_stacked_encoding_untouched() {
         "the series outside the scope is reported, never silently included"
     );
     assert!(
-        commit.skipped[0].1.contains("heatmap"),
+        commit.skipped[0].message.contains("heatmap"),
         "the reason names what the series actually draws: {}",
-        commit.skipped[0].1
+        commit.skipped[0].message
     );
     app.commit_property(commit);
 
@@ -378,4 +391,40 @@ fn applicability_names_the_contour_under_a_heatmap_drawn_first() {
         vec![contour],
         "only the series that draws a contour has a lowest contour level"
     );
+}
+
+/// "Reset contour" is a control in the same section as the individual settings,
+/// and has to answer the same way they do. Reporting "Updated 1 contour series."
+/// for a series that was already at its factory encoding told the user something
+/// happened when nothing did.
+#[test]
+fn resetting_an_encoding_that_is_already_the_factorys_reports_a_skip() {
+    let (mut app, contour) = contour_app();
+    let commit = app
+        .plan_encoding_reset(EncodingKind::Contour, std::slice::from_ref(&contour))
+        .expect("the reset plans");
+    assert!(
+        commit.applied.is_empty(),
+        "a fresh series is what the factory produces: {:?}",
+        commit.applied
+    );
+    assert_eq!(commit.skipped.len(), 1);
+    assert_eq!(commit.skipped[0].reason, SkipReason::AlreadyAtValue);
+    assert_eq!(app.commit_property(commit), 0);
+
+    // And it still applies once the series has actually moved.
+    let levels = contour_spec(&app, &contour).positive.count;
+    let commit = app
+        .plan_property_write(
+            contour::COUNT,
+            std::slice::from_ref(&contour),
+            &PropertyValue::Int(i64::from(levels) + 1),
+        )
+        .expect("the level count is writable");
+    app.commit_property(commit);
+    let commit = app
+        .plan_encoding_reset(EncodingKind::Contour, std::slice::from_ref(&contour))
+        .expect("the reset plans");
+    assert_eq!(commit.applied.len(), 1);
+    assert!(commit.skipped.is_empty());
 }

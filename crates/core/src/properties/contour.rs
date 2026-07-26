@@ -15,17 +15,23 @@
 //! asymmetric ladder be overwritten without the user ever seeing it.
 
 use super::model::*;
+use super::provider::PropertyProvider;
+use super::target::{
+    not_applicable_encoding, resolved_schema as standard_resolved_schema, series_context,
+};
+use super::{PropertyAddress, PropertyTransaction, definition, permitted_variants, variant_list};
 use crate::automation::{
     CAP_FIELD_BOUNDED, CAP_FIELD_LOCATION_SCALE, CAP_FIELD_NOISE_SCALE,
     CAP_FIELD_SCALAR_GRID_2D_REGULAR, CAP_FIELD_SIGNED,
 };
 use crate::state::{
     CONTOUR_BASE_ABSOLUTE, CONTOUR_BASE_BACKGROUND_SCALE, CONTOUR_BASE_FRACTION_OF_RANGE,
-    CONTOUR_BASE_NOISE_FLOOR, PeakMagnitude, contour_base_kind, contour_base_policy,
+    CONTOUR_BASE_NOISE_FLOOR, PeakMagnitude, PlotxApp, contour_base_kind, contour_base_policy,
+    default_contour_spec, field_peak_magnitude,
 };
 use plotx_figure::{
     ColorSource, ContourBasePolicy, ContourLevelSpec, ContourSpec, PositiveFiniteF32,
-    PositiveFiniteF64, UnitInterval,
+    PositiveFiniteF64, SeriesEncoding, UnitInterval,
 };
 
 pub const BASE_POLICY: PropertyId = PropertyId("series.contour.base.policy");
@@ -76,13 +82,14 @@ const SIGNED_CONTOUR: Applicability =
     Applicability::encoding(ComponentKind::Series, EncodingKind::Contour)
         .requiring(&[CAP_FIELD_SCALAR_GRID_2D_REGULAR, CAP_FIELD_SIGNED]);
 
-pub(super) const DEFINITIONS: &[PropertyDefinition] = &[
+pub(crate) const DEFINITIONS: &[PropertyDefinition] = &[
     PropertyDefinition {
         id: BASE_MAGNITUDE,
         scope_kind: ScopeKind::Object,
         value_schema: ValueSchema::Float {
             bounds: FloatBounds::above(0.0, f64::MAX),
             log: true,
+            drag_step: None,
         },
         access: PropertyAccess::ReadWrite,
         applicability: CONTOUR,
@@ -137,6 +144,7 @@ pub(super) const DEFINITIONS: &[PropertyDefinition] = &[
         value_schema: ValueSchema::Float {
             bounds: RATIO_BOUNDS,
             log: false,
+            drag_step: None,
         },
         access: PropertyAccess::ReadWrite,
         applicability: CONTOUR,
@@ -188,6 +196,7 @@ pub(super) const DEFINITIONS: &[PropertyDefinition] = &[
         value_schema: ValueSchema::Float {
             bounds: LINE_WIDTH_BOUNDS,
             log: false,
+            drag_step: None,
         },
         access: PropertyAccess::ReadWrite,
         applicability: CONTOUR,
@@ -198,6 +207,159 @@ pub(super) const DEFINITIONS: &[PropertyDefinition] = &[
         canonical_aliases: &["contour width", "line width", "stroke width"],
     },
 ];
+
+pub(crate) struct ContourProvider;
+
+pub(crate) static PROVIDER: ContourProvider = ContourProvider;
+
+impl PropertyProvider for ContourProvider {
+    fn definitions(&self) -> &'static [PropertyDefinition] {
+        DEFINITIONS
+    }
+
+    fn read(
+        &self,
+        app: &PlotxApp,
+        address: &PropertyAddress,
+    ) -> Result<ResolvedProperty, PropertyError> {
+        let definition = definition(address.definition).ok_or_else(|| {
+            PropertyError::UnknownProperty(address.definition.as_str().to_owned())
+        })?;
+        let context = series_context(app, &address.target, definition)?;
+        let SeriesEncoding::Contour(spec) = context.encoding else {
+            return Err(not_applicable_encoding(definition, context.encoding));
+        };
+        let value = read(definition.id, spec)
+            .ok_or_else(|| PropertyError::UnknownProperty(definition.id.as_str().to_owned()))?;
+        let default_value =
+            default_value(definition, &context, spec).and_then(|value| value.uniform().copied());
+        let availability = match definition.access {
+            PropertyAccess::ReadOnly => Availability::ReadOnly,
+            PropertyAccess::ReadWrite => Availability::Editable,
+        };
+        Ok(ResolvedProperty {
+            address: address.clone(),
+            value,
+            default_value,
+            availability,
+            schema: resolved_schema(definition.id, spec)
+                .unwrap_or_else(|| standard_resolved_schema(definition, &context.capabilities)),
+        })
+    }
+
+    fn readout(
+        &self,
+        app: &PlotxApp,
+        address: &PropertyAddress,
+    ) -> Result<super::PropertyReadout, PropertyError> {
+        if address.definition != BASE_MAGNITUDE {
+            return super::readout::uniform_readout(self.read(app, address)?);
+        }
+        // Validate the address without resolving the property's default. The
+        // default factory may inspect a field payload; a readout must remain a
+        // cache-only observation and therefore cannot call the full reader.
+        let definition = definition(address.definition).ok_or_else(|| {
+            PropertyError::UnknownProperty(address.definition.as_str().to_owned())
+        })?;
+        let context = series_context(app, &address.target, definition)?;
+        if !matches!(context.encoding, SeriesEncoding::Contour(_)) {
+            return Err(not_applicable_encoding(definition, context.encoding));
+        }
+        super::readout::contour_base_readout(app, &address.target)
+            .map(super::PropertyReadout::ContourBase)
+            .ok_or_else(|| {
+                PropertyError::NotApplicable(
+                    "the contour base readout needs a contour series".to_owned(),
+                )
+            })
+    }
+
+    fn edit(
+        &self,
+        app: &PlotxApp,
+        transaction: &mut PropertyTransaction,
+        address: &PropertyAddress,
+        operation: EditOp,
+    ) -> Result<(), PropertyError> {
+        let definition = definition(address.definition).ok_or_else(|| {
+            PropertyError::UnknownProperty(address.definition.as_str().to_owned())
+        })?;
+        let context = series_context(app, &address.target, definition)?;
+        let SeriesEncoding::Contour(current) = context.encoding else {
+            return Err(not_applicable_encoding(definition, context.encoding));
+        };
+        let value = match operation {
+            EditOp::Set(value) => {
+                let permitted = permitted_variants(&definition.value_schema, &context.capabilities);
+                if let PropertyValue::Enum(choice) = value
+                    && !permitted.iter().any(|variant| variant.id == choice)
+                {
+                    return Err(PropertyError::InvalidValue {
+                        property: definition.id,
+                        message: format!(
+                            "'{choice}' needs a capability this field does not expose; this field allows {}",
+                            variant_list(&permitted)
+                        ),
+                    });
+                }
+                value
+            }
+            EditOp::Reset => default_value(definition, &context, current)
+                .and_then(|value| value.uniform().copied())
+                .ok_or(PropertyError::InvalidValue {
+                    property: definition.id,
+                    message: "the default factory has no single value for this setting".to_owned(),
+                })?,
+            EditOp::Step(direction) => {
+                let binding = transaction.data_binding(app, context.canvas, context.object)?;
+                let series = binding
+                    .series
+                    .iter_mut()
+                    .find(|series| series.id == context.series)
+                    .ok_or_else(|| PropertyError::UnknownTarget(address.target.describe()))?;
+                let SeriesEncoding::Contour(spec) = &mut series.encoding else {
+                    return Err(PropertyError::NotApplicable(
+                        "the series is no longer a contour".to_owned(),
+                    ));
+                };
+                return step(definition.id, spec, direction);
+            }
+        };
+        let binding = transaction.data_binding(app, context.canvas, context.object)?;
+        let series = binding
+            .series
+            .iter_mut()
+            .find(|series| series.id == context.series)
+            .ok_or_else(|| PropertyError::UnknownTarget(address.target.describe()))?;
+        let SeriesEncoding::Contour(spec) = &mut series.encoding else {
+            return Err(PropertyError::NotApplicable(
+                "the series is no longer a contour".to_owned(),
+            ));
+        };
+        write(definition.id, spec, &value, &|| {
+            field_peak_magnitude(context.dataset, context.field)
+        })
+    }
+}
+
+fn default_value(
+    definition: &'static PropertyDefinition,
+    context: &super::target::SeriesContext<'_>,
+    current: &ContourSpec,
+) -> Option<AggregateValue<PropertyValue>> {
+    match definition.default_policy {
+        DefaultPolicy::ProcessingFactory | DefaultPolicy::None => None,
+        DefaultPolicy::Fixed(value) => Some(AggregateValue::Uniform(value)),
+        DefaultPolicy::EncodingFactory => {
+            let defaults = default_contour_spec(&context.capabilities, &|| {
+                field_peak_magnitude(context.dataset, context.field)
+            });
+            default_for(definition.id, &defaults, current, &|| {
+                field_peak_magnitude(context.dataset, context.field)
+            })
+        }
+    }
+}
 
 /// Read one property out of a spec. `None` means the id is not a contour
 /// property; applicability has already been decided by the caller.

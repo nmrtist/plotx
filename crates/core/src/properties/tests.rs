@@ -5,8 +5,9 @@ use crate::automation::{
     TargetRef,
 };
 use crate::state::{
-    CONTOUR_BASE_FRACTION_OF_RANGE, CONTOUR_BASE_NOISE_FLOOR, CanvasDocument, Dataset,
-    Nmr2DDataset, ObjectFrame, PlotxApp, SeriesBinding, SeriesId,
+    CONTOUR_BASE_ABSOLUTE, CONTOUR_BASE_FRACTION_OF_RANGE, CONTOUR_BASE_NOISE_FLOOR,
+    CanvasDocument, Dataset, Nmr2DDataset, NmrDataset, ObjectFrame, PlotxApp, SeriesBinding,
+    SeriesId,
 };
 
 /// The default plane: values running -7..8, so its noise estimate is an
@@ -40,6 +41,21 @@ fn nmr2d_with(source: &str, values: &[f64]) -> plotx_io::NmrData2D {
         diffusion: None,
         nus: None,
         source: source.to_owned(),
+    }
+}
+
+fn nmr1d_with(source: &str) -> plotx_io::NmrData {
+    plotx_io::NmrData {
+        points: (0..32)
+            .map(|value| num_complex::Complex64::new(f64::from(value), 0.0))
+            .collect(),
+        domain: plotx_io::Domain::Frequency,
+        spectral_width_hz: 4_000.0,
+        observe_freq_mhz: 400.0,
+        carrier_ppm: 0.0,
+        nucleus: "1H".to_owned(),
+        source: source.to_owned(),
+        group_delay: 0.0,
     }
 }
 
@@ -128,6 +144,30 @@ fn stable_property_ids_are_unique() {
     ids.sort_unstable();
     ids.dedup();
     assert_eq!(ids.len(), total, "catalog ids must be unique");
+}
+
+/// Provider modules are registered only through `GROUPS`. Keeping the catalog
+/// derived from that one list means a new family cannot become searchable while
+/// its reader/writer was forgotten, or vice versa.
+#[test]
+fn provider_groups_are_the_catalog_registration() {
+    let grouped: Vec<PropertyId> = GROUPS
+        .iter()
+        .flat_map(|group| group.provider.definitions())
+        .map(|definition| definition.id)
+        .collect();
+    let catalogued: Vec<PropertyId> = catalog().iter().map(|definition| definition.id).collect();
+    assert_eq!(catalogued, grouped, "catalog entries come only from GROUPS");
+    assert!(
+        catalogued.contains(&contour::COUNT),
+        "the contour provider must be registered through GROUPS"
+    );
+    for id in grouped {
+        assert!(
+            provider_for(id).is_some(),
+            "{id} has a definition but no dispatch provider"
+        );
+    }
 }
 
 /// Every entry must be reachable: a definition nothing can address is dead
@@ -365,9 +405,9 @@ fn an_inapplicable_target_is_reported_rather_than_ignored() {
     assert_eq!(set.applicable_targets.len(), 1);
     assert_eq!(set.skipped_targets.len(), 1);
     assert!(
-        set.skipped_targets[0].1.contains("contour"),
+        set.skipped_targets[0].message.contains("contour"),
         "the reason names the mismatch: {}",
-        set.skipped_targets[0].1
+        set.skipped_targets[0].message
     );
 
     let commit = app
@@ -660,4 +700,78 @@ fn the_typed_planner_names_the_rejected_value_and_the_bound() {
         message.contains("greater than 1") && message.contains("at most 10"),
         "the bound is named: {message}"
     );
+}
+
+#[cfg(test)]
+#[path = "provider_tests.rs"]
+mod provider_tests;
+
+/// A write that is valid for one target and refused by the next may not leave
+/// the first one changed.
+///
+/// The refusal has to arise *inside* the planner to mean anything: a value the
+/// wire format already rejects never reaches a target at all, so a test that
+/// fails at decoding proves nothing about the transaction. Here both values are
+/// well-formed numbers and both series accept the property — the second series
+/// is anchored to its noise floor, whose ceiling is a fact about that target's
+/// current state, so only the planner can know the write is out of range. By
+/// then the first series' working copy has already been modified.
+#[test]
+fn a_refusal_on_a_later_target_leaves_the_earlier_one_untouched() {
+    let (mut app, first) = contour_app();
+    let object: crate::state::ObjectId =
+        first.resource.local_id.as_deref().unwrap().parse().unwrap();
+    let second_id = {
+        let plot = app.doc.canvases[0]
+            .object_mut(object)
+            .and_then(|object| object.plot_mut())
+            .expect("plot");
+        let id = plot.allocate_series_id();
+        let mut extra = plot.binding.series[0].clone();
+        extra.id = id;
+        plot.binding.series.push(extra);
+        id
+    };
+    let second = app.series_target(0, object, second_id).expect("target");
+
+    // The two series share one binding, which is exactly the case a per-target
+    // rollback exists for: the second target selects a working copy the first
+    // has already written to.
+    for (target, policy) in [
+        (&first, CONTOUR_BASE_ABSOLUTE),
+        (&second, CONTOUR_BASE_NOISE_FLOOR),
+    ] {
+        let commit = app
+            .plan_property_write(
+                contour::BASE_POLICY,
+                std::slice::from_ref(target),
+                &PropertyValue::Enum(policy),
+            )
+            .expect("both anchors are available on this field");
+        app.commit_property(commit);
+    }
+    let before_first = contour_spec(&app, &first).positive.base.clone();
+    let before_second = contour_spec(&app, &second).positive.base.clone();
+    let revision = app.doc.automation_revision;
+
+    // Well above any multiplier, well inside an absolute level.
+    let error = app
+        .plan_property_write(
+            contour::BASE_MAGNITUDE,
+            &[first.clone(), second.clone()],
+            &PropertyValue::Float(1.0e6),
+        )
+        .expect_err("the noise-anchored series has a ceiling this value clears");
+    assert!(
+        matches!(error, PropertyError::InvalidValue { .. }),
+        "an out-of-range value is a refusal, not a skip: {error}"
+    );
+
+    assert_eq!(
+        contour_spec(&app, &first).positive.base,
+        before_first,
+        "the first series was already written in the transaction and must be rolled back with it"
+    );
+    assert_eq!(contour_spec(&app, &second).positive.base, before_second);
+    assert_eq!(app.doc.automation_revision, revision);
 }
