@@ -125,7 +125,7 @@ pub struct IltParams {
 impl Default for IltParams {
     fn default() -> Self {
         Self {
-            lambda: 1e-2,
+            lambda: crate::settings::DEFAULT_ILT_LAMBDA,
             d_min: 1e-11,
             d_max: 1e-8,
             n_grid: 128,
@@ -141,6 +141,23 @@ pub enum DosyMethod {
     #[default]
     MonoExp,
     Ilt(IltParams),
+}
+
+/// The invocation inputs recorded beside a persisted DOSY result.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "method", rename_all = "snake_case")]
+pub enum DosyInvocation {
+    MonoExp { snr_frac: f64 },
+    Ilt { params: IltParams },
+}
+
+/// Reproducibility metadata for one persisted DOSY result.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DosyResultProvenance {
+    pub algorithm: String,
+    pub version: u32,
+    pub input: DosyInvocation,
+    pub data_fingerprint: String,
 }
 
 pub use plotx_analysis::series::ReduceOp;

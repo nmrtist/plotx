@@ -88,7 +88,15 @@ impl PlotxApp {
     /// Async twin of `build_ilt_map_for`: same validation and input prep, but hand
     /// the heavy regularized inversion to the compute worker off the UI thread.
     pub fn request_ilt_map(&mut self, dataset: usize) {
-        let params = self.session.ui.ilt_params;
+        self.request_ilt_map_with_params(dataset, self.explicit_ilt_input_for(dataset));
+    }
+
+    pub fn request_ilt_map_with_params(&mut self, dataset: usize, explicit: Option<IltParams>) {
+        let params = self.resolve_ilt_params_for(dataset, explicit);
+        if let Err(message) = crate::state::validate_ilt_params(params) {
+            self.session.status = message;
+            return;
+        }
         let Some(d2) = self.doc.datasets.get(dataset).and_then(Dataset::as_nmr2d) else {
             self.session.status = "ILT DOSY maps need a diffusion dataset.".into();
             return;
@@ -129,6 +137,8 @@ impl PlotxApp {
             d_grid,
             params.lambda,
             params,
+            axis.values.clone(),
+            *meta,
             nucleus,
             source,
         );
@@ -167,6 +177,7 @@ impl PlotxApp {
                     epoch,
                     result,
                     params,
+                    provenance,
                     figure,
                 } => {
                     if epoch != self.session.dataset_epoch
@@ -191,15 +202,27 @@ impl PlotxApp {
                     };
                     d2.dosy_method = DosyMethod::Ilt(params);
                     d2.ilt_map = Some(result);
+                    d2.ilt_provenance = Some(provenance);
                     d2.ilt_figure = Some(figure);
+                    d2.dosy_provenance_warning = None;
                     if any {
                         d2.display = PseudoDisplay::DosyMap;
+                    }
+                    // The method, map and provenance above are persisted state and
+                    // land on both branches; dirtying only the populated one would
+                    // drop an empty result silently on close.
+                    self.doc.dirty = true;
+                    if any {
                         self.rebuild_canvases_for(dataset);
-                        self.doc.dirty = true;
                         self.session.status = "Built ILT DOSY map.".into();
                     } else {
-                        self.session.status =
-                            "ILT DOSY map is empty: no columns above the noise threshold.".into();
+                        self.session.status = format!(
+                            "ILT DOSY map is empty with λ = {} (legal range {}–{}): no columns are \
+                             above the noise threshold.",
+                            params.lambda,
+                            crate::settings::MIN_ILT_LAMBDA,
+                            crate::settings::MAX_ILT_LAMBDA
+                        );
                     }
                 }
                 Done::Dosy {
@@ -207,6 +230,7 @@ impl PlotxApp {
                     dataset,
                     epoch,
                     result,
+                    provenance,
                     figure,
                 } => {
                     if epoch != self.session.dataset_epoch
@@ -230,12 +254,18 @@ impl PlotxApp {
                         continue;
                     };
                     d2.dosy_map = Some(result);
+                    d2.dosy_provenance = Some(provenance);
                     d2.dosy_figure = Some(figure);
+                    d2.dosy_provenance_warning = None;
                     if any {
                         d2.dosy_method = DosyMethod::MonoExp;
                         d2.display = PseudoDisplay::DosyMap;
+                    }
+                    // See the ILT arm: the map and provenance are persisted and
+                    // land regardless of whether any column fitted.
+                    self.doc.dirty = true;
+                    if any {
                         self.rebuild_canvases_for(dataset);
-                        self.doc.dirty = true;
                         self.session.status = "Built DOSY map.".into();
                     } else {
                         self.session.status =
@@ -275,10 +305,9 @@ impl PlotxApp {
                     d2.processed = processed;
                     d2.processed_figure =
                         std::sync::Arc::new(build_processed_figure(&d2.processed, d2.preset));
-                    d2.dosy_map = None;
-                    d2.ilt_map = None;
-                    d2.dosy_figure = None;
-                    d2.ilt_figure = None;
+                    d2.invalidate_dosy_results(
+                        "Processing changed and invalidated the selected DOSY map",
+                    );
                     for field in fields {
                         self.session
                             .compute

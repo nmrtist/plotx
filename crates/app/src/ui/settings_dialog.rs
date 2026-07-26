@@ -2,7 +2,8 @@ use super::*;
 use egui::{Align, Align2, CornerRadius, FontId, Layout, RichText, pos2, vec2};
 use egui_phosphor::regular as icon;
 use plotx_core::settings::{
-    GraphicsPowerPreference, MAX_EXPORT_DPI, MIN_EXPORT_DPI, Settings, ThemeMode,
+    GraphicsPowerPreference, MAX_EXPORT_DPI, MAX_ILT_LAMBDA, MIN_EXPORT_DPI, MIN_ILT_LAMBDA,
+    Settings, ThemeMode,
 };
 use plotx_core::state::{MonitorScaleStatus, SettingsCategory, SettingsDialog};
 use plotx_core::update::{UpdateChannelSetting, UpdateService, UpdateStatus};
@@ -312,7 +313,20 @@ fn render_category(
             );
         }
         SettingsCategory::Processing => {
-            empty_state(ui, "Nothing to configure here yet.");
+            setting_row(
+                ui,
+                "Default ILT regularization (λ)",
+                Some(
+                    "Regularization used to build an ILT DOSY map for a dataset that has no earlier ILT result.",
+                ),
+                |ui| {
+                    ui.add(
+                        egui::DragValue::new(&mut draft.processing.ilt_lambda)
+                            .speed(0.001)
+                            .range(MIN_ILT_LAMBDA..=MAX_ILT_LAMBDA),
+                    );
+                },
+            );
         }
         SettingsCategory::Export => {
             setting_row(

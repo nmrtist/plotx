@@ -331,6 +331,8 @@ fn cancelled_ilt_job_reports_acknowledgement_without_a_result() {
         d_grid: vec![1e-10, 1e-9],
         lambda: 0.01,
         params: IltParams::default(),
+        values: vec![0.0, 1.0, 2.0],
+        meta: diffusion_meta(),
         nucleus: "X".into(),
         source: "test".into(),
     });

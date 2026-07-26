@@ -12,23 +12,60 @@ impl PlotxApp {
                 loaded.doc.dirty = false;
                 loaded.clear_history();
                 self.install_loaded_project(loaded);
-                self.session.record_operation(
-                    OperationReport::success(
-                        operation_id,
-                        OperationKind::ProjectLoad,
-                        format!("Opened project {}", path.display()),
-                        (),
+                // A dataset whose stored analysis result could not be restored is
+                // still a successful load, but the canvas then shows something
+                // other than what was saved. Reporting it only on the dataset
+                // would hide it behind a tool panel the user has no reason to
+                // open, so it is promoted to the load report and the status bar.
+                let restore_warnings = self
+                    .doc
+                    .datasets
+                    .iter()
+                    .filter_map(|dataset| {
+                        let dataset = dataset.as_nmr2d()?;
+                        // Same precedence the panel uses, including the derived
+                        // "selected map is missing" note: that case is not stored
+                        // on the dataset, but it is exactly the case where the
+                        // canvas silently shows something other than what was
+                        // saved, so it has to reach the load report too.
+                        let warning = dataset
+                            .dosy_provenance_warning
+                            .clone()
+                            .or_else(|| dataset.missing_selected_map_note().map(str::to_owned))?;
+                        Some((dataset.name.clone(), warning))
+                    })
+                    .collect::<Vec<_>>();
+                let mut report = OperationReport::success(
+                    operation_id,
+                    OperationKind::ProjectLoad,
+                    format!("Opened project {}", path.display()),
+                    (),
+                )
+                .with_diagnostic(
+                    Diagnostic::new(
+                        Severity::Info,
+                        DiagnosticCode::ProjectLoadSucceeded,
+                        "Project opened successfully.",
                     )
-                    .with_diagnostic(
+                    .with_source("core.project")
+                    .with_context("path", path.display().to_string()),
+                );
+                for (name, warning) in &restore_warnings {
+                    report = report.with_diagnostic(
                         Diagnostic::new(
-                            Severity::Info,
-                            DiagnosticCode::ProjectLoadSucceeded,
-                            "Project opened successfully.",
+                            Severity::Warning,
+                            DiagnosticCode::ProjectLoadWarning,
+                            warning.clone(),
                         )
                         .with_source("core.project")
-                        .with_context("path", path.display().to_string()),
-                    ),
-                );
+                        .with_context("path", path.display().to_string())
+                        .with_context("dataset", name.clone().unwrap_or_default()),
+                    );
+                }
+                if let Some((_, first)) = restore_warnings.first() {
+                    self.session.status = first.clone();
+                }
+                self.session.record_operation(report);
                 self.note_recent_file(path);
             }
             Err(e) => {

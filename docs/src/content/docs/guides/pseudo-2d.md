@@ -27,13 +27,35 @@ as relaxation (T1 or T2 — which one is your choice of fit model).
 - Bi-exponential and stretched-exponential
 - Linear
 
-For DOSY, a regularized inverse Laplace transform (ILT) is also available
-and can produce a full chemical-shift × diffusion map. Map builds run in the
-background and you can keep working; **Cancel** discards one. A map cannot be
-rebuilt for the same dataset until the current build finishes or is cancelled.
-Changing the dataset's processing while a map is building cancels the build —
-the map would no longer match the spectrum. The status bar tells you when
-that happens; simply rebuild the map after the processing change.
+For DOSY, the **Experiment** card on the **Analyze** tab also offers a
+regularized inverse Laplace transform (ILT), which produces a full
+chemical-shift × diffusion map. Map builds run in the background and you can
+keep working; **Cancel** discards one. A map cannot be rebuilt for the same
+dataset until the current build finishes or is cancelled. Changing the
+dataset's processing while a map is building cancels the build — the map would
+no longer match the spectrum. The status bar tells you when that happens;
+simply rebuild the map after the processing change. Changing the processing
+also discards a finished map for the same reason, so the plot falls back to the
+stack until you rebuild.
+
+The ILT settings offered for the next build resolve in this order: a value you
+type into the **Experiment** card for this dataset wins; otherwise the dataset's
+previous ILT result supplies the settings it was built with; otherwise **λ**
+comes from **Preferences → Processing** and the grid settings from PlotX's own
+defaults. **λ** accepts `0.000001` to `1000`.
+
+Both kinds of DOSY map are saved in the `.plotx` project along with your
+**Show** and **DOSY method** choices, so reopening a project puts the same plot
+back on screen without rebuilding. If a saved map was built from data that the
+project's stored processing no longer reproduces, PlotX keeps showing the saved
+map and warns you — in the status bar as the project opens, and in the
+**Experiment** card. If a saved map cannot be read back at all, PlotX shows the
+stack instead and says so in the same two places. Rebuilding the map clears the
+warning.
+
+Choosing **DOSY map** under **Show** while the selected **DOSY method** has no
+map yet also draws the stack, and the **Experiment** card names the map to
+build.
 
 ## Notes on intensities
 

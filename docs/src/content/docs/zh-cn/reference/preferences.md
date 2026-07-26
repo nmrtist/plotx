@@ -33,6 +33,13 @@ description: 偏好设置窗口中的每一项设置，按类别列出。
 - **Graphics processor**——PlotX 启动时申请的 GPU 类别；重启后生效。
   仅在多 GPU 机器上出现渲染问题时才需要改动。
 
+## Processing（处理）
+
+- **Default ILT regularization (λ)**——为没有以往 ILT 结果可参照的数据集
+  构建 ILT DOSY 图时所用的 λ。允许范围 `0.000001` 到 `1000`，默认 `0.01`。
+  在 **Experiment**（实验）卡片中输入的 λ 只作用于该数据集，不会改动这里的
+  默认值。参见[伪 2D 分析](/zh-cn/guides/pseudo-2d/)。
+
 ## Export（导出）
 
 - **Embed view snapshots**——把每个图的屏幕视图保存进 `.plotx` 文件。

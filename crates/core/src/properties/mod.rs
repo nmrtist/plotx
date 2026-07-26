@@ -11,6 +11,7 @@
 pub mod apodization;
 pub mod contour;
 pub mod export_dpi;
+pub mod ilt;
 pub mod line;
 mod model;
 mod provider;
@@ -41,6 +42,9 @@ pub(crate) static GROUPS: &[PropertyProviderGroup] = &[
     },
     PropertyProviderGroup {
         provider: &export_dpi::PROVIDER,
+    },
+    PropertyProviderGroup {
+        provider: &ilt::PROVIDER,
     },
     PropertyProviderGroup {
         provider: &line::PROVIDER,
@@ -168,3 +172,7 @@ mod apodization_tests;
 #[cfg(test)]
 #[path = "export_dpi_tests.rs"]
 mod export_dpi_tests;
+
+#[cfg(test)]
+#[path = "ilt_tests.rs"]
+pub(crate) mod ilt_tests;

@@ -18,7 +18,7 @@ pub(crate) mod fixture;
 pub(crate) use search::property_hits;
 
 use plotx_core::properties::{
-    PropertyDefinition, PropertyId, Tier, apodization, contour, definition, export_dpi, line,
+    PropertyDefinition, PropertyId, Tier, apodization, contour, definition, export_dpi, ilt, line,
     typography,
 };
 use plotx_core::state::{SettingsCategory, WorkflowTab};
@@ -211,6 +211,11 @@ const EXPORT_PREFERENCES_HOME: HomeRoute = HomeRoute {
     section: SettingsCategory::Export.section_id(),
 };
 
+const PROCESSING_PREFERENCES_HOME: HomeRoute = HomeRoute {
+    panel: PanelRoute::Preferences,
+    section: SettingsCategory::Processing.section_id(),
+};
+
 pub const PRESENTATIONS: &[PropertyPresentation] = &[
     PropertyPresentation {
         id: contour::BASE_MAGNITUDE,
@@ -317,6 +322,16 @@ pub const PRESENTATIONS: &[PropertyPresentation] = &[
         localized_label: LocalizedText("Raster resolution"),
         localized_aliases: &[LocalizedText("export DPI"), LocalizedText("bitmap DPI")],
         home_route: EXPORT_PREFERENCES_HOME,
+        canvas_step: false,
+    },
+    PropertyPresentation {
+        id: ilt::DEFAULT_LAMBDA,
+        localized_label: LocalizedText("Default ILT regularization"),
+        localized_aliases: &[
+            LocalizedText("ILT lambda"),
+            LocalizedText("DOSY regularization"),
+        ],
+        home_route: PROCESSING_PREFERENCES_HOME,
         canvas_step: false,
     },
 ];

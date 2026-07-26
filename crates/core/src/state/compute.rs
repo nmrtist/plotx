@@ -13,11 +13,11 @@ use plotx_processing::{
     Params2D, Processed2D, StackSpectrum, process_2d_cancellable, reapply_2d_cancellable,
 };
 
-use super::DatasetId;
 use super::{
     ContourGeometry, ContourGeometryCacheKey, EstimateKey, EstimateResult, FieldId, FieldRef,
     FieldRuntime, FieldSummary, FieldVersion, ScalarGrid2D, VersionedFieldRef, nmr_scalar_grid,
 };
+use super::{DatasetId, DosyResultProvenance};
 use crate::{IltParams, build_dosy_figure_cancellable, build_ilt_figure_cancellable};
 
 #[path = "compute_field.rs"]
@@ -95,6 +95,10 @@ enum Job {
         d_grid: Vec<f64>,
         lambda: f64,
         params: IltParams,
+        /// Raw ruler and metadata kept beside the derived b-factors so the worker
+        /// can fingerprint the same inputs the per-column path does.
+        values: Vec<f64>,
+        meta: DiffusionMeta,
         nucleus: String,
         source: String,
     },
@@ -172,6 +176,7 @@ pub enum Done {
         epoch: u64,
         result: IltResult,
         params: IltParams,
+        provenance: DosyResultProvenance,
         figure: Arc<Figure>,
     },
     Dosy {
@@ -179,6 +184,7 @@ pub enum Done {
         dataset: DatasetId,
         epoch: u64,
         result: DiffusionMap,
+        provenance: DosyResultProvenance,
         figure: Arc<Figure>,
     },
     Processing2D {
@@ -274,6 +280,8 @@ impl ComputeService {
         d_grid: Vec<f64>,
         lambda: f64,
         params: IltParams,
+        values: Vec<f64>,
+        meta: DiffusionMeta,
         nucleus: String,
         source: String,
     ) -> Result<(), EnqueueError> {
@@ -303,6 +311,8 @@ impl ComputeService {
                 d_grid,
                 lambda,
                 params,
+                values,
+                meta,
                 nucleus,
                 source,
             })

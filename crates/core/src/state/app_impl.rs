@@ -60,6 +60,10 @@ impl PlotxApp {
                 canvas_accent: settings.appearance.canvas_accent,
                 ui: UiState {
                     snap_enabled: settings.general.snap_enabled,
+                    // `ilt_params` deliberately starts empty rather than mirroring
+                    // the preference here: a copy taken at construction would not
+                    // follow later preference edits, and resolving at build time
+                    // is what keeps the default reachable as a lifecycle stage.
                     ..Default::default()
                 },
                 project_backup_generations: settings

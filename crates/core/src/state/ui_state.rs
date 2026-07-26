@@ -405,9 +405,15 @@ pub struct UiState {
     /// Parse/compile result for the exact editor source, so the DSL is not
     /// recompiled every frame while the text is unchanged.
     pub fit_model_editor_validation: Option<FitEditorValidation>,
-    /// Editable parameters for the ILT/CONTIN DOSY inversion (shared across
-    /// pseudo-2D datasets; baked into the map when a build runs).
-    pub ilt_params: IltParams,
+    /// The ILT/CONTIN parameters the user explicitly entered for the next build,
+    /// or `None` when they have not overridden anything. `None` is the load-bearing
+    /// state: it is what lets a build fall through to the target's stored result
+    /// provenance and then to the application default, so the three lifecycle
+    /// stages stay reachable on every entry point rather than only in the panel.
+    pub ilt_params: Option<IltParams>,
+    /// The dataset `ilt_params` was entered for. An explicit input belongs to one
+    /// target; without this, focusing another dataset would silently inherit it.
+    pub ilt_params_dataset: Option<DatasetId>,
     /// The live position of the Slice tool, or `None` before it is placed.
     pub slice: Option<SliceCursor>,
     /// The chosen slice orientation for a true-2D spectrum (ignored for a stack,
@@ -530,7 +536,8 @@ impl Default for UiState {
             fit_model_editor: None,
             fit_model_editor_status: String::new(),
             fit_model_editor_validation: None,
-            ilt_params: IltParams::default(),
+            ilt_params: None,
+            ilt_params_dataset: None,
             slice: None,
             slice_kind: plotx_processing::SliceKind::Row,
             proc_expanded_step: None,

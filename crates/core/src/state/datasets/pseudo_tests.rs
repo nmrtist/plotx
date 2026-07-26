@@ -221,3 +221,316 @@ fn entering_a_nus_schedule_forces_a_retransform_until_a_base_lands() {
     ds.retransform();
     assert!(!ds.base_stale, "a fresh base clears the flag");
 }
+
+#[test]
+fn persisted_display_and_method_changes_mark_the_document_dirty() {
+    let mut app = PlotxApp::new_with_settings(crate::settings::Settings::default());
+    app.doc
+        .datasets
+        .push(Dataset::Nmr2D(Box::new(Nmr2DDataset::load(
+            synthetic_dosy(1.2e-9),
+        ))));
+
+    app.doc.dirty = false;
+    app.set_pseudo_display(0, PseudoDisplay::DosyMap);
+    assert!(
+        app.doc.dirty,
+        "changing the persisted display must be dirty"
+    );
+
+    app.doc.dirty = false;
+    let params = IltParams {
+        lambda: 0.03,
+        ..IltParams::default()
+    };
+    app.set_pseudo_dosy_method(0, DosyMethod::Ilt(params));
+    assert!(app.doc.dirty, "changing the persisted method must be dirty");
+}
+
+#[test]
+fn processing_invalidation_explains_the_stack_fallback() {
+    let mut dataset = Nmr2DDataset::load(synthetic_dosy(1.2e-9));
+    assert!(dataset.build_dosy_map());
+    assert_eq!(dataset.display, PseudoDisplay::DosyMap);
+
+    dataset.rebuild();
+
+    assert!(dataset.dosy_map.is_none());
+    assert!(dataset.figure().title.starts_with("Pseudo-2D stack —"));
+    let warning = dataset
+        .dosy_provenance_warning
+        .as_deref()
+        .expect("processing invalidation must explain the stack fallback");
+    assert!(warning.contains("Processing changed"), "{warning}");
+    assert!(warning.contains("showing the stack"), "{warning}");
+    assert!(warning.contains("Build"), "{warning}");
+}
+
+#[test]
+fn ilt_invocation_resolution_obeys_explicit_provenance_default_and_reports_empty_explicit_runs() {
+    let mut settings = crate::settings::Settings::default();
+    settings.processing.ilt_lambda = 0.8;
+    let mut app = PlotxApp::new_with_settings(settings);
+    let mut dataset = Nmr2DDataset::load(synthetic_dosy(1.2e-9));
+    let previous = IltParams {
+        lambda: 0.03,
+        d_min: 1e-10,
+        d_max: 1e-8,
+        n_grid: 32,
+    };
+    assert!(dataset.build_ilt_map(previous));
+    app.doc.datasets.push(Dataset::Nmr2D(Box::new(dataset)));
+
+    let explicit = IltParams {
+        lambda: 0.5,
+        ..IltParams::default()
+    };
+    assert_eq!(app.resolve_ilt_params_for(0, Some(explicit)), explicit);
+    assert_eq!(app.resolve_ilt_params_for(0, None), previous);
+    app.doc.datasets[0].as_nmr2d_mut().unwrap().ilt_provenance = None;
+    assert_eq!(app.resolve_ilt_params_for(0, None).lambda, 0.8);
+
+    let mut empty = synthetic_dosy(1.2e-9);
+    empty.data.fill(Complex64::new(0.0, 0.0));
+    let mut empty_app = PlotxApp::new_with_settings(crate::settings::Settings::default());
+    empty_app
+        .doc
+        .datasets
+        .push(Dataset::Nmr2D(Box::new(Nmr2DDataset::load(empty))));
+    // Deliberately not a boundary value: at MIN or MAX the assertion below would
+    // be satisfied by the range text the same message prints, and would still
+    // pass with the value itself removed from the message.
+    let chosen = IltParams {
+        lambda: 0.37,
+        ..IltParams::default()
+    };
+    assert!(
+        chosen.lambda != crate::settings::MIN_ILT_LAMBDA
+            && chosen.lambda != crate::settings::MAX_ILT_LAMBDA
+    );
+    empty_app.build_ilt_map_for_with_params(0, Some(chosen));
+    assert_eq!(
+        empty_app.doc.datasets[0].as_nmr2d().unwrap().dosy_method,
+        DosyMethod::Ilt(chosen),
+        "a legal explicit lambda is obeyed even when the result is empty"
+    );
+    assert!(
+        empty_app
+            .session
+            .status
+            .contains(&chosen.lambda.to_string()),
+        "{}",
+        empty_app.session.status
+    );
+    assert!(
+        empty_app
+            .session
+            .status
+            .contains(&crate::settings::MIN_ILT_LAMBDA.to_string())
+            && empty_app
+                .session
+                .status
+                .contains(&crate::settings::MAX_ILT_LAMBDA.to_string()),
+        "{}",
+        empty_app.session.status
+    );
+}
+
+/// A build that fits nothing still installs the method, the map and its
+/// provenance — all persisted state. Dirtying only the populated branch would let
+/// those changes be lost on close with no save prompt, which is the silent form
+/// of data loss this branch exists to remove.
+#[test]
+fn a_build_that_fits_nothing_still_marks_the_document_dirty() {
+    let mut app = PlotxApp::new_with_settings(crate::settings::Settings::default());
+    // Zero signal: every column falls below the noise threshold, so both builders
+    // return `false` while still writing their results.
+    let mut empty = synthetic_dosy(1.2e-9);
+    empty
+        .data
+        .iter_mut()
+        .for_each(|value| *value = Complex64::ZERO);
+    app.doc
+        .datasets
+        .push(Dataset::Nmr2D(Box::new(Nmr2DDataset::load(empty))));
+
+    app.doc.dirty = false;
+    app.build_dosy_map_for(0);
+    let d2 = app.doc.datasets[0].as_nmr2d().unwrap();
+    assert!(d2.dosy_map.is_some(), "the empty map is still installed");
+    assert!(d2.dosy_provenance.is_some());
+    assert!(
+        app.doc.dirty,
+        "an empty per-column build still changed persisted state"
+    );
+
+    app.doc.dirty = false;
+    let params = IltParams {
+        lambda: 0.03,
+        ..IltParams::default()
+    };
+    app.build_ilt_map_for_with_params(0, Some(params));
+    let d2 = app.doc.datasets[0].as_nmr2d().unwrap();
+    assert_eq!(d2.dosy_method, DosyMethod::Ilt(params));
+    assert!(d2.ilt_provenance.is_some());
+    assert!(
+        app.doc.dirty,
+        "an empty ILT build still changed persisted state"
+    );
+}
+
+/// The "map is missing" note is derived, never stored, so it cannot outlive the
+/// condition. A stored copy would keep claiming the map is unavailable while the
+/// map is on screen.
+#[test]
+fn the_missing_map_note_tracks_the_current_selection_instead_of_persisting() {
+    let mut app = PlotxApp::new_with_settings(crate::settings::Settings::default());
+    let mut ds = Nmr2DDataset::load(synthetic_dosy(1.2e-9));
+    assert!(ds.build_dosy_map());
+    app.doc.datasets.push(Dataset::Nmr2D(Box::new(ds)));
+
+    let d2 = app.doc.datasets[0].as_nmr2d().unwrap();
+    assert_eq!(d2.display, PseudoDisplay::DosyMap);
+    assert_eq!(d2.missing_selected_map_note(), None);
+
+    // Selecting ILT, for which no map exists, must explain the stack fallback…
+    app.set_pseudo_dosy_method(0, DosyMethod::Ilt(IltParams::default()));
+    let note = app.doc.datasets[0]
+        .as_nmr2d()
+        .unwrap()
+        .missing_selected_map_note()
+        .expect("selecting a method with no map explains the fallback");
+    assert!(note.contains("ILT DOSY map is not available"), "{note}");
+
+    // …and going back to the method that does have one must stop explaining it.
+    app.set_pseudo_dosy_method(0, DosyMethod::MonoExp);
+    assert_eq!(
+        app.doc.datasets[0]
+            .as_nmr2d()
+            .unwrap()
+            .missing_selected_map_note(),
+        None,
+        "the note must not outlive the condition it describes"
+    );
+
+    // Nor should it fire when no map is selected at all.
+    app.set_pseudo_dosy_method(0, DosyMethod::Ilt(IltParams::default()));
+    app.set_pseudo_display(0, PseudoDisplay::Stack);
+    assert_eq!(
+        app.doc.datasets[0]
+            .as_nmr2d()
+            .unwrap()
+            .missing_selected_map_note(),
+        None
+    );
+}
+
+/// The fingerprint has to cover every numeric input the fit consumes, not just
+/// the trace samples. Referencing moves the chemical-shift axis without touching
+/// a sample, and the diffusion metadata reaches the per-column fit through the
+/// b-factor conversion; either change produces a different map, so either must
+/// produce a different digest.
+#[test]
+fn the_data_fingerprint_covers_coordinates_and_diffusion_metadata() {
+    let mut ds = Nmr2DDataset::load(synthetic_dosy(1.2e-9));
+    let Processed2D::Stack(stack) = &ds.processed else {
+        panic!("synthetic DOSY must process as a stack");
+    };
+    let stack = stack.clone();
+    let axis = ds.data.pseudo_axis.clone().unwrap();
+    let meta = ds.data.diffusion.unwrap();
+    let base = crate::state::dosy_data_fingerprint(&stack, &axis.values, &meta);
+
+    let mut shifted = (*stack).clone();
+    shifted.ppm.iter_mut().for_each(|value| *value += 0.5);
+    assert_ne!(
+        crate::state::dosy_data_fingerprint(&shifted, &axis.values, &meta),
+        base,
+        "a reference change moves the ppm axis and must be detected"
+    );
+
+    let mut edited = meta;
+    edited.big_delta *= 2.0;
+    assert_ne!(
+        crate::state::dosy_data_fingerprint(&stack, &axis.values, &edited),
+        base,
+        "diffusion metadata reaches the fit and must be detected"
+    );
+
+    let mut ruler = axis.values.clone();
+    ruler[0] += 1e-3;
+    assert_ne!(
+        crate::state::dosy_data_fingerprint(&stack, &ruler, &meta),
+        base,
+        "the gradient ruler must be detected"
+    );
+
+    // Guard against the digest becoming trivially input-insensitive.
+    assert_eq!(
+        crate::state::dosy_data_fingerprint(&stack, &axis.values, &meta),
+        base
+    );
+    let _ = &mut ds;
+}
+
+/// Grid parameters can arrive from a project file, so they are external input.
+/// The inversion solves a dense `n_grid x n_grid` system; an unchecked value
+/// would size that allocation instead of producing an error.
+#[test]
+fn ilt_parameters_from_a_project_are_validated_before_the_inversion() {
+    use crate::settings::{MAX_ILT_GRID, MAX_ILT_LAMBDA};
+    let ok = IltParams::default();
+    assert!(crate::state::validate_ilt_params(ok).is_ok());
+
+    let huge_grid = IltParams {
+        n_grid: 4_000_000,
+        ..ok
+    };
+    let message = crate::state::validate_ilt_params(huge_grid)
+        .expect_err("an out-of-range grid size must be refused");
+    assert!(message.contains("4000000"), "{message}");
+    assert!(message.contains(&MAX_ILT_GRID.to_string()), "{message}");
+
+    let reversed = IltParams {
+        d_min: 1e-8,
+        d_max: 1e-11,
+        ..ok
+    };
+    let message = crate::state::validate_ilt_params(reversed)
+        .expect_err("a reversed diffusion range must be refused");
+    assert!(
+        message.contains("1e-8") && message.contains("1e-11"),
+        "{message}"
+    );
+
+    let unhinged = IltParams {
+        d_min: f64::NAN,
+        ..ok
+    };
+    assert!(crate::state::validate_ilt_params(unhinged).is_err());
+
+    let bad_lambda = IltParams {
+        lambda: MAX_ILT_LAMBDA * 10.0,
+        ..ok
+    };
+    assert!(crate::state::validate_ilt_params(bad_lambda).is_err());
+
+    // And the build path must actually consult it rather than reaching the
+    // inversion with the value.
+    let mut app = PlotxApp::new_with_settings(crate::settings::Settings::default());
+    app.doc
+        .datasets
+        .push(Dataset::Nmr2D(Box::new(Nmr2DDataset::load(
+            synthetic_dosy(1.2e-9),
+        ))));
+    app.build_ilt_map_for_with_params(0, Some(huge_grid));
+    assert!(
+        app.doc.datasets[0].as_nmr2d().unwrap().ilt_map.is_none(),
+        "the inversion must not have run"
+    );
+    assert!(
+        app.session.status.contains("4000000"),
+        "{}",
+        app.session.status
+    );
+}

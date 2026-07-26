@@ -4,8 +4,9 @@ use crate::actions::{
 };
 use crate::export::{ExportDialogState, ExportFormat, ExportSettings};
 use crate::{
-    DosyMethod, IltParams, Integral2D, IntegralResult, PseudoDisplay, apply_peak_labels,
-    build_dosy_figure, build_figure, build_ilt_figure, build_stack_figure, extract_region_series,
+    DosyInvocation, DosyMethod, DosyResultProvenance, IltParams, Integral2D, IntegralResult,
+    PseudoDisplay, apply_peak_labels, build_dosy_figure, build_figure, build_ilt_figure,
+    build_stack_figure, extract_region_series,
 };
 use plotx_analysis::diffusion::{DiffusionMap, diffusion_map};
 use plotx_analysis::ilt::{IltResult, ilt_map, log_grid};
@@ -22,6 +23,7 @@ mod afm;
 mod app_impl;
 mod app_impl_align;
 mod app_impl_analysis;
+mod app_impl_analysis_tables;
 #[cfg(test)]
 mod app_impl_analysis_tests;
 mod app_impl_arithmetic;
@@ -47,6 +49,7 @@ mod dataset_trace;
 mod datasets;
 mod datasets_2d_figure;
 mod datasets_2d_maps;
+mod datasets_dispatch;
 mod document;
 mod document_identity;
 mod electrophysiology;
@@ -92,6 +95,7 @@ mod workflow_tab;
 pub use afm::*;
 pub use app_impl::*;
 pub use app_impl_align::*;
+pub use app_impl_analysis::validate_ilt_params;
 pub use app_impl_linefit::LineFitJob;
 pub use app_state::*;
 pub use axis_overrides::*;
@@ -100,6 +104,9 @@ pub use charts::*;
 pub use compute::*;
 pub use datasets::*;
 pub(crate) use datasets_2d_figure::build_processed_figure;
+pub(crate) use datasets_2d_maps::{
+    MONO_EXP_SNR_FRAC, dosy_data_fingerprint, ilt_provenance, mono_exp_provenance,
+};
 pub use document::*;
 pub use electrophysiology::*;
 pub use field::*;

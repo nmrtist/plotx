@@ -29,6 +29,30 @@ impl Nmr2DDataset {
         }
     }
 
+    /// Why `figure()` is drawing the stack even though a DOSY map is selected.
+    ///
+    /// Derived rather than stored, and deliberately kept beside the fallback it
+    /// explains: the condition is a pure function of the display, the method and
+    /// which maps exist, so a stored copy would outlive the state it describes
+    /// and claim a map is missing while the map is on screen.
+    pub fn missing_selected_map_note(&self) -> Option<&'static str> {
+        if !matches!(self.processed, Processed2D::Stack(_))
+            || self.display != PseudoDisplay::DosyMap
+        {
+            return None;
+        }
+        match self.dosy_method {
+            DosyMethod::MonoExp => self.dosy_map.is_none().then_some(
+                "The per-column DOSY map is not available, so PlotX is showing the stack \
+                 instead. Build the per-column DOSY map to replace it.",
+            ),
+            DosyMethod::Ilt(_) => self.ilt_map.is_none().then_some(
+                "The ILT DOSY map is not available, so PlotX is showing the stack instead. \
+                 Build the ILT DOSY map to replace it.",
+            ),
+        }
+    }
+
     pub fn summary(&self) -> String {
         format!(
             "{}–{} · {}×{} · {}",

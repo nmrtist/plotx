@@ -20,6 +20,13 @@ migrated silently. If that happens, update PlotX and reopen.
 **Preferences → General → Project backup copies** keeps previous saves as
 hidden files beside the project, so an accidental overwrite can be recovered.
 
+For pseudo-2D DOSY, a project also holds the per-column and ILT maps
+themselves, the ILT settings each was built with, your **Show** and **DOSY
+method** choices, and enough about how each map was produced for PlotX to warn
+you on reopening if the map no longer matches the data the project
+reconstructs. The contour drawing is not stored — PlotX redraws it from the
+saved map when the project opens.
+
 ## `.plotxproc` processing recipes
 
 A `.plotxproc` file stores one processing pipeline, without any data — save a

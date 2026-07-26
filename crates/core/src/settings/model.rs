@@ -65,6 +65,18 @@ pub struct GeneralSettings {
 pub const MAX_PROJECT_BACKUP_GENERATIONS: u8 = 5;
 pub const MIN_EXPORT_DPI: u16 = 72;
 pub const MAX_EXPORT_DPI: u16 = 1200;
+pub const MIN_ILT_LAMBDA: f64 = 1e-6;
+pub const MAX_ILT_LAMBDA: f64 = 1e3;
+pub const DEFAULT_ILT_LAMBDA: f64 = 1e-2;
+/// Diffusion-grid limits for the ILT inversion. These are not preferences and
+/// have no catalog property; they exist because the inversion solves a dense
+/// `n_grid x n_grid` system, so a grid size read back from a project file sizes
+/// a quadratic allocation. Project content is external input and must not be
+/// able to make that allocation unbounded.
+pub const MIN_ILT_GRID: usize = 16;
+pub const MAX_ILT_GRID: usize = 512;
+pub const MIN_ILT_DIFFUSION: f64 = 1e-13;
+pub const MAX_ILT_DIFFUSION: f64 = 1e-6;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub struct AppearanceSettings {
@@ -151,8 +163,11 @@ impl ThemeMode {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub struct ProcessingDefaults {}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ProcessingDefaults {
+    #[serde(default = "default_ilt_lambda")]
+    pub ilt_lambda: f64,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExportDefaults {
@@ -271,6 +286,14 @@ impl Default for ExportDefaults {
     }
 }
 
+impl Default for ProcessingDefaults {
+    fn default() -> Self {
+        Self {
+            ilt_lambda: default_ilt_lambda(),
+        }
+    }
+}
+
 fn current_schema_version() -> u32 {
     super::SETTINGS_SCHEMA_VERSION
 }
@@ -285,6 +308,10 @@ fn default_snap_enabled() -> bool {
 
 fn default_project_backup_generations() -> u8 {
     1
+}
+
+fn default_ilt_lambda() -> f64 {
+    DEFAULT_ILT_LAMBDA
 }
 
 fn default_export_dpi() -> u16 {

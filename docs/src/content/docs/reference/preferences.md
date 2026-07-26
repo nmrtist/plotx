@@ -40,6 +40,14 @@ restores everything except your recent-files list.
   effect after a restart. Change it only if you see rendering problems on a
   multi-GPU machine.
 
+## Processing
+
+- **Default ILT regularization (λ)** — the λ offered when you build an ILT DOSY
+  map for a dataset with no earlier ILT result to take it from. Accepts
+  `0.000001` to `1000`; the default is `0.01`. A λ typed into the **Experiment**
+  card applies to that dataset and leaves this default unchanged. See
+  [Pseudo-2D analysis](/guides/pseudo-2d/).
+
 ## Export
 
 - **Embed view snapshots** — save each plot's on-screen view into the

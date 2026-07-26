@@ -107,7 +107,10 @@ pub(super) fn read_regions(dataset: &mut Nmr2DDataset, recipe: &RecipeObject) {
         .unwrap_or_else(|| dataset.regions.iter().map(|r| r.id + 1).max().unwrap_or(0));
 }
 
-pub(super) fn nmr2d_recipe_extensions(dataset: &Nmr2DDataset) -> serde_json::Value {
+pub(super) fn nmr2d_recipe_extensions(
+    dataset: &Nmr2DDataset,
+    dosy: Option<serde_json::Value>,
+) -> serde_json::Value {
     let mut extensions = serde_json::Map::new();
     extensions.insert(
         "plotx.step_allocator".to_owned(),
@@ -128,6 +131,9 @@ pub(super) fn nmr2d_recipe_extensions(dataset: &Nmr2DDataset) -> serde_json::Val
             "plotx.analysis".to_owned(),
             serde_json::json!({ "integrals_2d": &dataset.integrals }),
         );
+    }
+    if let Some(dosy) = dosy {
+        extensions.insert("plotx.dosy".to_owned(), dosy);
     }
     if extensions.is_empty() {
         serde_json::Value::Null

@@ -1,6 +1,7 @@
 //! Worker-only execution for jobs declared by `compute`.
 
 use super::*;
+use crate::state::{MONO_EXP_SNR_FRAC, ilt_provenance, mono_exp_provenance};
 
 pub(super) fn run_job(job: Job) -> Done {
     match job {
@@ -14,10 +15,13 @@ pub(super) fn run_job(job: Job) -> Done {
             d_grid,
             lambda,
             params,
+            values,
+            meta,
             nucleus,
             source,
         } => {
             let cancelled = || token.load(Ordering::Relaxed);
+            let provenance = ilt_provenance(&stack, &values, &meta, params);
             match ilt_map_cancellable(&*stack, &b_factors, &d_grid, lambda, &cancelled) {
                 Some(result) if !cancelled() => {
                     let Some(figure) =
@@ -36,6 +40,7 @@ pub(super) fn run_job(job: Job) -> Done {
                         epoch,
                         result,
                         params,
+                        provenance,
                         figure,
                     }
                 }
@@ -58,7 +63,9 @@ pub(super) fn run_job(job: Job) -> Done {
             source,
         } => {
             let cancelled = || token.load(Ordering::Relaxed);
-            match diffusion_map_cancellable(&*stack, &values, &meta, 0.05, &cancelled) {
+            let provenance = mono_exp_provenance(&stack, &values, &meta);
+            match diffusion_map_cancellable(&*stack, &values, &meta, MONO_EXP_SNR_FRAC, &cancelled)
+            {
                 Some(result) if !cancelled() => {
                     let Some(figure) =
                         build_dosy_figure_cancellable(&result, &nucleus, &source, &cancelled)
@@ -75,6 +82,7 @@ pub(super) fn run_job(job: Job) -> Done {
                         dataset,
                         epoch,
                         result,
+                        provenance,
                         figure,
                     }
                 }

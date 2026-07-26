@@ -28,6 +28,8 @@ mod codec;
 mod convert;
 mod convert_dimensions;
 mod convert_recipes;
+mod convert_views;
+mod dosy_convert;
 mod dto;
 mod electrophysiology_convert;
 mod field_catalog;
@@ -42,6 +44,7 @@ pub use codec::*;
 pub use convert::*;
 pub use convert_dimensions::*;
 pub use convert_recipes::*;
+pub use convert_views::*;
 pub use dto::*;
 use integrals2d::read_integrals_2d;
 pub(crate) use persistence::commit_atomic_file;
@@ -56,6 +59,7 @@ const SCHEMA_VERSION: u32 = 1;
 const STORAGE_COMPLEX_F64_LE: &str = "complex_f64_le";
 const STORAGE_TABLE_V1: &str = "plotx_table_envelope_v1";
 const STORAGE_AFM_V1: &str = "plotx_afm_v1";
+const STORAGE_DOSY_V1: &str = "plotx_dosy_v1";
 const SNAPSHOT_KIND: &str = "editable_figure_v1";
 
 type Result<T> = std::result::Result<T, ProjectError>;
@@ -260,11 +264,13 @@ fn save_project_impl(
             )?;
             write_json(&mut zip, options, &recipe_path, &recipe)?;
         } else {
-            let (data_object, data_blob, recipe) =
-                dataset_to_objects(dataset, &data_id, &recipe_id)?;
-            write_json(&mut zip, options, &data_path, &data_object)?;
-            write_bytes(&mut zip, options, &data_object.payload.blob, &data_blob)?;
-            write_json(&mut zip, options, &recipe_path, &recipe)?;
+            let objects = dataset_to_objects(dataset, &data_id, &recipe_id)?;
+            write_json(&mut zip, options, &data_path, &objects.data)?;
+            write_bytes(&mut zip, options, &objects.data.payload.blob, &objects.blob)?;
+            for (path, bytes) in &objects.extra_blobs {
+                write_bytes(&mut zip, options, path, bytes)?;
+            }
+            write_json(&mut zip, options, &recipe_path, &objects.recipe)?;
         }
 
         manifest.objects.push(Entry {

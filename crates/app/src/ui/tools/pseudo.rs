@@ -1,5 +1,6 @@
 use egui::{Button, DragValue, Ui};
 use plotx_core::actions::{Action, DatasetProcessingState};
+use plotx_core::settings::{MAX_ILT_LAMBDA, MIN_ILT_LAMBDA};
 use plotx_core::state::PlotxApp;
 use plotx_processing::{Layout2D, Preset2D};
 
@@ -160,7 +161,7 @@ fn parse_indices(text: &str) -> Result<Vec<usize>, String> {
 fn pseudo_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
     use plotx_core::{DosyMethod, PseudoDisplay};
 
-    let (is_dosy, is_gradient, is_ilt, axis_summary, diff_summary, cur_display) = {
+    let (is_dosy, is_gradient, is_ilt, axis_summary, diff_summary, provenance_warning, cur_display) = {
         let n = app.doc.datasets[di].as_nmr2d().unwrap();
         let axis_summary = n.data.pseudo_axis.as_ref().map(|axis| {
             format!(
@@ -192,6 +193,9 @@ fn pseudo_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
             matches!(n.dosy_method, DosyMethod::Ilt(_)),
             axis_summary,
             diff_summary,
+            n.dosy_provenance_warning
+                .clone()
+                .or_else(|| n.missing_selected_map_note().map(str::to_owned)),
             n.display,
         )
     };
@@ -201,6 +205,9 @@ fn pseudo_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
     }
     if let Some(s) = &diff_summary {
         ui.small(s);
+    }
+    if let Some(warning) = &provenance_warning {
+        ui.colored_label(ui.visuals().warn_fg_color, warning);
     }
 
     ui.horizontal(|ui| {
@@ -228,9 +235,7 @@ fn pseudo_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
         ui.horizontal(|ui| {
             ui.label("DOSY method");
             if ui.selectable_label(!is_ilt, "Per-column").clicked() && is_ilt {
-                if let Some(d2) = app.doc.datasets[di].as_nmr2d_mut() {
-                    d2.dosy_method = DosyMethod::MonoExp;
-                }
+                app.set_pseudo_dosy_method(di, DosyMethod::MonoExp);
                 app.set_pseudo_display(di, PseudoDisplay::DosyMap);
             }
             if ui
@@ -242,44 +247,56 @@ fn pseudo_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
                 .clicked()
                 && !is_ilt
             {
-                let params = app.session.ui.ilt_params;
-                if let Some(d2) = app.doc.datasets[di].as_nmr2d_mut() {
-                    d2.dosy_method = DosyMethod::Ilt(params);
-                }
+                let params = app.resolve_ilt_params_for(di, app.explicit_ilt_input_for(di));
+                app.set_pseudo_dosy_method(di, DosyMethod::Ilt(params));
                 app.set_pseudo_display(di, PseudoDisplay::DosyMap);
             }
         });
         if is_ilt {
+            // Show what this build would actually use — the explicit input if the
+            // user has entered one for this dataset, otherwise what the lifecycle
+            // resolves to. Only an edit here records an explicit input, so simply
+            // opening the panel never turns a resolved value into an override.
+            let resolved = app.resolve_ilt_params_for(di, app.explicit_ilt_input_for(di));
+            let mut draft = resolved;
+            let mut edited = false;
             ui.horizontal(|ui| {
                 ui.label("λ");
-                ui.add(
-                    DragValue::new(&mut app.session.ui.ilt_params.lambda)
-                        .speed(0.001)
-                        .range(1e-6..=1e3),
-                );
+                edited |= ui
+                    .add(
+                        DragValue::new(&mut draft.lambda)
+                            .speed(0.001)
+                            .range(MIN_ILT_LAMBDA..=MAX_ILT_LAMBDA),
+                    )
+                    .changed();
             });
             ui.horizontal(|ui| {
                 ui.label("D min");
-                ui.add(
-                    DragValue::new(&mut app.session.ui.ilt_params.d_min)
-                        .speed(1e-12)
-                        .range(1e-13..=1e-7),
-                );
+                edited |= ui
+                    .add(
+                        DragValue::new(&mut draft.d_min)
+                            .speed(1e-12)
+                            .range(1e-13..=1e-7),
+                    )
+                    .changed();
                 ui.label("D max");
-                ui.add(
-                    DragValue::new(&mut app.session.ui.ilt_params.d_max)
-                        .speed(1e-10)
-                        .range(1e-12..=1e-6),
-                );
+                edited |= ui
+                    .add(
+                        DragValue::new(&mut draft.d_max)
+                            .speed(1e-10)
+                            .range(1e-12..=1e-6),
+                    )
+                    .changed();
             });
             ui.horizontal(|ui| {
                 ui.label("Grid points");
-                ui.add(
-                    DragValue::new(&mut app.session.ui.ilt_params.n_grid)
-                        .speed(1.0)
-                        .range(16..=512),
-                );
+                edited |= ui
+                    .add(DragValue::new(&mut draft.n_grid).speed(1.0).range(16..=512))
+                    .changed();
             });
+            if edited {
+                app.set_explicit_ilt_input(di, draft);
+            }
         }
     }
 

@@ -5,9 +5,10 @@
 //! planner the panel controls use.
 
 use super::*;
+use crate::properties::ilt_tests::ilt_app;
 use crate::properties::tests::{contour_app, contour_spec};
 use crate::properties::{
-    AggregateValue, PropertyAddress, PropertyValue, apodization, contour, definition_by_key,
+    AggregateValue, PropertyAddress, PropertyValue, apodization, contour, definition_by_key, ilt,
     typography,
 };
 use crate::state::{
@@ -67,6 +68,43 @@ fn add_line_series(app: &mut PlotxApp) {
     let mut series = SeriesBinding { id, ..series };
     series.label = Some("line".to_owned());
     plot.binding.series.push(series);
+}
+
+#[test]
+fn automation_inspects_stored_ilt_provenance_and_refuses_set_and_reset_as_read_only() {
+    let (mut app, target) = ilt_app(0.07);
+    let id = target.resource.id.clone();
+    let inspect = request(
+        &app,
+        TOOL_INSPECT,
+        serde_json::json!({"key": ilt::RESULT_LAMBDA.as_str()}),
+        vec![id.clone()],
+        CallerType::Agent,
+    );
+    let result = run(&mut app, inspect).expect("properties.inspect reads provenance");
+    let value = result.value.to_string();
+    assert!(value.contains("0.07"), "{value}");
+    assert!(value.contains("read_only"), "{value}");
+
+    for (tool, parameters) in [
+        (
+            TOOL_SET,
+            serde_json::json!({"key": ilt::RESULT_LAMBDA.as_str(), "value": 0.2}),
+        ),
+        (
+            TOOL_RESET,
+            serde_json::json!({"key": ilt::RESULT_LAMBDA.as_str()}),
+        ),
+    ] {
+        let error = plan_tool(
+            &app,
+            request(&app, tool, parameters, vec![id.clone()], CallerType::Agent),
+        )
+        .expect_err("non-inspect automation must refuse read-only provenance");
+        let message = error.to_string();
+        assert!(message.contains("read-only"), "{message}");
+        assert!(message.contains(ilt::RESULT_LAMBDA.as_str()), "{message}");
+    }
 }
 
 #[test]
@@ -425,14 +463,22 @@ fn dataset_property_tools_expand_processing_steps_and_report_non_apodization_ski
 /// before anything is planned.
 #[test]
 fn a_read_only_property_cannot_be_written() {
-    // Every catalog entry is currently writable, so this asserts the guard
-    // exists rather than exercising a read-only entry that does not yet exist.
-    assert!(
-        crate::properties::catalog()
-            .iter()
-            .all(|definition| definition.access == crate::properties::PropertyAccess::ReadWrite),
-        "add a read-only case here once the catalog has one"
+    let (app, target) = ilt_app(0.07);
+    let error = plan_tool(
+        &app,
+        request(
+            &app,
+            TOOL_SET,
+            serde_json::json!({"key": ilt::RESULT_LAMBDA.as_str(), "value": 0.2}),
+            vec![target.resource.id],
+            CallerType::Agent,
+        ),
     );
+    let message = error
+        .expect_err("the read-only definition must be refused before planning")
+        .to_string();
+    assert!(message.contains("read-only"), "{message}");
+    assert!(message.contains(ilt::RESULT_LAMBDA.as_str()), "{message}");
 }
 
 // ---------------------------------------------------------------------------
