@@ -13,8 +13,8 @@
 
 use crate::ui::commands::{self, CommandId};
 use crate::ui::properties::{
-    CONTOUR_HOME, GROUPS, LocalizedText, PRESENTATIONS, PropertyPresentation, discovery, panel,
-    presentation, search,
+    CONTOUR_HOME, GROUPS, LocalizedText, PRESENTATIONS, PanelRoute, PropertyPresentation,
+    discovery, panel, presentation, search,
 };
 use plotx_core::properties::{
     Applicability, ComponentKind, DefaultPolicy, EncodingKind, PropertyAccess, PropertyDefinition,
@@ -152,7 +152,22 @@ fn groups_and_home_sections_correspond() {
             group.section
         );
     }
+    let app = PlotxApp::new_with_settings(plotx_core::settings::Settings::default());
     for entry in PRESENTATIONS {
+        if entry.home_route.panel == PanelRoute::Preferences {
+            // Preferences-homed defaults deliberately take no Ribbon slot: the
+            // panel is already one global command away. That exemption is only
+            // sound while the command stays globally reachable, so pin the
+            // premise instead of exempting a whole panel on trust.
+            let preferences = commands::describe(&app, CommandId::Preferences);
+            assert!(
+                preferences.enabled,
+                "{} is reachable only through Preferences, which is itself \
+                 unavailable on an empty document",
+                entry.id
+            );
+            continue;
+        }
         assert!(
             discovery::group(entry.home_route.section).is_some(),
             "{} lives in section '{}', which declares no group, so it is \

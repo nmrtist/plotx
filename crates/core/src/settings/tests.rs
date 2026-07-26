@@ -90,6 +90,27 @@ fn backup_generation_count_is_bounded_on_load() {
 }
 
 #[test]
+fn recent_files_are_bounded_on_load() {
+    let path = temp_settings("recent-bound");
+    let _ = std::fs::remove_file(&path);
+    let files: Vec<String> = (0..(MAX_RECENT_FILES + 4))
+        .map(|index| format!("C:/data/run-{index}.abf"))
+        .collect();
+    std::fs::write(
+        &path,
+        serde_json::json!({ "recent": { "files": files } }).to_string(),
+    )
+    .unwrap();
+
+    let settings = io::load_from_paths(&path, None);
+    let _ = std::fs::remove_file(&path);
+
+    // The loaded list is what the Preferences panel shows, so the documented
+    // cap has to hold here and not only on `note`.
+    assert_eq!(settings.recent.files.len(), MAX_RECENT_FILES);
+}
+
+#[test]
 fn save_and_load_roundtrip() {
     let path = temp_settings("roundtrip");
     let _ = std::fs::remove_file(&path);

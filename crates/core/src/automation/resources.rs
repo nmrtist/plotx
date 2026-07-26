@@ -7,6 +7,7 @@ use crate::state::{Dataset, PlotxApp};
 use std::collections::BTreeMap;
 
 pub const KIND_DATASET: &str = "plotx.dataset";
+pub const KIND_APP: &str = "plotx.app";
 pub const KIND_DOCUMENT: &str = "plotx.document";
 pub const KIND_CANVAS: &str = "plotx.canvas";
 pub const KIND_TABLE_ROW: &str = "plotx.table.row";
@@ -16,6 +17,7 @@ pub const KIND_CANVAS_OBJECT: &str = "plotx.canvas.object";
 pub const KIND_EXTERNAL_INPUT: &str = "plotx.external_input";
 /// The one document root inside a `PlotxApp` target space.
 pub const DOCUMENT_RESOURCE_ID: &str = "document";
+pub const APP_RESOURCE_ID: &str = "app";
 
 pub const CAP_RENAME: &str = "resource.rename";
 pub const CAP_RENDER: &str = "figure.render";

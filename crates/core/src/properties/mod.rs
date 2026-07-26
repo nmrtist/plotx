@@ -2,14 +2,15 @@
 //! persistent setting, the counterpart of the existing command catalog.
 //!
 //! The catalog owns descriptions, addressing, reading, validation and the
-//! compilation of an edit into a typed [`crate::actions::Action`]. It does not
-//! own values: there is no `HashMap<PropertyId, PropertyValue>` anywhere in this
-//! module, because every value already has exactly one home in a typed domain
-//! model. Presentation — localized labels and panel routing — belongs to the
+//! compilation of an edit into a typed storage commit. It does not own values:
+//! there is no `HashMap<PropertyId, PropertyValue>` anywhere in this module,
+//! because every value already has exactly one home in a typed domain model.
+//! Presentation — localized labels and panel routing — belongs to the
 //! application crate and is keyed by the same [`PropertyId`].
 
 pub mod apodization;
 pub mod contour;
+pub mod export_dpi;
 pub mod line;
 mod model;
 mod provider;
@@ -37,6 +38,9 @@ pub(crate) static GROUPS: &[PropertyProviderGroup] = &[
     },
     PropertyProviderGroup {
         provider: &contour::PROVIDER,
+    },
+    PropertyProviderGroup {
+        provider: &export_dpi::PROVIDER,
     },
     PropertyProviderGroup {
         provider: &line::PROVIDER,
@@ -160,3 +164,7 @@ mod scope_tests;
 #[cfg(test)]
 #[path = "apodization_tests.rs"]
 mod apodization_tests;
+
+#[cfg(test)]
+#[path = "export_dpi_tests.rs"]
+mod export_dpi_tests;

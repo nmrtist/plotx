@@ -2,6 +2,9 @@ use super::{SETTINGS_SCHEMA_VERSION, Settings, migrate, paths};
 use std::io;
 use std::path::{Path, PathBuf};
 
+/// Read the stored preferences. This is the boundary read taken before a
+/// [`crate::state::PlotxApp`] exists; once one does, its `settings` field is
+/// the live value and this function must not be used to re-read it.
 pub fn load() -> Settings {
     let Some(path) = paths::settings_file() else {
         return Settings::default();
@@ -71,6 +74,10 @@ fn load_from_bytes(data: &[u8], quarantine_path: Option<&Path>) -> Settings {
         .general
         .project_backup_generations
         .min(super::MAX_PROJECT_BACKUP_GENERATIONS);
+    // The bound belongs here as well as on `note`: the loaded value is now the
+    // live list the Preferences panel shows, so a hand-edited file would
+    // otherwise display more entries than the cap promises.
+    settings.recent.files.truncate(super::MAX_RECENT_FILES);
     // `app_version` deliberately keeps the value the file was written with:
     // it is how the shell detects "first launch after an update". Saving
     // stamps the current version (see `save_to_path`).

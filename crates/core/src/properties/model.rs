@@ -6,7 +6,7 @@
 //! current value and the default are derived from the document on demand, so
 //! there is never a second copy of a value that already lives in a typed domain
 //! model. There is, for the same reason, no generic value store here; writes are
-//! compiled into the existing typed `Action`s.
+//! compiled into typed commits for their owning persistence boundary.
 
 use crate::automation::{ComponentRef, TargetRef};
 use plotx_figure::Color;
@@ -673,14 +673,20 @@ pub struct ResolvedPropertySet {
     pub value: AggregateValue<PropertyValue>,
 }
 
-/// A validated, not-yet-executed write. Every applicable target is already
-/// folded into one atomic action, so a commit either lands everywhere or
-/// nowhere.
+/// A validated, not-yet-executed write. Providers have already selected the
+/// typed storage payload; planning guarantees that at most one arm is present.
 #[derive(Clone)]
 pub struct PropertyCommit {
-    pub action: crate::actions::Action,
+    pub(crate) document_action: Option<crate::actions::Action>,
+    pub(crate) app_preferences: Option<crate::settings::Settings>,
     pub applied: Vec<PropertyAddress>,
     pub skipped: Vec<PropertySkip>,
+}
+
+impl PropertyCommit {
+    pub(crate) fn has_document_action(&self) -> bool {
+        self.document_action.is_some()
+    }
 }
 
 impl fmt::Debug for PropertyCommit {
@@ -689,6 +695,8 @@ impl fmt::Debug for PropertyCommit {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("PropertyCommit")
+            .field("document_action", &self.document_action.is_some())
+            .field("app_preferences", &self.app_preferences.is_some())
             .field("applied", &self.applied)
             .field("skipped", &self.skipped)
             .finish_non_exhaustive()
@@ -716,4 +724,6 @@ pub enum PropertyError {
         property: PropertyId,
         message: String,
     },
+    #[error("one property commit cannot cross multiple storages: {storages}")]
+    MixedStorage { storages: String },
 }

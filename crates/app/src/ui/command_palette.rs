@@ -12,7 +12,7 @@ use super::properties::{self, PanelRoute};
 use super::*;
 use egui::{Align2, FontId, Key, TextEdit, vec2};
 use plotx_core::properties::PropertyId;
-use plotx_core::state::{ObjectId, PropertyFocus, ToolGroup};
+use plotx_core::state::{ObjectId, PropertyFocus, SettingsCategory, ToolGroup};
 
 const PANEL_WIDTH: f32 = 540.0;
 const LIST_HEIGHT: f32 = 320.0;
@@ -322,6 +322,17 @@ pub(super) fn reveal_property(app: &mut PlotxApp, property: PropertyId, now: f64
         PanelRoute::Processing => {
             app.session.secondary_sidebar_visible = true;
             app.session.ui.requested_tool_group = Some(ToolGroup::Processing);
+        }
+        PanelRoute::Preferences => {
+            app.open_settings();
+            if let Some(dialog) = app.session.ui.settings_dialog.as_mut()
+                && let Some(category) = SettingsCategory::ALL
+                    .into_iter()
+                    .find(|category| category.section_id() == route.section)
+            {
+                dialog.category = category;
+            }
+            return;
         }
     }
     // A property owned by an owner-local component needs that component opened,

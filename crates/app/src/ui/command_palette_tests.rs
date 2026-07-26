@@ -1,5 +1,5 @@
 use super::*;
-use plotx_core::properties::contour;
+use plotx_core::properties::{contour, export_dpi};
 
 fn indices(items: &[PaletteItem], query: &str) -> Vec<PaletteAction> {
     filter(items, query)
@@ -82,6 +82,24 @@ fn activating_a_property_requests_its_home_route() {
     assert_eq!(focus.property, contour::BASE_MAGNITUDE);
     assert!(focus.pending);
     assert!((focus.highlight_until - 10.8).abs() < 1e-9);
+}
+
+#[test]
+fn activating_export_dpi_opens_the_export_preferences_category() {
+    let mut app = PlotxApp::new_with_settings(plotx_core::settings::Settings::default());
+    reveal_property(&mut app, export_dpi::DPI, 10.0);
+
+    let dialog = app
+        .session
+        .ui
+        .settings_dialog
+        .as_ref()
+        .expect("Preferences opens");
+    assert_eq!(dialog.category, plotx_core::state::SettingsCategory::Export);
+    assert!(
+        app.session.ui.property_focus.is_none(),
+        "the native Preferences row needs no sidebar focus request"
+    );
 }
 
 fn property_item(items: &[PaletteItem], property: PropertyId) -> &PaletteItem {

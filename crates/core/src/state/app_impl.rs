@@ -28,7 +28,6 @@ impl PlotxApp {
 
     pub fn new_with_settings(settings: crate::settings::Settings) -> Self {
         Self {
-            keep_empty_source_canvas: settings.general.keep_empty_source_canvas,
             doc: SharedDocument::new(Document {
                 datasets: Vec::new(),
                 canvases: Vec::new(),
@@ -84,6 +83,7 @@ impl PlotxApp {
                 present_fullscreen_on: false,
                 monitor: None,
             },
+            settings,
         }
     }
 

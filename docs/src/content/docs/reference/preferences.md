@@ -45,7 +45,9 @@ restores everything except your recent-files list.
 - **Embed view snapshots** — save each plot's on-screen view into the
   `.plotx` file.
 - **Raster resolution** — the default pixel density (72–1200 dpi) for bitmap
-  exports.
+  exports. A DPI typed into one export dialog applies to that export alone and
+  leaves this default unchanged; searching `export DPI` in the
+  [command palette](/reference/command-palette/) opens this page.
 
 ## Recent
 

@@ -302,10 +302,13 @@ pub(crate) fn commit_table_import_preview(app: &mut PlotxApp) -> bool {
             candidate.series_bindings,
         );
     }
+    app.session.record_operation(preview.report);
+    // Noting the file persists preferences, and a failed write reports itself
+    // through the status line. Recording the import first keeps that
+    // diagnostic: `record_operation` replaces the status unconditionally.
     if let Some(path) = preview.recent_path {
         app.note_recent_file(&path);
     }
-    app.session.record_operation(preview.report);
     true
 }
 

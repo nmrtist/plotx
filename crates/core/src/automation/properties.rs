@@ -203,6 +203,7 @@ fn commit_and_report(
 ) -> Result<ToolResult, AutomationError> {
     let applied = commit.applied.clone();
     let skipped = commit.skipped.clone();
+    let changes_document = commit.has_document_action();
     let before = DocumentRevision(app.doc.automation_revision);
     if !applied.is_empty() {
         app.commit_property(commit);
@@ -233,15 +234,17 @@ fn commit_and_report(
         diagnostics: Vec::new(),
         verification: vec![VerificationRecord {
             check: "revision_advanced".to_owned(),
-            passed: applied.is_empty() || after > before,
+            passed: applied.is_empty() || !changes_document || after > before,
             // A commit can apply to nothing because every target refused the
             // property *or* because every target already held the value, and
             // those are opposite answers to "did I address the right thing?".
             // The per-target reasons say which; this line must not assert one.
             message: if applied.is_empty() {
                 "nothing was committed; see each target's reason".to_owned()
-            } else {
+            } else if changes_document {
                 "atomic document commit completed".to_owned()
+            } else {
+                "app preferences committed without changing the document revision".to_owned()
             },
         }],
         value: serde_json::Value::Null,
@@ -424,9 +427,9 @@ fn property_error(tool_id: &str, error: PropertyError) -> AutomationError {
             tool_id: tool_id.to_owned(),
             message: error.to_string(),
         },
-        PropertyError::UnknownTarget(_) | PropertyError::NotApplicable(_) => {
-            AutomationError::Execution(error.to_string())
-        }
+        PropertyError::UnknownTarget(_)
+        | PropertyError::NotApplicable(_)
+        | PropertyError::MixedStorage { .. } => AutomationError::Execution(error.to_string()),
     }
 }
 

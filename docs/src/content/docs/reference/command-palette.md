@@ -37,6 +37,9 @@ Activating a setting does not change anything. It opens the panel the setting
 lives in, expands its section, scrolls to the row and highlights it briefly, so
 you can see the current value before editing it.
 
+A setting that lives in Preferences instead opens the Preferences window at the
+page that holds it; no individual row is highlighted there.
+
 A setting that belongs to one processing step also opens the Processing panel
 and expands the first step that actually carries it — a step whose window has no
 **GB**, for instance, is passed over rather than opened onto a row that is not
@@ -89,6 +92,11 @@ Settings:
   `apodization`, `window function`, `exponential`, `gaussian`, `LB`, `line
   broadening`, `GB` and `gaussian broadening` reach them. See
   [Processing](/guides/processing/).
+- **Raster resolution**, the pixel density bitmap exports start from, on the
+  **Export** page of Preferences. `export DPI`, `bitmap DPI`, `bitmap
+  resolution` and `raster resolution` reach it. It stays available whatever is
+  selected, changing it cannot be undone, and it applies to every project. See
+  [Preferences](/reference/preferences/).
 
 Data:
 
@@ -97,6 +105,6 @@ Data:
 
 Parameterized operations that need a target picked on the canvas — such as a
 specific integral or phase adjustment — are not in the palette; switch to the
-corresponding tool instead. One-off inputs to an operation, such as the export
-resolution of a single export, are part of that operation's dialog rather than
-searchable settings.
+corresponding tool instead. One-off inputs to an operation stay in that
+operation's dialog: the DPI you type into a single export is not searchable,
+while **Raster resolution**, the default it starts from, is.

@@ -63,6 +63,8 @@ pub struct GeneralSettings {
 }
 
 pub const MAX_PROJECT_BACKUP_GENERATIONS: u8 = 5;
+pub const MIN_EXPORT_DPI: u16 = 72;
+pub const MAX_EXPORT_DPI: u16 = 1200;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub struct AppearanceSettings {

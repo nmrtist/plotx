@@ -5,7 +5,7 @@
 use egui::{Response, RichText, Ui};
 use egui_phosphor::regular as icon;
 use plotx_core::actions::{Action, PageSizeState, PendingCanvasSizeEdit};
-use plotx_core::settings::{self, CanvasSizeDefaults, CustomSizePreset};
+use plotx_core::settings::{CanvasSizeDefaults, CustomSizePreset};
 use plotx_core::state::{
     CanvasSizeUnit, MM_TO_PT, PlotxApp, SizePreset, SizePresetGroup, content_bounds_pt,
     content_overflows, matching_preset, size_display_name, size_presets, wider_preset_suggestion,
@@ -52,7 +52,7 @@ pub(crate) fn size_section(app: &mut PlotxApp, ci: usize, ui: &mut Ui) {
     });
 
     let filter = search.trim().to_lowercase();
-    let defaults = canvas_size_defaults(ui.ctx());
+    let defaults = app.settings.canvas_size.clone();
     egui::ScrollArea::vertical()
         .max_height(170.0)
         .show(ui, |ui| {
@@ -138,13 +138,13 @@ pub(crate) fn size_section(app: &mut PlotxApp, ci: usize, ui: &mut Ui) {
 
     match choice {
         Some(SizeChoice::Preset(preset)) => apply_preset(app, ui.ctx(), ci, preset),
-        Some(SizeChoice::Custom(after)) => apply_size(app, ui.ctx(), ci, after, None),
+        Some(SizeChoice::Custom(after)) => apply_size(app, ci, after, None),
         Some(SizeChoice::Swap) => {
             let after = [size[1], size[0]];
-            apply_size(app, ui.ctx(), ci, after, matched.filter(|p| p.is_fixed()));
+            apply_size(app, ci, after, matched.filter(|p| p.is_fixed()));
         }
         Some(SizeChoice::DeleteCustom(index)) => {
-            update_canvas_size_defaults(ui.ctx(), |d| {
+            update_canvas_size_defaults(app, |d| {
                 if index < d.custom_presets.len() {
                     d.custom_presets.remove(index);
                 }
@@ -191,7 +191,7 @@ pub(crate) fn size_section(app: &mut PlotxApp, ci: usize, ui: &mut Ui) {
         ui.label(unit.label());
     });
 
-    let defaults = canvas_size_defaults(ui.ctx());
+    let defaults = app.settings.canvas_size.clone();
     let mut scale_content = defaults.scale_content;
     if ui
         .checkbox(&mut scale_content, "Scale content when applying sizes")
@@ -202,7 +202,7 @@ pub(crate) fn size_section(app: &mut PlotxApp, ci: usize, ui: &mut Ui) {
         )
         .changed()
     {
-        update_canvas_size_defaults(ui.ctx(), |d| d.scale_content = scale_content);
+        update_canvas_size_defaults(app, |d| d.scale_content = scale_content);
     }
 
     let mut auto = auto_height;
@@ -246,7 +246,7 @@ pub(crate) fn size_section(app: &mut PlotxApp, ci: usize, ui: &mut Ui) {
         .on_hover_text("Keep the current page size in the preset list, across sessions.")
         .clicked()
     {
-        update_canvas_size_defaults(ui.ctx(), |d| {
+        update_canvas_size_defaults(app, |d| {
             let exists = d.custom_presets.iter().any(|c| {
                 (c.width_mm - size[0]).abs() < 0.01 && (c.height_mm - size[1]).abs() < 0.01
             });
@@ -285,7 +285,7 @@ fn preset_row(ui: &mut Ui, preset: &'static SizePreset, matched: Option<&SizePre
 /// used only for an empty page).
 pub(crate) fn apply_preset(
     app: &mut PlotxApp,
-    ctx: &egui::Context,
+    _ctx: &egui::Context,
     ci: usize,
     preset: &'static SizePreset,
 ) {
@@ -295,7 +295,7 @@ pub(crate) fn apply_preset(
     let current = canvas.size_mm;
     let after = if preset.is_fixed() || canvas.objects.is_empty() {
         preset.size_mm()
-    } else if canvas_size_defaults(ctx).scale_content {
+    } else if app.settings.canvas_size.scale_content {
         [
             preset.width_mm,
             (current[1] * preset.width_mm / current[0]).clamp(10.0, 1000.0),
@@ -303,12 +303,11 @@ pub(crate) fn apply_preset(
     } else {
         [preset.width_mm, current[1]]
     };
-    apply_size(app, ctx, ci, after, Some(preset));
+    apply_size(app, ci, after, Some(preset));
 }
 
 fn apply_size(
     app: &mut PlotxApp,
-    ctx: &egui::Context,
     ci: usize,
     after_size: [f32; 2],
     preset: Option<&'static SizePreset>,
@@ -322,7 +321,7 @@ fn apply_size(
         preset_id: preset.map(|p| p.id.to_owned()),
     };
     if before != after {
-        let action = if canvas_size_defaults(ctx).scale_content {
+        let action = if app.settings.canvas_size.scale_content {
             Action::set_canvas_size_scaling_content(app, ci, after)
         } else {
             Action::set_canvas_size(ci, before, after)
@@ -330,7 +329,7 @@ fn apply_size(
         app.execute_action(action);
     }
     if let Some(preset) = preset {
-        update_canvas_size_defaults(ctx, |d| d.note_recent(preset.id));
+        update_canvas_size_defaults(app, |d| d.note_recent(preset.id));
     }
 }
 
@@ -509,29 +508,9 @@ fn suggestion_dismissed(ctx: &egui::Context, resource_id: &str, preset: &SizePre
         .unwrap_or(false)
 }
 
-/// The sticky canvas-size choices, cached in egui memory so the per-frame UI
-/// never re-reads the settings file; writes go through
-/// [`update_canvas_size_defaults`], which refreshes the cache and persists.
-fn canvas_size_defaults(ctx: &egui::Context) -> CanvasSizeDefaults {
-    let id = egui::Id::new("canvas_size_defaults_cache");
-    if let Some(cached) = ctx.data(|d| d.get_temp::<CanvasSizeDefaults>(id)) {
-        return cached;
-    }
-    let loaded = settings::load().canvas_size;
-    ctx.data_mut(|d| d.insert_temp(id, loaded.clone()));
-    loaded
-}
-
-fn update_canvas_size_defaults(ctx: &egui::Context, f: impl FnOnce(&mut CanvasSizeDefaults)) {
-    let mut defaults = canvas_size_defaults(ctx);
-    f(&mut defaults);
-    ctx.data_mut(|d| {
-        d.insert_temp(
-            egui::Id::new("canvas_size_defaults_cache"),
-            defaults.clone(),
-        )
-    });
-    settings::update(|s| s.canvas_size = defaults);
+fn update_canvas_size_defaults(app: &mut PlotxApp, f: impl FnOnce(&mut CanvasSizeDefaults)) {
+    f(&mut app.settings.canvas_size);
+    app.persist_settings();
 }
 
 fn handle_canvas_dimension_response(

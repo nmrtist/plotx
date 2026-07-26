@@ -438,7 +438,8 @@ fn main() -> eframe::Result<()> {
             if updated {
                 app.session.status = format!("Updated to PlotX {}.", env!("CARGO_PKG_VERSION"));
                 // Stamp the new version so the notice shows only once.
-                plotx_core::settings::update(|_| {});
+                app.settings.app_version = env!("CARGO_PKG_VERSION").to_owned();
+                app.persist_settings();
             }
             if let Some(notice) = crash_notice {
                 if updated {

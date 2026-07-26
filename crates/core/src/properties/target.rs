@@ -24,6 +24,38 @@ pub(crate) fn document_target() -> TargetRef {
     })
 }
 
+pub(crate) fn app_target() -> TargetRef {
+    TargetRef::resource(ResourceRef {
+        id: crate::automation::APP_RESOURCE_ID.to_owned(),
+        kind: crate::automation::ResourceKindId::new(crate::automation::KIND_APP),
+        parent_id: None,
+        local_id: None,
+    })
+}
+
+pub(crate) fn require_app_target(
+    target: &TargetRef,
+    definition: &'static PropertyDefinition,
+) -> Result<(), PropertyError> {
+    let actual = ComponentKind::of(target.component.as_ref());
+    if actual != ComponentKind::None {
+        return Err(PropertyError::ComponentKind {
+            property: definition.id,
+            expected: ComponentKind::None.as_str(),
+            actual: actual.as_str(),
+        });
+    }
+    if target.resource.kind.0 != crate::automation::KIND_APP
+        || target.resource.id != crate::automation::APP_RESOURCE_ID
+    {
+        return Err(PropertyError::NotApplicable(format!(
+            "{} belongs to app preferences, not {}",
+            definition.canonical_label, target.resource.id
+        )));
+    }
+    Ok(())
+}
+
 pub(crate) fn require_document_target(
     target: &TargetRef,
     definition: &'static PropertyDefinition,

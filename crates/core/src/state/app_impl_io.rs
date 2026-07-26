@@ -56,37 +56,38 @@ impl PlotxApp {
     /// watermark that refers to it — or every pre-load report would resurface
     /// in the banner after each project open.
     pub(crate) fn install_loaded_project(&mut self, mut loaded: PlotxApp) {
+        let settings = self.settings.clone();
+        let save_include_view_snapshots = loaded.doc.save_include_view_snapshots;
         loaded.session.operation_history = std::mem::take(&mut self.session.operation_history);
         loaded.session.ui.dismissed_feedback_order = self.session.ui.dismissed_feedback_order;
-        // Like the history: the session list is the runtime truth and
-        // must survive the swap even when a settings save failed.
-        loaded.session.recent_files = std::mem::take(&mut self.session.recent_files);
         *self = loaded;
+        // Project loading constructs a fresh app, but app preferences outlive
+        // document swaps. In particular, a value whose disk flush failed must
+        // not revert merely because a project was opened.
+        self.apply_settings(settings);
+        // A project records the save profile that produced it. Preserve that
+        // existing load behavior; the next explicit Preferences or save choice
+        // can replace it and update the live default.
+        self.doc.save_include_view_snapshots = save_include_view_snapshots;
     }
 
     pub fn request_save_project(&mut self) {
         self.session.ui.save_project_options = true;
     }
 
-    /// Open the Preferences panel, seeding its draft from the on-disk settings.
+    /// Open the Preferences panel, seeding its draft from the live settings.
     /// A no-op when it is already open, so re-triggering focuses the live window.
     pub fn open_settings(&mut self) {
         if self.session.ui.settings_dialog.is_none() {
-            let mut settings = crate::settings::load();
-            // The session list is the runtime truth for recents; seeding from
-            // disk would let a draft flush resurrect a stale copy whenever a
-            // background settings save had failed.
-            settings.recent.files = self.session.recent_files.clone();
-            self.session.ui.settings_dialog = Some(SettingsDialog::new(settings));
+            self.session.ui.settings_dialog = Some(SettingsDialog::new(self.settings.clone()));
         }
     }
 
     /// Reconcile the egui-free live state to a settings snapshot. Idempotent, so
     /// the instant-apply path may call it on every edit. The chrome theme is an
     /// egui concern and is applied separately by the app shell.
-    pub fn apply_settings(&mut self, settings: &crate::settings::Settings) {
+    pub fn apply_settings(&mut self, settings: crate::settings::Settings) {
         self.session.ui.snap_enabled = settings.general.snap_enabled;
-        self.keep_empty_source_canvas = settings.general.keep_empty_source_canvas;
         self.session.canvas_accent = settings.appearance.canvas_accent;
         if !settings.general.snap_enabled {
             self.session.ui.snap_guides.clear();
@@ -109,6 +110,31 @@ impl PlotxApp {
             monitor.auto = scale.auto;
             monitor.user = scale.user;
         }
+        self.settings = settings;
+    }
+
+    /// Flush the authoritative live settings and keep a Preferences draft in
+    /// lockstep so its next debounce cannot overwrite an edit made elsewhere.
+    pub fn persist_settings(&mut self) -> bool {
+        self.persist_settings_with(crate::settings::save)
+    }
+
+    pub(crate) fn persist_settings_with(
+        &mut self,
+        writer: impl FnOnce(&crate::settings::Settings) -> std::io::Result<()>,
+    ) -> bool {
+        if let Some(dialog) = self.session.ui.settings_dialog.as_mut() {
+            dialog.draft = self.settings.clone();
+        }
+        match writer(&self.settings) {
+            Ok(()) => true,
+            Err(error) => {
+                self.session.status = format!(
+                    "Couldn't save preferences — changes apply this session only ({error})"
+                );
+                false
+            }
+        }
     }
 
     /// Record a successfully opened or saved path at the front of the recent
@@ -127,17 +153,15 @@ impl PlotxApp {
 
     pub fn clear_recent_files(&mut self) {
         self.session.recent_files.clear();
-        self.sync_recent_files_to_settings(Vec::new());
         self.session.status = "Cleared the recent files list.".to_owned();
+        self.sync_recent_files_to_settings(Vec::new());
     }
 
     /// Persist the list and mirror it into an open Preferences draft, so a
     /// later draft flush cannot resurrect entries with a stale copy.
     fn sync_recent_files_to_settings(&mut self, files: Vec<std::path::PathBuf>) {
-        if let Some(dialog) = self.session.ui.settings_dialog.as_mut() {
-            dialog.draft.recent.files = files.clone();
-        }
-        crate::settings::update(move |settings| settings.recent.files = files);
+        self.settings.recent.files = files;
+        self.persist_settings();
     }
 
     /// Save the project and report whether persistence completed. The return
@@ -153,12 +177,10 @@ impl PlotxApp {
             Ok(outcome) => {
                 self.doc.project_path = Some(path.to_owned());
                 self.doc.save_include_view_snapshots = include_view_snapshots;
-                crate::settings::update(|settings| {
-                    settings.export.include_view_snapshots = include_view_snapshots;
-                    settings.general.snap_enabled = self.session.ui.snap_enabled;
-                    settings.general.project_backup_generations =
-                        self.session.project_backup_generations;
-                });
+                self.settings.export.include_view_snapshots = include_view_snapshots;
+                self.settings.general.snap_enabled = self.session.ui.snap_enabled;
+                self.settings.general.project_backup_generations =
+                    self.session.project_backup_generations;
                 self.doc.dirty = false;
                 self.doc.project_revision = Some(outcome.revision.clone());
                 let mut report = OperationReport::success(
@@ -188,6 +210,13 @@ impl PlotxApp {
                     );
                 }
                 self.session.record_operation(report);
+                // Flush the three preferences harvested above on their own,
+                // rather than relying on the recent-file call below to write
+                // the whole struct as a side effect: that dependency is
+                // invisible, and reordering either line would silently stop
+                // persisting them. It follows the success report so a failed
+                // write keeps its diagnostic instead of being overwritten.
+                self.persist_settings();
                 self.note_recent_file(path);
                 true
             }
@@ -381,8 +410,7 @@ impl PlotxApp {
             self.record_export_unavailable(format);
             return;
         }
-        let defaults = crate::settings::load().export;
-        let mut state = ExportDialogState::from_defaults(format, &defaults);
+        let mut state = ExportDialogState::from_defaults(format, &self.settings.export);
         let canvas = &self.doc.canvases[ci];
         if let Some(preset) = crate::export::ExportPreset::matching_canvas(
             format,

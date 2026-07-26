@@ -1,7 +1,9 @@
 use super::*;
 use egui::{Align, Align2, CornerRadius, FontId, Layout, RichText, pos2, vec2};
 use egui_phosphor::regular as icon;
-use plotx_core::settings::{self, GraphicsPowerPreference, Settings, ThemeMode};
+use plotx_core::settings::{
+    GraphicsPowerPreference, MAX_EXPORT_DPI, MIN_EXPORT_DPI, Settings, ThemeMode,
+};
 use plotx_core::state::{MonitorScaleStatus, SettingsCategory, SettingsDialog};
 use plotx_core::update::{UpdateChannelSetting, UpdateService, UpdateStatus};
 
@@ -88,7 +90,7 @@ pub(super) fn settings_window(app: &mut PlotxApp, ctx: &egui::Context) {
             .unwrap()
             .draft
             .clone();
-        app.apply_settings(&draft);
+        app.apply_settings(draft.clone());
         apply_chrome_theme(ctx, draft.appearance.theme);
         // `apply_settings` has synced the current monitor's record from the
         // draft; the egui zoom is an app-shell concern, applied here.
@@ -101,17 +103,24 @@ pub(super) fn settings_window(app: &mut PlotxApp, ctx: &egui::Context) {
     }
 
     let close = done || modal.should_close();
-    if let Some(dialog) = app.session.ui.settings_dialog.as_mut() {
-        let due = dialog.flush_at.is_some_and(|t| now >= t);
-        if close || due {
-            dialog.last_error = settings::save(&dialog.draft).err().map(|e| {
-                format!("Couldn't save preferences — changes apply this session only ({e})")
-            });
+    let flush = app
+        .session
+        .ui
+        .settings_dialog
+        .as_ref()
+        .is_some_and(|dialog| close || dialog.flush_at.is_some_and(|t| now >= t));
+    if flush {
+        let saved = app.persist_settings();
+        let error = (!saved).then(|| app.session.status.clone());
+        if let Some(dialog) = app.session.ui.settings_dialog.as_mut() {
+            dialog.last_error = error;
             dialog.flush_at = None;
         }
-        if let Some(t) = dialog.flush_at {
-            ctx.request_repaint_after(std::time::Duration::from_secs_f64((t - now).max(0.0)));
-        }
+    }
+    if let Some(dialog) = app.session.ui.settings_dialog.as_ref()
+        && let Some(t) = dialog.flush_at
+    {
+        ctx.request_repaint_after(std::time::Duration::from_secs_f64((t - now).max(0.0)));
     }
 
     if close
@@ -321,7 +330,7 @@ fn render_category(
                 |ui| {
                     ui.add(
                         egui::DragValue::new(&mut draft.export.dpi)
-                            .range(72..=1200)
+                            .range(MIN_EXPORT_DPI..=MAX_EXPORT_DPI)
                             .suffix(" dpi"),
                     );
                 },

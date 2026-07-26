@@ -93,7 +93,7 @@ fn build_payload(
         .canvases
         .get(canvas_index)
         .ok_or(ClipboardFigureError::NoTarget)?;
-    let dpi = plotx_core::settings::load().export.dpi;
+    let dpi = app.settings.export.dpi;
     let raster =
         rasterize_canvas(canvas, RasterOptions::new(dpi)).map_err(ClipboardFigureError::Raster)?;
     #[cfg(windows)]

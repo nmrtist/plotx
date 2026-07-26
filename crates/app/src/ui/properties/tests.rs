@@ -122,7 +122,11 @@ fn no_panel_section_exceeds_its_essential_budget() {
     // Every route, not a hand-picked one: a section whose panel is missing here
     // has no build-time budget at all, which is how the processing rows grew
     // theirs unchecked.
-    for panel in [PanelRoute::SecondarySidebar, PanelRoute::Processing] {
+    for panel in [
+        PanelRoute::SecondarySidebar,
+        PanelRoute::Processing,
+        PanelRoute::Preferences,
+    ] {
         for section in panel.sections() {
             let essential = essential_in(section);
             assert!(

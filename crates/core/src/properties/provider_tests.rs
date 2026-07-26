@@ -30,7 +30,7 @@ fn document_typography_is_addressable_without_a_canvas_object() {
             &PropertyValue::Float(9.5),
         )
         .expect("the document property plans");
-    let Action::Composite(actions) = &commit.action else {
+    let Some(Action::Composite(actions)) = &commit.document_action else {
         panic!("a catalog commit is composite");
     };
     assert!(matches!(
@@ -61,12 +61,9 @@ fn a_same_value_write_is_reported_without_an_empty_commit() {
     );
     assert_eq!(commit.skipped.len(), 1);
     assert!(commit.skipped[0].message.contains("already has that value"));
-    let Action::Composite(actions) = &commit.action else {
-        panic!("a no-op still has the catalog composite shape");
-    };
     assert!(
-        actions.is_empty(),
-        "the transaction contains no typed action"
+        commit.document_action.is_none(),
+        "the transaction contains no document payload"
     );
     let revision = app.doc.automation_revision;
     assert_eq!(app.commit_property(commit), 0);
@@ -151,7 +148,7 @@ fn line_stroke_width_reports_mixed_values_and_skips_other_encodings() {
         .expect("the compatible line series plan together");
     assert_eq!(commit.applied.len(), 2);
     assert_eq!(commit.skipped.len(), 1);
-    let Action::Composite(actions) = &commit.action else {
+    let Some(Action::Composite(actions)) = &commit.document_action else {
         panic!("a multi-object edit is composite");
     };
     assert_eq!(

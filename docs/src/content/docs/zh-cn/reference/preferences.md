@@ -36,7 +36,9 @@ description: 偏好设置窗口中的每一项设置，按类别列出。
 ## Export（导出）
 
 - **Embed view snapshots**——把每个图的屏幕视图保存进 `.plotx` 文件。
-- **Raster resolution**——位图导出的默认像素密度（72–1200 dpi）。
+- **Raster resolution**——位图导出的默认像素密度（72–1200 dpi）。在某次导出
+  对话框里填写的 DPI 只作用于那一次导出，不会改动这里的默认值；在
+  [命令面板](/zh-cn/reference/command-palette/)中搜索 `export DPI` 即可打开本页。
 
 ## Recent（最近）
 

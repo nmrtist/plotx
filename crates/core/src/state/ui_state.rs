@@ -111,13 +111,23 @@ impl SettingsCategory {
         SettingsCategory::Recent,
     ];
 
-    pub fn label(self) -> &'static str {
+    pub const fn label(self) -> &'static str {
         match self {
             SettingsCategory::General => "General",
             SettingsCategory::Appearance => "Appearance",
             SettingsCategory::Processing => "Processing",
             SettingsCategory::Export => "Export",
             SettingsCategory::Recent => "Recent",
+        }
+    }
+
+    pub const fn section_id(self) -> &'static str {
+        match self {
+            SettingsCategory::General => "preferences.general",
+            SettingsCategory::Appearance => "preferences.appearance",
+            SettingsCategory::Processing => "preferences.processing",
+            SettingsCategory::Export => "preferences.export",
+            SettingsCategory::Recent => "preferences.recent",
         }
     }
 }

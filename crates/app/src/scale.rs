@@ -103,19 +103,19 @@ impl ScaleDriver {
             .input(|i| i.viewport().native_pixels_per_point)
             .unwrap_or(1.0);
         let auto = auto_zoom(probe.ppi, native_ppp);
-        let mut scale = MonitorScale { auto, user: None };
-        let save_result = settings::try_update(|settings| {
-            let entry = settings
+        let scale = {
+            let entry = app
+                .settings
                 .appearance
                 .ui_scale
                 .monitors
                 .entry(probe.key.clone())
-                .or_insert(scale);
+                .or_insert(MonitorScale { auto, user: None });
             // Refresh `auto` on every sight: same key means same hardware, but
             // the derivation itself may have changed between app versions.
             entry.auto = auto;
-            scale = *entry;
-        });
+            *entry
+        };
 
         let first_sight = self.current.is_none();
         self.current = Some(probe.token);
@@ -125,9 +125,7 @@ impl ScaleDriver {
             user: scale.user,
             ppi: probe.ppi,
         });
-        if let Err(error) = save_result {
-            app.session.status = format!("Could not save display scale settings: {error}");
-        }
+        app.persist_settings();
         let zoom = scale.effective();
         if (ctx.zoom_factor() - zoom).abs() > f32::EPSILON {
             ctx.set_zoom_factor(zoom);
@@ -179,41 +177,39 @@ pub(crate) fn reset_ui_zoom(app: &mut PlotxApp, ctx: &egui::Context) {
 }
 
 fn set_ui_zoom(app: &mut PlotxApp, ctx: &egui::Context, user: Option<f32>) {
-    set_ui_zoom_with(app, ctx, user, persist_ui_zoom);
+    set_ui_zoom_with(app, ctx, user, PlotxApp::persist_settings);
 }
 
+/// The flush is a parameter so a test can prove the zoom commands persist at
+/// all, and that they do it *after* the optimistic status — `apply_ui_zoom`
+/// alone would leave the shortcuts session-only with the suite still green.
 fn set_ui_zoom_with(
     app: &mut PlotxApp,
     ctx: &egui::Context,
     user: Option<f32>,
-    persist: impl FnOnce(&str, f32, Option<f32>) -> std::io::Result<()>,
+    persist: impl FnOnce(&mut PlotxApp) -> bool,
 ) {
+    apply_ui_zoom(app, ctx, user);
+    persist(app);
+}
+
+fn apply_ui_zoom(app: &mut PlotxApp, ctx: &egui::Context, user: Option<f32>) {
     let Some(status) = app.session.monitor.as_ref() else {
         return;
     };
     let key = status.key.clone();
     let auto = status.auto;
-    let save_result = persist(&key, auto, user);
+    update_monitor_override(&mut app.settings, &key, auto, user);
     let status = app.session.monitor.as_mut().expect("status checked above");
     status.user = user;
     let zoom = status.effective();
     ctx.set_zoom_factor(zoom);
-    app.session.status = match (user, save_result) {
-        (Some(_), Ok(())) => format!("UI scale {:.0}% on this display.", zoom * 100.0),
-        (None, Ok(())) => {
+    app.session.status = match user {
+        Some(_) => format!("UI scale {:.0}% on this display.", zoom * 100.0),
+        None => {
             format!("UI scale automatic ({:.0}%) on this display.", zoom * 100.0)
         }
-        (_, Err(error)) => format!(
-            "UI scale changed to {:.0}% for this session, but could not save it: {error}",
-            zoom * 100.0
-        ),
     };
-}
-
-fn persist_ui_zoom(key: &str, auto: f32, user: Option<f32>) -> std::io::Result<()> {
-    settings::try_update(|settings| {
-        update_monitor_override(settings, key, auto, user);
-    })
 }
 
 fn update_monitor_override(
@@ -390,7 +386,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_override_save_is_visible_and_keeps_session_zoom() {
+    fn override_updates_live_settings_and_session_zoom() {
         let mut app = PlotxApp::new_with_settings(settings::Settings::default());
         app.session.monitor = Some(MonitorScaleStatus {
             key: "test-monitor".to_owned(),
@@ -399,16 +395,47 @@ mod tests {
             ppi: None,
         });
         let ctx = egui::Context::default();
-        set_ui_zoom_with(&mut app, &ctx, Some(1.5), |_, _, _| {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::PermissionDenied,
-                "read-only settings",
-            ))
-        });
+        apply_ui_zoom(&mut app, &ctx, Some(1.5));
 
         assert_eq!(app.session.monitor.as_ref().unwrap().user, Some(1.5));
-        assert!(app.session.status.contains("could not save it"));
-        assert!(app.session.status.contains("read-only settings"));
+        assert_eq!(
+            app.settings.appearance.ui_scale.monitors["test-monitor"].user,
+            Some(1.5)
+        );
+    }
+
+    #[test]
+    fn a_zoom_command_flushes_the_override_and_keeps_a_failure_visible() {
+        let mut app = PlotxApp::new_with_settings(settings::Settings::default());
+        app.session.monitor = Some(MonitorScaleStatus {
+            key: "test-monitor".to_owned(),
+            auto: 1.0,
+            user: None,
+            ppi: None,
+        });
+        let ctx = egui::Context::default();
+        let mut flushed = false;
+        set_ui_zoom_with(&mut app, &ctx, Some(1.5), |app| {
+            flushed = true;
+            // What the real flush does when the file cannot be written.
+            app.session.status =
+                "Couldn't save preferences — changes apply this session only (test)".to_owned();
+            false
+        });
+
+        assert!(flushed, "a zoom command must flush the override");
+        assert_eq!(
+            app.settings.appearance.ui_scale.monitors["test-monitor"].user,
+            Some(1.5)
+        );
+        // The zoom itself still applies, and the write failure survives the
+        // optimistic "UI scale 150%" line rather than replacing it.
+        assert_eq!(app.session.monitor.as_ref().unwrap().user, Some(1.5));
+        assert!(
+            app.session.status.contains("Couldn't save preferences"),
+            "{}",
+            app.session.status
+        );
     }
 
     #[test]

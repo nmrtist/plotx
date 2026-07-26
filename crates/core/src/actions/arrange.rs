@@ -275,10 +275,9 @@ impl PlotxApp {
         if !enabled {
             self.session.ui.snap_guides.clear();
         }
-        crate::settings::update(|settings| {
-            settings.export.include_view_snapshots = self.doc.save_include_view_snapshots;
-            settings.general.snap_enabled = enabled;
-        });
+        self.settings.export.include_view_snapshots = self.doc.save_include_view_snapshots;
+        self.settings.general.snap_enabled = enabled;
+        self.persist_settings();
     }
 }
 

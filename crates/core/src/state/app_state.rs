@@ -3,9 +3,10 @@ use super::{Session, SharedDocument};
 pub struct PlotxApp {
     pub doc: SharedDocument,
     pub session: Session,
-    /// Live, already-applied tiling preference. This deliberately does not read
-    /// the Preferences draft or disk during pointer movement.
-    pub keep_empty_source_canvas: bool,
+    /// Live, already-applied preferences. The file is only a flush target, and
+    /// the Preferences dialog owns an in-progress draft rather than another
+    /// source of truth.
+    pub settings: crate::settings::Settings,
 }
 
 /// Live UI-scale state of the monitor under the window: the settings key it is

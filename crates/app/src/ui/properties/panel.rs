@@ -659,7 +659,7 @@ fn apply(app: &mut PlotxApp, targets: &[TargetRef], pending: Pending, status_nou
     match planned {
         Ok(commit) => {
             let skipped = commit.skipped.clone();
-            let applied = app.commit_property(commit);
+            let applied = commit.applied.len();
             // A skipped target is reported, never silently dropped: the user
             // asked for the whole selection and must learn what it did not do.
             app.session.status = if skipped.is_empty() {
@@ -672,6 +672,10 @@ fn apply(app: &mut PlotxApp, targets: &[TargetRef], pending: Pending, status_nou
                     skipped[0].message
                 )
             };
+            // Persistence failures are reported by the commit after this
+            // optimistic status is installed, so they remain visible instead
+            // of being overwritten by "Updated".
+            app.commit_property(commit);
         }
         Err(error) => {
             app.session.status = format!("Could not change {}: {error}", status_noun.plural);

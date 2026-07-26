@@ -119,7 +119,7 @@ fn apodization_step_has_a_dependent_schema_and_a_typed_processing_action() {
             &PropertyValue::Enum(apodization::APODIZATION_EXPONENTIAL),
         )
         .expect("an apodization kind change plans");
-    let Action::Composite(actions) = &commit.action else {
+    let Some(Action::Composite(actions)) = &commit.document_action else {
         panic!("a catalog commit is composite");
     };
     assert!(matches!(

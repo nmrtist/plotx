@@ -105,7 +105,7 @@ pub(crate) fn update_tile_drop(
                 .clamp(0.0, 1.0),
         ],
     });
-    app.session.status = if app.keep_empty_source_canvas {
+    app.session.status = if app.settings.general.keep_empty_source_canvas {
         "Hold Alt to remove the empty source canvas.".into()
     } else {
         "Hold Alt to keep the empty source canvas.".into()
@@ -154,7 +154,7 @@ pub(crate) fn commit_tile_drop(
     preview: TileDropPreview,
     alt: bool,
 ) {
-    let remove_empty_source = app.keep_empty_source_canvas == alt;
+    let remove_empty_source = app.settings.general.keep_empty_source_canvas == alt;
     let source_becomes_empty =
         app.doc.canvases.get(drag.canvas).is_some_and(|canvas| {
             canvas.objects.len() == 1 && canvas.object(drag.object).is_some()

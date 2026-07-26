@@ -2,6 +2,7 @@ use super::*;
 use plotx_core::export::{
     ComplianceStatus, ExportPreset, PrecheckReport, page_metrics, precheck_report,
 };
+use plotx_core::settings::{MAX_EXPORT_DPI, MIN_EXPORT_DPI};
 
 pub(super) fn export_options_window(app: &mut PlotxApp, ctx: &egui::Context) {
     if app.session.ui.export_options.is_none() {
@@ -80,7 +81,10 @@ pub(super) fn export_options_window(app: &mut PlotxApp, ctx: &egui::Context) {
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 ui.label("DPI");
-                ui.add(egui::DragValue::new(&mut pending.dpi).range(72..=1200));
+                ui.add(
+                    egui::DragValue::new(&mut pending.dpi)
+                        .range(MIN_EXPORT_DPI..=MAX_EXPORT_DPI),
+                );
             });
         }
 
@@ -125,10 +129,9 @@ pub(super) fn export_options_window(app: &mut PlotxApp, ctx: &egui::Context) {
         if let Some(settings) = settings {
             let trim = settings.trim_to_visible_content;
             if let Some(path) = crate::ui::file_dialogs::choose_export_path(&settings) {
-                plotx_core::settings::update(move |settings| {
-                    apply_confirmed_export_default(&mut settings.export, trim, true);
-                });
                 app.export_to(settings, &path);
+                apply_confirmed_export_default(&mut app.settings.export, trim, true);
+                app.persist_settings();
             }
         }
     } else if cancel || modal.should_close() {

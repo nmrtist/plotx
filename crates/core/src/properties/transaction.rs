@@ -1,4 +1,4 @@
-//! The writable document snapshots a property provider selects.
+//! The typed working copies a property provider selects.
 //!
 //! Providers decide which typed storage they need; the service merely executes
 //! the completed action. That keeps a document property, a binding property,
@@ -6,8 +6,25 @@
 //! planner.
 
 use crate::actions::{Action, DatasetProcessingState};
+use crate::settings::Settings;
 use crate::state::{DataBinding, DatasetId, ObjectId, PlotxApp};
 use plotx_figure::FigureTypography;
+
+/// Persistence boundaries a provider can select.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum StorageClass {
+    Document,
+    AppPreferences,
+}
+
+impl StorageClass {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Document => "document",
+            Self::AppPreferences => "app preferences",
+        }
+    }
+}
 
 /// Working copies of all typed stores a catalog edit touches.
 #[derive(Default)]
@@ -15,6 +32,7 @@ pub(crate) struct PropertyTransaction {
     bindings: BindingPlan,
     typography: Option<(FigureTypography, FigureTypography)>,
     processing: Vec<(DatasetId, DatasetProcessingState, DatasetProcessingState)>,
+    settings: Option<(Settings, Settings)>,
     /// The working-copy state a single provider edit started from. It is
     /// deliberately per target, rather than one transaction-wide dirty bit:
     /// two series can share a binding, and a later no-op edit must not inherit
@@ -32,6 +50,10 @@ enum TargetSnapshot {
     Processing {
         dataset: DatasetId,
         before: DatasetProcessingState,
+    },
+    Settings {
+        before: Settings,
+        newly_selected: bool,
     },
 }
 
@@ -65,6 +87,10 @@ impl PropertyTransaction {
                 .iter()
                 .find(|(candidate, _, _)| candidate == dataset)
                 .is_some_and(|(_, _, after)| after != before),
+            TargetSnapshot::Settings { before, .. } => self
+                .settings
+                .as_ref()
+                .is_some_and(|(_, after)| after != before),
         })
     }
 
@@ -100,6 +126,16 @@ impl PropertyTransaction {
                         .iter_mut()
                         .find(|(candidate, _, _)| candidate == dataset)
                     {
+                        *after = before.clone();
+                    }
+                }
+                TargetSnapshot::Settings {
+                    before,
+                    newly_selected,
+                } => {
+                    if *newly_selected {
+                        self.settings = None;
+                    } else if let Some((_, after)) = self.settings.as_mut() {
                         *after = before.clone();
                     }
                 }
@@ -183,7 +219,63 @@ impl PropertyTransaction {
         Ok(&mut self.processing[index].2)
     }
 
-    pub(crate) fn into_action(self) -> Action {
+    /// Select the live application preferences for mutation. The provider
+    /// chooses this storage exactly as another provider chooses typography or
+    /// processing state; the planner does not infer it from scope.
+    pub(crate) fn app_preferences(&mut self, app: &PlotxApp) -> &mut Settings {
+        let newly_selected = self.settings.is_none();
+        let settings = &mut self
+            .settings
+            .get_or_insert_with(|| (app.settings.clone(), app.settings.clone()))
+            .1;
+        if !self
+            .target_before
+            .iter()
+            .any(|snapshot| matches!(snapshot, TargetSnapshot::Settings { .. }))
+        {
+            self.target_before.push(TargetSnapshot::Settings {
+                before: settings.clone(),
+                newly_selected,
+            });
+        }
+        settings
+    }
+
+    /// The storage boundaries selected by providers in this transaction.
+    pub(crate) fn storage_classes(&self) -> Vec<StorageClass> {
+        let mut classes = Vec::with_capacity(2);
+        if !self.bindings.entries.is_empty()
+            || self.typography.is_some()
+            || !self.processing.is_empty()
+        {
+            classes.push(StorageClass::Document);
+        }
+        if self.settings.is_some() {
+            classes.push(StorageClass::AppPreferences);
+        }
+        classes
+    }
+
+    /// Refuse a cross-storage request before either half becomes executable.
+    pub(crate) fn ensure_single_storage(&self) -> Result<(), super::PropertyError> {
+        let classes = self.storage_classes();
+        if classes.len() <= 1 {
+            return Ok(());
+        }
+        Err(super::PropertyError::MixedStorage {
+            storages: classes
+                .iter()
+                .map(|class| class.label())
+                .collect::<Vec<_>>()
+                .join(" and "),
+        })
+    }
+
+    pub(crate) fn into_commit(
+        self,
+        applied: Vec<super::PropertyAddress>,
+        skipped: Vec<super::PropertySkip>,
+    ) -> super::PropertyCommit {
         let mut actions = self.bindings.into_actions();
         if let Some((before, after)) = self.typography
             && before != after
@@ -198,7 +290,16 @@ impl PropertyTransaction {
                     Action::update_dataset_processing(dataset, before, after)
                 }),
         );
-        Action::Composite(actions)
+        let document_action = (!actions.is_empty()).then_some(Action::Composite(actions));
+        let app_preferences = self
+            .settings
+            .and_then(|(before, after)| (before != after).then_some(after));
+        super::PropertyCommit {
+            document_action,
+            app_preferences,
+            applied,
+            skipped,
+        }
     }
 }
 
@@ -243,5 +344,44 @@ impl BindingPlan {
                 Action::set_data_binding(canvas, object, before, after)
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mixed_storage_selection_is_refused_before_commit_creation() {
+        let app = PlotxApp::new_with_settings(crate::settings::Settings::default());
+        let mut transaction = PropertyTransaction::default();
+        transaction.begin_target();
+        transaction.figure_typography(&app);
+        transaction.app_preferences(&app);
+
+        assert_eq!(
+            transaction.storage_classes(),
+            [StorageClass::Document, StorageClass::AppPreferences]
+        );
+        let error = transaction
+            .ensure_single_storage()
+            .expect_err("a commit cannot span two persistence boundaries");
+        let message = error.to_string();
+        assert!(message.contains("document"), "{message}");
+        assert!(message.contains("app preferences"), "{message}");
+    }
+
+    #[test]
+    fn rolled_back_settings_target_leaves_no_storage_selected() {
+        let app = PlotxApp::new_with_settings(crate::settings::Settings::default());
+        let mut transaction = PropertyTransaction::default();
+        transaction.begin_target();
+        transaction.app_preferences(&app).export.dpi = 450;
+        assert!(transaction.target_changed());
+
+        transaction.rollback_target();
+
+        assert!(!transaction.target_changed());
+        assert!(transaction.storage_classes().is_empty());
     }
 }

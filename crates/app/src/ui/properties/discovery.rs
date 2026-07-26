@@ -174,6 +174,9 @@ pub(crate) fn targets_for_property(app: &PlotxApp, property: PropertyId) -> Vec<
         return Vec::new();
     };
     match definition.applicability.component {
+        ComponentKind::None if definition.scope_kind == ScopeKind::App => {
+            vec![app.app_target()]
+        }
         ComponentKind::None if definition.scope_kind == ScopeKind::Document => {
             vec![app.document_target()]
         }

@@ -18,9 +18,10 @@ pub(crate) mod fixture;
 pub(crate) use search::property_hits;
 
 use plotx_core::properties::{
-    PropertyDefinition, PropertyId, Tier, apodization, contour, definition, line, typography,
+    PropertyDefinition, PropertyId, Tier, apodization, contour, definition, export_dpi, line,
+    typography,
 };
-use plotx_core::state::WorkflowTab;
+use plotx_core::state::{SettingsCategory, WorkflowTab};
 
 /// A user-facing string in the active locale. PlotX ships one locale today; the
 /// type marks which strings are translatable so adding another is a table edit
@@ -39,7 +40,16 @@ impl LocalizedText {
 pub enum PanelRoute {
     SecondarySidebar,
     Processing,
+    Preferences,
 }
+
+const PREFERENCES_SECTIONS: &[&str] = &[
+    SettingsCategory::General.section_id(),
+    SettingsCategory::Appearance.section_id(),
+    SettingsCategory::Processing.section_id(),
+    SettingsCategory::Export.section_id(),
+    SettingsCategory::Recent.section_id(),
+];
 
 impl PanelRoute {
     /// The section ids this panel actually renders. A home route naming
@@ -53,6 +63,7 @@ impl PanelRoute {
                 panel::TYPOGRAPHY_SECTION,
             ],
             Self::Processing => &[panel::APODIZATION_SECTION],
+            Self::Preferences => PREFERENCES_SECTIONS,
         }
     }
 
@@ -60,6 +71,7 @@ impl PanelRoute {
         match self {
             Self::SecondarySidebar => "Object inspector",
             Self::Processing => "Processing tools",
+            Self::Preferences => "Preferences",
         }
     }
 }
@@ -194,6 +206,11 @@ const APODIZATION_HOME: HomeRoute = HomeRoute {
     section: panel::APODIZATION_SECTION,
 };
 
+const EXPORT_PREFERENCES_HOME: HomeRoute = HomeRoute {
+    panel: PanelRoute::Preferences,
+    section: SettingsCategory::Export.section_id(),
+};
+
 pub const PRESENTATIONS: &[PropertyPresentation] = &[
     PropertyPresentation {
         id: contour::BASE_MAGNITUDE,
@@ -293,6 +310,13 @@ pub const PRESENTATIONS: &[PropertyPresentation] = &[
         localized_label: LocalizedText("GB"),
         localized_aliases: &[LocalizedText("gaussian broadening")],
         home_route: APODIZATION_HOME,
+        canvas_step: false,
+    },
+    PropertyPresentation {
+        id: export_dpi::DPI,
+        localized_label: LocalizedText("Raster resolution"),
+        localized_aliases: &[LocalizedText("export DPI"), LocalizedText("bitmap DPI")],
+        home_route: EXPORT_PREFERENCES_HOME,
         canvas_step: false,
     },
 ];

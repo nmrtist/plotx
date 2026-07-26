@@ -6,7 +6,7 @@
 //! planner for every property family.
 
 use super::target::{
-    canvas_object, document_target, processing_step_targets, series_context_unchecked,
+    app_target, canvas_object, document_target, processing_step_targets, series_context_unchecked,
     series_targets,
 };
 use super::{
@@ -29,6 +29,11 @@ impl PlotxApp {
     /// when the document currently contains no pages.
     pub fn document_target(&self) -> TargetRef {
         document_target()
+    }
+
+    /// The singleton target for application-owned persistent preferences.
+    pub fn app_target(&self) -> TargetRef {
+        app_target()
     }
 
     /// The address of one series-owned property on one plot object.
@@ -257,16 +262,21 @@ impl PlotxApp {
                 ));
             }
         }
-        Ok(PropertyCommit {
-            action: transaction.into_action(),
-            applied,
-            skipped,
-        })
+        transaction.ensure_single_storage()?;
+        Ok(transaction.into_commit(applied, skipped))
     }
 
     /// Execute a validated commit and report the number of targets that were
     /// actually changed.
     pub fn commit_property(&mut self, commit: PropertyCommit) -> usize {
+        self.commit_property_with_persistence(commit, |app| app.persist_settings())
+    }
+
+    fn commit_property_with_persistence(
+        &mut self,
+        commit: PropertyCommit,
+        persist: impl FnOnce(&mut PlotxApp) -> bool,
+    ) -> usize {
         let applied = commit.applied.len();
         // A same-value write changes nothing, so its composite is empty and
         // `try_execute_action` would drop it anyway. Stopping here is about the
@@ -274,9 +284,24 @@ impl PlotxApp {
         // of being told an update succeeded that it cannot tell apart from one
         // that moved a value.
         if applied != 0 {
-            self.execute_property_action(commit.action);
+            if let Some(action) = commit.document_action {
+                self.execute_property_action(action);
+            }
+            if let Some(settings) = commit.app_preferences {
+                self.apply_settings(settings);
+                persist(self);
+            }
         }
         applied
+    }
+
+    #[cfg(test)]
+    pub(crate) fn commit_property_with_settings_writer(
+        &mut self,
+        commit: PropertyCommit,
+        writer: impl FnOnce(&crate::settings::Settings) -> std::io::Result<()>,
+    ) -> usize {
+        self.commit_property_with_persistence(commit, |app| app.persist_settings_with(writer))
     }
 
     /// Open a continuous gesture on one catalog control.
@@ -411,11 +436,8 @@ impl PlotxApp {
                 Err(error) => return Err(error),
             }
         }
-        Ok(PropertyCommit {
-            action: transaction.into_action(),
-            applied,
-            skipped,
-        })
+        transaction.ensure_single_storage()?;
+        Ok(transaction.into_commit(applied, skipped))
     }
 
     fn definition_for(

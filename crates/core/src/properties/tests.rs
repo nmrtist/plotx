@@ -315,7 +315,7 @@ fn an_edit_compiles_into_a_typed_binding_action() {
         .expect("count is writable");
     assert_eq!(commit.applied.len(), 1);
     assert!(commit.skipped.is_empty());
-    let Action::Composite(actions) = &commit.action else {
+    let Some(Action::Composite(actions)) = &commit.document_action else {
         panic!("a commit is always one atomic composite");
     };
     assert_eq!(actions.len(), 1);
@@ -360,7 +360,7 @@ fn several_series_of_one_object_fold_into_one_action() {
         )
         .expect("count is writable");
     assert_eq!(commit.applied.len(), 2);
-    let Action::Composite(actions) = &commit.action else {
+    let Some(Action::Composite(actions)) = &commit.document_action else {
         panic!("expected a composite");
     };
     assert_eq!(
