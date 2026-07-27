@@ -17,9 +17,9 @@ follows the page's active plot.
 
 ## Lowest level
 
-**Lowest level** is the only setting shown until you open **Advanced**, because
-it decides what you see: everything below it is not drawn at all. Raise it to
-suppress noise, lower it to reveal weak cross-peaks.
+**Lowest level** and **Line width** are the two rows shown before you open
+**Advanced**. Lowest level decides what you see: everything below it is not
+drawn at all. Raise it to suppress noise, lower it to reveal weak cross-peaks.
 
 What the number means depends on the anchor (below). Under the default anchor
 for a phase-sensitive NMR plane it is a multiple of the noise floor, so `5`
@@ -89,6 +89,15 @@ showing one of them. Stepping is an
 ordinary edit: it can be undone, and a step past the highest value the current
 anchor allows is refused, with the reason in the status bar.
 
+## Line width
+
+**Line width** sets how heavy contour strokes are printed, in points. Contours
+start at 0.5 pt; drag or type any value from 0.05 to 10 pt, or take one from
+**Presets** — *Fine* 0.50 pt, *Medium* 0.75 pt, *Bold* 1.25 pt. A thin stroke is
+what keeps a dense ladder legible at journal size. It does not change which
+features are drawn — that is the lowest level and **Levels** — only how heavy
+each one looks.
+
 ## Anchor and ladder
 
 Open **Advanced** for the rest of the ladder.
@@ -113,8 +122,8 @@ Open **Advanced** for the rest of the ladder.
 - **Level ratio** — the factor between one level and the next. It must be
   greater than 1, and at most 10.
 
-**Negative contours**, **Positive colour**, **Negative colour** and **Line
-width** (0.05 to 10) are in the same section.
+**Negative contours**, **Positive colour** and **Negative colour** are in the
+same section.
 
 The ladder stops early when the next level would be above the data's peak, so a
 plot can show fewer levels than **Levels** asks for. That is not an error: the

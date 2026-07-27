@@ -391,15 +391,21 @@ fn only_physical_canvas_lengths_follow_the_users_canvas_unit() {
     );
 }
 
-/// §12: only the lowest level is Essential on a contour; the ladder shape and
-/// the negative-half colour are for users who went looking for them.
+/// The two contour controls that directly decide what dense data looks like
+/// stay visible; the ladder shape and colours remain Advanced.
 #[test]
-fn only_the_lowest_contour_level_is_essential() {
+fn contour_level_and_line_width_are_essential() {
     let essential: Vec<&str> = essential_in(panel::CONTOUR_SECTION)
         .iter()
         .map(|entry| entry.id.as_str())
         .collect();
-    assert_eq!(essential, [contour::BASE_MAGNITUDE.as_str()]);
+    assert_eq!(
+        essential,
+        [
+            contour::BASE_MAGNITUDE.as_str(),
+            contour::LINE_WIDTH.as_str()
+        ]
+    );
 }
 
 /// The row checkbox is compact chrome, not a second presentation channel. Its

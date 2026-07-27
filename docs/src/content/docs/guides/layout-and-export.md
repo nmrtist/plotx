@@ -147,8 +147,10 @@ What you control directly:
   document rather than to a plot, the section is shown whatever is selected —
   including when nothing is.
 - **Line** in the Object inspector sets the **Stroke width** of the selected
-  plot's line series, from 0.05 to 10. The section appears only when something
-  in the selection is drawn as a line, and its header counts the series it is
+  plot's line series, in points. New line series are 0.5 pt; drag or type any
+  value from 0.05 to 10 pt, or take one from **Presets** — *Fine* 0.50 pt,
+  *Medium* 0.75 pt, *Bold* 1.25 pt. The section appears only when something in
+  the selection is drawn as a line, and its header counts the series it is
   about to change. Select several plots and it edits them together; select
   nothing and it follows the page's active plot.
 

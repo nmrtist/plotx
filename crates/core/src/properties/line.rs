@@ -16,14 +16,14 @@ use plotx_figure::{PositiveFiniteF32, SeriesEncoding};
 pub const STROKE_WIDTH: PropertyId = PropertyId("series.line.stroke_width");
 
 const WIDTH_BOUNDS: FloatBounds = FloatBounds::inclusive(0.05, 10.0);
-const WIDTH_STEP: f64 = 0.25;
+const WIDTH_STEP: f64 = 0.05;
 
 pub(crate) const DEFINITIONS: &[PropertyDefinition] = &[PropertyDefinition {
     id: STROKE_WIDTH,
     scope_kind: ScopeKind::Object,
     value_schema: ValueSchema::Float {
         bounds: WIDTH_BOUNDS,
-        display: FloatDisplay::Linear(""),
+        display: FloatDisplay::Linear("pt"),
         drag_step: Some(WIDTH_STEP),
     },
     access: PropertyAccess::ReadWrite,

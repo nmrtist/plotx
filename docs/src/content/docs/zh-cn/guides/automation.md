@@ -46,8 +46,8 @@ selection** 载入当前选择——再选择一个工具，点击 **Preflight**
 | **Negative contours** | `series.contour.negative.enabled` | `true` 或 `false` |
 | **Positive colour** | `series.contour.positive_color` | `"#rrggbb"` |
 | **Negative colour** | `series.contour.negative_color` | `"#rrggbb"` |
-| **Line width** | `series.contour.line_width` | 0.05 到 10 |
-| **Stroke width**（**Line** 区域） | `series.line.stroke_width` | 0.05 到 10 |
+| **Line width** | `series.contour.line_width` | 0.05 到 10 pt；默认 0.5 |
+| **Stroke width**（**Line** 区域） | `series.line.stroke_width` | 0.05 到 10 pt；默认 0.5 |
 | **Tick-label size**（**Figure typography** 区域） | `document.figure.typography.tick_pt` | 1 到 72 |
 
 应用偏好设置同样用这三个工具。对于

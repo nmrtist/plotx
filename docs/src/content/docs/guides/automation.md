@@ -50,8 +50,8 @@ application**).
 | **Negative contours** | `series.contour.negative.enabled` | `true` or `false` |
 | **Positive colour** | `series.contour.positive_color` | `"#rrggbb"` |
 | **Negative colour** | `series.contour.negative_color` | `"#rrggbb"` |
-| **Line width** | `series.contour.line_width` | 0.05 to 10 |
-| **Stroke width**, in the **Line** section | `series.line.stroke_width` | 0.05 to 10 |
+| **Line width** | `series.contour.line_width` | 0.05 to 10 pt; default 0.5 |
+| **Stroke width**, in the **Line** section | `series.line.stroke_width` | 0.05 to 10 pt; default 0.5 |
 | **Tick-label size**, in the **Figure typography** section | `document.figure.typography.tick_pt` | 1 to 72 |
 
 Application preferences take the same three tools. For

@@ -1,6 +1,9 @@
 use crate::{Color, ColormapId};
 use serde::{Deserialize, Deserializer, Serialize, de};
 
+/// Default authored width, in points, for data traces and contour strokes.
+pub const DEFAULT_DATA_LINE_WIDTH_PT: f32 = 0.5;
+
 /// A finite, strictly positive scalar used by persisted presentation settings.
 /// Constructors reject non-finite values so encodings cannot poison renderer keys.
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Serialize)]
@@ -116,7 +119,8 @@ impl Default for LineEncoding {
         Self {
             color: ColorSource::Explicit(Color::TRACE),
             scale: 1.0,
-            width: PositiveFiniteF32::new(1.0).expect("literal width is valid"),
+            width: PositiveFiniteF32::new(DEFAULT_DATA_LINE_WIDTH_PT)
+                .expect("literal width is valid"),
         }
     }
 }
@@ -228,7 +232,8 @@ impl Default for ContourStyle {
         Self {
             positive_color: ColorSource::Explicit(Color::TRACE),
             negative_color: ColorSource::Explicit(Color::rgb(0xd1, 0x24, 0x2a)),
-            width: PositiveFiniteF32::new(0.7).expect("literal width is valid"),
+            width: PositiveFiniteF32::new(DEFAULT_DATA_LINE_WIDTH_PT)
+                .expect("literal width is valid"),
         }
     }
 }
@@ -289,6 +294,18 @@ mod tests {
         assert_ne!(
             style.positive_color.resolve(),
             style.negative_color.resolve()
+        );
+    }
+
+    #[test]
+    fn line_and_contour_defaults_share_the_fine_data_stroke() {
+        assert_eq!(
+            LineEncoding::default().width.get(),
+            DEFAULT_DATA_LINE_WIDTH_PT
+        );
+        assert_eq!(
+            ContourStyle::default().width.get(),
+            DEFAULT_DATA_LINE_WIDTH_PT
         );
     }
 

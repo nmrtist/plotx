@@ -42,6 +42,29 @@ pub(crate) fn handle_navigation(app: &mut PlotxApp, ci: usize, rect: egui::Rect,
     });
     let typing = ui.ctx().egui_wants_keyboard_input();
 
+    // A double-click is reported on the second release. By then a zero-distance
+    // box or axis zoom has already started on the second press, so handle the
+    // click before the in-flight zoom completion path can consume that release.
+    if dbl
+        && let Some(p) = hover.filter(|p| rect.contains(*p))
+        && !command
+        && let Some((id, outer, plot)) = plot_under_cursor(app, ci, rect, p)
+    {
+        app.finish_pending_wheel_zoom(now, true);
+        app.finish_pending_wheel_property(now, true);
+        // A pan already moved the viewport and `cancel_interaction` has no Pan
+        // arm, so cancelling would leave that move applied with no undo record
+        // and make the reset's own record start from the panned view. Commit it
+        // first: the pan and the reset then undo as the two edits they are.
+        if matches!(app.interaction(), Interaction::Pan(_)) {
+            commit_data_pan(app);
+        } else if app.interaction().is_active() {
+            app.cancel_interaction();
+        }
+        reset_plot_viewport(app, ci, id, outer, plot, p);
+        return true;
+    }
+
     // Every viewport zoom drag is owned here start-to-finish so the ambient
     // Alt+drag box gesture and the dedicated Browse Zoom tool share one path.
     let active_zoom = match &app.session.ui.interaction {
@@ -108,11 +131,6 @@ pub(crate) fn handle_navigation(app: &mut PlotxApp, ci: usize, rect: egui::Rect,
         if middle_released || primary_released || !pan_input {
             commit_data_pan(app);
         }
-        return true;
-    }
-
-    if dbl && let Some((id, outer, plot)) = data_target {
-        reset_plot_viewport(app, ci, id, outer, plot, p);
         return true;
     }
 
@@ -636,3 +654,7 @@ pub(crate) fn zoom_plot_viewport(
     ui.ctx()
         .request_repaint_after(std::time::Duration::from_millis(200));
 }
+
+#[cfg(test)]
+#[path = "navigation_tests.rs"]
+mod tests;

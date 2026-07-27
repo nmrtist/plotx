@@ -55,6 +55,7 @@ const MAX_RATIO: f64 = 10.0;
 const RATIO_BOUNDS: FloatBounds = FloatBounds::above(1.0, MAX_RATIO);
 /// Below this a stroke is invisible on screen and hairline in print.
 const LINE_WIDTH_BOUNDS: FloatBounds = FloatBounds::inclusive(0.05, 10.0);
+const LINE_WIDTH_STEP: f64 = 0.05;
 
 /// The base-policy choices and the capability each one needs. `FractionOfRange`
 /// requires a bounded field and is withheld from signed ones: "four percent of
@@ -195,13 +196,13 @@ pub(crate) const DEFINITIONS: &[PropertyDefinition] = &[
         scope_kind: ScopeKind::Object,
         value_schema: ValueSchema::Float {
             bounds: LINE_WIDTH_BOUNDS,
-            display: FloatDisplay::Linear(""),
-            drag_step: None,
+            display: FloatDisplay::Linear("pt"),
+            drag_step: Some(LINE_WIDTH_STEP),
         },
         access: PropertyAccess::ReadWrite,
         applicability: CONTOUR,
         default_policy: DefaultPolicy::EncodingFactory,
-        tier: Tier::Advanced,
+        tier: Tier::Essential,
         copies: ValueCopies::PerTarget,
         canonical_label: "Contour line width",
         canonical_aliases: &["contour width", "line width", "stroke width"],

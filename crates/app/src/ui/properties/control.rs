@@ -1,8 +1,11 @@
 //! Property row controls, value descriptions, and gesture edges.
 
 use super::*;
+use plotx_core::properties::{contour, line};
 use plotx_core::state::CanvasSizeUnit;
 use std::borrow::Cow;
+
+const LINE_WIDTH_PRESETS: [(&str, f64); 3] = [("Fine", 0.5), ("Medium", 0.75), ("Bold", 1.25)];
 
 pub(super) struct RowEdits<'a> {
     pub pending: &'a mut Option<Pending>,
@@ -25,7 +28,7 @@ pub(super) fn property_row(
         .scope(|ui| {
             ui.horizontal(|ui| {
                 ui.label(row.presentation.localized_label.get())
-                    .on_hover_text(row.definition.canonical_label);
+                    .on_hover_text(property_hint(row));
                 match row.representative.availability {
                     plotx_core::properties::Availability::Editable => {
                         control(
@@ -151,6 +154,16 @@ fn modified_marker(row: &Row, pending: &mut Option<Pending>, ui: &mut Ui) {
         .clicked()
     {
         *pending = Some(Pending::Reset(row.presentation.id));
+    }
+}
+
+fn property_hint(row: &Row) -> &'static str {
+    match row.presentation.id {
+        line::STROKE_WIDTH => "Width of spectrum and line-series strokes, in points.",
+        contour::LINE_WIDTH => {
+            "Width of contour strokes, in points. Lowest level and Levels control which features are drawn."
+        }
+        _ => row.definition.canonical_label,
     }
 }
 
@@ -470,6 +483,7 @@ fn float_control(
         ));
     }
     draw_unit(ui, &projection.caption);
+    line_width_presets(row, current, mixed, pending, ui);
     if let Some(PropertyReadout::ContourBase(readout)) = &row.readout
         && let Some(suffix) = super::super::readout::resolution_suffix(readout)
     {
@@ -482,6 +496,43 @@ fn float_control(
             egui_phosphor::regular::ARROW_RIGHT
         ));
     }
+}
+
+fn line_width_presets(
+    row: &Row,
+    current: f64,
+    mixed: bool,
+    pending: &mut Option<Pending>,
+    ui: &mut Ui,
+) {
+    if !matches!(
+        row.presentation.id,
+        line::STROKE_WIDTH | contour::LINE_WIDTH
+    ) {
+        return;
+    }
+    ui.menu_button("Presets", |ui| {
+        for (name, value) in LINE_WIDTH_PRESETS {
+            // Every preset is exactly representable, and widths round-trip
+            // through `PositiveFiniteF32`, so the stored value either is the
+            // preset or is a notch away from it. Equality is the honest test.
+            let selected = !mixed && current == value;
+            if ui
+                .selectable_label(selected, format!("{name} — {value:.2} pt"))
+                .clicked()
+            {
+                if !selected {
+                    *pending = Some(Pending::Write(
+                        row.presentation.id,
+                        PropertyValue::Float(value),
+                    ));
+                }
+                ui.close();
+            }
+        }
+    })
+    .response
+    .on_hover_text("Choose a common data-line width");
 }
 
 struct FloatControlInput {
@@ -654,146 +705,5 @@ fn describe<'a>(row: &Row, value: &'a PropertyValue) -> Cow<'a, str> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use plotx_core::properties::{FloatBounds, FloatDisplay, axis};
-
-    #[test]
-    fn stepped_drag_candidates_snap_to_the_schema_lattice() {
-        for candidate in 3..=15 {
-            let snapped = snapped_stepped_int(candidate, 3, 15, 2);
-            assert!((3..=15).contains(&snapped));
-            assert_eq!((snapped - 3) % 2, 0, "candidate {candidate}");
-        }
-        assert_eq!(snapped_stepped_int(10, 3, 15, 2), 11);
-    }
-
-    #[test]
-    fn continuous_text_input_commits_one_undo_record() {
-        let (mut app, ids) = crate::ui::properties::fixture::contour_page(1);
-        let target = app.object_target(0, ids[0]).expect("plot target");
-        let undo_before = app.session.undo_stack.len();
-        let mut editing = true;
-        let mut buffer = String::new();
-        let mut submissions = 0;
-
-        for character in ["A", "x", "i", "s"] {
-            buffer.push_str(character);
-            if should_submit_text_edit(&mut editing, true, false, false) {
-                submissions += 1;
-            }
-        }
-        if should_submit_text_edit(&mut editing, false, true, false) {
-            submissions += 1;
-            let commit = app
-                .plan_property_write(
-                    axis::X_LABEL,
-                    std::slice::from_ref(&target),
-                    &PropertyValue::Text(buffer),
-                )
-                .expect("text edit plans");
-            app.commit_property(commit);
-        }
-
-        assert_eq!(submissions, 1);
-        assert_eq!(app.session.undo_stack.len(), undo_before + 1);
-        assert_eq!(
-            app.doc.canvases[0].objects[0]
-                .plot()
-                .expect("plot")
-                .axis_overrides
-                .x_label
-                .as_deref(),
-            Some("Axis")
-        );
-        app.undo();
-        assert_eq!(
-            app.doc.canvases[0].objects[0]
-                .plot()
-                .expect("plot")
-                .axis_overrides
-                .x_label,
-            None
-        );
-    }
-
-    #[test]
-    fn continuous_text_box_input_commits_one_undo_record() {
-        use plotx_core::state::{
-            CanvasDocument, CanvasObject, CanvasObjectKind, ObjectFrame, TextBox,
-        };
-        let mut app = PlotxApp::new();
-        let mut canvas = CanvasDocument::new("text".to_owned(), [120.0, 80.0]);
-        let id = canvas.allocate_object_id();
-        canvas.objects.push(CanvasObject {
-            id,
-            name: "Caption".to_owned(),
-            frame: ObjectFrame::new(0.0, 0.0, 40.0, 20.0),
-            locked: false,
-            visible: true,
-            group: None,
-            kind: CanvasObjectKind::Text(TextBox::label(String::new())),
-        });
-        app.doc.canvases.push(canvas);
-        let target = app.object_target(0, id).unwrap();
-        let undo_before = app.session.undo_stack.len();
-        let mut editing = true;
-        let mut buffer = String::new();
-        let mut submissions = 0;
-        for character in ["P", "l", "o", "t", "X"] {
-            buffer.push_str(character);
-            if should_submit_text_edit(&mut editing, true, false, false) {
-                submissions += 1;
-            }
-        }
-        if should_submit_text_edit(&mut editing, false, true, false) {
-            submissions += 1;
-            let commit = app
-                .plan_property_write(
-                    plotx_core::properties::object::TEXT,
-                    std::slice::from_ref(&target),
-                    &PropertyValue::Text(buffer),
-                )
-                .unwrap();
-            app.commit_property(commit);
-        }
-        assert_eq!(submissions, 1);
-        assert_eq!(app.session.undo_stack.len(), undo_before + 1);
-        assert_eq!(
-            app.doc.canvases[0].object(id).unwrap().text().unwrap().text,
-            "PlotX"
-        );
-        app.undo();
-        let text = app.doc.canvases[0].object(id).unwrap().text().unwrap();
-        assert!(text.text.is_empty());
-    }
-
-    #[test]
-    fn a_drag_across_zero_never_emits_a_kernel_rejected_divisor() {
-        let bounds = FloatBounds::excluding_magnitude(-f64::MAX, f64::MAX, f64::MIN_POSITIVE);
-        let next = admitted_float_from_control(bounds, 1.0, 0.0, FloatDisplay::Linear(""), 0.1);
-        assert!(next < 0.0, "a downward drag crosses to the negative side");
-        assert!(bounds.admits(next));
-        assert!(next.abs() > f64::MIN_POSITIVE);
-    }
-
-    #[test]
-    fn canvas_length_projection_changes_value_caption_and_write_space_together() {
-        let projection = FloatControlProjection::new(
-            true,
-            FloatBounds::inclusive(0.0, 100.0),
-            FloatDisplay::Linear("mm"),
-            25.4,
-            CanvasSizeUnit::Inch,
-            Some(1.0),
-        );
-        assert!((projection.displayed - 1.0).abs() < 1.0e-6);
-        assert_eq!(projection.caption, "in");
-        assert_eq!(projection.decimals, Some(3));
-        assert_eq!(projection.speed, CanvasSizeUnit::Inch.drag_speed());
-        assert!(
-            (projection.to_domain(2.0) - 50.8).abs() < 1.0e-5,
-            "the catalog always receives millimetres"
-        );
-    }
-}
+#[path = "control_tests.rs"]
+mod tests;

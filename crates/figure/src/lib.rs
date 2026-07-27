@@ -7,8 +7,8 @@ mod encoding;
 pub use colormap::ColormapId;
 pub use encoding::{
     ColorSource, ContourBasePolicy, ContourLevelSpec, ContourSpec, ContourStyle,
-    EstimatorSelection, HeatmapSpec, ImageInterpolation, ImageSpec, LineEncoding,
-    PositiveFiniteF32, PositiveFiniteF64, SeriesEncoding, UnitInterval,
+    DEFAULT_DATA_LINE_WIDTH_PT, EstimatorSelection, HeatmapSpec, ImageInterpolation, ImageSpec,
+    LineEncoding, PositiveFiniteF32, PositiveFiniteF64, SeriesEncoding, UnitInterval,
 };
 
 /// An RGB color, 0–255 per channel.
@@ -209,7 +209,7 @@ impl Series {
             name: name.into(),
             points,
             color: Color::TRACE,
-            width: 1.0,
+            width: DEFAULT_DATA_LINE_WIDTH_PT,
             kind: SeriesKind::Line,
         }
     }

@@ -90,6 +90,22 @@ fn all_three_typography_sizes_share_the_declared_point_schema() {
     }
 }
 
+#[test]
+fn data_line_widths_share_the_fine_point_schema() {
+    for property in [line::STROKE_WIDTH, contour::LINE_WIDTH] {
+        let definition = definition(property).expect("line width is registered");
+        assert_eq!(
+            definition.value_schema,
+            ValueSchema::Float {
+                bounds: FloatBounds::inclusive(0.05, 10.0),
+                display: FloatDisplay::Linear("pt"),
+                drag_step: Some(0.05),
+            }
+        );
+        assert_eq!(definition.tier, Tier::Essential);
+    }
+}
+
 /// A write of the value already in typed storage is not an applied edit. The
 /// caller gets an explicit skip, and the empty composite cannot create a fake
 /// undo/revision entry.
@@ -257,6 +273,8 @@ fn a_line_readout_dispatches_by_property_address() {
     assert_eq!(
         app.property_readout(&PropertyAddress::new(target, line::STROKE_WIDTH))
             .expect("the line readout resolves"),
-        PropertyReadout::Value(PropertyValue::Float(1.0))
+        PropertyReadout::Value(PropertyValue::Float(f64::from(
+            plotx_figure::DEFAULT_DATA_LINE_WIDTH_PT,
+        )))
     );
 }

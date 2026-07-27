@@ -164,7 +164,7 @@ impl PlotxApp {
         Some(plotx_figure::AxisTrace {
             points,
             color: Color::TRACE,
-            width: 1.0,
+            width: plotx_figure::DEFAULT_DATA_LINE_WIDTH_PT,
         })
     }
 
@@ -175,7 +175,7 @@ impl PlotxApp {
         Some(plotx_figure::AxisTrace {
             points: n.spectrum.real_points(),
             color: Color::TRACE,
-            width: 1.0,
+            width: plotx_figure::DEFAULT_DATA_LINE_WIDTH_PT,
         })
     }
 
