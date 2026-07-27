@@ -92,8 +92,9 @@ pub(crate) fn clear_canvas_interaction_state(
     ci: usize,
     scope: CanvasInteractionClearScope,
 ) {
+    app.finish_pending_wheel_zoom(f64::INFINITY, true);
+    app.finish_pending_wheel_property(f64::INFINITY, true);
     app.reset_interaction();
-    app.session.ui.wheel_zoom = None;
 
     if matches!(
         scope,

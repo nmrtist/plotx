@@ -20,6 +20,7 @@ pub fn execute(
         // menu bar, the palette and the Ribbon).
         let now = ctx.input(|input| input.time);
         app.finish_pending_wheel_zoom(now, true);
+        app.finish_pending_wheel_property(now, true);
     }
     if !commands::describe(app, id).enabled {
         return;

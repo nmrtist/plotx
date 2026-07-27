@@ -208,7 +208,7 @@ fn line_stroke_width_reports_mixed_values_and_skips_other_encodings() {
     assert!(
         actions
             .iter()
-            .all(|action| matches!(action, Action::SetDataBinding { .. }))
+            .all(|action| matches!(action, Action::SetSeriesPresentation { .. }))
     );
     app.commit_property(commit);
     for target in line_targets {

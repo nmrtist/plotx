@@ -211,6 +211,20 @@ impl Action {
         }
     }
 
+    pub fn set_series_presentation(
+        canvas: usize,
+        object: ObjectId,
+        before: DataBinding,
+        after: DataBinding,
+    ) -> Self {
+        Self::SetSeriesPresentation {
+            canvas,
+            object,
+            before,
+            after,
+        }
+    }
+
     pub fn set_chart_type(
         canvas: usize,
         object: ObjectId,

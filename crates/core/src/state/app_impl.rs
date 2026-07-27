@@ -357,6 +357,7 @@ impl PlotxApp {
         self.session.tool = tool;
         self.reset_interaction();
         self.finish_pending_wheel_zoom(f64::INFINITY, true);
+        self.finish_pending_wheel_property(f64::INFINITY, true);
         // A data tool operates directly on the selected plot, so give it a target:
         // if the active canvas has no selected plot yet, select the active one.
         if tool.is_data_tool()

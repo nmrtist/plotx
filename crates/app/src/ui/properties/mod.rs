@@ -12,6 +12,7 @@ pub(crate) mod discovery;
 mod groups;
 pub(crate) mod panel;
 pub(crate) mod readout;
+mod routes;
 mod search;
 mod types;
 
@@ -19,6 +20,7 @@ mod types;
 pub(crate) mod fixture;
 
 pub(crate) use groups::GROUPS;
+use routes::*;
 pub(crate) use search::property_hits;
 pub use types::*;
 
@@ -26,165 +28,12 @@ pub use types::*;
 use plotx_core::properties::definition;
 use plotx_core::properties::{
     PropertyId, Tier, apodization, app_preferences, axis, baseline, bin, canvas, contour,
-    export_dpi, group_delay, ilt, line, normalize, object, phase, reference, smooth, step_enabled,
-    typography, zero_fill,
+    export_dpi, group_delay, heatmap, ilt, line, normalize, object, phase, reference, smooth,
+    step_enabled, typography, zero_fill,
 };
-use plotx_core::state::{SettingsCategory, WorkflowTab};
-
-const CONTOUR_HOME: HomeRoute = HomeRoute {
-    panel: PanelRoute::SecondarySidebar,
-    section: panel::CONTOUR_SECTION,
-};
-
-const LINE_HOME: HomeRoute = HomeRoute {
-    panel: PanelRoute::SecondarySidebar,
-    section: panel::LINE_SECTION,
-};
-
-const AXIS_HOME: HomeRoute = HomeRoute {
-    panel: PanelRoute::SecondarySidebar,
-    section: panel::AXIS_SECTION,
-};
-
-const STACK_HOME: HomeRoute = HomeRoute {
-    panel: PanelRoute::SecondarySidebar,
-    section: panel::STACK_SECTION,
-};
-const CHART_HOME: HomeRoute = HomeRoute {
-    panel: PanelRoute::SecondarySidebar,
-    section: panel::CHART_SECTION,
-};
-const TEXT_HOME: HomeRoute = HomeRoute {
-    panel: PanelRoute::SecondarySidebar,
-    section: panel::TEXT_SECTION,
-};
-const SHAPE_HOME: HomeRoute = HomeRoute {
-    panel: PanelRoute::SecondarySidebar,
-    section: panel::SHAPE_SECTION,
-};
-const PANEL_HOME: HomeRoute = HomeRoute {
-    panel: PanelRoute::SecondarySidebar,
-    section: panel::PANEL_SECTION,
-};
-const OBJECT_HOME: HomeRoute = HomeRoute {
-    panel: PanelRoute::SecondarySidebar,
-    section: panel::OBJECT_SECTION,
-};
-
-const fn object_entry(
-    id: PropertyId,
-    label: &'static str,
-    home_route: HomeRoute,
-) -> PropertyPresentation {
-    PropertyPresentation {
-        id,
-        localized_label: LocalizedText(label),
-        localized_aliases: &[],
-        home_route,
-        canvas_step: false,
-        uses_canvas_length_unit: false,
-    }
-}
-
-const TYPOGRAPHY_HOME: HomeRoute = HomeRoute {
-    panel: PanelRoute::SecondarySidebar,
-    section: panel::TYPOGRAPHY_SECTION,
-};
-
-const CANVAS_MARGINS_HOME: HomeRoute = HomeRoute {
-    panel: PanelRoute::CanvasSettings,
-    section: panel::CANVAS_MARGINS_SECTION,
-};
-
-const CANVAS_GRID_HOME: HomeRoute = HomeRoute {
-    panel: PanelRoute::CanvasSettings,
-    section: panel::CANVAS_GRID_SECTION,
-};
-
-const CANVAS_SIZE_HOME: HomeRoute = HomeRoute {
-    panel: PanelRoute::CanvasSettings,
-    section: panel::CANVAS_SIZE_SECTION,
-};
-
-const CANVAS_CAPTION_HOME: HomeRoute = HomeRoute {
-    panel: PanelRoute::CanvasSettings,
-    section: panel::CANVAS_CAPTION_SECTION,
-};
-
-const APODIZATION_HOME: HomeRoute = HomeRoute {
-    panel: PanelRoute::Processing,
-    section: panel::APODIZATION_SECTION,
-};
-
-const ZERO_FILL_HOME: HomeRoute = HomeRoute {
-    panel: PanelRoute::Processing,
-    section: panel::ZERO_FILL_SECTION,
-};
-
-const PHASE_HOME: HomeRoute = HomeRoute {
-    panel: PanelRoute::Processing,
-    section: panel::PHASE_SECTION,
-};
-
-const BASELINE_HOME: HomeRoute = HomeRoute {
-    panel: PanelRoute::Processing,
-    section: panel::BASELINE_SECTION,
-};
-
-const REFERENCE_HOME: HomeRoute = HomeRoute {
-    panel: PanelRoute::Processing,
-    section: panel::REFERENCE_SECTION,
-};
-
-const SMOOTH_HOME: HomeRoute = HomeRoute {
-    panel: PanelRoute::Processing,
-    section: panel::SMOOTH_SECTION,
-};
-
-const NORMALIZE_HOME: HomeRoute = HomeRoute {
-    panel: PanelRoute::Processing,
-    section: panel::NORMALIZE_SECTION,
-};
-
-const BIN_HOME: HomeRoute = HomeRoute {
-    panel: PanelRoute::Processing,
-    section: panel::BIN_SECTION,
-};
-
-const PROCESSING_STEP_HOME: HomeRoute = HomeRoute {
-    panel: PanelRoute::Processing,
-    section: panel::PROCESSING_STEP_SECTION,
-};
-
-const PROCESSING_ADVANCED_HOME: HomeRoute = HomeRoute {
-    panel: PanelRoute::Processing,
-    section: panel::PROCESSING_ADVANCED_SECTION,
-};
-
-const EXPORT_PREFERENCES_HOME: HomeRoute = HomeRoute {
-    panel: PanelRoute::Preferences,
-    section: SettingsCategory::Export.section_id(),
-};
-
-const GENERAL_PREFERENCES_HOME: HomeRoute = HomeRoute {
-    panel: PanelRoute::Preferences,
-    section: SettingsCategory::General.section_id(),
-};
-
-const APPEARANCE_PREFERENCES_HOME: HomeRoute = HomeRoute {
-    panel: PanelRoute::Preferences,
-    section: SettingsCategory::Appearance.section_id(),
-};
-
-const UPDATES_PREFERENCES_HOME: HomeRoute = HomeRoute {
-    panel: PanelRoute::Preferences,
-    section: panel::PREFERENCES_UPDATES_SECTION,
-};
-
-const PROCESSING_PREFERENCES_HOME: HomeRoute = HomeRoute {
-    panel: PanelRoute::Preferences,
-    section: SettingsCategory::Processing.section_id(),
-};
+#[cfg(test)]
+use plotx_core::state::SettingsCategory;
+use plotx_core::state::WorkflowTab;
 
 pub const PRESENTATIONS: &[PropertyPresentation] = &[
     object_entry(object::STACK_MODE, "Mode", STACK_HOME),
@@ -330,6 +179,26 @@ pub const PRESENTATIONS: &[PropertyPresentation] = &[
         localized_label: LocalizedText("Line width"),
         localized_aliases: &[LocalizedText("contour width")],
         home_route: CONTOUR_HOME,
+        canvas_step: false,
+        uses_canvas_length_unit: false,
+    },
+    PropertyPresentation {
+        id: heatmap::RANGE_SPAN,
+        localized_label: LocalizedText("Colour range"),
+        localized_aliases: &[
+            LocalizedText("heatmap contrast"),
+            LocalizedText("colour scale"),
+            LocalizedText("color scale"),
+        ],
+        home_route: HEATMAP_HOME,
+        canvas_step: true,
+        uses_canvas_length_unit: false,
+    },
+    PropertyPresentation {
+        id: heatmap::RANGE_CENTER,
+        localized_label: LocalizedText("Range centre"),
+        localized_aliases: &[LocalizedText("colour scale midpoint")],
+        home_route: HEATMAP_HOME,
         canvas_step: false,
         uses_canvas_length_unit: false,
     },

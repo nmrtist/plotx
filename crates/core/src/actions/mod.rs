@@ -48,6 +48,19 @@ pub struct PendingViewportEdit {
     pub last_input_time: f64,
 }
 
+/// Accumulates high-resolution wheel input into discrete catalog steps while
+/// keeping the exact hovered series targets fixed for the gesture.
+#[derive(Clone)]
+pub struct PendingWheelPropertyEdit {
+    pub canvas: usize,
+    pub object: ObjectId,
+    pub property: crate::properties::PropertyId,
+    pub targets: Vec<crate::automation::TargetRef>,
+    pub accumulator: f32,
+    pub last_input_time: f64,
+    pub gesture_started: bool,
+}
+
 /// A page's size selection: the physical dimensions together with the preset
 /// identity the user picked. Kept as one value so undo/redo restores both — the
 /// id is what disambiguates journal widths shared by two publishers.
@@ -230,6 +243,15 @@ pub enum Action {
     /// Replace a plot's data binding (add/remove/reorder overlaid series),
     /// rebuilding its figure and refitting the viewport.
     SetDataBinding {
+        canvas: usize,
+        object: ObjectId,
+        before: DataBinding,
+        after: DataBinding,
+    },
+    /// Change persisted series presentation while retaining the user's spatial
+    /// viewport. Property-catalog edits use this boundary; adding, removing or
+    /// reordering data still uses `SetDataBinding` and refits the plot.
+    SetSeriesPresentation {
         canvas: usize,
         object: ObjectId,
         before: DataBinding,
@@ -443,6 +465,28 @@ pub enum Action {
 mod build;
 
 impl Action {
+    pub fn undo_label(&self) -> &'static str {
+        match self {
+            Self::Composite(actions) => actions
+                .iter()
+                .find(|action| !action.is_noop())
+                .map(Self::undo_label)
+                .unwrap_or("edit"),
+            Self::SetObjectViewport { .. } => "plot navigation",
+            Self::SetSeriesPresentation { .. } => "display setting",
+            Self::SetAxisOverrides { .. } => "axis setting",
+            Self::UpdateDatasetProcessing { .. } => "data processing",
+            Self::MoveResizeObject { .. }
+            | Self::SetObjectFrames { .. }
+            | Self::ArrangeObjects { .. } => "object layout",
+            Self::SetDataBinding { .. } => "plot data",
+            Self::SetChartType { .. } => "chart type",
+            Self::SetStackSpec { .. } => "stack setting",
+            Self::SetCanvasSize { .. } | Self::SetPageLayout { .. } => "page layout",
+            _ => "edit",
+        }
+    }
+
     fn is_noop(&self) -> bool {
         match self {
             Self::Composite(actions) => actions.iter().all(Self::is_noop),
@@ -469,6 +513,7 @@ impl Action {
             // Inserting or removing a bookmark always changes the list.
             Self::BoardViewInsert { .. } | Self::BoardViewRemove { .. } => false,
             Self::SetDataBinding { before, after, .. } => before == after,
+            Self::SetSeriesPresentation { before, after, .. } => before == after,
             Self::SetAxisOverrides { before, after, .. } => before == after,
             Self::SetChartType { before, after, .. } => before == after,
             Self::SetStackSpec { before, after, .. } => before == after,

@@ -33,6 +33,7 @@ impl PanelRoute {
         match self {
             Self::SecondarySidebar => &[
                 panel::CONTOUR_SECTION,
+                panel::HEATMAP_SECTION,
                 panel::LINE_SECTION,
                 panel::AXIS_SECTION,
                 panel::STACK_SECTION,

@@ -17,6 +17,7 @@ pub mod canvas;
 pub mod contour;
 pub mod export_dpi;
 pub mod group_delay;
+pub mod heatmap;
 pub mod ilt;
 pub mod line;
 mod model;
@@ -74,6 +75,9 @@ pub(crate) static GROUPS: &[PropertyProviderGroup] = &[
     },
     PropertyProviderGroup {
         provider: &group_delay::PROVIDER,
+    },
+    PropertyProviderGroup {
+        provider: &heatmap::PROVIDER,
     },
     PropertyProviderGroup {
         provider: &ilt::PROVIDER,
@@ -217,6 +221,10 @@ mod step_tests;
 #[cfg(test)]
 #[path = "scope_tests.rs"]
 mod scope_tests;
+
+#[cfg(test)]
+#[path = "heatmap_tests.rs"]
+mod heatmap_tests;
 
 #[cfg(test)]
 #[path = "apodization_tests.rs"]

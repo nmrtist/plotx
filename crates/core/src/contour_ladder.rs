@@ -24,16 +24,18 @@ pub(crate) struct ContourLadder {
 /// policy never produces a signed absolute value, and the caller applies its
 /// half's sign to the returned magnitudes.
 ///
-/// An unusable base is handled according to *where the base came from*, because
-/// the two cases mean opposite things:
+/// A base that cannot produce a crossing is handled according to *why*:
 ///
-/// - A base a policy *derived* — most often a zero scale estimate on a flat or
-///   ideal synthetic grid — is not something the user typed, and would otherwise
-///   leave a permanently blank plot with no indication of why. It falls back to
-///   a base derived from the spec the user actually selected, never to a hidden
-///   peak fraction, so `count` and `ratio` still control the output. A fallback
-///   that is itself unusable (a non-finite peak, or a ratio ladder that
-///   overflows) draws nothing.
+/// - A positive base at or above this half's peak means the threshold has
+///   deliberately excluded that half. It draws nothing for every policy. In
+///   particular, raising a shared signed ladder past the weaker half must not
+///   wrap that half around to a new ladder near zero.
+/// - A base a policy could not derive — most often a zero scale estimate on a
+///   flat or ideal synthetic grid — is not a threshold at all. It falls back to
+///   a base derived from the spec the user selected, never to a hidden peak
+///   fraction, so `count` and `ratio` still control the output. A fallback that
+///   is itself unusable (a non-finite peak, or a ratio ladder that overflows)
+///   draws nothing.
 /// - [`ContourBasePolicy::Absolute`] *is* the user's explicit input, the
 ///   strongest term of the value-resolution order. Rewriting it would silently
 ///   draw a ladder at levels the user never asked for, so it is obeyed
@@ -45,17 +47,27 @@ pub(crate) fn contour_level_ladder(
     level: &ContourLevelSpec,
 ) -> ContourLadder {
     let usable = |value: f64| value.is_finite() && value > 0.0 && value < peak;
+    let positive_base = base > 0.0;
     let base = if usable(base) {
         base
-    } else if matches!(level.base, ContourBasePolicy::Absolute(_)) {
-        // `Absolute` wraps a `PositiveFiniteF64`, and both callers reject a
-        // non-positive peak before reaching here, so the only way an explicit
-        // threshold is unusable is that it sits at or above the peak. The
-        // comparison is still written out rather than assumed, so a future
-        // caller with a non-finite peak reports nothing instead of a bad number.
+    } else if positive_base {
+        // A positive threshold at or above the peak is a valid request for an
+        // empty half, not a failed derivation. Only an explicit absolute value
+        // is reported as unreachable; a raised noise/background multiple may
+        // legitimately suppress the weaker sign without an error message.
         return ContourLadder {
             levels: Vec::new(),
-            threshold_above_peak: (base >= peak).then_some(base),
+            threshold_above_peak: (matches!(level.base, ContourBasePolicy::Absolute(_))
+                && base >= peak)
+                .then_some(base),
+        };
+    } else if matches!(level.base, ContourBasePolicy::Absolute(_)) {
+        // `Absolute` always wraps a positive finite number today. Keep a
+        // defensive empty result if that invariant ever changes rather than
+        // inventing a replacement for explicit input.
+        return ContourLadder {
+            levels: Vec::new(),
+            threshold_above_peak: None,
         };
     } else if level.count == 1 {
         // One level always means one visible, interior contour: a lone level at

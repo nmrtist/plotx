@@ -65,6 +65,29 @@ fn every_derived_default_read_reports_a_reset_target() {
     use crate::state::{CanvasObject, CanvasObjectKind, TextBox};
 
     let (mut app, series) = super::contour_app();
+    let plot_id: crate::state::ObjectId = series
+        .resource
+        .local_id
+        .as_deref()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let heatmap_series = {
+        let plot = app.doc.canvases[0]
+            .object_mut(plot_id)
+            .and_then(|object| object.plot_mut())
+            .unwrap();
+        let id = plot.allocate_series_id();
+        let mut binding = plot.binding.series[0].clone();
+        binding.id = id;
+        binding.encoding =
+            plotx_figure::SeriesEncoding::Heatmap(plotx_figure::HeatmapSpec::default());
+        plot.binding.series.push(binding);
+        id
+    };
+    let heatmap = app
+        .series_target(0, plot_id, heatmap_series)
+        .expect("heatmap target");
     let canvas = &mut app.doc.canvases[0];
     let text_id = canvas.allocate_object_id();
     canvas.objects.push(CanvasObject {
@@ -76,14 +99,16 @@ fn every_derived_default_read_reports_a_reset_target() {
         group: None,
         kind: CanvasObjectKind::Text(TextBox::label("derived default".to_owned())),
     });
-    let object = crate::automation::TargetRef::resource(series.resource);
+    let object = crate::automation::TargetRef::resource(series.resource.clone());
     let text = app.object_target(0, text_id).expect("text target");
     let application = app.app_target();
     for definition in catalog()
         .iter()
         .filter(|definition| matches!(&definition.default_policy, DefaultPolicy::Derived))
     {
-        let target = if definition.scope_kind == ScopeKind::App {
+        let target = if definition.applicability.encoding == Some(EncodingKind::Heatmap) {
+            heatmap.clone()
+        } else if definition.scope_kind == ScopeKind::App {
             application.clone()
         } else if matches!(
             definition.id,

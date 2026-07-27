@@ -130,6 +130,7 @@ fn property_sections(app: &mut PlotxApp, ci: usize, include_axes: bool, ui: &mut
         crate::ui::properties::panel::axis_section(app, ci, &objects, ui);
     }
     crate::ui::properties::panel::contour_section(app, ci, &objects, ui);
+    crate::ui::properties::panel::heatmap_section(app, ci, &objects, ui);
     crate::ui::properties::panel::line_section(app, ci, &objects, ui);
     crate::ui::properties::panel::typography_section(app, ui);
 }

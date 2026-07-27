@@ -21,6 +21,7 @@ use plotx_core::properties::{
     PropertyId, PropertyStep, ScopeKind, Tier, ValueCopies, ValueSchema,
 };
 use plotx_core::state::PlotxApp;
+use plotx_figure::{HeatmapSpec, SeriesEncoding};
 
 /// A property registered nowhere but here. It shares the contour section's
 /// home, which is the ordinary case: a new setting joins a group that already
@@ -92,7 +93,7 @@ fn one_registration_joins_its_group_without_a_second_entry() {
         "membership is derived, so it grows with the table and nothing else"
     );
     // The group table itself is untouched: the newcomer contributed no entry.
-    assert_eq!(GROUPS.len(), 24);
+    assert_eq!(GROUPS.len(), 25);
 }
 
 /// Channel 3: the gesture picks up whichever property declared itself
@@ -105,6 +106,27 @@ fn one_registration_claims_the_canvas_gesture() {
         Some(NEWCOMER.id),
         "a property that declares the gesture drives it with no further wiring"
     );
+}
+
+#[test]
+fn overlaid_display_encodings_are_reported_as_ambiguous() {
+    let (mut app, objects) = crate::ui::properties::fixture::contour_page(1);
+    let object = objects[0];
+    let plot = app.doc.canvases[0]
+        .object_mut(object)
+        .and_then(|object| object.plot_mut())
+        .unwrap();
+    let mut heatmap = plot.binding.series[0].clone();
+    heatmap.id = plot.allocate_series_id();
+    heatmap.encoding = SeriesEncoding::Heatmap(HeatmapSpec::default());
+    plot.binding.series.push(heatmap);
+
+    let discovery::CanvasStepTarget::Ambiguous { labels } =
+        discovery::canvas_step_target(&app, 0, object)
+    else {
+        panic!("contour + heatmap must not acquire an implicit wheel priority");
+    };
+    assert_eq!(labels, vec!["Lowest level", "Colour range"]);
 }
 
 /// Every declared group has a Ribbon button, a menu entry and a palette hit —
@@ -194,20 +216,23 @@ fn every_home_section_has_a_group_or_the_explicit_preferences_entry() {
     }
 }
 
-/// The gesture drives one setting at a time. Two steppable properties would
-/// make `+` mean different things depending on table order, which is precisely
-/// the kind of hidden ambiguity a derived channel must not introduce.
+/// One encoding exposes at most one direct display-sensitivity setting. An
+/// overlay may expose one per encoding; runtime discovery reports that as
+/// ambiguous instead of choosing by table order.
 #[test]
-fn at_most_one_property_claims_the_canvas_gesture() {
-    let claiming: Vec<&str> = PRESENTATIONS
-        .iter()
-        .filter(|entry| entry.canvas_step)
-        .map(|entry| entry.id.as_str())
-        .collect();
-    assert!(
-        claiming.len() <= 1,
-        "these properties all claim the `+`/`-` gesture: {claiming:?}"
-    );
+fn at_most_one_property_per_encoding_claims_display_sensitivity() {
+    let mut claiming = Vec::new();
+    for entry in PRESENTATIONS.iter().filter(|entry| entry.canvas_step) {
+        let encoding = entry
+            .definition()
+            .and_then(|definition| definition.applicability.encoding)
+            .expect("a canvas display gesture belongs to an encoding");
+        assert!(
+            !claiming.iter().any(|(claimed, _)| *claimed == encoding),
+            "encoding {encoding:?} has more than one display-sensitivity property"
+        );
+        claiming.push((encoding, entry.id));
+    }
 }
 
 /// The gesture is registered as a command, so it is searchable, appears in

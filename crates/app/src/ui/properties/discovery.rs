@@ -72,6 +72,59 @@ pub(crate) fn steppable_in(
     presentations.iter().find(|entry| entry.canvas_step)
 }
 
+/// Resolution of the display setting addressed by a wheel gesture over one
+/// plot body.
+///
+/// Multiple series of the same encoding remain one target with several
+/// recipients. Different steppable properties are ambiguous: an overlaid
+/// contour and heatmap must never depend on a hidden priority rule.
+#[derive(Clone, Debug)]
+pub(crate) enum CanvasStepTarget {
+    None,
+    Unique {
+        property: PropertyId,
+        label: &'static str,
+        targets: Vec<TargetRef>,
+    },
+    Ambiguous {
+        labels: Vec<&'static str>,
+    },
+}
+
+pub(crate) fn canvas_step_target(
+    app: &PlotxApp,
+    canvas: usize,
+    object: ObjectId,
+) -> CanvasStepTarget {
+    let targets = app.series_targets(canvas, object);
+    let mut candidates = PRESENTATIONS
+        .iter()
+        .filter(|entry| entry.canvas_step)
+        .filter_map(|entry| {
+            let applicable = app
+                .resolve_property_set(entry.id, &targets)
+                .applicable_targets
+                .into_iter()
+                .map(|address| address.target)
+                .collect::<Vec<_>>();
+            (!applicable.is_empty()).then_some((entry.id, entry.localized_label.get(), applicable))
+        });
+    let Some((property, label, targets)) = candidates.next() else {
+        return CanvasStepTarget::None;
+    };
+    let rest: Vec<_> = candidates.collect();
+    if rest.is_empty() {
+        return CanvasStepTarget::Unique {
+            property,
+            label,
+            targets,
+        };
+    }
+    let mut labels = vec![label];
+    labels.extend(rest.into_iter().map(|(_, label, _)| label));
+    CanvasStepTarget::Ambiguous { labels }
+}
+
 /// What to say when the only plots a setting applies to are locked. It names
 /// the state and the way out, per the crate's hide-vs-disable rule.
 pub(crate) const LOCKED_REASON: &str =

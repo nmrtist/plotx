@@ -124,6 +124,14 @@ impl PlotxApp {
             } => {
                 self.set_object_binding(*canvas, *object, after);
             }
+            Action::SetSeriesPresentation {
+                canvas,
+                object,
+                after,
+                ..
+            } => {
+                self.set_object_presentation(*canvas, *object, after);
+            }
             Action::SetChartType {
                 canvas,
                 object,
@@ -245,6 +253,7 @@ impl PlotxApp {
                     }
                     self.reset_interaction();
                     self.session.ui.wheel_zoom = None;
+                    self.session.ui.wheel_property = None;
                     self.session.ui.selection = Selection::None;
                     self.session.ui.panel_note_inline_edit = None;
                     self.session.ui.panel_note_edit = None;

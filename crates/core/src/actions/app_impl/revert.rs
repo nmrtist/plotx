@@ -124,6 +124,14 @@ impl PlotxApp {
             } => {
                 self.set_object_binding(*canvas, *object, before);
             }
+            Action::SetSeriesPresentation {
+                canvas,
+                object,
+                before,
+                ..
+            } => {
+                self.set_object_presentation(*canvas, *object, before);
+            }
             Action::SetChartType {
                 canvas,
                 object,

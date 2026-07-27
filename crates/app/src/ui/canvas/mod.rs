@@ -1,5 +1,5 @@
 use egui::{Color32, Pos2, Rect as EguiRect, Sense, Stroke, StrokeKind, Ui, Vec2};
-use plotx_core::actions::{Action, PendingViewportEdit};
+use plotx_core::actions::{Action, PendingViewportEdit, PendingWheelPropertyEdit};
 use plotx_core::layout::{self, MovableEdges, SnapGuide, SnapTargets};
 use plotx_core::state::region_color;
 use plotx_core::state::{
@@ -232,6 +232,7 @@ pub fn render_central(app: &mut PlotxApp, ui: &mut Ui) {
     paint_panel_label_selection(app, ci, rect, &painter, chrome);
     paint_object_selection(app, ci, rect, page, &painter, chrome);
     paint_property_readouts(app, ci, rect, &painter, chrome, ui.visuals().dark_mode);
+    paint_wheel_target_hint(app, ci, rect, ui, &painter, chrome, ui.visuals().dark_mode);
     paint_tile_ghost(app, &painter, chrome);
     paint_tile_preview(app, rect, &painter, chrome);
     super::canvas_size::page_size_chrome(app, ci, page, rect, ui);

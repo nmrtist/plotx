@@ -304,8 +304,9 @@ fn handle_escape(app: &mut PlotxApp, now: f64) {
         return;
     }
 
-    if app.session.ui.wheel_zoom.is_some() {
+    if app.session.ui.wheel_zoom.is_some() || app.session.ui.wheel_property.is_some() {
         app.finish_pending_wheel_zoom(now, true);
+        app.finish_pending_wheel_property(now, true);
         app.session.status = "Cancelled interaction.".to_owned();
         return;
     }
@@ -576,5 +577,24 @@ mod tests {
 
         assert_eq!(app.session.tool, Tool::BrowseZoom);
         assert_eq!(app.session.status, "Exited tool mode.");
+    }
+
+    #[test]
+    fn escape_finishes_a_pending_wheel_property_gesture() {
+        let mut app = PlotxApp::new_with_settings(plotx_core::settings::Settings::default());
+        app.session.ui.wheel_property = Some(plotx_core::actions::PendingWheelPropertyEdit {
+            canvas: 0,
+            object: plotx_core::state::ObjectId::new(1),
+            property: plotx_core::properties::contour::BASE_MAGNITUDE,
+            targets: Vec::new(),
+            accumulator: 0.0,
+            last_input_time: 0.0,
+            gesture_started: false,
+        });
+
+        handle_escape(&mut app, 1.0);
+
+        assert!(app.session.ui.wheel_property.is_none());
+        assert_eq!(app.session.status, "Cancelled interaction.");
     }
 }

@@ -65,6 +65,7 @@ export default defineConfig({
 					items: [
 						{ slug: 'guides/layout-and-export' },
 						{ slug: 'guides/contour-levels' },
+						{ slug: 'guides/heatmap-range' },
 						{ slug: 'guides/annotations' },
 						{ slug: 'guides/exporting' },
 						{ slug: 'guides/present-mode' },

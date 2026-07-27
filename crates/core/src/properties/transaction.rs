@@ -614,7 +614,7 @@ impl BindingPlan {
             .into_iter()
             .filter(|(_, _, before, after)| before != after)
             .map(|(canvas, object, before, after)| {
-                Action::set_data_binding(canvas, object, before, after)
+                Action::set_series_presentation(canvas, object, before, after)
             })
             .collect()
     }

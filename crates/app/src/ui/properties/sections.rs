@@ -36,6 +36,29 @@ pub(crate) fn contour_section(
     )
 }
 
+/// Render scalar heatmap display-range properties over the current selection.
+pub(crate) fn heatmap_section(
+    app: &mut PlotxApp,
+    canvas: usize,
+    objects: &[ObjectId],
+    ui: &mut Ui,
+) -> bool {
+    let targets: Vec<TargetRef> = objects
+        .iter()
+        .flat_map(|&object| app.series_targets(canvas, object))
+        .collect();
+    render_section(
+        app,
+        HEATMAP_SECTION,
+        "Heatmap",
+        SectionNoun::new("heatmap series", "heatmap series"),
+        &targets,
+        Some(EncodingKind::Heatmap),
+        SectionLayout::Standard,
+        ui,
+    )
+}
+
 /// Render line properties over the current plot selection.
 pub(crate) fn line_section(
     app: &mut PlotxApp,
@@ -476,13 +499,19 @@ fn render_section(
             });
     }
 
-    if let Some(encoding) = reset_encoding
-        && ui
-            .small_button("Reset contour")
+    if let Some(encoding) = reset_encoding {
+        let label = match encoding {
+            EncodingKind::Contour => "Reset contour",
+            EncodingKind::Heatmap => "Reset heatmap",
+            _ => "Reset series style",
+        };
+        if ui
+            .small_button(label)
             .on_hover_text("Rebuild this series' encoding from its defaults")
             .clicked()
-    {
-        pending = Some(Pending::ResetEncoding(encoding));
+        {
+            pending = Some(Pending::ResetEncoding(encoding));
+        }
     }
 
     // The reveal is one-shot: once the section has been drawn with the row in

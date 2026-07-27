@@ -183,6 +183,7 @@ pub fn render(
 
     let now = ctx.input(|i| i.time);
     app.finish_pending_wheel_zoom(now, false);
+    app.finish_pending_wheel_property(now, false);
 }
 
 fn copy_table_export(ctx: &egui::Context, payload: plotx_core::data_export::ClipboardExport) {

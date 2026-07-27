@@ -2,8 +2,8 @@
 
 use super::*;
 
-/// A panel edit must reach the document as the ordinary typed binding action,
-/// so it undoes, redoes and rebuilds like every other binding change.
+/// A panel edit must reach the document as the typed series-presentation
+/// action, so it undoes and redoes without resetting the spatial viewport.
 #[test]
 fn an_edit_compiles_into_a_typed_binding_action() {
     let (mut app, target) = contour_app();
@@ -21,7 +21,7 @@ fn an_edit_compiles_into_a_typed_binding_action() {
         panic!("a commit is always one atomic composite");
     };
     assert_eq!(actions.len(), 1);
-    assert!(matches!(actions[0], Action::SetDataBinding { .. }));
+    assert!(matches!(actions[0], Action::SetSeriesPresentation { .. }));
 
     app.commit_property(commit);
     let after = contour_spec(&app, &target);

@@ -1,4 +1,5 @@
 use super::*;
+use crate::actions::PendingWheelPropertyEdit;
 use crate::operation::{OperationHistory, OperationId, OperationReport};
 use std::collections::HashSet;
 use std::ops::{Deref, DerefMut};
@@ -292,6 +293,7 @@ pub struct UiState {
     /// Which table column the Peaks tool targets (ignored by single-trace domains).
     pub peak_column: Option<plotx_data::ColumnId>,
     pub wheel_zoom: Option<PendingViewportEdit>,
+    pub wheel_property: Option<PendingWheelPropertyEdit>,
     pub canvas_size_edit: Option<PendingCanvasSizeEdit>,
     pub page_layout_edit: Option<PendingPageLayoutEdit>,
     pub processing_session: Option<PendingProcessingEdit>,
@@ -473,6 +475,7 @@ impl Default for UiState {
             analysis_selection: None,
             peak_column: None,
             wheel_zoom: None,
+            wheel_property: None,
             canvas_size_edit: None,
             page_layout_edit: None,
             processing_session: None,

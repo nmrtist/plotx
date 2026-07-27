@@ -34,9 +34,10 @@ the cursor, or on the board when the cursor is over empty space.
 
 | Input | Action |
 | --- | --- |
-| Scroll wheel / pinch | Zoom the plot under the cursor (both axes) |
-| `Shift` + scroll | Zoom the x axis only |
-| `Alt` + scroll | Zoom the y axis only |
+| Scroll over a plot body | Zoom the x axis of a 1D plot; both axes of a 2D plot |
+| Pinch over a plot | Zoom both axes, whatever the plot draws |
+| `Alt` + scroll over a plot body | Change what the plot shows: y intensity on a 1D plot, the lowest contour level, or a heatmap's colour range |
+| `Alt` + drag over a plot body | Rubber-band a box to zoom into, in any tool |
 | Scroll over an axis strip | Zoom that axis only |
 | `Ctrl` + scroll / pinch | Zoom the board instead of the plot |
 | Middle-drag or `Space` + drag | Pan the plot (the board when over empty space or holding `Ctrl`) |
@@ -45,6 +46,13 @@ the cursor, or on the board when the cursor is over empty space.
 | Double-click an axis strip | Reset that axis only |
 | `F` | Zoom the board to fit the selected frames (everything when nothing is selected) |
 | `Enter` | Zoom the board to the selected page or sheet |
+
+Hovering a plot body or an axis strip outlines the area the wheel will act on
+and names the action in its top-left corner, including which setting `Alt` +
+scroll would change and on how many series. Where one plot draws two things
+with display settings of their own — contours over a heatmap — `Alt` + scroll
+does nothing rather than guessing which you meant; change the layer you want
+from the Object inspector.
 
 ## Selection and editing
 

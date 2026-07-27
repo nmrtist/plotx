@@ -100,10 +100,7 @@ fn a_half_with_no_signal_of_its_sign_is_not_a_threshold_problem() {
 }
 
 #[test]
-fn a_policy_base_above_the_peak_falls_back_to_the_selected_ladder_span() {
-    // A degenerate (zero) noise estimate is not something the user typed, so it
-    // still falls back to the ladder the spec selected — and that fallback is a
-    // successful resolution, never a threshold report.
+fn a_policy_base_above_the_peak_suppresses_that_half_without_wrapping_to_zero() {
     let spec = ContourSpec {
         positive: ContourLevelSpec {
             base: ContourBasePolicy::NoiseFloor {
@@ -114,7 +111,15 @@ fn a_policy_base_above_the_peak_falls_back_to_the_selected_ladder_span() {
             count: 3,
             ratio: PositiveFiniteF64::new(1.5).unwrap(),
         },
-        negative: None,
+        negative: Some(ContourLevelSpec {
+            base: ContourBasePolicy::NoiseFloor {
+                multiplier: PositiveFiniteF64::new(5.0).unwrap(),
+                peak_fraction: plotx_figure::UnitInterval::new(0.0).expect("a zero floor is valid"),
+                estimator: EstimatorSelection::FollowLatest,
+            },
+            count: 3,
+            ratio: PositiveFiniteF64::new(1.5).unwrap(),
+        }),
         style: ContourStyle::default(),
     };
     let ContourResolution::Ready {
@@ -122,7 +127,7 @@ fn a_policy_base_above_the_peak_falls_back_to_the_selected_ladder_span() {
         unreachable,
     } = resolve_contour_levels(source(32, 1, 1), &spec, summary(), |_| {
         Some(EstimateResult::Scale(ScaleEstimate {
-            scale: EstimatedScale::Degenerate,
+            scale: EstimatedScale::new(3.0).expect("positive scale"),
             provenance: EstimateProvenance {
                 estimator: plotx_analysis::robust::ROBUST_DIFFERENCE_MAD_ID.to_owned(),
                 version: plotx_analysis::robust::ROBUST_DIFFERENCE_MAD_VERSION,
@@ -132,12 +137,60 @@ fn a_policy_base_above_the_peak_falls_back_to_the_selected_ladder_span() {
     else {
         panic!("the estimate is supplied, so resolution is not pending");
     };
-    assert_eq!(levels.positive.len(), 3);
-    assert!((levels.positive[0].get() - 10.0 / 1.5f64.powi(2)).abs() < 1e-9);
+    assert!(levels.positive.is_empty());
+    assert!(levels.negative.is_empty());
     assert!(
         unreachable.is_empty(),
-        "a policy that recovered drew levels; there is nothing to explain: {unreachable:?}"
+        "a raised derived threshold is a valid suppression request, not a mistyped absolute value"
     );
+}
+
+#[test]
+fn raising_a_shared_policy_past_only_the_weaker_half_never_reveals_negative_levels() {
+    let level = ContourLevelSpec {
+        base: ContourBasePolicy::NoiseFloor {
+            multiplier: PositiveFiniteF64::new(6.0).unwrap(),
+            peak_fraction: plotx_figure::UnitInterval::new(0.0).expect("a zero floor is valid"),
+            estimator: EstimatorSelection::FollowLatest,
+        },
+        count: 3,
+        ratio: PositiveFiniteF64::new(1.5).unwrap(),
+    };
+    let spec = ContourSpec {
+        positive: level.clone(),
+        negative: Some(level),
+        style: ContourStyle::default(),
+    };
+    let asymmetric = FieldSummary {
+        min: finite(-5.0),
+        max: finite(20.0),
+    };
+    let ContourResolution::Ready {
+        levels,
+        unreachable,
+    } = resolve_contour_levels(source(33, 1, 1), &spec, asymmetric, |_| {
+        Some(EstimateResult::Scale(ScaleEstimate {
+            scale: EstimatedScale::new(1.0).expect("positive scale"),
+            provenance: EstimateProvenance {
+                estimator: plotx_analysis::robust::ROBUST_DIFFERENCE_MAD_ID.to_owned(),
+                version: plotx_analysis::robust::ROBUST_DIFFERENCE_MAD_VERSION,
+            },
+        }))
+    })
+    else {
+        panic!("the estimate is supplied, so resolution is not pending");
+    };
+
+    assert_eq!(
+        levels.positive.first().map(|level| level.get()),
+        Some(6.0),
+        "the stronger positive half keeps the raised threshold"
+    );
+    assert!(
+        levels.negative.is_empty(),
+        "a threshold above the negative peak must remove negative contours instead of generating a replacement ladder"
+    );
+    assert!(unreachable.is_empty());
 }
 
 /// A 4×4 plane whose real values run 0..=10 and never go negative: the positive

@@ -90,6 +90,17 @@ pub(crate) const GROUPS: &[PropertyGroup] = &[
         unavailable_reason: "Select a plot whose series draws contours before changing contour levels.",
     },
     PropertyGroup {
+        section: panel::HEATMAP_SECTION,
+        label: LocalizedText("Heatmap"),
+        icon: egui_phosphor::regular::GRID_FOUR,
+        ribbon: RibbonSpot {
+            tab: WorkflowTab::Figure,
+            group: "Style",
+            priority: 2,
+        },
+        unavailable_reason: "Select a plot whose series draws a scalar heatmap before changing its colour range.",
+    },
+    PropertyGroup {
         section: panel::LINE_SECTION,
         label: LocalizedText("Line"),
         icon: egui_phosphor::regular::LINE_SEGMENT,

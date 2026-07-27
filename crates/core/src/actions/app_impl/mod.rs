@@ -35,29 +35,35 @@ impl PlotxApp {
     }
 
     pub fn undo(&mut self) {
+        self.finish_pending_wheel_zoom(f64::INFINITY, true);
+        self.finish_pending_wheel_property(f64::INFINITY, true);
         self.finish_axis_overrides_edit();
         self.reset_interaction();
         let Some(action) = self.session.undo_stack.pop() else {
             return;
         };
+        let label = action.undo_label();
         self.revert_action(&action);
         self.session.redo_stack.push(action);
         self.doc.dirty = true;
         self.doc.automation_revision = self.doc.automation_revision.saturating_add(1);
-        self.session.status = "Undid last edit.".to_owned();
+        self.session.status = format!("Undid {label}.");
     }
 
     pub fn redo(&mut self) {
+        self.finish_pending_wheel_zoom(f64::INFINITY, true);
+        self.finish_pending_wheel_property(f64::INFINITY, true);
         self.finish_axis_overrides_edit();
         self.reset_interaction();
         let Some(action) = self.session.redo_stack.pop() else {
             return;
         };
+        let label = action.undo_label();
         self.apply_action(&action);
         self.session.undo_stack.push(action);
         self.doc.dirty = true;
         self.doc.automation_revision = self.doc.automation_revision.saturating_add(1);
-        self.session.status = "Redid edit.".to_owned();
+        self.session.status = format!("Redid {label}.");
     }
 
     pub fn can_undo(&self) -> bool {
@@ -73,6 +79,7 @@ impl PlotxApp {
         self.session.redo_stack.clear();
         self.reset_interaction();
         self.session.ui.wheel_zoom = None;
+        self.session.ui.wheel_property = None;
         self.session.ui.canvas_size_edit = None;
         self.session.ui.processing_session = None;
         self.session.ui.property_gesture = None;
@@ -106,6 +113,26 @@ impl PlotxApp {
                 pending.before,
                 object.viewport.clone(),
             );
+        }
+    }
+
+    pub fn finish_pending_wheel_property(&mut self, now: f64, force: bool) {
+        let Some(pending) = self.session.ui.wheel_property.as_ref() else {
+            return;
+        };
+        if !force && now - pending.last_input_time < 0.18 {
+            return;
+        }
+        let gesture_started = pending.gesture_started;
+        let deferred_contour =
+            gesture_started && pending.property == crate::properties::contour::BASE_MAGNITUDE;
+        let target = (pending.canvas, pending.object);
+        self.session.ui.wheel_property = None;
+        if gesture_started {
+            self.end_property_gesture();
+        }
+        if deferred_contour {
+            self.rebuild_plot_presentation(target.0, target.1);
         }
     }
     pub fn set_object_frame(&mut self, canvas: usize, object: ObjectId, frame: ObjectFrame) {
@@ -306,6 +333,87 @@ impl PlotxApp {
     }
 
     fn set_object_binding(&mut self, canvas: usize, object: ObjectId, binding: &DataBinding) {
+        self.set_object_binding_with_viewport(canvas, object, binding, false);
+    }
+
+    fn set_object_presentation(&mut self, canvas: usize, object: ObjectId, binding: &DataBinding) {
+        // A contour wheel gesture can emit many catalog commits in a fraction
+        // of a second. Persist every value for accurate readout/undo, but retain
+        // the last complete geometry and rebuild only once when the gesture
+        // closes. This bounds background work without weakening ordinary panel
+        // edits or starving other plots that share the same source field.
+        let defer_contour = self
+            .session
+            .ui
+            .wheel_property
+            .as_ref()
+            .is_some_and(|pending| {
+                pending.canvas == canvas
+                    && pending.object == object
+                    && pending.gesture_started
+                    && pending.property == crate::properties::contour::BASE_MAGNITUDE
+            });
+        if defer_contour {
+            if let Some(plot) = self
+                .doc
+                .canvases
+                .get_mut(canvas)
+                .and_then(|canvas| canvas.object_mut(object))
+                .and_then(|object| object.plot_mut())
+            {
+                plot.binding = binding.clone();
+            }
+            return;
+        }
+        self.set_object_binding_with_viewport(canvas, object, binding, true);
+    }
+
+    fn rebuild_plot_presentation(&mut self, canvas: usize, object: ObjectId) {
+        let Some((binding, chart, stack, projections, frame, previous_contours)) = self
+            .doc
+            .canvases
+            .get(canvas)
+            .and_then(|canvas| canvas.object(object))
+            .and_then(|object| {
+                let plot = object.plot()?;
+                Some((
+                    plot.binding.clone(),
+                    plot.chart.clone(),
+                    plot.stack,
+                    plot.projections.clone(),
+                    object.frame,
+                    plot.figure().contours.clone(),
+                ))
+            })
+        else {
+            return;
+        };
+        let size = [
+            frame.width / crate::state::MM_TO_PT,
+            frame.height / crate::state::MM_TO_PT,
+        ];
+        let mut figure = self.build_object_figure(&binding, &chart, &stack, &projections, size);
+        if figure.contours.len() < previous_contours.len() {
+            figure.contours = previous_contours;
+        }
+        if let Some(plot) = self
+            .doc
+            .canvases
+            .get_mut(canvas)
+            .and_then(|canvas| canvas.object_mut(object))
+            .and_then(|object| object.plot_mut())
+        {
+            plot.preserve_viewport_on_rebuild(figure);
+        }
+    }
+
+    fn set_object_binding_with_viewport(
+        &mut self,
+        canvas: usize,
+        object: ObjectId,
+        binding: &DataBinding,
+        preserve_viewport: bool,
+    ) {
         let Some(o) = self
             .doc
             .canvases
@@ -334,7 +442,11 @@ impl PlotxApp {
             .and_then(|c| c.object_mut(object))
             .and_then(|o| o.plot_mut())
         {
-            plot.reset_viewport_on_rebuild(fig);
+            if preserve_viewport {
+                plot.preserve_viewport_on_rebuild(fig);
+            } else {
+                plot.reset_viewport_on_rebuild(fig);
+            }
         }
     }
 

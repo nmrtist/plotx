@@ -100,6 +100,11 @@ pub(super) fn validate_action(
         | Action::MoveResizeObject { canvas, object, .. }
         | Action::SetPanelMeta { canvas, object, .. }
         | Action::SetObjectFlags { canvas, object, .. }
+        | Action::SetDataBinding { canvas, object, .. }
+        | Action::SetSeriesPresentation { canvas, object, .. }
+        | Action::SetChartType { canvas, object, .. }
+        | Action::SetStackSpec { canvas, object, .. }
+        | Action::SetAxisProjections { canvas, object, .. }
         | Action::SetObjectText { canvas, object, .. }
         | Action::RenameObject { canvas, object, .. } => {
             let valid = app
