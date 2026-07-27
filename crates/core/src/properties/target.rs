@@ -24,6 +24,10 @@ pub(crate) fn document_target() -> TargetRef {
     })
 }
 
+pub(crate) fn canvas_target(id: CanvasId) -> TargetRef {
+    TargetRef::resource(ResourceRef::from(id))
+}
+
 pub(crate) fn app_target() -> TargetRef {
     TargetRef::resource(ResourceRef {
         id: crate::automation::APP_RESOURCE_ID.to_owned(),
@@ -31,6 +35,31 @@ pub(crate) fn app_target() -> TargetRef {
         parent_id: None,
         local_id: None,
     })
+}
+
+pub(crate) fn require_canvas_target(
+    app: &PlotxApp,
+    target: &TargetRef,
+    definition: &'static PropertyDefinition,
+) -> Result<CanvasId, PropertyError> {
+    let actual = ComponentKind::of(target.component.as_ref());
+    if actual != ComponentKind::None {
+        return Err(PropertyError::ComponentKind {
+            property: definition.id,
+            expected: ComponentKind::None.as_str(),
+            actual: actual.as_str(),
+        });
+    }
+    if target.resource.kind.0 != crate::automation::KIND_CANVAS {
+        return Err(PropertyError::NotApplicable(format!(
+            "{} belongs to a canvas, not {}",
+            definition.canonical_label, target.resource.id
+        )));
+    }
+    let unknown = || PropertyError::UnknownTarget(target.resource.id.clone());
+    let id = CanvasId::try_from(&target.resource).map_err(|_| unknown())?;
+    app.doc.canvas_index(id).ok_or_else(unknown)?;
+    Ok(id)
 }
 
 pub(crate) fn require_app_target(
@@ -186,6 +215,52 @@ pub(crate) fn canvas_object(
     Ok((canvas, object))
 }
 
+pub(crate) fn require_plot_object_target(
+    app: &PlotxApp,
+    target: &TargetRef,
+    definition: &'static PropertyDefinition,
+) -> Result<(usize, ObjectId), PropertyError> {
+    let actual = ComponentKind::of(target.component.as_ref());
+    if actual != ComponentKind::None {
+        return Err(PropertyError::ComponentKind {
+            property: definition.id,
+            expected: ComponentKind::None.as_str(),
+            actual: actual.as_str(),
+        });
+    }
+    let (canvas, object) = canvas_object(app, &target.resource)?;
+    app.doc.canvases[canvas]
+        .object(object)
+        .and_then(|object| object.plot())
+        .ok_or_else(|| {
+            PropertyError::NotApplicable(format!(
+                "{} belongs to a plot object",
+                definition.canonical_label
+            ))
+        })?;
+    Ok((canvas, object))
+}
+
+pub(crate) fn require_object_target(
+    app: &PlotxApp,
+    target: &TargetRef,
+    definition: &'static PropertyDefinition,
+) -> Result<(usize, ObjectId), PropertyError> {
+    let actual = ComponentKind::of(target.component.as_ref());
+    if actual != ComponentKind::None {
+        return Err(PropertyError::ComponentKind {
+            property: definition.id,
+            expected: ComponentKind::None.as_str(),
+            actual: actual.as_str(),
+        });
+    }
+    let (canvas, object) = canvas_object(app, &target.resource)?;
+    app.doc.canvases[canvas]
+        .object(object)
+        .ok_or_else(|| PropertyError::UnknownTarget(target.resource.id.clone()))?;
+    Ok((canvas, object))
+}
+
 pub(crate) fn series_targets(app: &PlotxApp, canvas: usize, object: ObjectId) -> Vec<TargetRef> {
     let Some(canvas_document) = app.doc.canvases.get(canvas) else {
         return Vec::new();
@@ -277,12 +352,33 @@ pub(crate) fn resolved_schema(
 ) -> ResolvedSchema {
     match definition.value_schema {
         ValueSchema::Bool => ResolvedSchema::Bool,
-        ValueSchema::Int { min, max } => ResolvedSchema::Int { min, max },
-        ValueSchema::Float { bounds, log, .. } => ResolvedSchema::Float {
-            bounds,
-            log,
+        ValueSchema::Text => ResolvedSchema::Text,
+        ValueSchema::Int { min, max } => ResolvedSchema::Int { min, max, unit: "" },
+        ValueSchema::IntWithDrag {
+            min,
+            max,
+            drag_step,
+        } => ResolvedSchema::IntWithDrag {
+            min,
+            max,
+            drag_step,
             unit: "",
         },
+        ValueSchema::SteppedInt {
+            min,
+            max,
+            step,
+            drag_step,
+        } => ResolvedSchema::SteppedInt {
+            min,
+            max,
+            step,
+            drag_step,
+            unit: "",
+        },
+        ValueSchema::Float {
+            bounds, display, ..
+        } => ResolvedSchema::Float { bounds, display },
         ValueSchema::Enum { .. } => ResolvedSchema::Enum {
             variants: permitted_variants(&definition.value_schema, capabilities),
         },

@@ -105,7 +105,9 @@ pub(crate) fn aggregate_property_summary(readouts: &[PropertyReadout]) -> Option
                 .iter()
                 .filter_map(|readout| match readout {
                     PropertyReadout::ContourBase(readout) => Some(*readout),
-                    PropertyReadout::Value(_) => None,
+                    PropertyReadout::Value(_)
+                    | PropertyReadout::ZeroFillTarget(_)
+                    | PropertyReadout::PhasePivotPpm { .. } => None,
                 })
                 .collect();
             if contours.len() != readouts.len() {
@@ -118,7 +120,7 @@ pub(crate) fn aggregate_property_summary(readouts: &[PropertyReadout]) -> Option
         }
         PropertyReadout::Value(value) => {
             if readouts.iter().all(|readout| readout == first) {
-                Some(value_summary(*value))
+                Some(value_summary(value))
             } else {
                 Some(format!(
                     "{} series — no single property value",
@@ -126,15 +128,33 @@ pub(crate) fn aggregate_property_summary(readouts: &[PropertyReadout]) -> Option
                 ))
             }
         }
+        PropertyReadout::ZeroFillTarget(readout) => {
+            if readouts.iter().all(|candidate| candidate == first) {
+                Some(format!("{} points", readout.points))
+            } else {
+                Some(format!(
+                    "{} steps — no single zero-fill target",
+                    readouts.len()
+                ))
+            }
+        }
+        PropertyReadout::PhasePivotPpm { ppm } => {
+            if readouts.iter().all(|candidate| candidate == first) {
+                Some(format!("{ppm:.3} ppm"))
+            } else {
+                Some(format!("{} steps — no single phase pivot", readouts.len()))
+            }
+        }
     }
 }
 
-fn value_summary(value: PropertyValue) -> String {
+fn value_summary(value: &PropertyValue) -> String {
     match value {
         PropertyValue::Bool(value) => value.to_string(),
+        PropertyValue::Text(value) => value.clone(),
         PropertyValue::Int(value) => value.to_string(),
-        PropertyValue::Float(value) => number(value),
-        PropertyValue::Enum(value) => value.to_owned(),
+        PropertyValue::Float(value) => number(*value),
+        PropertyValue::Enum(value) => (*value).to_owned(),
         PropertyValue::Color(color) => format!("#{:02x}{:02x}{:02x}", color.r, color.g, color.b),
     }
 }

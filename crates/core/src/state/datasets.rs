@@ -1,6 +1,11 @@
 use super::*;
 use std::sync::Arc;
 
+/// Factory rule shared by dataset construction, reset, and property defaults.
+pub(crate) fn default_group_delay_correct(domain: Domain) -> bool {
+    matches!(domain, Domain::Time)
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum PhaseDragKind {
     Pivot,
@@ -61,7 +66,7 @@ impl NmrDataset {
             Domain::Time => AxisPipeline::default_1d(),
             Domain::Frequency => AxisPipeline::frequency_1d(),
         };
-        let group_delay_correct = data.domain == Domain::Time;
+        let group_delay_correct = default_group_delay_correct(data.domain);
         let has_imaginary = data.domain == Domain::Time || data.points.iter().any(|v| v.im != 0.0);
         let base = fft::transform_base(&data, &pipeline, group_delay_correct);
         let spectrum = reapply(&base, &pipeline);
@@ -211,7 +216,7 @@ impl Nmr2DDataset {
             Domain::Time => Params2D::default_for(preset),
             Domain::Frequency => Params2D::frequency_domain(preset),
         };
-        let group_delay_correct = data.domain == Domain::Time;
+        let group_delay_correct = default_group_delay_correct(data.domain);
         let has_imaginary = data.domain == Domain::Time || data.data.iter().any(|v| v.im != 0.0);
         let base = process_2d(&data, &params);
         let processed = reapply_2d(&base, &params);
@@ -268,10 +273,27 @@ impl Nmr2DDataset {
     /// Rebuild `base` from the FID (a time-domain step or the layout changed) then
     /// re-derive the display result.
     pub fn retransform(&mut self) {
-        self.base = process_2d(&self.data, &self.params);
+        let data = self.processing_data();
+        self.base = process_2d(&data, &self.params);
         self.base_params = self.params.clone();
         self.base_stale = false;
         self.rebuild();
+    }
+
+    /// Input view for the 2D transform's existing unconditional direct-axis
+    /// delay removal.
+    ///
+    /// Keeping the switch here avoids a second FFT implementation: disabling
+    /// correction presents zero delay metadata to the same scientific kernel.
+    /// The uncommon disabled path owns one copy so the persisted acquisition
+    /// metadata remains untouched.
+    pub(crate) fn processing_data(&self) -> Arc<NmrData2D> {
+        if self.group_delay_correct {
+            return Arc::clone(&self.data);
+        }
+        let mut data = (*self.data).clone();
+        data.direct.group_delay = 0.0;
+        Arc::new(data)
     }
     /// A true-2D (contour) result, as opposed to a pseudo-2D stack of slices.
     pub fn is_true_2d(&self) -> bool {

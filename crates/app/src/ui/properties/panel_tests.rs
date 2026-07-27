@@ -139,6 +139,9 @@ fn a_uniform_row_still_carries_its_resolved_level() {
         .readout
         .as_ref()
         .expect("a single agreeing series states what its multiple means");
+    let plotx_core::properties::PropertyReadout::ContourBase(readout) = readout else {
+        panic!("the lowest-level row carries a contour readout");
+    };
     assert_eq!(readout.magnitude, 5.0);
 }
 

@@ -69,7 +69,9 @@ entire matrix of values at once, **Heatmap** or **Surface 3D**.
   **Stacked** to pile the columns instead (positive values stack upward,
   negative downward).
 - **Histogram** — the value distribution of one chosen column. Bins follow the
-  Freedman–Diaconis rule; uncheck **Auto bins** to set a fixed count.
+  Freedman–Diaconis rule; uncheck **Auto bins** to set a fixed **Bins** count
+  between 1 and 512. The count you inherit is the one the automatic rule just
+  produced, so unchecking the box leaves the histogram as it was.
 - **Box** — one box per column: median, quartile box, 1.5 × IQR whiskers, and
   individual outlier points.
 - **Violin** — one kernel-density silhouette per column with an inner quartile

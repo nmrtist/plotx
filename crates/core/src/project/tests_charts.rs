@@ -60,7 +60,7 @@ fn project_roundtrip_preserves_non_default_chart_type() {
     assert_eq!(chart.type_id, "table_bar");
     assert_eq!(chart.column, Some(selected_column));
     // The materialised figure is the bar chart (one rectangle per x row).
-    assert_eq!(first_plot(&loaded).figure.polygons.len(), 3);
+    assert_eq!(first_plot(&loaded).figure().polygons.len(), 3);
 }
 
 #[test]
@@ -102,4 +102,57 @@ fn project_roundtrip_preserves_chart_options() {
     assert_eq!(chart.colormap, plotx_figure::ColormapId::Plasma);
     assert_eq!(chart.view_angles, [-30.0, 55.0]);
     assert_eq!(chart.column, Some(selected_column));
+}
+
+#[test]
+fn catalog_read_preserves_the_empty_follow_default_chart_sentinel_on_resave() {
+    let mut app = PlotxApp::new();
+    app.doc
+        .datasets
+        .push(Dataset::Table(Box::new(chart_table())));
+    let mut canvas = CanvasDocument::new("table".to_owned(), [120.0, 80.0]);
+    let id = canvas.allocate_object_id();
+    canvas.objects.push(app.build_plot_object(
+        0,
+        ObjectFrame::new(0.0, 0.0, 100.0, 70.0),
+        id,
+        "Plot".to_owned(),
+    ));
+    canvas
+        .object_mut(id)
+        .and_then(|object| object.plot_mut())
+        .expect("plot")
+        .chart
+        .type_id
+        .clear();
+    app.doc.canvases.push(canvas);
+    let first_path = temp_project("chart-sentinel-first");
+    let second_path = temp_project("chart-sentinel-second");
+    let _ = std::fs::remove_file(&first_path);
+    let _ = std::fs::remove_file(&second_path);
+    save_project(&app, &first_path, false).unwrap();
+
+    let loaded = load_project(&first_path).unwrap();
+    let target = loaded.object_target(0, id).expect("plot target");
+    let resolved = loaded
+        .resolve_property(&crate::properties::PropertyAddress::new(
+            target,
+            crate::properties::object::CHART_TYPE_ID,
+        ))
+        .expect("catalog read");
+    assert_eq!(
+        resolved.value,
+        crate::properties::AggregateValue::Uniform(crate::properties::PropertyValue::Enum(
+            "table_line"
+        ))
+    );
+    assert!(
+        first_plot(&loaded).chart.type_id.is_empty(),
+        "reading resolves the sentinel for display without materializing it"
+    );
+    save_project(&loaded, &second_path, false).unwrap();
+    let resaved = load_project(&second_path).unwrap();
+    let _ = std::fs::remove_file(&first_path);
+    let _ = std::fs::remove_file(&second_path);
+    assert!(first_plot(&resaved).chart.type_id.is_empty());
 }

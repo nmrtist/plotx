@@ -599,7 +599,8 @@ fn ribbon_placement(id: CommandId) -> Option<RibbonPlacement> {
         CommandId::TogglePrimarySidebar
         | CommandId::ToggleSecondarySidebar
         | CommandId::ToggleGrid
-        | CommandId::Present => (View, "Display", 1, Always),
+        | CommandId::Present
+        | CommandId::Preferences => (View, "Display", 1, Always),
         CommandId::OpenFile
         | CommandId::ImportTable
         | CommandId::OpenFolder

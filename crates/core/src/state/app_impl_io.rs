@@ -124,15 +124,9 @@ impl PlotxApp {
     /// the instant-apply path may call it on every edit. The chrome theme is an
     /// egui concern and is applied separately by the app shell.
     pub fn apply_settings(&mut self, settings: crate::settings::Settings) {
-        self.session.ui.snap_enabled = settings.general.snap_enabled;
-        self.session.canvas_accent = settings.appearance.canvas_accent;
         if !settings.general.snap_enabled {
             self.session.ui.snap_guides.clear();
         }
-        self.session.project_backup_generations = settings
-            .general
-            .project_backup_generations
-            .min(crate::settings::MAX_PROJECT_BACKUP_GENERATIONS);
         self.doc.save_include_view_snapshots = settings.export.include_view_snapshots;
         let mut recent = settings.recent.files.clone();
         recent.truncate(crate::settings::MAX_RECENT_FILES);
@@ -215,9 +209,6 @@ impl PlotxApp {
                 self.doc.project_path = Some(path.to_owned());
                 self.doc.save_include_view_snapshots = include_view_snapshots;
                 self.settings.export.include_view_snapshots = include_view_snapshots;
-                self.settings.general.snap_enabled = self.session.ui.snap_enabled;
-                self.settings.general.project_backup_generations =
-                    self.session.project_backup_generations;
                 self.doc.dirty = false;
                 self.doc.project_revision = Some(outcome.revision.clone());
                 let mut report = OperationReport::success(
@@ -247,7 +238,7 @@ impl PlotxApp {
                     );
                 }
                 self.session.record_operation(report);
-                // Flush the three preferences harvested above on their own,
+                // Flush the save-profile preference above on its own,
                 // rather than relying on the recent-file call below to write
                 // the whole struct as a side effect: that dependency is
                 // invisible, and reordering either line would silently stop

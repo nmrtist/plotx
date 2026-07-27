@@ -50,3 +50,21 @@ impl AxisOverridesDto {
         .normalized()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn explicit_label_override_is_not_elided_when_text_matches_the_derived_label() {
+        let derived_label = "Chemical shift";
+        let overrides = AxisOverrides {
+            x_label: Some(derived_label.to_owned()),
+            ..AxisOverrides::default()
+        };
+
+        let dto = AxisOverridesDto::from_overrides(&overrides)
+            .expect("an explicit label makes the override structure non-default");
+        assert_eq!(dto.x_label.as_deref(), Some(derived_label));
+    }
+}

@@ -151,6 +151,16 @@ impl Action {
         }
     }
 
+    pub fn set_spacing_mode(
+        canvas: usize,
+        before: PageLayout,
+        mode: crate::layout::SpacingMode,
+    ) -> Self {
+        let mut after = before;
+        after.spacing_mode = mode;
+        Self::set_page_layout(canvas, before, after)
+    }
+
     pub fn set_panel_meta(
         canvas: usize,
         object: ObjectId,

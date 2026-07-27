@@ -17,7 +17,7 @@ pub(super) fn experiment_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) -> bo
     if chosen != n.preset {
         let before = DatasetProcessingState::from_dataset(&app.doc.datasets[di]);
         let mut after = before.clone();
-        if let DatasetProcessingState::Nmr2D { params, preset } = &mut after {
+        if let DatasetProcessingState::Nmr2D { params, preset, .. } = &mut after {
             *preset = chosen;
             params.layout = chosen.layout();
         }

@@ -130,8 +130,7 @@ pub(super) fn export_options_window(app: &mut PlotxApp, ctx: &egui::Context) {
             let trim = settings.trim_to_visible_content;
             if let Some(path) = crate::ui::file_dialogs::choose_export_path(&settings) {
                 app.export_to(settings, &path);
-                apply_confirmed_export_default(&mut app.settings.export, trim, true);
-                app.persist_settings();
+                set_confirmed_trim_default(app, trim);
             }
         }
     } else if cancel || modal.should_close() {
@@ -139,13 +138,19 @@ pub(super) fn export_options_window(app: &mut PlotxApp, ctx: &egui::Context) {
     }
 }
 
-fn apply_confirmed_export_default(
-    defaults: &mut plotx_core::settings::ExportDefaults,
-    trim_to_visible_content: bool,
-    path_confirmed: bool,
-) {
-    if path_confirmed {
-        defaults.trim_to_visible_content = trim_to_visible_content;
+fn set_confirmed_trim_default(app: &mut PlotxApp, trim_to_visible_content: bool) {
+    let target = app.app_target();
+    match app.plan_property_write(
+        plotx_core::properties::app_preferences::TRIM_TO_VISIBLE_CONTENT,
+        std::slice::from_ref(&target),
+        &plotx_core::properties::PropertyValue::Bool(trim_to_visible_content),
+    ) {
+        Ok(commit) => {
+            app.commit_property(commit);
+        }
+        Err(error) => {
+            app.session.status = format!("Could not save the export trim preference: {error}");
+        }
     }
 }
 
@@ -206,17 +211,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_confirmed_path_updates_trim_and_never_dpi() {
-        let mut defaults = plotx_core::settings::ExportDefaults {
-            dpi: 600,
-            ..Default::default()
-        };
-        apply_confirmed_export_default(&mut defaults, true, false);
-        assert!(!defaults.trim_to_visible_content);
-        assert_eq!(defaults.dpi, 600);
+    fn confirmed_export_updates_trim_through_the_catalog_and_never_dpi() {
+        let mut settings = plotx_core::settings::Settings::default();
+        settings.export.dpi = 600;
+        let mut app = PlotxApp::new_with_settings(settings);
 
-        apply_confirmed_export_default(&mut defaults, true, true);
-        assert!(defaults.trim_to_visible_content);
-        assert_eq!(defaults.dpi, 600);
+        set_confirmed_trim_default(&mut app, true);
+        assert!(app.settings.export.trim_to_visible_content);
+        assert_eq!(app.settings.export.dpi, 600);
+        let resolved = app
+            .resolve_property(&plotx_core::properties::PropertyAddress::new(
+                app.app_target(),
+                plotx_core::properties::app_preferences::TRIM_TO_VISIBLE_CONTENT,
+            ))
+            .expect("the catalog reads the confirmed default");
+        assert_eq!(
+            resolved.value.uniform(),
+            Some(&plotx_core::properties::PropertyValue::Bool(true))
+        );
     }
 }

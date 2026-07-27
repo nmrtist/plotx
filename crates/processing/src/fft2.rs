@@ -297,7 +297,8 @@ fn build_t1_rows(
     Some(rows)
 }
 
-fn f1_increments(rows: usize, quad: QuadMode) -> usize {
+/// Number of complex indirect increments the F1 transform actually receives.
+pub fn f1_increments(rows: usize, quad: QuadMode) -> usize {
     match quad {
         QuadMode::Complex => rows,
         QuadMode::States | QuadMode::StatesTppi | QuadMode::EchoAntiecho => rows / 2,

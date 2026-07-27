@@ -30,7 +30,7 @@ pub(crate) trait PropertyProvider: Sync {
         app: &PlotxApp,
         transaction: &mut PropertyTransaction,
         address: &PropertyAddress,
-        operation: EditOp,
+        operation: &EditOp<'_>,
     ) -> Result<(), PropertyError>;
 
     /// Return the value one canvas or panel label should show for this exact

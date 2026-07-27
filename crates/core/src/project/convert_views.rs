@@ -416,6 +416,13 @@ pub fn view_to_canvas(
                 // does not, so a bypassed snapshot has to be treated as absent
                 // here or the rebuilt figure would lose both.
                 let snapshot_backed = view_object.snapshot.is_some() && !map_unavailable;
+                let derived_axes = if snapshot_backed {
+                    let derived =
+                        app.build_object_figure(&binding, &chart, &stack, &projections, size_mm);
+                    crate::state::DerivedAxes::from_figure(&derived)
+                } else {
+                    crate::state::DerivedAxes::from_figure(&figure)
+                };
                 if !snapshot_backed {
                     axis_overrides.apply_to(&mut figure);
                 }
@@ -438,17 +445,18 @@ pub fn view_to_canvas(
                     .or_else(|| view_object.title.clone())
                     .map(PanelDto::into_panel)
                     .unwrap_or_else(|| PanelMeta::new(app.default_plot_title(di), frame.width));
-                CanvasObjectKind::Plot(Box::new(PlotObject {
-                    next_series_id: SeriesId::new(view_object.next_series_id),
+                CanvasObjectKind::Plot(Box::new(PlotObject::from_materialized_figure(
+                    SeriesId::new(view_object.next_series_id),
                     binding,
                     chart,
                     stack,
                     projections,
                     axis_overrides,
+                    derived_axes,
                     figure,
                     viewport,
                     panel,
-                }))
+                )))
             }
             _ => continue,
         };

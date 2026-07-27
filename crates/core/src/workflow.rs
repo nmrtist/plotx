@@ -288,17 +288,17 @@ pub fn build_plot_object(
         locked: false,
         visible: true,
         group: None,
-        kind: CanvasObjectKind::Plot(Box::new(PlotObject {
-            next_series_id: crate::state::SeriesId::new(1),
-            binding: default_binding(dataset),
+        kind: CanvasObjectKind::Plot(Box::new(PlotObject::new(
+            crate::state::SeriesId::new(1),
+            default_binding(dataset),
             chart,
-            stack: StackSpec::default(),
-            projections: AxisProjections::default(),
-            axis_overrides: AxisOverrides::default(),
+            StackSpec::default(),
+            AxisProjections::default(),
+            AxisOverrides::default(),
             figure,
             viewport,
             panel,
-        })),
+        ))),
     }
 }
 
@@ -366,12 +366,12 @@ pub fn build_default_canvas_for_dataset(
                 series.source.field = field.id;
                 series.encoding = plotx_figure::SeriesEncoding::default();
             }
-            plot.figure = build_dataset_figure(
+            let figure = build_dataset_figure(
                 dataset,
                 &plot.chart,
                 [width / 2.0 / MM_TO_PT, height / MM_TO_PT],
             );
-            plot.viewport = CanvasViewport::from_figure(&plot.figure);
+            plot.adopt_rebuilt_figure(figure);
         }
         canvas.objects.push(second);
     }

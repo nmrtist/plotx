@@ -17,7 +17,7 @@ use super::{PRESENTATIONS, PropertyGroup, PropertyPresentation};
 use egui::Ui;
 use plotx_core::automation::{ResourceRef, TargetRef};
 use plotx_core::properties::{
-    ComponentKind, PropertyId, PropertyStep, ScopeKind, Tier, definition,
+    ComponentKind, PropertyId, PropertyStep, ScopeKind, Tier, definition, object,
 };
 use plotx_core::state::{ObjectId, PlotxApp};
 
@@ -148,10 +148,38 @@ pub(crate) fn editable_targets_for_property(
     app: &PlotxApp,
     property: PropertyId,
 ) -> Vec<TargetRef> {
-    match definition(property).map(|definition| definition.applicability.component) {
-        Some(ComponentKind::Series) => editable_targets(app),
+    match definition(property) {
+        Some(definition)
+            if definition.scope_kind == ScopeKind::Object
+                && definition.applicability.component == ComponentKind::None
+                && property != object::LOCKED =>
+        {
+            selected_object_targets(app, true)
+        }
+        Some(definition) if definition.applicability.component == ComponentKind::Series => {
+            editable_targets(app)
+        }
         _ => targets_for_property(app, property),
     }
+}
+
+fn selected_object_targets(app: &PlotxApp, unlocked_only: bool) -> Vec<TargetRef> {
+    let Some(canvas) = app.session.active_canvas else {
+        return Vec::new();
+    };
+    app.session
+        .ui
+        .selection
+        .objects()
+        .iter()
+        .copied()
+        .filter(|&object| {
+            app.doc.canvases[canvas]
+                .object(object)
+                .is_some_and(|candidate| !unlocked_only || !candidate.locked)
+        })
+        .filter_map(|object| app.object_target(canvas, object))
+        .collect()
 }
 
 fn targets_of(app: &PlotxApp, objects: Vec<ObjectId>) -> Vec<TargetRef> {
@@ -179,6 +207,15 @@ pub(crate) fn targets_for_property(app: &PlotxApp, property: PropertyId) -> Vec<
         }
         ComponentKind::None if definition.scope_kind == ScopeKind::Document => {
             vec![app.document_target()]
+        }
+        ComponentKind::None if definition.scope_kind == ScopeKind::Canvas => app
+            .session
+            .active_canvas
+            .and_then(|index| app.doc.canvases.get(index))
+            .map(|canvas| vec![app.canvas_target(canvas.resource_id)])
+            .unwrap_or_default(),
+        ComponentKind::None if definition.scope_kind == ScopeKind::Object => {
+            selected_object_targets(app, false)
         }
         ComponentKind::None => Vec::new(),
         ComponentKind::Series => selection_targets(app),

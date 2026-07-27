@@ -35,13 +35,24 @@ PlotX 的界面为英文；手册中加粗的英文词即界面上的原文标�
   [等高线层级](/zh-cn/guides/contour-levels/)。常用设置直接显示，其余收在
   **Advanced**（高级）折叠区中。其中 **Contour** 与 **Line** 两个区域只在
   所选内容确实这样绘制时才出现；**Figure typography** 属于文档，始终显示。
+- **设置行（setting row）**——一项设置在对象检查器、Canvas settings、处理
+  面板或 Preferences 中的呈现。同一行无论出现在哪里，行为都一致。偏离默认值的
+  行会显示圆点，悬停可看到默认值，旁边的重置按钮可恢复它。按
+  <kbd>Ctrl</kbd>+<kbd>K</kbd> 可按名称搜索这些设置：激活结果后，PlotX 会打开
+  该行所在的面板，展开收起它的折叠区，滚动到该行并高亮。当前状态下不能编辑的
+  行仍然显示，只是变灰；悬停即可看到要先改哪个开关。
+  多选对象时，一次编辑会应用到全部对象；若它们原本取值不一致，该行标注
+  **mixed** 并以短横线代替数值，而不是拿其中一个对象的值冒充整组结果。悬停可
+  看到有多少个不一致，以及此时写入一个值会产生什么效果。
 - **设置分组（settings group）**——一组同属一处的相关设置。Ribbon 为每个
   分组提供一个按钮，它只负责打开这些设置的所在处，而不重复摆一套控件：
   **Figure → Style** 中的 **Contour settings**、**Line settings** 与
   **Figure typography settings**，**Process → Processing** 中的
   **Apodization settings**。画布右键菜单会列出当前适用的同一批分组，形如
   *Contour settings…*；<kbd>Ctrl</kbd>+<kbd>K</kbd> 则能找到分组里的单项
-  设置。
+  设置。应用偏好不属于任何对象，因此画布右键菜单不列出它们：请用 **View →
+  Display** 中的 **Preferences…**、命令面板，或按 <kbd>Ctrl</kbd>+<kbd>,</kbd>
+  打开。
 - **数据表（Data sheet）**——数据表格的电子表格视图，双击表格打开。
 - **命令面板（Command palette）**——<kbd>Ctrl</kbd>+<kbd>K</kbd> 打开
   的可搜索列表，涵盖命令、设置与数据；见

@@ -84,8 +84,7 @@ fn ilt_default_catalog_edit_uses_shared_bounds_and_persists() {
         resolved.schema,
         ResolvedSchema::Float {
             bounds: FloatBounds::inclusive(MIN_ILT_LAMBDA, MAX_ILT_LAMBDA),
-            log: true,
-            unit: "",
+            display: FloatDisplay::Log10("λ"),
         }
     );
 

@@ -334,7 +334,13 @@ fn descriptors() -> Vec<ToolDescriptor> {
             "Inspect a property",
             "Read one catalog property across the components of the selected resources",
             super::properties::PropertyKeyParams,
-            [KIND_DOCUMENT, KIND_DATASET, KIND_CANVAS_OBJECT],
+            [
+                KIND_APP,
+                KIND_DOCUMENT,
+                KIND_DATASET,
+                KIND_CANVAS,
+                KIND_CANVAS_OBJECT
+            ],
             [CAP_PROPERTY_CATALOG],
             EffectLevel::ReadOnly,
             true
@@ -344,7 +350,13 @@ fn descriptors() -> Vec<ToolDescriptor> {
             "Set a property",
             "Write one catalog property through the same planner the panel controls use",
             super::properties::PropertyWriteParams,
-            [KIND_DOCUMENT, KIND_DATASET, KIND_CANVAS_OBJECT],
+            [
+                KIND_APP,
+                KIND_DOCUMENT,
+                KIND_DATASET,
+                KIND_CANVAS,
+                KIND_CANVAS_OBJECT
+            ],
             [CAP_PROPERTY_CATALOG],
             EffectLevel::Reversible,
             true
@@ -354,7 +366,13 @@ fn descriptors() -> Vec<ToolDescriptor> {
             "Reset a property",
             "Re-derive one catalog property from its default policy in each target's context",
             super::properties::PropertyKeyParams,
-            [KIND_DOCUMENT, KIND_DATASET, KIND_CANVAS_OBJECT],
+            [
+                KIND_APP,
+                KIND_DOCUMENT,
+                KIND_DATASET,
+                KIND_CANVAS,
+                KIND_CANVAS_OBJECT
+            ],
             [CAP_PROPERTY_CATALOG],
             EffectLevel::Reversible,
             true

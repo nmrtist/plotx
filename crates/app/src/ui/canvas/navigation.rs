@@ -224,7 +224,7 @@ pub(crate) fn apply_plot_pan(
     else {
         return;
     };
-    let fig = &plot_object.figure;
+    let fig = plot_object.figure();
     let x_sign = if fig.x.reversed { 1.0 } else { -1.0 };
     let y_sign = if fig.y.reversed { -1.0 } else { 1.0 };
     let dx = x_sign * f64::from(delta.x) / f64::from(plot.width.max(1.0)) * fig.x.span();
@@ -240,8 +240,7 @@ pub(crate) fn apply_plot_pan(
     )
     .clamp_to(plot_object.viewport.full_y);
     plot_object.viewport.auto_y = false;
-    let viewport = plot_object.viewport.clone();
-    viewport.apply_to(&mut plot_object.figure);
+    plot_object.apply_viewport();
     app.doc.dirty = true;
 }
 
@@ -275,7 +274,7 @@ pub(crate) fn finish_axis_zoom(
     else {
         return;
     };
-    let fig = &plot_object.figure;
+    let fig = plot_object.figure();
     let before = plot_object.viewport.clone();
     let (x, y) = match drag.axis {
         ZoomAxis::X => {
@@ -323,8 +322,8 @@ pub(crate) fn reset_plot_viewport(
     let before = plot_object.viewport.clone();
     let mut after = before.clone();
     match hit_zone(p, outer_rect, plot) {
-        HitZone::XAxis => after.reset_x(&plot_object.figure),
-        HitZone::YAxis => after.reset_y(&plot_object.figure),
+        HitZone::XAxis => after.reset_x(plot_object.figure()),
+        HitZone::YAxis => after.reset_y(plot_object.figure()),
         HitZone::Plot => after.reset_all(),
         HitZone::None => return,
     }
@@ -386,17 +385,16 @@ pub(crate) fn zoom_plot_viewport(
 
     let object = app.doc.canvases[ci].object_mut(object_id).unwrap();
     let plot_object = object.plot_mut().unwrap();
-    let fig = &plot_object.figure;
+    let fig = plot_object.figure().clone();
     if zoom_x {
         let anchor = screen_to_x(p.x, plot, fig.x.min, fig.x.span(), fig.x.reversed);
-        plot_object.viewport.zoom_x(fig, anchor, scale);
+        plot_object.viewport.zoom_x(&fig, anchor, scale);
     }
     if zoom_y {
         let anchor = screen_to_y(p.y, plot, fig.y.min, fig.y.span(), fig.y.reversed);
         plot_object.viewport.zoom_y(anchor, scale);
     }
-    let viewport = plot_object.viewport.clone();
-    viewport.apply_to(&mut plot_object.figure);
+    plot_object.apply_viewport();
     app.doc.dirty = true;
     ui.ctx()
         .request_repaint_after(std::time::Duration::from_millis(200));

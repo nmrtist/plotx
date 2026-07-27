@@ -131,7 +131,7 @@ fn run_line_fit_stores_inline_result_and_materializes_on_request() {
     let series_names: Vec<&str> = app.doc.canvases[0].objects[0]
         .plot()
         .unwrap()
-        .figure
+        .figure()
         .series
         .iter()
         .map(|s| s.name.as_str())
@@ -149,7 +149,7 @@ fn run_line_fit_stores_inline_result_and_materializes_on_request() {
         app.doc.canvases[0].objects[0]
             .plot()
             .unwrap()
-            .figure
+            .figure()
             .series
             .len(),
         1

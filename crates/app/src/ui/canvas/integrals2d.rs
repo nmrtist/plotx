@@ -149,7 +149,7 @@ pub(crate) fn handle_integral_2d_drag(
             .object(object_id)
             .and_then(|o| o.plot())
             .unwrap()
-            .figure;
+            .figure();
         (
             AxisMap {
                 min: figure.x.min,
@@ -473,7 +473,7 @@ pub(crate) fn paint_integrals_2d(
     let Some(figure) = app.doc.canvases[ci]
         .object(object_id)
         .and_then(|o| o.plot())
-        .map(|p| &p.figure)
+        .map(|p| p.figure())
     else {
         return;
     };

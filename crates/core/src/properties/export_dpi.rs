@@ -49,17 +49,20 @@ impl PropertyProvider for ExportDpiProvider {
         require_app_target(&address.target, definition)?;
         Ok(ResolvedProperty {
             address: address.clone(),
+            modified: None,
             value: AggregateValue::Uniform(PropertyValue::Int(i64::from(app.settings.export.dpi))),
-            default_value: match definition.default_policy {
-                DefaultPolicy::Fixed(value) => Some(value),
+            default_value: match &definition.default_policy {
+                DefaultPolicy::Fixed(value) => Some(value.clone()),
                 DefaultPolicy::EncodingFactory
                 | DefaultPolicy::ProcessingFactory
+                | DefaultPolicy::Derived
                 | DefaultPolicy::None => None,
             },
             availability: Availability::Editable,
             schema: ResolvedSchema::Int {
                 min: i64::from(MIN_EXPORT_DPI),
                 max: i64::from(MAX_EXPORT_DPI),
+                unit: "dpi",
             },
         })
     }
@@ -69,25 +72,26 @@ impl PropertyProvider for ExportDpiProvider {
         app: &PlotxApp,
         transaction: &mut PropertyTransaction,
         address: &PropertyAddress,
-        operation: EditOp,
+        operation: &EditOp<'_>,
     ) -> Result<(), PropertyError> {
         let definition = property_definition(address.definition)?;
         require_app_target(&address.target, definition)?;
         let value = match operation {
-            EditOp::Set(PropertyValue::Int(value)) => checked_dpi(definition.id, value)?,
+            EditOp::Set(PropertyValue::Int(value)) => checked_dpi(definition.id, *value)?,
             EditOp::Set(value) => {
                 return Err(PropertyError::InvalidValue {
                     property: definition.id,
                     message: format!("expected an integer, got {}", value.kind()),
                 });
             }
-            EditOp::Reset => match definition.default_policy {
+            EditOp::Reset => match &definition.default_policy {
                 DefaultPolicy::Fixed(PropertyValue::Int(value)) => {
-                    checked_dpi(definition.id, value)?
+                    checked_dpi(definition.id, *value)?
                 }
                 DefaultPolicy::Fixed(_)
                 | DefaultPolicy::EncodingFactory
                 | DefaultPolicy::ProcessingFactory
+                | DefaultPolicy::Derived
                 | DefaultPolicy::None => {
                     return Err(PropertyError::InvalidValue {
                         property: definition.id,

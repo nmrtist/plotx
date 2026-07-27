@@ -109,9 +109,7 @@ impl PlotxApp {
             return;
         };
         let before = self.doc.canvases[ci].layout;
-        let mut after = before;
-        after.spacing_mode = mode;
-        self.commit_page_layout(ci, before, after);
+        self.execute_action(Action::set_spacing_mode(ci, before, mode));
     }
 
     pub fn set_gutter_preset(&mut self, preset: crate::layout::GutterPreset) {
@@ -270,14 +268,34 @@ impl PlotxApp {
         }
     }
 
-    pub fn set_snap_enabled(&mut self, enabled: bool) {
-        self.session.ui.snap_enabled = enabled;
-        if !enabled {
-            self.session.ui.snap_guides.clear();
+    /// Toggle content-driven page height without creating an undo step.
+    ///
+    /// Auto height was historically a live page preference rather than an
+    /// action. Keeping the mutation beside `set_show_grid` makes the catalog
+    /// path preserve that boundary.
+    pub fn set_canvas_auto_height(&mut self, canvas: usize, enabled: bool) {
+        if let Some(c) = self.doc.canvases.get_mut(canvas)
+            && c.auto_height != enabled
+        {
+            c.auto_height = enabled;
+            self.doc.dirty = true;
         }
-        self.settings.export.include_view_snapshots = self.doc.save_include_view_snapshots;
-        self.settings.general.snap_enabled = enabled;
-        self.persist_settings();
+    }
+
+    pub fn set_snap_enabled(&mut self, enabled: bool) {
+        let target = self.app_target();
+        match self.plan_property_write(
+            crate::properties::app_preferences::SNAP_ENABLED,
+            std::slice::from_ref(&target),
+            &crate::properties::PropertyValue::Bool(enabled),
+        ) {
+            Ok(commit) => {
+                self.commit_property(commit);
+            }
+            Err(error) => {
+                self.session.status = format!("Could not change object snapping: {error}");
+            }
+        }
     }
 }
 
@@ -296,11 +314,11 @@ fn layout_items(
                 .find_map(|(candidate, frame)| (*candidate == id).then_some(*frame))
                 .unwrap_or(object.frame);
             if let Some(change) = axis_changes.iter().find(|change| change.id == id) {
-                let mut figure = plot.figure.clone();
+                let mut figure = plot.figure().clone();
                 change.after.apply_to(&mut figure);
                 Some(crate::layout::layout_item(id, &figure, frame))
             } else {
-                Some(crate::layout::layout_item(id, &plot.figure, frame))
+                Some(crate::layout::layout_item(id, plot.figure(), frame))
             }
         })
         .collect()

@@ -50,6 +50,7 @@ mod datasets;
 mod datasets_2d_figure;
 mod datasets_2d_maps;
 mod datasets_dispatch;
+mod derived_axes;
 mod document;
 mod document_identity;
 mod electrophysiology;
@@ -107,6 +108,7 @@ pub(crate) use datasets_2d_figure::build_processed_figure;
 pub(crate) use datasets_2d_maps::{
     MONO_EXP_SNR_FRAC, dosy_data_fingerprint, ilt_provenance, mono_exp_provenance,
 };
+pub use derived_axes::*;
 pub use document::*;
 pub use electrophysiology::*;
 pub use field::*;
@@ -132,6 +134,7 @@ pub use multiplet::*;
 pub use page_fit::*;
 pub use panel_label::*;
 pub use peaks::*;
+pub use plot_object::*;
 pub use region::*;
 pub use series_binding::*;
 pub use size_presets::*;

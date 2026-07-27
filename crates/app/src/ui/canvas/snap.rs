@@ -102,7 +102,7 @@ pub(crate) fn snap_object_frame(
     ui: &Ui,
 ) -> (ObjectFrame, Vec<SnapGuide>) {
     let alt = ui.input(|i| i.modifiers.alt);
-    if !app.session.ui.snap_enabled || alt {
+    if !app.settings.general.snap_enabled || alt {
         return (candidate, Vec::new());
     }
     let canvas = &app.doc.canvases[ci];

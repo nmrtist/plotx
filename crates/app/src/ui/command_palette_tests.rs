@@ -1,5 +1,5 @@
 use super::*;
-use plotx_core::properties::{contour, export_dpi};
+use plotx_core::properties::{canvas, contour, export_dpi};
 
 fn indices(items: &[PaletteItem], query: &str) -> Vec<PaletteAction> {
     filter(items, query)
@@ -97,9 +97,132 @@ fn activating_export_dpi_opens_the_export_preferences_category() {
         .expect("Preferences opens");
     assert_eq!(dialog.category, plotx_core::state::SettingsCategory::Export);
     assert!(
-        app.session.ui.property_focus.is_none(),
-        "the native Preferences row needs no sidebar focus request"
+        app.session
+            .ui
+            .property_focus
+            .is_some_and(|focus| focus.property == export_dpi::DPI && focus.pending),
+        "the Preferences row receives the same scroll-and-highlight request as other homes"
     );
+}
+
+#[test]
+fn activating_a_canvas_property_opens_the_active_canvas_settings() {
+    let mut app = PlotxApp::new_with_settings(plotx_core::settings::Settings::default());
+    app.doc
+        .canvases
+        .push(plotx_core::state::CanvasDocument::new(
+            "Page".to_owned(),
+            [120.0, 80.0],
+        ));
+    app.session.active_canvas = Some(0);
+
+    reveal_property(&mut app, canvas::WIDTH_MM, 10.0);
+
+    assert_eq!(app.session.ui.canvas_settings, Some(0));
+    assert_eq!(
+        app.session
+            .ui
+            .property_focus
+            .expect("the catalog row is focused")
+            .property,
+        canvas::WIDTH_MM
+    );
+}
+
+#[test]
+fn object_home_route_reveals_expands_scrolls_and_highlights_the_row() {
+    let (mut app, ids) = properties::fixture::contour_page(1);
+    reveal_property(&mut app, contour::COUNT, 10.0);
+    assert!(app.session.secondary_sidebar_visible);
+    assert!(
+        app.session
+            .ui
+            .property_focus
+            .is_some_and(|focus| focus.property == contour::COUNT && focus.pending)
+    );
+
+    let ctx = egui::Context::default();
+    let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+        properties::panel::contour_section(&mut app, 0, &ids, ui);
+    });
+
+    let focus = app
+        .session
+        .ui
+        .property_focus
+        .expect("the Advanced row remains highlighted after it is revealed");
+    assert_eq!(focus.property, contour::COUNT);
+    assert!(
+        !focus.pending,
+        "rendering the Advanced row consumes its one-shot scroll request"
+    );
+    assert!(focus.highlight_until > 10.0);
+}
+
+#[test]
+fn canvas_home_route_opens_scrolls_and_highlights_the_row() {
+    let mut app = PlotxApp::new_with_settings(plotx_core::settings::Settings::default());
+    app.doc
+        .canvases
+        .push(plotx_core::state::CanvasDocument::new(
+            "Page".to_owned(),
+            [120.0, 80.0],
+        ));
+    app.session.active_canvas = Some(0);
+    reveal_property(&mut app, canvas::WIDTH_MM, 10.0);
+    assert_eq!(app.session.ui.canvas_settings, Some(0));
+
+    let target = app.canvas_target(app.doc.canvases[0].resource_id);
+    let ctx = egui::Context::default();
+    let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+        properties::panel::canvas_size_section(&mut app, &target, ui);
+    });
+
+    let focus = app
+        .session
+        .ui
+        .property_focus
+        .expect("the canvas row remains highlighted after it is revealed");
+    assert_eq!(focus.property, canvas::WIDTH_MM);
+    assert!(
+        !focus.pending,
+        "rendering the canvas row consumes its one-shot scroll request"
+    );
+    assert!(focus.highlight_until > 10.0);
+}
+
+#[test]
+fn app_home_route_opens_preferences_scrolls_and_highlights_the_row() {
+    use plotx_core::properties::app_preferences;
+
+    let mut app = PlotxApp::new_with_settings(plotx_core::settings::Settings::default());
+    reveal_property(&mut app, app_preferences::SNAP_ENABLED, 10.0);
+    assert_eq!(
+        app.session
+            .ui
+            .settings_dialog
+            .as_ref()
+            .expect("Preferences opens")
+            .category,
+        plotx_core::state::SettingsCategory::General
+    );
+
+    let ctx = egui::Context::default();
+    let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+        crate::ui::settings_dialog::settings_window(&mut app, ui.ctx());
+    });
+
+    let focus = app
+        .session
+        .ui
+        .property_focus
+        .expect("the preference row remains highlighted after it is revealed");
+    assert_eq!(focus.property, app_preferences::SNAP_ENABLED);
+    assert!(
+        !focus.pending,
+        "rendering the preference row consumes its one-shot scroll request"
+    );
+    assert!(focus.highlight_until > 10.0);
 }
 
 fn property_item(items: &[PaletteItem], property: PropertyId) -> &PaletteItem {

@@ -68,7 +68,7 @@ fn apply_theme_changes_background_and_text_colour_reversibly() {
     );
     assert_eq!(app.doc.style_library.text.color, theme.text_color);
     assert_eq!(
-        first_plot(&app).figure.series[0].color,
+        first_plot(&app).figure().series[0].color,
         theme.trace_palette[0]
     );
 
@@ -96,11 +96,14 @@ fn apply_theme_restyles_figure_typography_on_every_plot() {
         app.doc.style_library.figure_typography,
         theme.figure_typography
     );
-    assert_eq!(first_plot(&app).figure.typography, theme.figure_typography);
+    assert_eq!(
+        first_plot(&app).figure().typography,
+        theme.figure_typography
+    );
 
     app.undo();
     assert_eq!(app.doc.style_library.figure_typography, before);
-    assert_eq!(first_plot(&app).figure.typography, before);
+    assert_eq!(first_plot(&app).figure().typography, before);
 }
 
 #[test]
@@ -116,22 +119,22 @@ fn set_figure_typography_restamps_plots_and_is_undoable() {
 
     app.execute_action(Action::set_figure_typography(before, after));
     assert_eq!(app.doc.style_library.figure_typography, after);
-    assert_eq!(first_plot(&app).figure.typography, after);
+    assert_eq!(first_plot(&app).figure().typography, after);
 
     app.undo();
     assert_eq!(app.doc.style_library.figure_typography, before);
-    assert_eq!(first_plot(&app).figure.typography, before);
+    assert_eq!(first_plot(&app).figure().typography, before);
 
     app.redo();
-    assert_eq!(first_plot(&app).figure.typography, after);
+    assert_eq!(first_plot(&app).figure().typography, after);
 }
 
 #[test]
 fn axis_overrides_survive_rebuild_and_roundtrip_through_undo() {
     let mut app = sample_app();
     let object = app.doc.canvases[0].objects[0].id;
-    let automatic_x_label = first_plot(&app).figure.x.label.clone();
-    let automatic_y_label = first_plot(&app).figure.y.label.clone();
+    let automatic_x_label = first_plot(&app).figure().x.label.clone();
+    let automatic_y_label = first_plot(&app).figure().y.label.clone();
     let automatic_x = first_plot(&app).viewport.full_x;
     let automatic_y = first_plot(&app).viewport.full_y;
     let before = AxisOverrides::default();
@@ -150,8 +153,8 @@ fn axis_overrides_survive_rebuild_and_roundtrip_through_undo() {
         after.clone(),
     ));
     assert_eq!(first_plot(&app).axis_overrides, after);
-    assert_eq!(first_plot(&app).figure.x.label, "Chemical shift");
-    assert_eq!(first_plot(&app).figure.y.label, "Response");
+    assert_eq!(first_plot(&app).figure().x.label, "Chemical shift");
+    assert_eq!(first_plot(&app).figure().y.label, "Response");
     assert_eq!(first_plot(&app).viewport.full_x, AxisRange::new(1.0, 8.0));
     assert_eq!(first_plot(&app).viewport.full_y, AxisRange::new(-2.0, 12.0));
     assert!(!first_plot(&app).viewport.auto_y);
@@ -160,7 +163,7 @@ fn axis_overrides_survive_rebuild_and_roundtrip_through_undo() {
     {
         let plot = app.doc.canvases[0].objects[0].plot_mut().unwrap();
         plot.viewport.view_x = zoomed_x;
-        plot.viewport.apply_to(&mut plot.figure);
+        plot.apply_viewport();
     }
     app.rebuild_canvases_for(0);
     assert_eq!(first_plot(&app).axis_overrides, after);
@@ -169,8 +172,8 @@ fn axis_overrides_survive_rebuild_and_roundtrip_through_undo() {
 
     app.undo();
     assert_eq!(first_plot(&app).axis_overrides, before);
-    assert_eq!(first_plot(&app).figure.x.label, automatic_x_label);
-    assert_eq!(first_plot(&app).figure.y.label, automatic_y_label);
+    assert_eq!(first_plot(&app).figure().x.label, automatic_x_label);
+    assert_eq!(first_plot(&app).figure().y.label, automatic_y_label);
     assert_eq!(first_plot(&app).viewport.full_x, automatic_x);
     assert_eq!(first_plot(&app).viewport.full_y, automatic_y);
     assert!(first_plot(&app).viewport.auto_y);

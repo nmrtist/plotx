@@ -172,7 +172,8 @@ pub fn invert(spec: &mut Spectrum) {
     }
 }
 
-fn axis_step(ppm: &[f64]) -> f64 {
+/// Effective spacing of the axis consumed by binning.
+pub fn axis_step(ppm: &[f64]) -> f64 {
     if ppm.len() < 2 {
         return 1.0;
     }

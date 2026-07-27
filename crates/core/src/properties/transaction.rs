@@ -5,10 +5,17 @@
 //! and a future app preference from being dispatched by `ScopeKind` in the
 //! planner.
 
-use crate::actions::{Action, DatasetProcessingState};
+use crate::actions::{Action, DatasetProcessingState, PageSizeState};
+use crate::layout::PageLayout;
 use crate::settings::Settings;
-use crate::state::{DataBinding, DatasetId, ObjectId, PlotxApp};
+use crate::state::{
+    AxisOverrides, CanvasId, DataBinding, DatasetId, ObjectId, PanelLabelStyle, PlotxApp,
+};
 use plotx_figure::FigureTypography;
+
+#[path = "transaction_object.rs"]
+mod object;
+use object::{ObjectPlans, ObjectTargetSnapshot};
 
 /// Persistence boundaries a provider can select.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -30,6 +37,9 @@ impl StorageClass {
 #[derive(Default)]
 pub(crate) struct PropertyTransaction {
     bindings: BindingPlan,
+    canvases: Vec<CanvasPlan>,
+    axis_overrides: Vec<AxisOverridesPlan>,
+    objects: ObjectPlans,
     typography: Option<(FigureTypography, FigureTypography)>,
     processing: Vec<(DatasetId, DatasetProcessingState, DatasetProcessingState)>,
     settings: Option<(Settings, Settings)>,
@@ -47,6 +57,16 @@ enum TargetSnapshot {
         before: DataBinding,
     },
     Typography(FigureTypography),
+    Canvas {
+        id: CanvasId,
+        before: CanvasPropertyState,
+    },
+    AxisOverrides {
+        canvas: usize,
+        object: ObjectId,
+        before: AxisOverrides,
+    },
+    Object(ObjectTargetSnapshot),
     Processing {
         dataset: DatasetId,
         before: DatasetProcessingState,
@@ -55,6 +75,46 @@ enum TargetSnapshot {
         before: Settings,
         newly_selected: bool,
     },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct CanvasPropertyState {
+    pub(crate) layout: PageLayout,
+    pub(crate) page_size: PageSizeState,
+    pub(crate) auto_height: bool,
+    pub(crate) caption: (String, bool),
+    pub(crate) panel_label_style: PanelLabelStyle,
+}
+
+impl CanvasPropertyState {
+    fn of(canvas: &crate::state::CanvasDocument) -> Self {
+        Self {
+            layout: canvas.layout,
+            page_size: PageSizeState::of(canvas),
+            auto_height: canvas.auto_height,
+            caption: (canvas.caption.clone(), canvas.caption_visible),
+            panel_label_style: canvas.panel_label_style,
+        }
+    }
+}
+
+struct CanvasPlan {
+    id: CanvasId,
+    before: CanvasPropertyState,
+    after: CanvasPropertyState,
+}
+
+struct AxisOverridesPlan {
+    canvas: usize,
+    object: ObjectId,
+    before: AxisOverrides,
+    after: AxisOverrides,
+}
+
+#[derive(Clone)]
+pub(crate) enum CanvasDirectEdit {
+    ShowGrid { canvas: CanvasId, show: bool },
+    AutoHeight { canvas: CanvasId, enabled: bool },
 }
 
 impl PropertyTransaction {
@@ -82,6 +142,21 @@ impl PropertyTransaction {
             TargetSnapshot::Typography(before) => {
                 self.typography.is_some_and(|(_, after)| after != *before)
             }
+            TargetSnapshot::Canvas { id, before } => self
+                .canvases
+                .iter()
+                .find(|plan| plan.id == *id)
+                .is_some_and(|plan| plan.after != *before),
+            TargetSnapshot::AxisOverrides {
+                canvas,
+                object,
+                before,
+            } => self
+                .axis_overrides
+                .iter()
+                .find(|plan| plan.canvas == *canvas && plan.object == *object)
+                .is_some_and(|plan| plan.after != *before),
+            TargetSnapshot::Object(snapshot) => self.objects.target_changed(snapshot),
             TargetSnapshot::Processing { dataset, before } => self
                 .processing
                 .iter()
@@ -120,6 +195,25 @@ impl PropertyTransaction {
                         *after = *before;
                     }
                 }
+                TargetSnapshot::Canvas { id, before } => {
+                    if let Some(plan) = self.canvases.iter_mut().find(|plan| plan.id == *id) {
+                        plan.after = before.clone();
+                    }
+                }
+                TargetSnapshot::AxisOverrides {
+                    canvas,
+                    object,
+                    before,
+                } => {
+                    if let Some(plan) = self
+                        .axis_overrides
+                        .iter_mut()
+                        .find(|plan| plan.canvas == *canvas && plan.object == *object)
+                    {
+                        plan.after = before.clone();
+                    }
+                }
+                TargetSnapshot::Object(snapshot) => self.objects.rollback(snapshot),
                 TargetSnapshot::Processing { dataset, before } => {
                     if let Some((_, _, after)) = self
                         .processing
@@ -185,6 +279,113 @@ impl PropertyTransaction {
         typography
     }
 
+    /// Select one canvas by stable identity. Its collection position is used
+    /// only for this lookup and never leaves the function.
+    pub(crate) fn canvas(
+        &mut self,
+        app: &PlotxApp,
+        id: CanvasId,
+    ) -> Result<&mut CanvasPropertyState, super::PropertyError> {
+        let plan_index = if let Some(index) = self.canvases.iter().position(|plan| plan.id == id) {
+            index
+        } else {
+            let index = app
+                .doc
+                .canvas_index(id)
+                .ok_or_else(|| super::PropertyError::UnknownTarget(id.to_string()))?;
+            let state = CanvasPropertyState::of(&app.doc.canvases[index]);
+            self.canvases.push(CanvasPlan {
+                id,
+                before: state.clone(),
+                after: state,
+            });
+            self.canvases.len() - 1
+        };
+        if !self.target_before.iter().any(
+            |snapshot| matches!(snapshot, TargetSnapshot::Canvas { id: candidate, .. } if *candidate == id),
+        ) {
+            self.target_before.push(TargetSnapshot::Canvas {
+                id,
+                before: self.canvases[plan_index].after.clone(),
+            });
+        }
+        Ok(&mut self.canvases[plan_index].after)
+    }
+
+    /// Stage the spacing mode through the same typed action constructor used
+    /// by `PlotxApp::set_spacing_mode`.
+    pub(crate) fn set_canvas_spacing_mode(
+        &mut self,
+        app: &PlotxApp,
+        id: CanvasId,
+        mode: crate::layout::SpacingMode,
+    ) -> Result<(), super::PropertyError> {
+        self.canvas(app, id)?.layout.spacing_mode = mode;
+        Ok(())
+    }
+
+    /// Stage grid visibility for the direct, non-undoable
+    /// `PlotxApp::set_show_grid` commit path.
+    pub(crate) fn set_canvas_show_grid(
+        &mut self,
+        app: &PlotxApp,
+        id: CanvasId,
+        show: bool,
+    ) -> Result<(), super::PropertyError> {
+        self.canvas(app, id)?.layout.show_grid = show;
+        Ok(())
+    }
+
+    /// Select one plot's complete axis override value. The existing
+    /// `SetAxisOverrides` action is the undo and persistence boundary.
+    pub(crate) fn axis_overrides(
+        &mut self,
+        app: &PlotxApp,
+        canvas: usize,
+        object: ObjectId,
+    ) -> Result<&mut AxisOverrides, super::PropertyError> {
+        let plan_index = if let Some(index) = self
+            .axis_overrides
+            .iter()
+            .position(|plan| plan.canvas == canvas && plan.object == object)
+        {
+            index
+        } else {
+            let current = app
+                .doc
+                .canvases
+                .get(canvas)
+                .and_then(|canvas| canvas.object(object))
+                .and_then(|object| object.plot())
+                .map(|plot| plot.axis_overrides.clone())
+                .ok_or_else(|| super::PropertyError::UnknownTarget(object.to_string()))?;
+            self.axis_overrides.push(AxisOverridesPlan {
+                canvas,
+                object,
+                before: current.clone(),
+                after: current,
+            });
+            self.axis_overrides.len() - 1
+        };
+        if !self.target_before.iter().any(|snapshot| {
+            matches!(
+                snapshot,
+                TargetSnapshot::AxisOverrides {
+                    canvas: candidate_canvas,
+                    object: candidate_object,
+                    ..
+                } if *candidate_canvas == canvas && *candidate_object == object
+            )
+        }) {
+            self.target_before.push(TargetSnapshot::AxisOverrides {
+                canvas,
+                object,
+                before: self.axis_overrides[plan_index].after.clone(),
+            });
+        }
+        Ok(&mut self.axis_overrides[plan_index].after)
+    }
+
     /// Select one dataset's existing processing snapshot for mutation. The
     /// provider chooses this store; the service never switches on scope to do
     /// so. Multiple component edits to one dataset still become one action.
@@ -245,6 +446,9 @@ impl PropertyTransaction {
     pub(crate) fn storage_classes(&self) -> Vec<StorageClass> {
         let mut classes = Vec::with_capacity(2);
         if !self.bindings.entries.is_empty()
+            || !self.canvases.is_empty()
+            || !self.axis_overrides.is_empty()
+            || !self.objects.is_empty()
             || self.typography.is_some()
             || !self.processing.is_empty()
         {
@@ -273,10 +477,78 @@ impl PropertyTransaction {
 
     pub(crate) fn into_commit(
         self,
+        app: &PlotxApp,
         applied: Vec<super::PropertyAddress>,
         skipped: Vec<super::PropertySkip>,
     ) -> super::PropertyCommit {
         let mut actions = self.bindings.into_actions();
+        actions.extend(
+            self.axis_overrides
+                .into_iter()
+                .filter(|plan| plan.before != plan.after)
+                .map(|plan| {
+                    Action::set_axis_overrides(plan.canvas, plan.object, plan.before, plan.after)
+                }),
+        );
+        actions.extend(self.objects.into_actions());
+        let mut canvas_direct = Vec::new();
+        for plan in self.canvases {
+            let Some(canvas) = app.doc.canvas_index(plan.id) else {
+                continue;
+            };
+            let mut layout_after = plan.after.layout;
+            layout_after.show_grid = plan.before.layout.show_grid;
+            if plan.before.layout != layout_after {
+                let mut without_spacing = layout_after;
+                without_spacing.spacing_mode = plan.before.layout.spacing_mode;
+                if without_spacing == plan.before.layout {
+                    actions.push(Action::set_spacing_mode(
+                        canvas,
+                        plan.before.layout,
+                        layout_after.spacing_mode,
+                    ));
+                } else {
+                    actions.push(Action::set_page_layout(
+                        canvas,
+                        plan.before.layout,
+                        layout_after,
+                    ));
+                }
+            }
+            if plan.before.page_size != plan.after.page_size {
+                actions.push(Action::set_canvas_size(
+                    canvas,
+                    plan.before.page_size,
+                    plan.after.page_size,
+                ));
+            }
+            if plan.before.caption != plan.after.caption {
+                actions.push(Action::set_canvas_caption(
+                    canvas,
+                    plan.before.caption,
+                    plan.after.caption,
+                ));
+            }
+            if plan.before.panel_label_style != plan.after.panel_label_style {
+                actions.push(Action::SetPanelLabelStyle {
+                    canvas,
+                    before: plan.before.panel_label_style,
+                    after: plan.after.panel_label_style,
+                });
+            }
+            if plan.before.layout.show_grid != plan.after.layout.show_grid {
+                canvas_direct.push(CanvasDirectEdit::ShowGrid {
+                    canvas: plan.id,
+                    show: plan.after.layout.show_grid,
+                });
+            }
+            if plan.before.auto_height != plan.after.auto_height {
+                canvas_direct.push(CanvasDirectEdit::AutoHeight {
+                    canvas: plan.id,
+                    enabled: plan.after.auto_height,
+                });
+            }
+        }
         if let Some((before, after)) = self.typography
             && before != after
         {
@@ -296,6 +568,7 @@ impl PropertyTransaction {
             .and_then(|(before, after)| (before != after).then_some(after));
         super::PropertyCommit {
             document_action,
+            canvas_direct,
             app_preferences,
             applied,
             skipped,

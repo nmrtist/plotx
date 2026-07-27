@@ -446,12 +446,9 @@ impl PlotxApp {
         .flatten()
         .collect::<Vec<_>>();
         let outcome = if full {
-            self.session.compute.request_2d_full(
-                dataset_id,
-                &fields,
-                std::sync::Arc::clone(&d2.data),
-                params,
-            )
+            self.session
+                .compute
+                .request_2d_full(dataset_id, &fields, d2.processing_data(), params)
         } else {
             self.session
                 .compute

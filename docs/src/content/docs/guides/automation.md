@@ -33,10 +33,13 @@ Name the setting in **Parameters (JSON)** by its id:
 `{"key": "series.contour.count", "value": 12}` for **Set a property**, and
 `{"key": "series.contour.count"}` for the other two.
 
-All three tools accept plot objects, datasets, and the document itself — listed
-as **PlotX document**. Which of those to check follows from the setting: a
-contour or line setting lives on a plot object, an apodization setting on a
-dataset, and figure typography on the document.
+The three tools reach every setting the panels edit: object and series styling,
+processing-step parameters, document and canvas settings, and application
+preferences. Which resource to name follows from the setting — a contour or
+line setting lives on a plot object, an apodization setting on a dataset,
+figure typography on the document (listed as **PlotX document**), a page size
+on a canvas, and a preference on the application (listed as **PlotX
+application**).
 
 | Setting in the Object inspector | id | Accepts |
 | --- | --- | --- |
@@ -50,6 +53,11 @@ dataset, and figure typography on the document.
 | **Line width** | `series.contour.line_width` | 0.05 to 10 |
 | **Stroke width**, in the **Line** section | `series.line.stroke_width` | 0.05 to 10 |
 | **Tick-label size**, in the **Figure typography** section | `document.figure.typography.tick_pt` | 1 to 72 |
+
+Application preferences take the same three tools. For
+`settings.appearance.accent.color`, **Set a property** accepts `"#rrggbb"` and
+pins the canvas accent to that colour; **Reset a property** clears it, and the
+accent follows the theme again.
 
 | Setting on an apodization step | id | Accepts |
 | --- | --- | --- |
@@ -118,6 +126,32 @@ workflow step and the values land in the run record, which is also what
 the numbers appear under **Result value (JSON)**, below the per-component rows:
 one reading per component, each with its current value, its default and the
 range it accepts.
+
+#### What a reading contains
+
+Each reading names its `target` and carries the current `value`, a
+`default_value` where the setting has one, `modified` — whether the value
+differs from that default — an `availability`, and the `schema` that bounds it.
+
+A setting the current state does not allow you to write is still read back:
+`availability` is `"disabled"` and `disabled_reason` names what has to change
+first, such as switching the phase mode to *Manual* before φ0 can be set.
+
+Schemas are tagged by `type`: `bool`, `text`, `int`, `stepped_int`, `float`,
+`enum`, or `color`.
+
+- `int` and `stepped_int` carry `min` and `max`, plus a `unit` where the setting
+  has one. `stepped_int` also carries the `step` its values must land on — a
+  Savitzky-Golay window, for instance, runs from 3 to 201 in steps of 2.
+- `float` carries `min`, `max` and `exclusive_min`, and where a setting refuses
+  particular values, `excluded` (one value) or `excluded_magnitude` (everything
+  at or below that magnitude). Its `display` — `linear`, `degrees` or `log10` —
+  is how the panel shows the number; the `unit` and `log` fields beside it
+  restate the same thing.
+- `enum` lists its variants, each with a stable id and a label.
+
+Bounds and values are always in the setting's own units, whatever `display`
+says: a phase whose `display` is `degrees` is radians on the wire.
 
 ## External Inputs
 

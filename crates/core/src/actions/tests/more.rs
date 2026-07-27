@@ -25,7 +25,7 @@ fn stacked_binding_builds_distinctly_coloured_series_with_legend() {
         binding,
     ));
 
-    let fig = &first_plot(&app).figure;
+    let fig = first_plot(&app).figure();
     assert!(fig.series.len() >= 2, "stack should draw both traces");
     assert!(fig.show_legend, "stack should show a legend");
     assert_ne!(
@@ -35,7 +35,7 @@ fn stacked_binding_builds_distinctly_coloured_series_with_legend() {
 
     app.undo();
     assert_eq!(first_plot(&app).binding.series.len(), 1);
-    assert!(!first_plot(&app).figure.show_legend);
+    assert!(!first_plot(&app).figure().show_legend);
 }
 
 #[test]
@@ -99,7 +99,7 @@ fn set_chart_type_switches_table_to_categorical_bars_and_undoes() {
 
     let before = first_plot(&app).chart.clone();
     assert_eq!(before.type_id, "table_line");
-    let line_series = first_plot(&app).figure.series.len();
+    let line_series = first_plot(&app).figure().series.len();
     assert_eq!(line_series, 1, "line chart draws one series per column");
     let overrides = AxisOverrides {
         x_range: Some(AxisRange::new(1.0, 8.0)),
@@ -114,20 +114,20 @@ fn set_chart_type_switches_table_to_categorical_bars_and_undoes() {
     app.execute_action(Action::set_chart_type(0, id, before, after.clone()));
     assert_eq!(first_plot(&app).chart, after);
     // One-series grouped bars draw one filled rectangle per categorical row.
-    assert_eq!(first_plot(&app).figure.polygons.len(), 3);
-    assert!(first_plot(&app).figure.x.categories.is_some());
-    assert_eq!(first_plot(&app).figure.x.min, -0.5);
-    assert_eq!(first_plot(&app).figure.x.max, 2.5);
+    assert_eq!(first_plot(&app).figure().polygons.len(), 3);
+    assert!(first_plot(&app).figure().x.categories.is_some());
+    assert_eq!(first_plot(&app).figure().x.min, -0.5);
+    assert_eq!(first_plot(&app).figure().x.max, 2.5);
     assert_eq!(first_plot(&app).axis_overrides.x_range, overrides.x_range);
 
     app.undo();
     assert_eq!(first_plot(&app).chart.type_id, "table_line");
-    assert_eq!(first_plot(&app).figure.series.len(), line_series);
+    assert_eq!(first_plot(&app).figure().series.len(), line_series);
     assert_eq!(first_plot(&app).viewport.full_x, AxisRange::new(1.0, 8.0));
 
     app.redo();
     assert_eq!(first_plot(&app).chart.type_id, "table_bar_grouped");
-    assert_eq!(first_plot(&app).figure.polygons.len(), 3);
+    assert_eq!(first_plot(&app).figure().polygons.len(), 3);
 }
 
 #[test]
@@ -191,7 +191,7 @@ fn axis_projections_attach_and_project_survive_undo() {
         after: after.clone(),
     });
 
-    let fig = &app.doc.canvases[ci].objects[0].plot().unwrap().figure;
+    let fig = app.doc.canvases[ci].objects[0].plot().unwrap().figure();
     let top = fig.top_projection.as_ref().expect("attached top trace");
     let left = fig.left_projection.as_ref().expect("sum left trace");
     let expected = app.doc.datasets[0].as_nmr().unwrap().spectrum.ppm.len();
@@ -207,7 +207,7 @@ fn axis_projections_attach_and_project_survive_undo() {
     );
 
     app.undo();
-    let fig = &app.doc.canvases[ci].objects[0].plot().unwrap().figure;
+    let fig = app.doc.canvases[ci].objects[0].plot().unwrap().figure();
     assert!(fig.top_projection.is_none() && fig.left_projection.is_none());
 }
 

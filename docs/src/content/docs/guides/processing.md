@@ -65,6 +65,8 @@ frequency-domain steps.
 Some spectrometers record a digital filter delay at the start of the FID that
 shows up as distorted first points. Digital group-delay correction removes it;
 it is a per-dataset switch next to the step list, applied before the pipeline.
+It governs 1D and 2D data alike: switch it off on a 2D dataset and the direct
+dimension is left uncorrected too.
 
 ## Apodization
 
@@ -121,6 +123,18 @@ until you press it.
 
 Automatic phase correction is enabled by default; you can switch methods or
 adjust φ0 / φ1 manually with live preview.
+
+Open the **Phase** step and its four rows sit together: **Mode**, **φ0**, **φ1**
+and **Pivot**. φ0 and φ1 are in degrees. The pivot is a fraction of the axis
+from 0 to 1, with the ppm position it currently lands on shown beside it. While
+the step is open a pivot handle is drawn on the spectrum, and dragging it there
+places the pivot in ppm.
+
+φ0, φ1 and the pivot are editable only while **Mode** is *Manual*; under an
+automatic method each row says which switch to flip first.
+
+Through [Automation](/guides/automation/) these values keep their own units:
+phase angles in radians, the pivot as a fraction.
 
 ## Baseline correction
 

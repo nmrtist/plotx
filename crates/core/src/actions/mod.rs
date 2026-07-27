@@ -31,6 +31,7 @@ pub enum DatasetProcessingState {
     Nmr2D {
         params: Params2D,
         preset: Preset2D,
+        group_delay_correct: bool,
     },
     /// A table has no reversible processing recipe; its curve fits are edited
     /// through their own actions.
@@ -62,6 +63,16 @@ impl PageSizeState {
             size_mm: canvas.size_mm,
             preset_id: canvas.size_preset_id.clone(),
         }
+    }
+
+    /// Reconcile a manually edited physical size with the preset identity that
+    /// preceded it. The identity survives only while the new dimensions still
+    /// describe that preset.
+    pub fn after_manual_resize(&self, size_mm: [f32; 2]) -> Self {
+        let preset_id = self.preset_id.clone().filter(|id| {
+            crate::state::preset_by_id(id).is_some_and(|preset| preset.matches(size_mm))
+        });
+        Self { size_mm, preset_id }
     }
 }
 
@@ -109,14 +120,11 @@ pub struct PendingPropertyGesture {
     pub owns_processing_session: bool,
 }
 
-/// Coalesces a single object-inspector interaction (a DragValue drag, a colour
-/// pick, a text edit) into one undo step: the pre-edit frames and styles of the
-/// touched objects, committed once the interaction ends.
+/// Coalesces an object-inspector geometry interaction into one undo step.
 #[derive(Clone)]
 pub struct PendingInspectorEdit {
     pub canvas: usize,
     pub frames: Vec<(ObjectId, ObjectFrame)>,
-    pub styles: Vec<(ObjectId, ObjectStyle)>,
 }
 
 #[derive(Clone)]

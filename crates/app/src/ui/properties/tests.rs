@@ -1,10 +1,69 @@
 use super::*;
-use plotx_core::properties::{PropertyAccess, catalog};
+use plotx_core::properties::{PropertyAccess, ValueSchema, catalog, step_enabled};
 
 /// Rows a single panel section renders without being expanded. Beyond this the
 /// section is no longer a panel but a settings dump, and the fix is to re-tier
 /// properties rather than to raise the number.
 const MAX_ESSENTIAL_PER_SECTION: usize = 6;
+
+#[derive(Debug)]
+struct EssentialVisibilityProfile {
+    discriminator: &'static str,
+    visible: Vec<PropertyId>,
+}
+
+fn essential_visibility_profiles(section: &str) -> Vec<EssentialVisibilityProfile> {
+    let declared: Vec<PropertyId> = essential_in(section).iter().map(|entry| entry.id).collect();
+    if section != panel::CHART_SECTION {
+        if section == panel::BASELINE_SECTION {
+            return [
+                baseline::OFFSET,
+                baseline::POLYNOMIAL,
+                baseline::ASYMMETRIC_LEAST_SQUARES,
+            ]
+            .into_iter()
+            .map(|method| EssentialVisibilityProfile {
+                discriminator: method,
+                visible: declared
+                    .iter()
+                    .copied()
+                    .filter(|property| baseline::property_applies_to_method(*property, method))
+                    .collect(),
+            })
+            .collect();
+        }
+        return vec![EssentialVisibilityProfile {
+            discriminator: "all declared Essential rows applicable",
+            visible: declared,
+        }];
+    }
+
+    let chart_type = definition(object::CHART_TYPE_ID).expect("Chart Type is registered");
+    let ValueSchema::Enum { variants } = &chart_type.value_schema else {
+        panic!("Chart Type must remain an enum");
+    };
+    variants
+        .iter()
+        .map(|variant| EssentialVisibilityProfile {
+            discriminator: variant.id,
+            visible: declared
+                .iter()
+                .copied()
+                .filter(|property| object::chart_property_applies_to_type(*property, variant.id))
+                .collect(),
+        })
+        .collect()
+}
+
+fn maximum_visible_essential(section: &str) -> EssentialVisibilityProfile {
+    essential_visibility_profiles(section)
+        .into_iter()
+        .max_by_key(|profile| profile.visible.len())
+        .unwrap_or(EssentialVisibilityProfile {
+            discriminator: "empty section",
+            visible: Vec::new(),
+        })
+}
 
 /// §8.1: every user-visible property must have a presentation. A definition
 /// without one is addressable by automation yet invisible and unsearchable in
@@ -115,7 +174,7 @@ fn aliases_are_indexed_by_the_unified_search() {
     }
 }
 
-/// §8.6: the panel budget. Exceeding it means the section has stopped being a
+/// §8.7: the panel budget. Exceeding it means the section has stopped being a
 /// panel, and the remedy is to move rows to `Advanced`, not to raise the limit.
 #[test]
 fn no_panel_section_exceeds_its_essential_budget() {
@@ -125,24 +184,211 @@ fn no_panel_section_exceeds_its_essential_budget() {
     for panel in [
         PanelRoute::SecondarySidebar,
         PanelRoute::Processing,
+        PanelRoute::CanvasSettings,
         PanelRoute::Preferences,
     ] {
         for section in panel.sections() {
-            let essential = essential_in(section);
+            let profile = maximum_visible_essential(section);
             assert!(
-                essential.len() <= MAX_ESSENTIAL_PER_SECTION,
-                "section '{section}' of the {} renders {} Essential properties, \
+                profile.visible.len() <= MAX_ESSENTIAL_PER_SECTION,
+                "section '{section}' of the {} renders {} Essential properties \
+                 together for '{}', \
                  over the budget of {MAX_ESSENTIAL_PER_SECTION}. Re-tier some of \
                  {:?} to Advanced or Expert instead of raising the budget.",
                 panel.title(),
-                essential.len(),
-                essential
+                profile.visible.len(),
+                profile.discriminator,
+                profile
+                    .visible
                     .iter()
-                    .map(|entry| entry.id.as_str())
+                    .map(|property| property.as_str())
                     .collect::<Vec<_>>()
             );
         }
     }
+}
+
+#[test]
+fn migrated_object_sections_keep_their_existing_density() {
+    for (section, declared, visible, combination) in [
+        (
+            panel::STACK_SECTION,
+            5,
+            5,
+            "an offset line stack, including series visibility",
+        ),
+        (
+            panel::CHART_SECTION,
+            7,
+            4,
+            "table_surface: type, colormap, azimuth, elevation",
+        ),
+        (panel::TEXT_SECTION, 5, 5, "a text object"),
+        (panel::SHAPE_SECTION, 5, 5, "a filled shape object"),
+        (panel::PANEL_SECTION, 2, 2, "a plot with a panel label"),
+        (panel::OBJECT_SECTION, 1, 1, "any selected object"),
+    ] {
+        assert_eq!(essential_in(section).len(), declared, "{section}");
+        let profile = maximum_visible_essential(section);
+        assert_eq!(
+            profile.visible.len(),
+            visible,
+            "section '{section}' must retain its calibrated density from {combination}"
+        );
+        if section == panel::CHART_SECTION {
+            assert_eq!(profile.discriminator, "table_surface");
+        }
+    }
+}
+
+#[test]
+fn migrated_processing_controls_keep_their_pre_migration_visibility() {
+    for property in [
+        baseline::POLYNOMIAL_ORDER,
+        baseline::SMOOTHNESS,
+        baseline::ASYMMETRY,
+        baseline::ITERATIONS,
+        smooth::POLYNOMIAL_ORDER,
+        bin::METHOD,
+        phase::PIVOT,
+    ] {
+        assert_eq!(
+            definition(property)
+                .expect("the processing property is registered")
+                .tier,
+            Tier::Essential,
+            "{property} must remain directly visible"
+        );
+    }
+    let baseline_profile = maximum_visible_essential(panel::BASELINE_SECTION);
+    assert_eq!(
+        baseline_profile.visible.len(),
+        4,
+        "AsLS shows method, smoothness, asymmetry, and iterations together"
+    );
+    assert_eq!(
+        baseline_profile.discriminator,
+        baseline::ASYMMETRIC_LEAST_SQUARES
+    );
+}
+
+#[test]
+fn migrated_canvas_and_typography_controls_keep_their_visibility_and_section_density() {
+    for (section, expected, combination) in [
+        (
+            panel::CANVAS_MARGINS_SECTION,
+            5,
+            "a canvas with all four margins and its gutter",
+        ),
+        (
+            panel::CANVAS_GRID_SECTION,
+            4,
+            "a canvas with rows, columns, grid visibility, and spacing mode",
+        ),
+        (
+            panel::CANVAS_SIZE_SECTION,
+            3,
+            "a canvas with width, height, and automatic height",
+        ),
+        (
+            panel::CANVAS_CAPTION_SECTION,
+            2,
+            "a canvas with caption and panel-label controls",
+        ),
+        (
+            panel::TYPOGRAPHY_SECTION,
+            3,
+            "a document with all typography controls",
+        ),
+    ] {
+        assert_eq!(
+            maximum_visible_essential(section).visible.len(),
+            expected,
+            "section '{section}' must reflect the controls visible for {combination}"
+        );
+    }
+}
+
+#[test]
+fn migrated_preferences_keep_their_real_section_density() {
+    for (section, expected, combination) in [
+        (
+            SettingsCategory::General.section_id(),
+            3,
+            "all catalog-backed General preferences",
+        ),
+        (
+            SettingsCategory::Appearance.section_id(),
+            3,
+            "theme, GPU, and the accent override row",
+        ),
+        (
+            SettingsCategory::Processing.section_id(),
+            1,
+            "the scale-content processing preference",
+        ),
+        (
+            SettingsCategory::Export.section_id(),
+            4,
+            "all catalog-backed Export preferences",
+        ),
+        (
+            panel::PREFERENCES_UPDATES_SECTION,
+            2,
+            "automatic checks and update channel",
+        ),
+        (
+            SettingsCategory::Recent.section_id(),
+            0,
+            "no catalog-backed Essential rows",
+        ),
+    ] {
+        assert_eq!(
+            maximum_visible_essential(section).visible.len(),
+            expected,
+            "section '{section}' must retain the controls visible for {combination}"
+        );
+    }
+}
+
+#[test]
+fn migrated_axis_controls_remain_six_essential_rows() {
+    let essential: Vec<PropertyId> = essential_in(panel::AXIS_SECTION)
+        .iter()
+        .map(|entry| entry.id)
+        .collect();
+    assert_eq!(
+        essential,
+        [
+            axis::X_LABEL,
+            axis::Y_LABEL,
+            axis::X_SHOW_TICK_LABELS,
+            axis::X_SHOW_LABEL,
+            axis::Y_SHOW_TICK_LABELS,
+            axis::Y_SHOW_LABEL,
+        ]
+    );
+}
+
+#[test]
+fn only_physical_canvas_lengths_follow_the_users_canvas_unit() {
+    let marked: Vec<PropertyId> = PRESENTATIONS
+        .iter()
+        .filter(|entry| entry.uses_canvas_length_unit)
+        .map(|entry| entry.id)
+        .collect();
+    assert_eq!(
+        marked,
+        [
+            canvas::MARGIN_TOP_MM,
+            canvas::MARGIN_RIGHT_MM,
+            canvas::MARGIN_BOTTOM_MM,
+            canvas::MARGIN_LEFT_MM,
+            canvas::GUTTER_MM,
+            canvas::WIDTH_MM,
+            canvas::HEIGHT_MM,
+        ]
+    );
 }
 
 /// §12: only the lowest level is Essential on a contour; the ladder shape and
@@ -154,4 +400,16 @@ fn only_the_lowest_contour_level_is_essential() {
         .map(|entry| entry.id.as_str())
         .collect();
     assert_eq!(essential, [contour::BASE_MAGNITUDE.as_str()]);
+}
+
+/// The row checkbox is compact chrome, not a second presentation channel. Its
+/// renderer selects from this same Essential set before drawing inline, so the
+/// budget and the visible row cannot drift.
+#[test]
+fn the_inline_step_toggle_is_the_processing_step_sections_essential_set() {
+    let essential: Vec<PropertyId> = essential_in(panel::PROCESSING_STEP_SECTION)
+        .iter()
+        .map(|entry| entry.id)
+        .collect();
+    assert_eq!(essential, [step_enabled::ENABLED]);
 }

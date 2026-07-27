@@ -215,6 +215,7 @@ impl<'a> ProjectResourceProvider<'a> {
                 cap(CAP_RENDER),
                 cap(CAP_THEME),
                 cap(CAP_EXPORT),
+                cap(CAP_PROPERTY_CATALOG),
             ],
             children,
             dimensions: vec![canvas.objects.len()],
@@ -265,14 +266,14 @@ impl ResourceProvider for ProjectResourceProvider<'_> {
     }
 
     fn descriptors(&self) -> Vec<ResourceDescriptor> {
-        let mut descriptors = vec![ResourceDescriptor {
+        let root = |id: &str, kind: &str, name: &str| ResourceDescriptor {
             resource: ResourceRef {
-                id: DOCUMENT_RESOURCE_ID.to_owned(),
-                kind: ResourceKindId::new(KIND_DOCUMENT),
+                id: id.to_owned(),
+                kind: ResourceKindId::new(kind),
                 parent_id: None,
                 local_id: None,
             },
-            name: "PlotX document".to_owned(),
+            name: name.to_owned(),
             capabilities: vec![cap(CAP_PROPERTY_CATALOG)],
             children: Vec::new(),
             dimensions: Vec::new(),
@@ -280,7 +281,11 @@ impl ResourceProvider for ProjectResourceProvider<'_> {
             metadata: BTreeMap::new(),
             lineage: Vec::new(),
             revision: self.revision(),
-        }];
+        };
+        let mut descriptors = vec![
+            root(APP_RESOURCE_ID, KIND_APP, "PlotX application"),
+            root(DOCUMENT_RESOURCE_ID, KIND_DOCUMENT, "PlotX document"),
+        ];
         for (index, dataset) in self.app.doc.datasets.iter().enumerate() {
             let parent = self.dataset_descriptor(index, dataset);
             if let Dataset::Table(table) = dataset {
@@ -329,15 +334,7 @@ impl ResourceProvider for ProjectResourceProvider<'_> {
             let parent = self.canvas_descriptor(index);
             let canvas = &self.app.doc.canvases[index];
             for object in &canvas.objects {
-                let mut capabilities = vec![cap(CAP_RENAME)];
-                // A text box or an image has a name and nothing the catalog
-                // addresses; only an object with a plot binding carries
-                // components. Text objects are therefore skipped by the same
-                // declared-capability gate every other tool uses, with the same
-                // reason, and the property tools need no special case for them.
-                if object.plot().is_some() {
-                    capabilities.push(cap(CAP_PROPERTY_CATALOG));
-                }
+                let capabilities = vec![cap(CAP_RENAME), cap(CAP_PROPERTY_CATALOG)];
                 descriptors.push(ResourceDescriptor {
                     resource: child_ref(
                         canvas.resource_id,

@@ -9,20 +9,34 @@
 //! application crate and is keyed by the same [`PropertyId`].
 
 pub mod apodization;
+pub mod app_preferences;
+pub mod axis;
+pub mod baseline;
+pub mod bin;
+pub mod canvas;
 pub mod contour;
 pub mod export_dpi;
+pub mod group_delay;
 pub mod ilt;
 pub mod line;
 mod model;
+pub mod normalize;
+pub mod object;
+pub mod phase;
+mod processing_common;
 mod provider;
 mod readout;
+pub mod reference;
 mod service;
+pub mod smooth;
+pub mod step_enabled;
 mod target;
 mod transaction;
 pub mod typography;
+pub mod zero_fill;
 
 pub use model::*;
-pub use readout::{ContourAnchor, ContourBaseReadout, PropertyReadout};
+pub use readout::{ContourAnchor, ContourBaseReadout, PropertyReadout, ZeroFillTargetReadout};
 
 pub(crate) use provider::{PropertyProvider, PropertyProviderGroup};
 pub(crate) use transaction::PropertyTransaction;
@@ -38,10 +52,28 @@ pub(crate) static GROUPS: &[PropertyProviderGroup] = &[
         provider: &apodization::PROVIDER,
     },
     PropertyProviderGroup {
+        provider: &app_preferences::PROVIDER,
+    },
+    PropertyProviderGroup {
+        provider: &axis::PROVIDER,
+    },
+    PropertyProviderGroup {
+        provider: &baseline::PROVIDER,
+    },
+    PropertyProviderGroup {
+        provider: &bin::PROVIDER,
+    },
+    PropertyProviderGroup {
+        provider: &canvas::PROVIDER,
+    },
+    PropertyProviderGroup {
         provider: &contour::PROVIDER,
     },
     PropertyProviderGroup {
         provider: &export_dpi::PROVIDER,
+    },
+    PropertyProviderGroup {
+        provider: &group_delay::PROVIDER,
     },
     PropertyProviderGroup {
         provider: &ilt::PROVIDER,
@@ -50,7 +82,28 @@ pub(crate) static GROUPS: &[PropertyProviderGroup] = &[
         provider: &line::PROVIDER,
     },
     PropertyProviderGroup {
+        provider: &normalize::PROVIDER,
+    },
+    PropertyProviderGroup {
+        provider: &object::PROVIDER,
+    },
+    PropertyProviderGroup {
+        provider: &phase::PROVIDER,
+    },
+    PropertyProviderGroup {
+        provider: &reference::PROVIDER,
+    },
+    PropertyProviderGroup {
+        provider: &smooth::PROVIDER,
+    },
+    PropertyProviderGroup {
+        provider: &step_enabled::PROVIDER,
+    },
+    PropertyProviderGroup {
         provider: &typography::PROVIDER,
+    },
+    PropertyProviderGroup {
+        provider: &zero_fill::PROVIDER,
     },
 ];
 
@@ -168,6 +221,58 @@ mod scope_tests;
 #[cfg(test)]
 #[path = "apodization_tests.rs"]
 mod apodization_tests;
+
+#[cfg(test)]
+#[path = "axis_tests.rs"]
+mod axis_tests;
+
+#[cfg(test)]
+#[path = "object_tests.rs"]
+mod object_tests;
+
+#[cfg(test)]
+#[path = "processing_test_support.rs"]
+mod processing_test_support;
+
+#[cfg(test)]
+#[path = "zero_fill_tests.rs"]
+mod zero_fill_tests;
+
+#[cfg(test)]
+#[path = "phase_tests.rs"]
+mod phase_tests;
+
+#[cfg(test)]
+#[path = "baseline_tests.rs"]
+mod baseline_tests;
+
+#[cfg(test)]
+#[path = "reference_tests.rs"]
+mod reference_tests;
+
+#[cfg(test)]
+#[path = "smooth_tests.rs"]
+mod smooth_tests;
+
+#[cfg(test)]
+#[path = "normalize_tests.rs"]
+mod normalize_tests;
+
+#[cfg(test)]
+#[path = "bin_tests.rs"]
+mod bin_tests;
+
+#[cfg(test)]
+#[path = "canvas_tests.rs"]
+mod canvas_tests;
+
+#[cfg(test)]
+#[path = "step_enabled_tests.rs"]
+mod step_enabled_tests;
+
+#[cfg(test)]
+#[path = "group_delay_tests.rs"]
+mod group_delay_tests;
 
 #[cfg(test)]
 #[path = "export_dpi_tests.rs"]

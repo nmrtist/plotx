@@ -1,17 +1,17 @@
 //! The ordered processing step-list panel: one editable pipeline per axis, with
 //! an FFT anchor separating time- and frequency-domain steps.
 
-mod cleanup_editors;
 mod editors;
 
 use egui::{Button, Ui};
 use egui_phosphor::regular as icon;
 use plotx_core::actions::DatasetProcessingState;
+use plotx_core::automation::{ResourceRef, TargetRef};
 use plotx_core::state::{Dataset, DatasetId, PhaseAxis, PlotxApp};
 use plotx_processing::{
-    Apodization, AutoPhaseMethod, AxisPipeline, BaselineMethod, BinParams, NormalizeMethod,
-    PhaseParams, ProcessingStep, ReferenceParams, SmoothMethod, StepDomain, StepId, StepKind,
-    StepSource, ZeroFill,
+    Apodization, AxisPipeline, BaselineMethod, BinParams, NormalizeMethod, PhaseParams,
+    ProcessingStep, ReferenceParams, SmoothMethod, StepDomain, StepId, StepKind, StepSource,
+    ZeroFill,
 };
 
 /// A structural change to a step, deferred until after the row loop so the list
@@ -63,10 +63,11 @@ fn badge(dataset: &Dataset) -> (String, bool) {
 
 fn panel_menu(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
     ui.label("Advanced");
-    let mut gd = group_delay(&app.doc.datasets[di]);
-    if ui.checkbox(&mut gd, "Group-delay correction").changed() {
-        set_group_delay(app, di, gd);
-    }
+    let target = TargetRef {
+        resource: ResourceRef::from(app.doc.datasets[di].resource_id()),
+        component: None,
+    };
+    crate::ui::properties::panel::processing_advanced_section(app, &target, ui);
     let mut paused = app.session.ui.proc_paused;
     if ui.checkbox(&mut paused, "Pause auto-recompute").changed() {
         app.session.ui.proc_paused = paused;
@@ -154,10 +155,11 @@ fn row(
     let expanded = app.session.ui.proc_expanded_step == Some((owner, id));
     ui.horizontal(|ui| {
         ui.weak(icon::DOTS_SIX_VERTICAL);
-        let mut enabled = step.enabled;
-        if ui.checkbox(&mut enabled, "").changed() {
-            set_enabled(app, di, axis, id, enabled);
-        }
+        let target = TargetRef {
+            resource: ResourceRef::from(owner),
+            component: Some(plotx_core::automation::ComponentRef::ProcessingStep(id)),
+        };
+        crate::ui::properties::panel::processing_step_section(app, &target, ui);
         ui.label(editors::kind_icon(&step.kind));
         if ui
             .selectable_label(expanded, editors::kind_label(&step.kind))
@@ -278,7 +280,8 @@ fn add_step_menu(app: &mut PlotxApp, di: usize, axis: PhaseAxis, ui: &mut Ui) {
                 ui.close();
             }
             if ui.button("Binning").clicked() {
-                add_step(app, di, axis, StepKind::Bin(BinParams::DEFAULT));
+                let params = default_bin_params(app, di);
+                add_step(app, di, axis, StepKind::Bin(params));
                 ui.close();
             }
             if ui.button("Reverse").clicked() {
@@ -291,6 +294,17 @@ fn add_step_menu(app: &mut PlotxApp, di: usize, axis: PhaseAxis, ui: &mut Ui) {
             }
         }
     });
+}
+
+fn default_bin_params(app: &PlotxApp, dataset: usize) -> BinParams {
+    let Some(Dataset::Nmr(dataset)) = app.doc.datasets.get(dataset) else {
+        return BinParams::DEFAULT;
+    };
+    let effective_minimum = 1.5 * plotx_processing::cleanup::axis_step(&dataset.spectrum.ppm);
+    BinParams {
+        width: BinParams::DEFAULT.width.max(effective_minimum.next_up()),
+        ..BinParams::DEFAULT
+    }
 }
 
 fn action_bar(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
@@ -352,73 +366,6 @@ fn state_pipe(state: &mut DatasetProcessingState, axis: PhaseAxis) -> Option<&mu
         },
         _ => None,
     }
-}
-
-fn edit_step(
-    state: &mut DatasetProcessingState,
-    axis: PhaseAxis,
-    id: StepId,
-    mutate: impl FnOnce(&mut StepKind),
-) {
-    if let Some(pipe) = state_pipe(state, axis)
-        && let Some(s) = pipe.steps.iter_mut().find(|s| s.id == id)
-    {
-        mutate(&mut s.kind);
-    }
-}
-
-fn commit_kind(app: &mut PlotxApp, di: usize, axis: PhaseAxis, id: StepId, kind: StepKind) {
-    let before = DatasetProcessingState::from_dataset(&app.doc.datasets[di]);
-    let mut after = before.clone();
-    edit_step(&mut after, axis, id, |k| *k = kind);
-    app.commit_processing_edit(di, before, after);
-}
-
-fn set_enabled(app: &mut PlotxApp, di: usize, axis: PhaseAxis, id: StepId, enabled: bool) {
-    let before = DatasetProcessingState::from_dataset(&app.doc.datasets[di]);
-    let mut after = before.clone();
-    if let Some(pipe) = state_pipe(&mut after, axis)
-        && let Some(s) = pipe.steps.iter_mut().find(|s| s.id == id)
-    {
-        s.enabled = enabled;
-    }
-    app.commit_processing_edit(di, before, after);
-}
-
-/// Switch a Phase step between manual and one of the auto methods. Switching to
-/// manual seeds the exact automatic terms so the trace does not jump.
-fn set_phase_method(
-    app: &mut PlotxApp,
-    di: usize,
-    axis: PhaseAxis,
-    id: StepId,
-    method: Option<AutoPhaseMethod>,
-) {
-    let before = DatasetProcessingState::from_dataset(&app.doc.datasets[di]);
-    let mut after = before.clone();
-    match method {
-        Some(m) => {
-            edit_step(&mut after, axis, id, |k| {
-                if let StepKind::Phase(p) = k {
-                    p.auto = Some(m);
-                }
-            });
-        }
-        None => {
-            let seed = app.doc.datasets[di].automatic_phase_params(axis);
-            edit_step(&mut after, axis, id, |k| {
-                if let StepKind::Phase(p) = k {
-                    if let Some((p0, p1, piv)) = seed {
-                        p.phase0 = p0;
-                        p.phase1 = p1;
-                        p.pivot_frac = piv;
-                    }
-                    p.auto = None;
-                }
-            });
-        }
-    }
-    app.commit_processing_edit(di, before, after);
 }
 
 fn apply_row_op(app: &mut PlotxApp, di: usize, axis: PhaseAxis, id: StepId, op: RowOp) {
@@ -521,43 +468,6 @@ fn reset_to_default(app: &mut PlotxApp, di: usize) {
     ));
 }
 
-fn set_group_delay(app: &mut PlotxApp, di: usize, on: bool) {
-    match &app.doc.datasets[di] {
-        Dataset::Nmr(_) => {
-            let before = DatasetProcessingState::from_dataset(&app.doc.datasets[di]);
-            let mut after = before.clone();
-            if let DatasetProcessingState::Nmr {
-                group_delay_correct,
-                ..
-            } = &mut after
-            {
-                *group_delay_correct = on;
-            }
-            app.commit_processing_edit(di, before, after);
-        }
-        Dataset::Nmr2D(_) => {
-            if let Some(n) = app.doc.datasets[di].as_nmr2d_mut() {
-                n.group_delay_correct = on;
-            }
-            app.apply_dataset_retransform(di);
-            app.recompute_integrals_2d_after_processing(di);
-        }
-        Dataset::Table(_) => {}
-        Dataset::Electrophysiology(_) => {}
-        Dataset::Afm(_) => {}
-    }
-}
-
-fn group_delay(dataset: &Dataset) -> bool {
-    match dataset {
-        Dataset::Nmr(n) => n.group_delay_correct,
-        Dataset::Nmr2D(n) => n.group_delay_correct,
-        Dataset::Table(_) => true,
-        Dataset::Electrophysiology(_) => true,
-        Dataset::Afm(_) => true,
-    }
-}
-
 fn is_default_processing(dataset: &Dataset) -> bool {
     let Some(def) = plotx_core::project::reset_processing(dataset) else {
         return true;
@@ -575,9 +485,17 @@ fn is_default_processing(dataset: &Dataset) -> bool {
             },
         ) => ga == gb && pipe_eq(a, b),
         (
-            DatasetProcessingState::Nmr2D { params: a, .. },
-            DatasetProcessingState::Nmr2D { params: b, .. },
-        ) => a.layout == b.layout && pipe_eq(&a.f2, &b.f2) && pipe_eq(&a.f1, &b.f1),
+            DatasetProcessingState::Nmr2D {
+                params: a,
+                group_delay_correct: ga,
+                ..
+            },
+            DatasetProcessingState::Nmr2D {
+                params: b,
+                group_delay_correct: gb,
+                ..
+            },
+        ) => ga == gb && a.layout == b.layout && pipe_eq(&a.f2, &b.f2) && pipe_eq(&a.f1, &b.f1),
         _ => false,
     }
 }
@@ -589,4 +507,42 @@ fn pipe_eq(a: &AxisPipeline, b: &AxisPipeline) -> bool {
             .iter()
             .zip(&b.steps)
             .all(|(x, y)| x.kind == y.kind && x.enabled == y.enabled)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use num_complex::Complex64;
+    use plotx_core::state::Nmr2DDataset;
+    use plotx_io::{Dim, Domain, NmrData2D, QuadMode};
+
+    #[test]
+    fn two_dimensional_group_delay_participates_in_the_default_badge() {
+        let dim = |nucleus: &str| Dim {
+            spectral_width_hz: 2_000.0,
+            observe_freq_mhz: 400.0,
+            carrier_ppm: 4.7,
+            nucleus: nucleus.to_owned(),
+            group_delay: 2.0,
+        };
+        let data = NmrData2D {
+            data: vec![Complex64::new(1.0, 0.2); 32],
+            rows: 4,
+            cols: 8,
+            domain: Domain::Time,
+            direct: dim("1H"),
+            indirect: dim("13C"),
+            quad: QuadMode::Complex,
+            indirect_conjugate: false,
+            experiment: Some("hsqc".to_owned()),
+            pseudo_axis: None,
+            diffusion: None,
+            nus: None,
+            source: "default badge".to_owned(),
+        };
+        let mut dataset = Dataset::Nmr2D(Box::new(Nmr2DDataset::load(data)));
+        assert!(is_default_processing(&dataset));
+        dataset.as_nmr2d_mut().unwrap().group_delay_correct = false;
+        assert!(!is_default_processing(&dataset));
+    }
 }

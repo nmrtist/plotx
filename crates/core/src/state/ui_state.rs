@@ -274,6 +274,15 @@ impl PropertyFocus {
     }
 }
 
+/// Persistent buffer for one catalog text control. It is keyed by the exact
+/// target selection so changing objects cannot carry uncommitted text across.
+pub struct PropertyTextEditState {
+    pub property: crate::properties::PropertyId,
+    pub targets: Vec<crate::automation::TargetRef>,
+    pub text: String,
+    pub editing: bool,
+}
+
 pub struct UiState {
     /// The single in-flight direct-manipulation gesture; see [`Interaction`].
     pub interaction: Interaction,
@@ -285,10 +294,10 @@ pub struct UiState {
     pub wheel_zoom: Option<PendingViewportEdit>,
     pub canvas_size_edit: Option<PendingCanvasSizeEdit>,
     pub page_layout_edit: Option<PendingPageLayoutEdit>,
-    pub processing_edit: Option<PendingProcessingEdit>,
     pub processing_session: Option<PendingProcessingEdit>,
     /// The continuous property-catalog control currently being dragged, if any.
     pub property_gesture: Option<crate::actions::PendingPropertyGesture>,
+    pub property_text_edits: Vec<PropertyTextEditState>,
     pub inspector_edit: Option<PendingInspectorEdit>,
     /// Pre-edit snapshot for a plot-local axis text/range gesture.
     pub axis_overrides_before: Option<(usize, ObjectId, AxisOverrides)>,
@@ -377,7 +386,6 @@ pub struct UiState {
     pub panel_note_inline_edit: Option<PanelNoteEditState>,
     pub panel_note_edit: Option<PanelNoteEditState>,
     pub text_edit: Option<TextEditState>,
-    pub snap_enabled: bool,
     /// Snap guide previews painted during an `Interaction::Object` drag; cleared
     /// alongside it.
     pub snap_guides: Vec<crate::layout::SnapGuide>,
@@ -467,9 +475,9 @@ impl Default for UiState {
             wheel_zoom: None,
             canvas_size_edit: None,
             page_layout_edit: None,
-            processing_edit: None,
             processing_session: None,
             property_gesture: None,
+            property_text_edits: Vec::new(),
             inspector_edit: None,
             axis_overrides_before: None,
             canvas_settings: None,
@@ -520,7 +528,6 @@ impl Default for UiState {
             panel_note_inline_edit: None,
             panel_note_edit: None,
             text_edit: None,
-            snap_enabled: true,
             snap_guides: Vec::new(),
             selected_region: None,
             selected_integral: None,
@@ -633,10 +640,7 @@ pub struct Session {
     /// from settings at construction and kept in sync by `note_recent_file` /
     /// `clear_recent_files` / `apply_settings`. Not serialized with projects.
     pub recent_files: Vec<std::path::PathBuf>,
-    pub canvas_accent: Option<[u8; 3]>,
     pub ui: UiState,
-    /// Complete previous project files to retain after a successful save.
-    pub project_backup_generations: u8,
     /// Off-thread runner for the heaviest button-triggered DOSY computations.
     /// Not serialized; rebuilt fresh whenever a `PlotxApp` is constructed.
     pub compute: ComputeService,

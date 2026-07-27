@@ -14,6 +14,75 @@ pub fn pipeline_from_dto(dto: &AxisPipelineDto) -> AxisPipeline {
     }
 }
 
+/// Validate persisted cleanup parameters against the exact input each kernel
+/// will receive. The error names the stored value and the data-derived bound so
+/// a malformed project or scheme never opens into a silently rewritten state.
+pub fn validate_1d_pipeline(
+    data: &plotx_io::NmrData,
+    pipeline: &AxisPipeline,
+    group_delay_correct: bool,
+) -> std::result::Result<(), String> {
+    let mut spectrum = plotx_processing::transform_base(data, pipeline, group_delay_correct);
+    for step in pipeline
+        .steps
+        .iter()
+        .skip_while(|step| step.kind.at_or_before_fft())
+    {
+        match step.kind {
+            StepKind::Smooth(method) => {
+                let capped = spectrum.values.len().min(201);
+                let max_window = if capped.is_multiple_of(2) {
+                    capped.saturating_sub(1)
+                } else {
+                    capped
+                };
+                let (window, order) = match method {
+                    SmoothMethod::MovingAverage { window } => (usize::from(window), None),
+                    SmoothMethod::SavitzkyGolay { window, poly_order } => {
+                        (usize::from(window), Some(usize::from(poly_order)))
+                    }
+                };
+                if max_window < 3 || window < 3 || window > max_window || window.is_multiple_of(2) {
+                    return Err(format!(
+                        "stored smoothing window {window} is out of range: it must be an odd value between 3 and {max_window} for this {}-point spectrum",
+                        spectrum.values.len()
+                    ));
+                }
+                if let Some(order) = order {
+                    let max_order = 8.min(window - 1);
+                    if order < 1 || order > max_order {
+                        return Err(format!(
+                            "stored smoothing polynomial order {order} is out of range: it must be between 1 and {max_order} for window {window}"
+                        ));
+                    }
+                }
+            }
+            StepKind::Normalize(NormalizeMethod::Constant { divisor })
+                if !divisor.is_finite() || divisor.abs() <= f64::MIN_POSITIVE =>
+            {
+                return Err(format!(
+                    "stored normalization divisor {divisor} is out of range: its magnitude must be greater than {}",
+                    f64::MIN_POSITIVE
+                ));
+            }
+            StepKind::Bin(params) => {
+                let minimum = 1.5 * plotx_processing::cleanup::axis_step(&spectrum.ppm);
+                if !params.width.is_finite() || params.width <= minimum {
+                    return Err(format!(
+                        "stored bin width {} is out of range: it must be greater than {minimum} for this axis",
+                        params.width
+                    ));
+                }
+            }
+            _ => {}
+        }
+        if step.enabled {
+            plotx_processing::apply_freq_step(&mut spectrum, &step.kind);
+        }
+    }
+    Ok(())
+}
+
 /// Drop step identities from a pipeline destined for a detached recipe
 /// (`.plotxproc`), which has no owner to make them meaningful.
 pub fn strip_step_identities(dto: &mut AxisPipelineDto) {

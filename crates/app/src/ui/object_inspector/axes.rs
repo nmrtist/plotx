@@ -1,5 +1,6 @@
-use egui::{DragValue, Response, TextEdit, Ui};
+use egui::{DragValue, Response, Ui};
 use plotx_core::actions::Action;
+use plotx_core::properties::axis;
 use plotx_core::state::{AxisOverrides, AxisRange, ObjectId, PlotxApp};
 use plotx_figure::AxisFrame;
 
@@ -27,55 +28,21 @@ pub(super) fn axes_section(
     object: ObjectId,
     ui: &mut Ui,
 ) -> bool {
-    let Some((x_auto, y_auto, hidden, x_categorical, y_categorical)) = app.doc.canvases[canvas]
+    let Some((hidden, x_categorical, y_categorical)) = app.doc.canvases[canvas]
         .object(object)
         .and_then(|object| object.plot())
         .map(|plot| {
             (
-                plot.figure.x.label.clone(),
-                plot.figure.y.label.clone(),
-                plot.figure.axis_frame == AxisFrame::Hidden,
-                plot.figure.x.categories.is_some(),
-                plot.figure.y.categories.is_some(),
+                plot.figure().axis_frame == AxisFrame::Hidden,
+                plot.figure().x.categories.is_some(),
+                plot.figure().y.categories.is_some(),
             )
         })
     else {
         return false;
     };
 
-    ui.strong("Axes");
     let hidden_reason = "Choose a chart with visible axes to edit axis settings.";
-    let mut focused = false;
-    egui::Grid::new("object_axis_labels")
-        .num_columns(2)
-        .spacing([8.0, 4.0])
-        .show(ui, |ui| {
-            focused |= label_row(
-                app,
-                canvas,
-                object,
-                AxisKind::X,
-                "X title",
-                &x_auto,
-                !hidden,
-                hidden_reason,
-                ui,
-            );
-            ui.end_row();
-            focused |= label_row(
-                app,
-                canvas,
-                object,
-                AxisKind::Y,
-                "Y title",
-                &y_auto,
-                !hidden,
-                hidden_reason,
-                ui,
-            );
-            ui.end_row();
-        });
-
     let x_reason = if hidden {
         hidden_reason
     } else {
@@ -106,122 +73,30 @@ pub(super) fn axes_section(
         y_reason,
         ui,
     );
-    visibility_row(app, canvas, object, AxisKind::X, "X text", ui);
-    visibility_row(app, canvas, object, AxisKind::Y, "Y text", ui);
-
-    focused
-}
-
-fn visibility_row(
-    app: &mut PlotxApp,
-    canvas: usize,
-    object: ObjectId,
-    axis: AxisKind,
-    label: &str,
-    ui: &mut Ui,
-) {
-    let Some((mut ticks, mut title)) = app.doc.canvases[canvas]
-        .object(object)
-        .and_then(|object| object.plot())
-        .map(|plot| match axis {
-            AxisKind::X => (plot.figure.x.show_tick_labels, plot.figure.x.show_label),
-            AxisKind::Y => (plot.figure.y.show_tick_labels, plot.figure.y.show_label),
-        })
-    else {
-        return;
-    };
-    ui.horizontal(|ui| {
-        ui.label(label);
-        let tick_changed = ui.checkbox(&mut ticks, "Tick labels").changed();
-        let title_changed = ui.checkbox(&mut title, "Title").changed();
-        if tick_changed || title_changed {
-            let before = current_overrides(app, canvas, object);
-            let mut after = before.clone();
-            match axis {
-                AxisKind::X => {
-                    if tick_changed {
-                        after.x_show_tick_labels = Some(ticks);
-                    }
-                    if title_changed {
-                        after.x_show_label = Some(title);
-                    }
-                }
-                AxisKind::Y => {
-                    if tick_changed {
-                        after.y_show_tick_labels = Some(ticks);
-                    }
-                    if title_changed {
-                        after.y_show_label = Some(title);
-                    }
-                }
+    if ui
+        .button("Automatic")
+        .on_hover_text("Clear all axis visibility overrides")
+        .clicked()
+        && let Some(target) = app.object_target(canvas, object)
+    {
+        match app.plan_property_resets(
+            &[
+                axis::X_SHOW_TICK_LABELS,
+                axis::X_SHOW_LABEL,
+                axis::Y_SHOW_TICK_LABELS,
+                axis::Y_SHOW_LABEL,
+            ],
+            std::slice::from_ref(&target),
+        ) {
+            Ok(commit) => {
+                app.commit_property(commit);
             }
-            app.execute_action(Action::set_axis_overrides(canvas, object, before, after));
-        }
-        if ui
-            .button("Automatic")
-            .on_hover_text("Clear visibility overrides")
-            .clicked()
-        {
-            let before = current_overrides(app, canvas, object);
-            let mut after = before.clone();
-            match axis {
-                AxisKind::X => {
-                    after.x_show_tick_labels = None;
-                    after.x_show_label = None;
-                }
-                AxisKind::Y => {
-                    after.y_show_tick_labels = None;
-                    after.y_show_label = None;
-                }
+            Err(error) => {
+                app.session.status = format!("Could not reset axis visibility: {error}");
             }
-            app.execute_action(Action::set_axis_overrides(canvas, object, before, after));
         }
-    });
-}
-
-#[allow(clippy::too_many_arguments)]
-fn label_row(
-    app: &mut PlotxApp,
-    canvas: usize,
-    object: ObjectId,
-    axis: AxisKind,
-    label: &str,
-    automatic: &str,
-    enabled: bool,
-    disabled_reason: &str,
-    ui: &mut Ui,
-) -> bool {
-    let current = current_overrides(app, canvas, object);
-    let mut text = match axis {
-        AxisKind::X => current.x_label.clone(),
-        AxisKind::Y => current.y_label.clone(),
     }
-    .unwrap_or_default();
-    ui.label(label);
-    let response = ui
-        .add_enabled(
-            enabled,
-            TextEdit::singleline(&mut text)
-                .hint_text(automatic)
-                .desired_width(132.0),
-        )
-        .on_disabled_hover_text(disabled_reason);
-    if response.gained_focus() {
-        begin_edit(app, canvas, object);
-    }
-    if response.changed() {
-        let value = (!text.trim().is_empty()).then_some(text);
-        let mut after = current_overrides(app, canvas, object);
-        match axis {
-            AxisKind::X => after.x_label = value,
-            AxisKind::Y => after.y_label = value,
-        }
-        apply_live(app, canvas, object, after);
-    }
-    if response.lost_focus() {
-        commit_edit(app);
-    }
-    response.has_focus()
+    false
 }
 
 #[allow(clippy::too_many_arguments)]

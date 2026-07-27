@@ -77,7 +77,7 @@ pub fn execute(
                 app.set_show_grid(canvas, !app.doc.canvases[canvas].layout.show_grid);
             }
         }
-        CommandId::ToggleSnap => app.set_snap_enabled(!app.session.ui.snap_enabled),
+        CommandId::ToggleSnap => app.set_snap_enabled(!app.settings.general.snap_enabled),
         CommandId::Preferences => app.open_settings(),
         CommandId::CommandPalette => {
             app.session.ui.command_palette = match app.session.ui.command_palette.take() {
@@ -265,4 +265,64 @@ fn open_active_region_table(app: &mut PlotxApp) {
 fn reveal_group(app: &mut PlotxApp, group: ToolGroup) {
     app.session.secondary_sidebar_visible = true;
     app.session.ui.requested_tool_group = Some(group);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use plotx_core::properties::{AggregateValue, PropertyAddress, PropertyValue, app_preferences};
+    use plotx_core::settings::Settings;
+
+    fn catalog_snap(app: &mut PlotxApp, enabled: bool) {
+        let commit = app
+            .plan_property_write(
+                app_preferences::SNAP_ENABLED,
+                std::slice::from_ref(&app.app_target()),
+                &PropertyValue::Bool(enabled),
+            )
+            .expect("the Preferences catalog row plans");
+        app.commit_property(commit);
+    }
+
+    fn resolved_snap(app: &PlotxApp) -> AggregateValue<PropertyValue> {
+        app.resolve_property(&PropertyAddress::new(
+            app.app_target(),
+            app_preferences::SNAP_ENABLED,
+        ))
+        .expect("snap resolves through the catalog")
+        .value
+    }
+
+    #[test]
+    fn settings_toolbar_and_toggle_command_share_the_snap_catalog_value() {
+        let mut app = PlotxApp::new_with_settings(Settings::default());
+
+        // Preferences rows submit this same catalog write.
+        catalog_snap(&mut app, false);
+        assert_eq!(
+            resolved_snap(&app),
+            AggregateValue::Uniform(PropertyValue::Bool(false))
+        );
+
+        // The canvas toolbar keeps its existing setter surface, whose
+        // implementation now plans and commits the catalog property.
+        app.set_snap_enabled(true);
+        assert_eq!(
+            resolved_snap(&app),
+            AggregateValue::Uniform(PropertyValue::Bool(true))
+        );
+
+        let mut clipboard = ClipboardTablePaste::default();
+        execute(
+            CommandId::ToggleSnap,
+            &mut app,
+            &mut clipboard,
+            &egui::Context::default(),
+        );
+        assert_eq!(
+            resolved_snap(&app),
+            AggregateValue::Uniform(PropertyValue::Bool(false))
+        );
+        assert!(!app.settings.general.snap_enabled);
+    }
 }

@@ -4,9 +4,9 @@ use super::provider::PropertyProvider;
 use super::target::{SeriesContext, not_applicable_encoding, resolved_schema, series_context};
 use super::{
     AggregateValue, Applicability, Availability, ComponentKind, DefaultPolicy, EditOp,
-    EncodingKind, FloatBounds, PropertyAccess, PropertyAddress, PropertyDefinition, PropertyError,
-    PropertyId, PropertyTransaction, PropertyValue, ResolvedProperty, ScopeKind, Tier, ValueCopies,
-    ValueSchema, definition,
+    EncodingKind, FloatBounds, FloatDisplay, PropertyAccess, PropertyAddress, PropertyDefinition,
+    PropertyError, PropertyId, PropertyTransaction, PropertyValue, ResolvedProperty, ScopeKind,
+    Tier, ValueCopies, ValueSchema, definition,
 };
 use crate::state::{
     PlotxApp, PresentationProfile, RequestedChart, default_encoding, field_peak_magnitude,
@@ -23,7 +23,7 @@ pub(crate) const DEFINITIONS: &[PropertyDefinition] = &[PropertyDefinition {
     scope_kind: ScopeKind::Object,
     value_schema: ValueSchema::Float {
         bounds: WIDTH_BOUNDS,
-        log: false,
+        display: FloatDisplay::Linear(""),
         drag_step: Some(WIDTH_STEP),
     },
     access: PropertyAccess::ReadWrite,
@@ -58,6 +58,7 @@ impl PropertyProvider for LineProvider {
         };
         Ok(ResolvedProperty {
             address: address.clone(),
+            modified: None,
             value: AggregateValue::Uniform(PropertyValue::Float(f64::from(line.width.get()))),
             default_value: factory_width(&context).map(PropertyValue::Float),
             availability: Availability::Editable,
@@ -70,7 +71,7 @@ impl PropertyProvider for LineProvider {
         app: &PlotxApp,
         transaction: &mut PropertyTransaction,
         address: &PropertyAddress,
-        operation: EditOp,
+        operation: &EditOp<'_>,
     ) -> Result<(), PropertyError> {
         let definition = definition(address.definition).ok_or_else(|| {
             PropertyError::UnknownProperty(address.definition.as_str().to_owned())
@@ -81,7 +82,7 @@ impl PropertyProvider for LineProvider {
         };
         let width = match operation {
             EditOp::Set(PropertyValue::Float(value)) => {
-                WIDTH_BOUNDS.check(definition.id, "line width", value)?
+                WIDTH_BOUNDS.check(definition.id, "line width", *value)?
             }
             EditOp::Set(value) => {
                 return Err(PropertyError::InvalidValue {

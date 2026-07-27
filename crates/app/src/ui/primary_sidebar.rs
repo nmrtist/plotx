@@ -253,17 +253,14 @@ fn object_list(app: &mut PlotxApp, ci: usize, ui: &mut Ui) {
                     .checkbox(&mut locked, "")
                     .on_hover_text("Locked")
                     .changed()
+                    && let Some(target) = app.object_target(ci, object_id)
+                    && let Ok(commit) = app.plan_property_write(
+                        plotx_core::properties::object::LOCKED,
+                        std::slice::from_ref(&target),
+                        &plotx_core::properties::PropertyValue::Bool(locked),
+                    )
                 {
-                    let before = (
-                        app.doc.canvases[ci].objects[oi].visible,
-                        app.doc.canvases[ci].objects[oi].locked,
-                    );
-                    app.execute_action(Action::set_object_flags(
-                        ci,
-                        object_id,
-                        before,
-                        (before.0, locked),
-                    ));
+                    app.commit_property(commit);
                 }
                 if ui
                     .add_enabled(

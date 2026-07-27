@@ -29,7 +29,7 @@ fn set_integrals_apply_undo_redo_keeps_all_primary_figures_synced() {
         vec![integral],
     ));
     assert!(app.doc.canvases.iter().all(|canvas| {
-        let curve = &canvas.objects[0].plot().unwrap().figure.integral_curves;
+        let curve = &canvas.objects[0].plot().unwrap().figure().integral_curves;
         curve.len() == 1 && curve[0].label == "3.000"
     }));
 
@@ -38,7 +38,7 @@ fn set_integrals_apply_undo_redo_keeps_all_primary_figures_synced() {
         canvas.objects[0]
             .plot()
             .unwrap()
-            .figure
+            .figure()
             .integral_curves
             .is_empty()
     }));
@@ -47,7 +47,7 @@ fn set_integrals_apply_undo_redo_keeps_all_primary_figures_synced() {
         canvas.objects[0]
             .plot()
             .unwrap()
-            .figure
+            .figure()
             .integral_curves
             .len()
             == 1
@@ -79,7 +79,7 @@ fn cancelling_live_integral_edit_restores_curve_description() {
         app.doc.canvases[0].objects[0]
             .plot()
             .unwrap()
-            .figure
+            .figure()
             .integral_curves[0]
             .label,
         "9.000"
@@ -91,7 +91,7 @@ fn cancelling_live_integral_edit_restores_curve_description() {
         app.doc.canvases[0].objects[0]
             .plot()
             .unwrap()
-            .figure
+            .figure()
             .integral_curves[0]
             .label,
         "3.000"
@@ -173,7 +173,7 @@ fn lightweight_sync_respects_hidden_primary_series() {
     app.set_integrals(0, &[sample_integral(2, 3.0, Some(3.0))]);
     let plot = app.doc.canvases[0].objects[0].plot_mut().unwrap();
     plot.binding.series[0].visible = false;
-    assert_eq!(plot.figure.integral_curves.len(), 1);
+    assert_eq!(plot.figure().integral_curves.len(), 1);
 
     app.sync_integral_curves_for(0);
 
@@ -181,7 +181,7 @@ fn lightweight_sync_respects_hidden_primary_series() {
         app.doc.canvases[0].objects[0]
             .plot()
             .unwrap()
-            .figure
+            .figure()
             .integral_curves
             .is_empty()
     );
@@ -202,7 +202,7 @@ fn one_dimensional_processing_commit_recomputes_integral_and_curve() {
     let curve = &app.doc.canvases[0].objects[0]
         .plot()
         .unwrap()
-        .figure
+        .figure()
         .integral_curves[0];
     assert_eq!(curve.normalized_area, recomputed.normalized_area);
     assert_eq!(curve.start_ppm, recomputed.start_ppm);
@@ -251,7 +251,7 @@ fn processing_action_apply_undo_and_redo_recompute_integrals() {
         app.doc.canvases[0].objects[0]
             .plot()
             .unwrap()
-            .figure
+            .figure()
             .integral_curves[0]
             .label,
         "3.000"
@@ -278,7 +278,7 @@ fn reference_accepts_arbitrary_target_without_plot_marker() {
     let curve = &app.doc.canvases[0].objects[0]
         .plot()
         .unwrap()
-        .figure
+        .figure()
         .integral_curves[0];
     assert_eq!(curve.label, "100.000");
     assert_eq!(curve.color, plotx_figure::Color::rgb(0x2b, 0x6c, 0xb0));

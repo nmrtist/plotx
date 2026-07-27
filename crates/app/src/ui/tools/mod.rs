@@ -13,10 +13,9 @@ mod statistics_config;
 mod task_card;
 
 use curve_fit::curve_fit_group;
-use egui::{Button, DragValue, Id, Response, Ui};
+use egui::{Button, DragValue, Id, Ui};
 use egui_phosphor::regular as icon;
 use line_fit::line_fit_group;
-use plotx_core::actions::{DatasetProcessingState, PendingProcessingEdit};
 use plotx_core::state::{Dataset, PlotxApp, Tool, ToolGroup};
 use pseudo::experiment_group;
 use region_analysis::region_analysis_group;
@@ -500,45 +499,5 @@ fn integrate_2d_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
                 }
             });
         });
-    }
-}
-
-pub(super) fn begin_processing_widget(
-    app: &mut PlotxApp,
-    di: usize,
-    resp: &Response,
-    before: DatasetProcessingState,
-) {
-    if resp.drag_started() {
-        app.session.ui.processing_edit = Some(PendingProcessingEdit {
-            dataset: app.doc.datasets[di].resource_id(),
-            before,
-        });
-    }
-}
-
-/// Commit a DragValue interaction as one undo step, routed through the pause
-/// gate so a paused edit defers its recompute. A drag coalesces via the
-/// pending edit's `before`; a plain click commits with `fallback_before`.
-pub(super) fn commit_processing_widget(
-    app: &mut PlotxApp,
-    di: usize,
-    resp: &Response,
-    fallback_before: DatasetProcessingState,
-) {
-    if resp.drag_stopped() {
-        let before = app
-            .session
-            .ui
-            .processing_edit
-            .take()
-            .filter(|edit| edit.dataset == app.doc.datasets[di].resource_id())
-            .map(|edit| edit.before)
-            .unwrap_or(fallback_before);
-        let after = DatasetProcessingState::from_dataset(&app.doc.datasets[di]);
-        app.commit_processing_edit(di, before, after);
-    } else if resp.changed() && !resp.dragged() {
-        let after = DatasetProcessingState::from_dataset(&app.doc.datasets[di]);
-        app.commit_processing_edit(di, fallback_before, after);
     }
 }

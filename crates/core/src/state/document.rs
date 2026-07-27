@@ -297,25 +297,6 @@ impl AxisProjections {
     }
 }
 
-#[derive(Clone)]
-pub struct PlotObject {
-    /// Persistent high-water mark for owner-local series identities. This is
-    /// deliberately outside `binding`, which actions may replace wholesale.
-    pub next_series_id: SeriesId,
-    pub binding: DataBinding,
-    /// The selected chart type (registry id) + its context, driving figure
-    /// rebuilds through `state::charts`. Defaults to the dataset domain's default.
-    pub chart: ChartSpec,
-    /// The multi-series stacking layout. Default = superimposed overlay.
-    pub stack: StackSpec,
-    /// Marginal 1D axis projections for a 2D contour (empty for other plots).
-    pub projections: AxisProjections,
-    pub axis_overrides: AxisOverrides,
-    pub figure: Figure,
-    pub viewport: CanvasViewport,
-    pub panel: PanelMeta,
-}
-
 /// Horizontal alignment of a text box's lines within its frame.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TextAlign {
@@ -572,7 +553,7 @@ pub fn document_item(
             plotx_render::DocumentItem::Plot(plotx_render::DocumentObject {
                 id: format!("object_{}", object.id),
                 frame: object.frame.rect(),
-                figure: &plot.figure,
+                figure: plot.figure(),
                 visible: object.visible,
                 title: plot.panel.visible.then_some(letter).flatten().map(|text| {
                     plotx_render::DocumentText {

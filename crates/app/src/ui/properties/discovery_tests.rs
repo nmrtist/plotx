@@ -44,6 +44,7 @@ const NEWCOMER_PRESENTATION: PropertyPresentation = PropertyPresentation {
     localized_aliases: &[LocalizedText("brand new")],
     home_route: CONTOUR_HOME,
     canvas_step: true,
+    uses_canvas_length_unit: false,
 };
 
 fn with_newcomer() -> Vec<PropertyPresentation> {
@@ -91,7 +92,7 @@ fn one_registration_joins_its_group_without_a_second_entry() {
         "membership is derived, so it grows with the table and nothing else"
     );
     // The group table itself is untouched: the newcomer contributed no entry.
-    assert_eq!(GROUPS.len(), 4);
+    assert_eq!(GROUPS.len(), 24);
 }
 
 /// Channel 3: the gesture picks up whichever property declared itself
@@ -141,10 +142,11 @@ fn every_group_lands_on_a_property_with_a_home() {
 }
 
 /// A group with no section behind it could never be navigated to, and a
-/// section with no group would silently lose channels 2 and 4. Both directions
-/// are checked so the omission fails the build instead of the interface.
+/// section with no group would silently lose channels 2 and 4. Preferences are
+/// the explicit exception: they stay out of the selection-owned canvas menu
+/// and share the global Preferences command in the palette and Ribbon.
 #[test]
-fn groups_and_home_sections_correspond() {
+fn every_home_section_has_a_group_or_the_explicit_preferences_entry() {
     for group in GROUPS {
         assert!(
             !discovery::members_of(group.section, PRESENTATIONS).is_empty(),
@@ -153,28 +155,42 @@ fn groups_and_home_sections_correspond() {
         );
     }
     let app = PlotxApp::new_with_settings(plotx_core::settings::Settings::default());
-    for entry in PRESENTATIONS {
-        if entry.home_route.panel == PanelRoute::Preferences {
-            // Preferences-homed defaults deliberately take no Ribbon slot: the
-            // panel is already one global command away. That exemption is only
-            // sound while the command stays globally reachable, so pin the
-            // premise instead of exempting a whole panel on trust.
-            let preferences = commands::describe(&app, CommandId::Preferences);
-            assert!(
-                preferences.enabled,
-                "{} is reachable only through Preferences, which is itself \
-                 unavailable on an empty document",
-                entry.id
-            );
-            continue;
+    let command_catalog = commands::catalog(&app);
+    let preferences = commands::describe(&app, CommandId::Preferences);
+    for panel_route in [
+        PanelRoute::SecondarySidebar,
+        PanelRoute::Processing,
+        PanelRoute::CanvasSettings,
+        PanelRoute::Preferences,
+    ] {
+        for section in panel_route.sections() {
+            if panel_route == PanelRoute::Preferences {
+                assert!(
+                    discovery::group(section).is_none(),
+                    "Preferences section '{section}' must not enter the \
+                     selection-owned canvas context menu"
+                );
+                assert!(
+                    preferences.enabled && preferences.ribbon.is_some(),
+                    "Preferences section '{section}' is exempt only while the \
+                     global Preferences command is enabled in the Ribbon"
+                );
+                assert!(
+                    command_catalog
+                        .iter()
+                        .any(|command| command.id == CommandId::Preferences),
+                    "Preferences section '{section}' is exempt only while the \
+                     Preferences command remains searchable"
+                );
+            } else {
+                assert!(
+                    discovery::group(section).is_some(),
+                    "section '{section}' in {} declares no group, so it is \
+                     unreachable from the Ribbon and the context menu",
+                    panel_route.title()
+                );
+            }
         }
-        assert!(
-            discovery::group(entry.home_route.section).is_some(),
-            "{} lives in section '{}', which declares no group, so it is \
-             unreachable from the Ribbon and the context menu",
-            entry.id,
-            entry.home_route.section
-        );
     }
 }
 

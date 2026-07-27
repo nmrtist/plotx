@@ -118,7 +118,7 @@ pub(super) fn command_identity(
         CommandId::ToggleSnap => (
             "Toggle Snapping".into(),
             Some(icon::MAGNET),
-            Some(app.session.ui.snap_enabled),
+            Some(app.settings.general.snap_enabled),
         ),
         CommandId::Preferences => plain("Preferences…", Some(icon::GEAR_SIX)),
         CommandId::CommandPalette => plain("Command Palette…", Some(icon::MAGNIFYING_GLASS)),

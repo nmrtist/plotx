@@ -9,14 +9,14 @@ use super::provider::PropertyProvider;
 use super::target::dataset_steps;
 use super::{
     AggregateValue, Applicability, Availability, ComponentKind, DefaultPolicy, EditOp, EnumVariant,
-    FloatBounds, PropertyAccess, PropertyAddress, PropertyDefinition, PropertyError, PropertyId,
-    PropertyTransaction, PropertyValue, ResolvedProperty, ResolvedSchema, ScopeKind, Tier,
-    ValueCopies, ValueSchema, definition,
+    FloatBounds, FloatDisplay, PropertyAccess, PropertyAddress, PropertyDefinition, PropertyError,
+    PropertyId, PropertyTransaction, PropertyValue, ResolvedProperty, ResolvedSchema, ScopeKind,
+    Tier, ValueCopies, ValueSchema, definition,
 };
 use crate::actions::DatasetProcessingState;
 use crate::automation::ComponentRef;
 use crate::state::{Dataset, DatasetId, PhaseAxis, PlotxApp};
-use plotx_processing::{Apodization, ProcessingStep, StepId, StepKind, StepSource};
+use plotx_processing::{Apodization, ProcessingStep, StepId, StepKind};
 
 pub const KIND: PropertyId = PropertyId("dataset.processing.apodization.kind");
 pub const LB_HZ: PropertyId = PropertyId("dataset.processing.apodization.lb_hz");
@@ -85,7 +85,7 @@ pub(crate) const DEFINITIONS: &[PropertyDefinition] = &[
         scope_kind: ScopeKind::Dataset,
         value_schema: ValueSchema::Float {
             bounds: LB_BOUNDS,
-            log: false,
+            display: FloatDisplay::Linear("Hz"),
             drag_step: Some(PARAMETER_STEP),
         },
         access: PropertyAccess::ReadWrite,
@@ -104,7 +104,7 @@ pub(crate) const DEFINITIONS: &[PropertyDefinition] = &[
         scope_kind: ScopeKind::Dataset,
         value_schema: ValueSchema::Float {
             bounds: GB_BOUNDS,
-            log: false,
+            display: FloatDisplay::Linear("Hz"),
             drag_step: Some(PARAMETER_STEP),
         },
         access: PropertyAccess::ReadWrite,
@@ -137,6 +137,7 @@ impl PropertyProvider for ApodizationProvider {
         let value = value_of(definition, context.current)?;
         Ok(ResolvedProperty {
             address: address.clone(),
+            modified: None,
             value: AggregateValue::Uniform(value),
             default_value: default_value(definition, context.factory)?,
             availability: Availability::Editable,
@@ -149,7 +150,7 @@ impl PropertyProvider for ApodizationProvider {
         app: &PlotxApp,
         transaction: &mut PropertyTransaction,
         address: &PropertyAddress,
-        operation: EditOp,
+        operation: &EditOp<'_>,
     ) -> Result<(), PropertyError> {
         let definition = property_definition(address.definition)?;
         let context = context(app, address, definition)?;
@@ -265,18 +266,12 @@ fn factory_default(
     axis: PhaseAxis,
     step: &ProcessingStep,
 ) -> Option<Apodization> {
-    if step.source != StepSource::Default {
-        return None;
-    }
-    dataset
-        .factory_pipeline(axis)?
-        .steps
-        .iter()
-        .find(|candidate| candidate.id == step.id)
-        .and_then(|candidate| match candidate.kind {
+    super::processing_common::factory_step(dataset, axis, step).and_then(
+        |candidate| match candidate.kind {
             StepKind::Apodize(apodization) => Some(apodization),
             _ => None,
-        })
+        },
+    )
 }
 
 fn value_of(
@@ -297,7 +292,7 @@ fn default_value(
     definition: &'static PropertyDefinition,
     factory: Option<Apodization>,
 ) -> Result<Option<PropertyValue>, PropertyError> {
-    match definition.default_policy {
+    match &definition.default_policy {
         DefaultPolicy::ProcessingFactory => {
             let Some(factory) = factory else {
                 return Ok(None);
@@ -321,11 +316,13 @@ fn default_value(
                 )),
             }
         }
-        DefaultPolicy::Fixed(value) => Ok(Some(value)),
-        DefaultPolicy::EncodingFactory | DefaultPolicy::None => Err(PropertyError::InvalidValue {
-            property: definition.id,
-            message: "this property has no processing default".to_owned(),
-        }),
+        DefaultPolicy::Fixed(value) => Ok(Some(value.clone())),
+        DefaultPolicy::EncodingFactory | DefaultPolicy::Derived | DefaultPolicy::None => {
+            Err(PropertyError::InvalidValue {
+                property: definition.id,
+                message: "this property has no processing default".to_owned(),
+            })
+        }
     }
 }
 
@@ -363,17 +360,19 @@ fn parameter_bounds(definition: &'static PropertyDefinition) -> FloatBounds {
 }
 
 fn parameter_schema(definition: &'static PropertyDefinition) -> ResolvedSchema {
+    let ValueSchema::Float { display, .. } = definition.value_schema else {
+        unreachable!("apodization parameters are declared as floats");
+    };
     ResolvedSchema::Float {
         bounds: parameter_bounds(definition),
-        log: false,
-        unit: "Hz",
+        display,
     }
 }
 
 fn checked_value(
     definition: &'static PropertyDefinition,
     apodization: Apodization,
-    value: PropertyValue,
+    value: &PropertyValue,
 ) -> Result<PropertyValue, PropertyError> {
     match definition.id {
         KIND => match value {
@@ -393,9 +392,9 @@ fn checked_value(
                     parameter_bounds(definition).check(
                         definition.id,
                         definition.canonical_label,
-                        value,
+                        *value,
                     )?;
-                    Ok(PropertyValue::Float(value))
+                    Ok(PropertyValue::Float(*value))
                 }
                 value => wrong_kind(definition, value, "a number"),
             }
@@ -408,7 +407,7 @@ fn checked_value(
 
 fn wrong_kind(
     definition: &'static PropertyDefinition,
-    value: PropertyValue,
+    value: &PropertyValue,
     expected: &str,
 ) -> Result<PropertyValue, PropertyError> {
     Err(PropertyError::InvalidValue {

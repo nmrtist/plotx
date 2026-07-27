@@ -93,7 +93,7 @@ pub(crate) fn paint_analysis_selection(
     let Some(plot_object) = object.plot() else {
         return;
     };
-    let fig = &plot_object.figure;
+    let fig = plot_object.figure();
     let x0 = x_to_screen(
         selection.x_range.min,
         plot,
@@ -139,7 +139,7 @@ pub(crate) fn paint_regions(
     let Some(fig) = app.doc.canvases[ci]
         .object(object_id)
         .and_then(|object| object.plot())
-        .map(|plot| &plot.figure)
+        .map(|plot| plot.figure())
     else {
         return;
     };
@@ -236,7 +236,7 @@ pub(crate) fn paint_integrals(
     let Some(fig) = app.doc.canvases[ci]
         .object(object_id)
         .and_then(|object| object.plot())
-        .map(|plot| &plot.figure)
+        .map(|plot| plot.figure())
     else {
         return;
     };
@@ -363,7 +363,7 @@ pub(crate) fn paint_peaks(
     let Some(fig) = app.doc.canvases[ci]
         .object(object_id)
         .and_then(|object| object.plot())
-        .map(|plot| &plot.figure)
+        .map(|plot| plot.figure())
     else {
         return;
     };

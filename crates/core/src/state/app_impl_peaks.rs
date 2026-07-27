@@ -123,12 +123,8 @@ impl PlotxApp {
                 let Some(plot) = object.plot_mut() else {
                     continue;
                 };
-                if plot.binding.primary_dataset() == Some(dataset_id)
-                    && plot.binding.primary_visible()
-                {
-                    plot.figure.integral_curves.clone_from(&curves);
-                } else if plot.binding.primary_dataset() == Some(dataset_id) {
-                    plot.figure.integral_curves.clear();
+                if plot.binding.primary_dataset() == Some(dataset_id) {
+                    plot.set_integral_curves(&curves, plot.binding.primary_visible());
                 }
             }
         }

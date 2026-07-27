@@ -459,7 +459,7 @@ fn a_snapshot_is_not_replayed_when_the_stored_map_could_not_be_restored() {
         .iter()
         .find_map(|object| object.plot())
         .expect("the saved canvas has a plot")
-        .figure
+        .figure()
         .contours
         .len();
     assert!(saved_contours > 0, "the snapshot must hold DOSY contours");
@@ -476,7 +476,7 @@ fn a_snapshot_is_not_replayed_when_the_stored_map_could_not_be_restored() {
         .iter()
         .find_map(|object| object.plot())
         .expect("the canvas still has a plot")
-        .figure
+        .figure()
         .contours
         .len();
     assert_eq!(

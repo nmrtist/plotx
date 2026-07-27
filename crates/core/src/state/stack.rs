@@ -370,17 +370,17 @@ impl PlotxApp {
         let figure = self.build_binding_figure(&binding, &chart, &stack, canvas.size_mm);
         let viewport = CanvasViewport::from_figure(&figure);
         let panel = PanelMeta::new(self.default_plot_title(sel[0]), frame.width);
-        let mut plot = PlotObject {
-            next_series_id: SeriesId::new(0),
+        let mut plot = PlotObject::new(
+            SeriesId::new(0),
             binding,
             chart,
             stack,
-            projections: AxisProjections::default(),
-            axis_overrides: AxisOverrides::default(),
+            AxisProjections::default(),
+            AxisOverrides::default(),
             figure,
             viewport,
             panel,
-        };
+        );
         // One place decides how a freshly materialized binding is numbered, so
         // the ids and the allocator cannot drift apart.
         plot.mint_series_ids();

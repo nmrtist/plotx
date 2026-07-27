@@ -88,7 +88,7 @@ pub(crate) const DEFINITIONS: &[PropertyDefinition] = &[
         scope_kind: ScopeKind::Object,
         value_schema: ValueSchema::Float {
             bounds: FloatBounds::above(0.0, f64::MAX),
-            log: true,
+            display: FloatDisplay::Log10("intensity"),
             drag_step: None,
         },
         access: PropertyAccess::ReadWrite,
@@ -143,7 +143,7 @@ pub(crate) const DEFINITIONS: &[PropertyDefinition] = &[
         // value the write path refuses.
         value_schema: ValueSchema::Float {
             bounds: RATIO_BOUNDS,
-            log: false,
+            display: FloatDisplay::Linear(""),
             drag_step: None,
         },
         access: PropertyAccess::ReadWrite,
@@ -195,7 +195,7 @@ pub(crate) const DEFINITIONS: &[PropertyDefinition] = &[
         scope_kind: ScopeKind::Object,
         value_schema: ValueSchema::Float {
             bounds: LINE_WIDTH_BOUNDS,
-            log: false,
+            display: FloatDisplay::Linear(""),
             drag_step: None,
         },
         access: PropertyAccess::ReadWrite,
@@ -232,13 +232,14 @@ impl PropertyProvider for ContourProvider {
         let value = read(definition.id, spec)
             .ok_or_else(|| PropertyError::UnknownProperty(definition.id.as_str().to_owned()))?;
         let default_value =
-            default_value(definition, &context, spec).and_then(|value| value.uniform().copied());
+            default_value(definition, &context, spec).and_then(|value| value.uniform().cloned());
         let availability = match definition.access {
             PropertyAccess::ReadOnly => Availability::ReadOnly,
             PropertyAccess::ReadWrite => Availability::Editable,
         };
         Ok(ResolvedProperty {
             address: address.clone(),
+            modified: None,
             value,
             default_value,
             availability,
@@ -279,7 +280,7 @@ impl PropertyProvider for ContourProvider {
         app: &PlotxApp,
         transaction: &mut PropertyTransaction,
         address: &PropertyAddress,
-        operation: EditOp,
+        operation: &EditOp<'_>,
     ) -> Result<(), PropertyError> {
         let definition = definition(address.definition).ok_or_else(|| {
             PropertyError::UnknownProperty(address.definition.as_str().to_owned())
@@ -292,7 +293,7 @@ impl PropertyProvider for ContourProvider {
             EditOp::Set(value) => {
                 let permitted = permitted_variants(&definition.value_schema, &context.capabilities);
                 if let PropertyValue::Enum(choice) = value
-                    && !permitted.iter().any(|variant| variant.id == choice)
+                    && !permitted.iter().any(|variant| variant.id == *choice)
                 {
                     return Err(PropertyError::InvalidValue {
                         property: definition.id,
@@ -302,10 +303,10 @@ impl PropertyProvider for ContourProvider {
                         ),
                     });
                 }
-                value
+                (*value).clone()
             }
             EditOp::Reset => default_value(definition, &context, current)
-                .and_then(|value| value.uniform().copied())
+                .and_then(|value| value.uniform().cloned())
                 .ok_or(PropertyError::InvalidValue {
                     property: definition.id,
                     message: "the default factory has no single value for this setting".to_owned(),
@@ -322,7 +323,7 @@ impl PropertyProvider for ContourProvider {
                         "the series is no longer a contour".to_owned(),
                     ));
                 };
-                return step(definition.id, spec, direction);
+                return step(definition.id, spec, *direction);
             }
         };
         let binding = transaction.data_binding(app, context.canvas, context.object)?;
@@ -347,9 +348,9 @@ fn default_value(
     context: &super::target::SeriesContext<'_>,
     current: &ContourSpec,
 ) -> Option<AggregateValue<PropertyValue>> {
-    match definition.default_policy {
-        DefaultPolicy::ProcessingFactory | DefaultPolicy::None => None,
-        DefaultPolicy::Fixed(value) => Some(AggregateValue::Uniform(value)),
+    match &definition.default_policy {
+        DefaultPolicy::ProcessingFactory | DefaultPolicy::Derived | DefaultPolicy::None => None,
+        DefaultPolicy::Fixed(value) => Some(AggregateValue::Uniform(value.clone())),
         DefaultPolicy::EncodingFactory => {
             let defaults = default_contour_spec(&context.capabilities, &|| {
                 field_peak_magnitude(context.dataset, context.field)
@@ -467,23 +468,19 @@ pub(super) fn resolved_schema(id: PropertyId, spec: &ContourSpec) -> Option<Reso
     let schema = match &spec.positive.base {
         ContourBasePolicy::Absolute(_) => ResolvedSchema::Float {
             bounds: FloatBounds::above(0.0, f64::MAX),
-            log: true,
-            unit: "intensity",
+            display: FloatDisplay::Log10("intensity"),
         },
         ContourBasePolicy::NoiseFloor { .. } => ResolvedSchema::Float {
             bounds: FloatBounds::above(0.0, MAX_MULTIPLIER),
-            log: false,
-            unit: "× noise floor",
+            display: FloatDisplay::Linear("× noise floor"),
         },
         ContourBasePolicy::BackgroundScale { .. } => ResolvedSchema::Float {
             bounds: FloatBounds::above(0.0, MAX_MULTIPLIER),
-            log: false,
-            unit: "× spread",
+            display: FloatDisplay::Linear("× spread"),
         },
         ContourBasePolicy::FractionOfRange(_) => ResolvedSchema::Float {
             bounds: FloatBounds::above(0.0, 1.0),
-            log: false,
-            unit: "of range",
+            display: FloatDisplay::Linear("of range"),
         },
     };
     Some(schema)

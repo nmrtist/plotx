@@ -116,7 +116,7 @@ pub fn render_central(app: &mut PlotxApp, ui: &mut Ui) {
     let avail = ui.available_rect_before_wrap();
     let (resp, painter) = ui.allocate_painter(avail.size(), Sense::click_and_drag());
     let rect = resp.rect;
-    let chrome = ChromeStyle::from_visuals(ui.visuals(), app.session.canvas_accent);
+    let chrome = ChromeStyle::from_visuals(ui.visuals(), app.settings.appearance.canvas_accent);
     ensure_board_view(app, rect);
     drive_board_fit(app, ui, rect);
 
@@ -265,7 +265,7 @@ pub fn render_central(app: &mut PlotxApp, ui: &mut Ui) {
             .object(object_id)
             .and_then(|object| object.plot())
             .unwrap()
-            .figure;
+            .figure();
         let zoom = app.session.board.zoom;
         let layout = plotx_render::axis_layout(fig, outer.width / zoom, outer.height / zoom);
         let proj = plotx_render::Projector::new(fig, outer, &layout.margins.scaled(zoom));
@@ -285,7 +285,7 @@ pub fn render_central(app: &mut PlotxApp, ui: &mut Ui) {
                         .object(object_id)
                         .and_then(|object| object.plot())
                         .unwrap()
-                        .figure;
+                        .figure();
                     match axis.orient() {
                         PhaseOrient::Vertical => {
                             let (mn, sp, rv) = (fig.x.min, fig.x.span(), fig.x.reversed);
@@ -593,20 +593,21 @@ mod tests {
             locked: false,
             visible: true,
             group: None,
-            kind: CanvasObjectKind::Plot(Box::new(PlotObject {
-                next_series_id: plotx_core::state::SeriesId::new(1),
-                binding: plotx_core::state::DataBinding { series: Vec::new() },
-                chart: plotx_core::state::ChartSpec::default(),
-                stack: plotx_core::state::StackSpec::default(),
-                projections: plotx_core::state::AxisProjections::default(),
-                axis_overrides: plotx_core::state::AxisOverrides::default(),
-                figure: Figure::new("plot", Axis::new("x", 0.0, 1.0), Axis::new("y", 0.0, 1.0)),
-                viewport: CanvasViewport::from_figure(&Figure::new(
-                    "plot",
-                    Axis::new("x", 0.0, 1.0),
-                    Axis::new("y", 0.0, 1.0),
-                )),
-                panel: PanelMeta::new("title".to_owned(), 50.0),
+            kind: CanvasObjectKind::Plot(Box::new({
+                let figure =
+                    Figure::new("plot", Axis::new("x", 0.0, 1.0), Axis::new("y", 0.0, 1.0));
+                let viewport = CanvasViewport::from_figure(&figure);
+                PlotObject::new(
+                    plotx_core::state::SeriesId::new(1),
+                    plotx_core::state::DataBinding { series: Vec::new() },
+                    plotx_core::state::ChartSpec::default(),
+                    plotx_core::state::StackSpec::default(),
+                    plotx_core::state::AxisProjections::default(),
+                    plotx_core::state::AxisOverrides::default(),
+                    figure,
+                    viewport,
+                    PanelMeta::new("title".to_owned(), 50.0),
+                )
             })),
         });
 
@@ -626,20 +627,21 @@ mod tests {
             locked: false,
             visible: true,
             group: None,
-            kind: CanvasObjectKind::Plot(Box::new(PlotObject {
-                next_series_id: plotx_core::state::SeriesId::new(1),
-                binding: plotx_core::state::DataBinding { series: Vec::new() },
-                chart: plotx_core::state::ChartSpec::default(),
-                stack: plotx_core::state::StackSpec::default(),
-                projections: plotx_core::state::AxisProjections::default(),
-                axis_overrides: plotx_core::state::AxisOverrides::default(),
-                figure: Figure::new("plot", Axis::new("x", 0.0, 1.0), Axis::new("y", 0.0, 1.0)),
-                viewport: CanvasViewport::from_figure(&Figure::new(
-                    "plot",
-                    Axis::new("x", 0.0, 1.0),
-                    Axis::new("y", 0.0, 1.0),
-                )),
-                panel: PanelMeta::new("title".to_owned(), 50.0),
+            kind: CanvasObjectKind::Plot(Box::new({
+                let figure =
+                    Figure::new("plot", Axis::new("x", 0.0, 1.0), Axis::new("y", 0.0, 1.0));
+                let viewport = CanvasViewport::from_figure(&figure);
+                PlotObject::new(
+                    plotx_core::state::SeriesId::new(1),
+                    plotx_core::state::DataBinding { series: Vec::new() },
+                    plotx_core::state::ChartSpec::default(),
+                    plotx_core::state::StackSpec::default(),
+                    plotx_core::state::AxisProjections::default(),
+                    plotx_core::state::AxisOverrides::default(),
+                    figure,
+                    viewport,
+                    PanelMeta::new("title".to_owned(), 50.0),
+                )
             })),
         });
         app.doc.canvases.push(canvas);

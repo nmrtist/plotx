@@ -1,7 +1,8 @@
 use plotx_core::actions::Action;
 use plotx_core::automation::{KIND_FIELD, ProjectResourceProvider, ResourceProvider};
 use plotx_core::state::{
-    CanvasObjectKind, DEFAULT_CANVAS_SIZE_MM, Dataset, NATURE_DOUBLE_COLUMN, PlotxApp, StackSpec,
+    CanvasObjectKind, DEFAULT_CANVAS_SIZE_MM, Dataset, DerivedAxes, NATURE_DOUBLE_COLUMN, PlotxApp,
+    StackSpec,
 };
 use plotx_figure::{ContourSpec, SeriesEncoding};
 use plotx_io::{AfmData, AfmForceSet, AfmFrameDirection, AfmImageChannel, AfmScale};
@@ -71,10 +72,10 @@ fn force_only_gui_insertion_builds_a_nonempty_force_curve() {
         panic!("expected plot");
     };
     assert_eq!(plot.chart.type_id, "afm_force_curve");
-    assert_eq!(plot.figure.series.len(), 2);
-    assert_eq!([plot.figure.x.min, plot.figure.x.max], [-100.0, 100.0]);
-    assert_eq!(plot.figure.y.label, "Force (nN)");
-    assert!((plot.figure.series[0].points[0][1] - 0.1).abs() < 1.0e-12);
+    assert_eq!(plot.figure().series.len(), 2);
+    assert_eq!([plot.figure().x.min, plot.figure().x.max], [-100.0, 100.0]);
+    assert_eq!(plot.figure().y.label, "Force (nN)");
+    assert!((plot.figure().series[0].points[0][1] - 0.1).abs() < 1.0e-12);
 }
 
 #[test]
@@ -130,6 +131,34 @@ fn map_and_force_gui_insertion_builds_side_by_side_plots() {
         force.binding.series[0].encoding,
         SeriesEncoding::Line(_)
     ));
+}
+
+#[test]
+fn afm_double_view_force_curve_keeps_its_own_derived_axes() {
+    let dataset = afm_dataset(true);
+    let canvas = plotx_core::workflow::build_default_canvas_for_dataset(
+        &dataset,
+        0,
+        "AFM".to_owned(),
+        DEFAULT_CANVAS_SIZE_MM,
+    );
+    let CanvasObjectKind::Plot(map) = &canvas.objects[0].kind else {
+        panic!("expected AFM map plot");
+    };
+    let CanvasObjectKind::Plot(force) = &canvas.objects[1].kind else {
+        panic!("expected AFM force plot");
+    };
+
+    assert_eq!(
+        force.derived_axes(),
+        &DerivedAxes::from_figure(force.figure()),
+        "Force Curve derived axes must describe its own rebuilt figure"
+    );
+    assert_ne!(
+        force.derived_axes().x_label,
+        map.derived_axes().x_label,
+        "AFM map and Force Curve should expose distinct derived x-axis labels"
+    );
 }
 
 #[test]

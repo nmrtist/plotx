@@ -1,5 +1,6 @@
 //! Dataset processing-step catalog slice.
 
+use super::processing_test_support::{states_2d_app, target_for_axis};
 use super::*;
 use crate::actions::Action;
 use crate::automation::{ComponentRef, ResourceRef, TargetRef};
@@ -139,7 +140,10 @@ fn apodization_step_has_a_dependent_schema_and_a_typed_processing_action() {
     );
     assert!(matches!(
         resolved_lb.schema,
-        ResolvedSchema::Float { unit: "Hz", .. }
+        ResolvedSchema::Float {
+            display: FloatDisplay::Linear("Hz"),
+            ..
+        }
     ));
     assert!(matches!(
         app.resolve_property(&gb),
@@ -159,7 +163,10 @@ fn apodization_step_has_a_dependent_schema_and_a_typed_processing_action() {
         app.resolve_property(&gb)
             .expect("GB appears only for Gaussian")
             .schema,
-        ResolvedSchema::Float { unit: "Hz", .. }
+        ResolvedSchema::Float {
+            display: FloatDisplay::Linear("Hz"),
+            ..
+        }
     ));
 
     for (property, value) in [
@@ -472,6 +479,41 @@ fn gaussian_broadening_is_open_at_zero_while_line_broadening_keeps_both_signs() 
             lb_hz: -2.0,
             gb_hz: apodization::GB_DEFAULT_HZ
         }
+    );
+}
+
+#[test]
+fn states_f1_default_apodization_resolves_and_resets_by_provenance_not_step_id() {
+    let mut app = states_2d_app(10, 6);
+    let target = target_for_axis(&app, PhaseAxis::F1, |kind| {
+        matches!(kind, StepKind::Apodize(_))
+    });
+    let resolved = app
+        .resolve_property(&PropertyAddress::new(target.clone(), apodization::KIND))
+        .expect("the reminted F1 default resolves");
+    assert_eq!(
+        resolved.default_value,
+        Some(PropertyValue::Enum(apodization::APODIZATION_COSINE_BELL))
+    );
+
+    let changed = app
+        .plan_property_write(
+            apodization::KIND,
+            std::slice::from_ref(&target),
+            &PropertyValue::Enum(apodization::APODIZATION_EXPONENTIAL),
+        )
+        .expect("F1 apodization changes");
+    app.commit_property(changed);
+    let reset = app
+        .plan_property_reset(apodization::KIND, std::slice::from_ref(&target))
+        .expect("F1 reset plans through the real catalog entry");
+    assert_eq!(reset.applied.len(), 1);
+    app.commit_property(reset);
+    assert_eq!(
+        app.resolve_property(&PropertyAddress::new(target, apodization::KIND))
+            .expect("the reset F1 step resolves")
+            .value,
+        AggregateValue::Uniform(PropertyValue::Enum(apodization::APODIZATION_COSINE_BELL))
     );
 }
 

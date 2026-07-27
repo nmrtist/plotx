@@ -57,19 +57,13 @@ impl PlotxApp {
                     files.truncate(crate::settings::MAX_RECENT_FILES);
                     files
                 },
-                canvas_accent: settings.appearance.canvas_accent,
                 ui: UiState {
-                    snap_enabled: settings.general.snap_enabled,
                     // `ilt_params` deliberately starts empty rather than mirroring
                     // the preference here: a copy taken at construction would not
                     // follow later preference edits, and resolving at build time
                     // is what keeps the default reachable as a lifecycle stage.
                     ..Default::default()
                 },
-                project_backup_generations: settings
-                    .general
-                    .project_backup_generations
-                    .min(crate::settings::MAX_PROJECT_BACKUP_GENERATIONS),
                 compute: ComputeService::new(),
                 updates: crate::update::UpdateService::new(&settings.updates),
                 line_fit_job: None,
@@ -216,8 +210,7 @@ impl PlotxApp {
         };
         let figure = self.build_object_figure(&binding, &chart, &stack, &projections, size_mm);
         if let Some(plot) = object.plot_mut() {
-            plot.viewport = CanvasViewport::from_figure(&figure);
-            plot.figure = figure;
+            plot.adopt_rebuilt_figure(figure);
         }
         object
     }

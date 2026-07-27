@@ -32,10 +32,21 @@ use plotx_figure::{ContourBasePolicy, SeriesEncoding, UnitInterval};
 /// Most settings need only their resolved scalar. Providers with a value whose
 /// meaning depends on cached scientific state can return a richer variant
 /// without teaching the service which encoding owns it.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum PropertyReadout {
     Value(PropertyValue),
     ContourBase(ContourBaseReadout),
+    ZeroFillTarget(ZeroFillTargetReadout),
+    /// The addressed phase step's fractional pivot projected onto its axis.
+    PhasePivotPpm {
+        ppm: f64,
+    },
+}
+
+/// The FFT length produced by one addressed zero-fill step.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ZeroFillTargetReadout {
+    pub points: usize,
 }
 
 /// Turn an ordinary resolved value into a readout.
@@ -47,12 +58,15 @@ pub(crate) fn uniform_readout(
     resolved: ResolvedProperty,
 ) -> Result<PropertyReadout, PropertyError> {
     let property = resolved.address.definition;
-    let value = resolved.value.uniform().copied().ok_or_else(|| {
-        PropertyError::NotApplicable(format!(
-            "{} has no single value to show in a readout",
-            property.as_str()
-        ))
-    })?;
+    let value = match resolved.value {
+        super::AggregateValue::Uniform(value) => value,
+        super::AggregateValue::Mixed | super::AggregateValue::Unavailable => {
+            return Err(PropertyError::NotApplicable(format!(
+                "{} has no single value to show in a readout",
+                property.as_str()
+            )));
+        }
+    };
     Ok(PropertyReadout::Value(value))
 }
 

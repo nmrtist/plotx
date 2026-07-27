@@ -67,7 +67,7 @@ pub(crate) fn handle_phase_before_paint(
     let Some(figure) = app.doc.canvases[ci]
         .object(object_id)
         .and_then(|object| object.plot())
-        .map(|plot| &plot.figure)
+        .map(|plot| plot.figure())
     else {
         return;
     };

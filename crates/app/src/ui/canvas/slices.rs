@@ -46,7 +46,7 @@ pub(crate) fn handle_slice(
         let Some(fig) = app.doc.canvases[ci]
             .object(object_id)
             .and_then(|o| o.plot())
-            .map(|pl| &pl.figure)
+            .map(|pl| pl.figure())
         else {
             return;
         };
@@ -101,7 +101,7 @@ pub(crate) fn paint_slice(
     let Some(fig) = app.doc.canvases[ci]
         .object(object_id)
         .and_then(|o| o.plot())
-        .map(|pl| &pl.figure)
+        .map(|pl| pl.figure())
     else {
         return;
     };

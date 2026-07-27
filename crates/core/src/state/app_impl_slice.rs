@@ -34,6 +34,7 @@ impl NmrDataset {
             source: source.clone(),
             group_delay: 0.0,
         };
+        let group_delay_correct = super::default_group_delay_correct(data.domain);
         // The trace is already a phased spectrum: the pipeline is the bare FFT
         // anchor, so the transform reproduces the values with no further steps.
         // This dataset owns the pipeline it is built with, so the single step
@@ -54,7 +55,7 @@ impl NmrDataset {
             base: spectrum.clone(),
             pipeline,
             next_step_id: 1,
-            group_delay_correct: true,
+            group_delay_correct,
             has_imaginary: true,
             spectrum,
             name: Some(source),
@@ -225,6 +226,16 @@ mod tests {
                 DerivationKind::Projection,
                 [app.doc.datasets[0].resource_id()]
             ))
+        );
+    }
+
+    #[test]
+    fn frequency_domain_slices_share_the_factory_group_delay_default() {
+        let dataset = NmrDataset::from_slice(slice(), "slice".to_owned());
+        assert!(!dataset.group_delay_correct);
+        assert_eq!(
+            dataset.group_delay_correct,
+            default_group_delay_correct(dataset.data.domain)
         );
     }
 }

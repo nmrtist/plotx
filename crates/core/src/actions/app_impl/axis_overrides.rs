@@ -17,7 +17,7 @@ impl PlotxApp {
             return;
         };
         plot.viewport = viewport.clone();
-        plot.viewport.apply_to(&mut plot.figure);
+        plot.apply_viewport();
     }
 
     /// Finish a live Inspector edit before another command can change its target
@@ -100,7 +100,11 @@ impl PlotxApp {
         let needs_automatic_rebuild = cleared(&before.x_label, &after.x_label)
             || cleared(&before.y_label, &after.y_label)
             || cleared(&before.x_range, &after.x_range)
-            || cleared(&before.y_range, &after.y_range);
+            || cleared(&before.y_range, &after.y_range)
+            || cleared(&before.x_show_tick_labels, &after.x_show_tick_labels)
+            || cleared(&before.x_show_label, &after.x_show_label)
+            || cleared(&before.y_show_tick_labels, &after.y_show_tick_labels)
+            || cleared(&before.y_show_label, &after.y_show_label);
 
         let rebuilt = needs_automatic_rebuild.then(|| {
             let size = [
@@ -121,68 +125,32 @@ impl PlotxApp {
         };
         plot.axis_overrides = after;
 
-        if let Some(mut figure) = rebuilt {
-            plot.axis_overrides.apply_to(&mut figure);
-            let effective_y_range =
-                plot.axis_overrides.y_range.is_some() && figure.y.categories.is_none();
-            if y_range_changed {
-                plot.viewport.auto_y = !effective_y_range;
-            } else if effective_y_range {
-                plot.viewport.auto_y = false;
-            }
-            plot.viewport.sync_full_from(&figure);
-            reset_changed_ranges(
-                plot,
-                &figure,
-                x_range_changed,
-                y_range_changed,
-                effective_y_range,
-            );
-            plot.viewport.apply_to(&mut figure);
-            plot.figure = figure;
+        if let Some(figure) = rebuilt {
+            plot.rebuild_for_axis_overrides(figure, x_range_changed, y_range_changed);
             return;
         }
 
-        plot.axis_overrides.apply_to(&mut plot.figure);
+        plot.apply_axis_overrides();
         if x_range_changed
-            && plot.figure.x.categories.is_none()
+            && plot.figure().x.categories.is_none()
             && let Some(range) = plot.axis_overrides.x_range
         {
             plot.viewport.full_x = range;
             plot.viewport.view_x = range;
             if plot.viewport.auto_y {
-                plot.viewport.reset_x(&plot.figure);
+                let figure = plot.figure().clone();
+                plot.viewport.reset_x(&figure);
             }
         }
         if y_range_changed
-            && plot.figure.y.categories.is_none()
+            && plot.figure().y.categories.is_none()
             && let Some(range) = plot.axis_overrides.y_range
         {
             plot.viewport.full_y = range;
             plot.viewport.view_y = range;
             plot.viewport.auto_y = false;
         }
-        plot.viewport.apply_to(&mut plot.figure);
-    }
-}
-
-fn reset_changed_ranges(
-    plot: &mut crate::state::PlotObject,
-    figure: &plotx_figure::Figure,
-    x_changed: bool,
-    y_changed: bool,
-    effective_y_range: bool,
-) {
-    if x_changed {
-        plot.viewport.reset_x(figure);
-    }
-    if y_changed {
-        if effective_y_range {
-            plot.viewport.view_y = plot.viewport.full_y;
-            plot.viewport.auto_y = false;
-        } else {
-            plot.viewport.reset_y(figure);
-        }
+        plot.apply_viewport();
     }
 }
 

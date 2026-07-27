@@ -97,7 +97,7 @@ pub(crate) fn finish_selection_drag(
 
     let object = app.doc.canvases[ci].object(object_id).unwrap();
     let plot_object = object.plot().unwrap();
-    let fig = &plot_object.figure;
+    let fig = plot_object.figure();
     let x = AxisRange::new(
         screen_to_x(a.x, plot, fig.x.min, fig.x.span(), fig.x.reversed),
         screen_to_x(b.x, plot, fig.x.min, fig.x.span(), fig.x.reversed),
@@ -184,7 +184,7 @@ pub(crate) fn finish_zoom_drag(
 
     let object = app.doc.canvases[ci].object(object_id).unwrap();
     let plot_object = object.plot().unwrap();
-    let fig = &plot_object.figure;
+    let fig = plot_object.figure();
     let before = plot_object.viewport.clone();
     let x = if width >= SELECT_MIN_PX {
         Some(AxisRange::new(
@@ -557,7 +557,7 @@ pub(crate) fn arrange_context_menu(app: &mut PlotxApp, ci: usize, ui: &mut Ui) {
     if ui.checkbox(&mut show_grid, "Show layout grid").clicked() {
         app.set_show_grid(ci, show_grid);
     }
-    let mut snap = app.session.ui.snap_enabled;
+    let mut snap = app.settings.general.snap_enabled;
     if ui.checkbox(&mut snap, "Snap to grid & objects").clicked() {
         app.set_snap_enabled(snap);
     }

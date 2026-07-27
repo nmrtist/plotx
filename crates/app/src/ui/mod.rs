@@ -38,13 +38,12 @@ use data_sheet::*;
 use diagnostics::*;
 use egui::{Color32, Pos2, Response, Sense, Stroke, Ui, Vec2};
 use export_dialog::*;
-use plotx_core::actions::{Action, PendingPageLayoutEdit};
+use plotx_core::actions::Action;
 use plotx_core::export::{ExportPageScope, ExportScopeKind, ExportSettings};
-use plotx_core::layout::PageLayout;
 use plotx_core::operation::OperationOutcome;
-use plotx_core::state::{CanvasSizeUnit, Interaction, PanelLabelStyle, PlotxApp, Selection};
+use plotx_core::state::{Interaction, PlotxApp, Selection};
 pub(crate) use settings_dialog::apply_chrome_theme;
-use settings_dialog::settings_window;
+use settings_dialog::{settings_window, sync_chrome_theme};
 use shortcuts::*;
 use windows::*;
 
@@ -56,6 +55,7 @@ pub fn render(
     input_blocked: bool,
 ) {
     let ctx = ui.ctx().clone();
+    sync_chrome_theme(&ctx, app.settings.appearance.theme);
     clipboard_table_paste.begin_frame(app, &ctx);
     if let Some(payload) = app.poll_data_export() {
         copy_table_export(&ctx, payload);

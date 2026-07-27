@@ -81,7 +81,7 @@ pub(crate) fn handle_peaks(
         .object(object_id)
         .and_then(|object| object.plot())
         .unwrap()
-        .figure
+        .figure()
         .clone();
     let sc = Screen {
         plot,

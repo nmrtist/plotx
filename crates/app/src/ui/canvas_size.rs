@@ -4,7 +4,7 @@
 
 use egui::{Response, RichText, Ui};
 use egui_phosphor::regular as icon;
-use plotx_core::actions::{Action, PageSizeState, PendingCanvasSizeEdit};
+use plotx_core::actions::{Action, PageSizeState};
 use plotx_core::settings::{CanvasSizeDefaults, CustomSizePreset};
 use plotx_core::state::{
     CanvasSizeUnit, MM_TO_PT, PlotxApp, SizePreset, SizePresetGroup, content_bounds_pt,
@@ -160,37 +160,6 @@ pub(crate) fn size_section(app: &mut PlotxApp, ci: usize, ui: &mut Ui) {
         }
     });
 
-    let unit = app.session.ui.canvas_size_unit;
-    let auto_height = app.doc.canvases[ci].auto_height;
-    ui.horizontal(|ui| {
-        ui.label("W");
-        let before = app.doc.canvases[ci].size_mm;
-        let mut width = unit.from_mm(before[0]);
-        let resp = ui.add(
-            egui::DragValue::new(&mut width)
-                .speed(unit.drag_speed())
-                .range(unit.drag_range())
-                .max_decimals(unit.decimals()),
-        );
-        handle_canvas_dimension_response(app, ci, &resp, before, unit, 0, width);
-        ui.label("H");
-        let before = app.doc.canvases[ci].size_mm;
-        let mut height = unit.from_mm(before[1]);
-        let resp = ui.add_enabled(
-            !auto_height,
-            egui::DragValue::new(&mut height)
-                .speed(unit.drag_speed())
-                .range(unit.drag_range())
-                .max_decimals(unit.decimals()),
-        );
-        if auto_height {
-            resp.clone()
-                .on_disabled_hover_text("Turn off Auto height to set the height manually.");
-        }
-        handle_canvas_dimension_response(app, ci, &resp, before, unit, 1, height);
-        ui.label(unit.label());
-    });
-
     let defaults = app.settings.canvas_size.clone();
     let mut scale_content = defaults.scale_content;
     if ui
@@ -202,20 +171,7 @@ pub(crate) fn size_section(app: &mut PlotxApp, ci: usize, ui: &mut Ui) {
         )
         .changed()
     {
-        update_canvas_size_defaults(app, |d| d.scale_content = scale_content);
-    }
-
-    let mut auto = auto_height;
-    if ui
-        .checkbox(&mut auto, "Auto height")
-        .on_hover_text(
-            "Keeps the width fixed while the page height follows the content's \
-             depth, up to the journal's maximum figure depth.",
-        )
-        .changed()
-    {
-        app.doc.canvases[ci].auto_height = auto;
-        app.doc.dirty = true;
+        set_scale_content_default(app, scale_content);
     }
 
     let size = app.doc.canvases[ci].size_mm;
@@ -513,66 +469,18 @@ fn update_canvas_size_defaults(app: &mut PlotxApp, f: impl FnOnce(&mut CanvasSiz
     app.persist_settings();
 }
 
-fn handle_canvas_dimension_response(
-    app: &mut PlotxApp,
-    ci: usize,
-    resp: &Response,
-    fallback_before: [f32; 2],
-    unit: CanvasSizeUnit,
-    axis: usize,
-    value: f32,
-) {
-    if resp.drag_started() {
-        // Capture the preset id along with the size before any mutation: the
-        // per-frame reconciler may clear a stale id mid-drag, and undo must
-        // restore the pre-drag identity.
-        app.session.ui.canvas_size_edit = Some(PendingCanvasSizeEdit {
-            canvas: ci,
-            before: PageSizeState {
-                size_mm: fallback_before,
-                preset_id: app.doc.canvases[ci].size_preset_id.clone(),
-            },
-        });
-    }
-    if resp.changed() {
-        app.doc.canvases[ci].size_mm[axis] = unit.to_mm(value).clamp(10.0, 1000.0);
-        app.rebuild_canvas(ci);
-        app.doc.dirty = true;
-    }
-    if resp.drag_stopped() {
-        let before = app
-            .session
-            .ui
-            .canvas_size_edit
-            .take()
-            .filter(|edit| edit.canvas == ci)
-            .map(|edit| edit.before)
-            .unwrap_or_else(|| PageSizeState {
-                size_mm: fallback_before,
-                preset_id: app.doc.canvases[ci].size_preset_id.clone(),
-            });
-        let after = manual_edit_state(&before, app.doc.canvases[ci].size_mm);
-        app.execute_action(Action::set_canvas_size(ci, before, after));
-    } else if resp.changed() && !resp.dragged() {
-        let before = PageSizeState {
-            size_mm: fallback_before,
-            preset_id: app.doc.canvases[ci].size_preset_id.clone(),
-        };
-        let after = manual_edit_state(&before, app.doc.canvases[ci].size_mm);
-        app.execute_action(Action::set_canvas_size(ci, before, after));
-    }
-}
-
-/// The post-edit size state for a manual W/H change: the original preset id is
-/// kept while the new size still matches it (a height tweak on a journal
-/// preset), and dropped once it no longer does.
-fn manual_edit_state(before: &PageSizeState, after_size: [f32; 2]) -> PageSizeState {
-    let preset_id = before
-        .preset_id
-        .clone()
-        .filter(|id| plotx_core::state::preset_by_id(id).is_some_and(|p| p.matches(after_size)));
-    PageSizeState {
-        size_mm: after_size,
-        preset_id,
+fn set_scale_content_default(app: &mut PlotxApp, scale_content: bool) {
+    let target = app.app_target();
+    match app.plan_property_write(
+        plotx_core::properties::app_preferences::SCALE_CONTENT,
+        std::slice::from_ref(&target),
+        &plotx_core::properties::PropertyValue::Bool(scale_content),
+    ) {
+        Ok(commit) => {
+            app.commit_property(commit);
+        }
+        Err(error) => {
+            app.session.status = format!("Could not save the scale-content preference: {error}");
+        }
     }
 }

@@ -160,7 +160,7 @@ pub fn save_project(
         include_view_snapshots,
         revision.clone(),
         None,
-        usize::from(app.session.project_backup_generations),
+        usize::from(app.settings.general.project_backup_generations),
     )?;
     Ok(SaveOutcome {
         backup_warning,
@@ -332,7 +332,7 @@ fn save_project_impl(
                 };
                 let figure_path =
                     format!("views/{view_id}.snapshot/object_{}.figure.json", object.id);
-                write_json(&mut zip, options, &figure_path, &plot.figure)?;
+                write_json(&mut zip, options, &figure_path, plot.figure())?;
                 object.snapshot = Some(ViewSnapshot {
                     kind: SNAPSHOT_KIND.to_owned(),
                     schema_version: SCHEMA_VERSION,

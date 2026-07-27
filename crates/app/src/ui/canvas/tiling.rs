@@ -142,7 +142,7 @@ fn layout_item(canvas: &CanvasDocument, id: ObjectId) -> Option<plotx_core::layo
     let plot = object.plot()?;
     Some(plotx_core::layout::layout_item(
         id,
-        &plot.figure,
+        plot.figure(),
         object.frame,
     ))
 }
@@ -210,7 +210,7 @@ pub(crate) fn paint_tile_ghost(app: &PlotxApp, painter: &egui::Painter, chrome: 
         return;
     }
     let screen = PlotRect::new(ghost.x, ghost.y, ghost.width, ghost.height);
-    plotx_render::screen::paint(painter, screen, &plot.figure, app.session.board.zoom);
+    plotx_render::screen::paint(painter, screen, plot.figure(), app.session.board.zoom);
     let r = EguiRect::from_min_size(
         Pos2::new(ghost.x, ghost.y),
         Vec2::new(ghost.width, ghost.height),

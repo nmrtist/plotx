@@ -61,3 +61,29 @@ fn project_and_scheme_roundtrips_preserve_cleanup_steps() {
         .collect();
     assert_eq!(tail, expected);
 }
+
+#[test]
+fn applying_a_scheme_reports_an_invalid_stored_smoothing_window() {
+    let target = Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d())));
+    let mut pipeline = AxisPipeline::default_1d();
+    pipeline.steps.push(ProcessingStep::new(
+        StepId::new(99),
+        StepKind::Smooth(SmoothMethod::SavitzkyGolay {
+            window: 8,
+            poly_order: 7,
+        }),
+        StepSource::User,
+    ));
+    let scheme = ProcessingScheme {
+        schema_version: 1,
+        dimension_count: 1,
+        pipelines: vec![pipeline_to_dto(&pipeline)],
+        layout: None,
+        group_delay_correct: true,
+    };
+    let error = apply_scheme(&scheme, &target)
+        .expect_err("an even persisted window must be diagnosed at the load boundary");
+    let message = error.to_string();
+    assert!(message.contains("stored smoothing window 8"), "{message}");
+    assert!(message.contains("odd value between 3 and 201"), "{message}");
+}

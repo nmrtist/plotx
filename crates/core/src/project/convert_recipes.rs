@@ -9,6 +9,8 @@ pub fn apply_1d_recipe(dataset: &mut NmrDataset, recipe: &RecipeObject) -> Resul
     if let Some(dto) = p.pipelines.first() {
         dataset.pipeline = pipeline_from_dto(dto);
     }
+    validate_1d_pipeline(&dataset.data, &dataset.pipeline, p.group_delay_correct)
+        .map_err(ProjectError::Invalid)?;
     dataset.next_step_id = recipe
         .extensions
         .get("plotx.step_allocator")

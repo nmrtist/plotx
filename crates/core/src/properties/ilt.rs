@@ -4,7 +4,7 @@ use super::provider::PropertyProvider;
 use super::target::require_app_target;
 use super::{
     AggregateValue, Applicability, Availability, ComponentKind, DefaultPolicy, EditOp, FloatBounds,
-    PropertyAccess, PropertyAddress, PropertyDefinition, PropertyError, PropertyId,
+    FloatDisplay, PropertyAccess, PropertyAddress, PropertyDefinition, PropertyError, PropertyId,
     PropertyTransaction, PropertyValue, ResolvedProperty, ResolvedSchema, ScopeKind, Tier,
     ValueCopies, ValueSchema, definition,
 };
@@ -23,7 +23,7 @@ pub(crate) const DEFINITIONS: &[PropertyDefinition] = &[
         scope_kind: ScopeKind::App,
         value_schema: ValueSchema::Float {
             bounds: LAMBDA_BOUNDS,
-            log: true,
+            display: FloatDisplay::Log10("λ"),
             drag_step: Some(0.001),
         },
         access: PropertyAccess::ReadWrite,
@@ -39,7 +39,7 @@ pub(crate) const DEFINITIONS: &[PropertyDefinition] = &[
         scope_kind: ScopeKind::Dataset,
         value_schema: ValueSchema::Float {
             bounds: LAMBDA_BOUNDS,
-            log: true,
+            display: FloatDisplay::Log10("λ"),
             drag_step: None,
         },
         access: PropertyAccess::ReadOnly,
@@ -72,10 +72,11 @@ impl PropertyProvider for IltProvider {
                 require_app_target(&address.target, definition)?;
                 (
                     app.settings.processing.ilt_lambda,
-                    match definition.default_policy {
-                        DefaultPolicy::Fixed(value) => Some(value),
+                    match &definition.default_policy {
+                        DefaultPolicy::Fixed(value) => Some(value.clone()),
                         DefaultPolicy::EncodingFactory
                         | DefaultPolicy::ProcessingFactory
+                        | DefaultPolicy::Derived
                         | DefaultPolicy::None => None,
                     },
                     Availability::Editable,
@@ -90,13 +91,13 @@ impl PropertyProvider for IltProvider {
         };
         Ok(ResolvedProperty {
             address: address.clone(),
+            modified: None,
             value: AggregateValue::Uniform(PropertyValue::Float(value)),
             default_value,
             availability,
             schema: ResolvedSchema::Float {
                 bounds: LAMBDA_BOUNDS,
-                log: true,
-                unit: "",
+                display: FloatDisplay::Log10("λ"),
             },
         })
     }
@@ -106,7 +107,7 @@ impl PropertyProvider for IltProvider {
         app: &PlotxApp,
         transaction: &mut PropertyTransaction,
         address: &PropertyAddress,
-        operation: EditOp,
+        operation: &EditOp<'_>,
     ) -> Result<(), PropertyError> {
         let definition = property_definition(address.definition)?;
         // `PropertyService::plan_edit` already refuses read-only definitions before
@@ -120,20 +121,21 @@ impl PropertyProvider for IltProvider {
         }
         require_app_target(&address.target, definition)?;
         let value = match operation {
-            EditOp::Set(PropertyValue::Float(value)) => checked_lambda(definition.id, value)?,
+            EditOp::Set(PropertyValue::Float(value)) => checked_lambda(definition.id, *value)?,
             EditOp::Set(value) => {
                 return Err(PropertyError::InvalidValue {
                     property: definition.id,
                     message: format!("expected a float, got {}", value.kind()),
                 });
             }
-            EditOp::Reset => match definition.default_policy {
+            EditOp::Reset => match &definition.default_policy {
                 DefaultPolicy::Fixed(PropertyValue::Float(value)) => {
-                    checked_lambda(definition.id, value)?
+                    checked_lambda(definition.id, *value)?
                 }
                 DefaultPolicy::Fixed(_)
                 | DefaultPolicy::EncodingFactory
                 | DefaultPolicy::ProcessingFactory
+                | DefaultPolicy::Derived
                 | DefaultPolicy::None => {
                     return Err(PropertyError::InvalidValue {
                         property: definition.id,

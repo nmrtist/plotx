@@ -112,7 +112,7 @@ pub(super) fn sample_app() -> PlotxApp {
     let mut object =
         app.build_plot_object(0, ObjectFrame::new(0.0, 0.0, w, h), id, "Plot 1".to_owned());
     let plot = object.plot_mut().unwrap();
-    plot.figure = figure;
+    plot.adopt_rebuilt_figure(figure);
     plot.viewport = viewport;
     canvas.selected_object = Some(id);
     canvas.objects.push(object);
@@ -314,7 +314,7 @@ fn project_roundtrip_preserves_data_recipe_and_view() {
         loaded.doc.canvases[0].objects[0]
             .plot()
             .unwrap()
-            .figure
+            .figure()
             .typography,
         custom_typography
     );
@@ -347,8 +347,8 @@ fn project_roundtrip_preserves_data_recipe_and_view() {
     );
     assert_eq!(first_plot(&loaded).panel.position, [33.0, 14.0]);
     assert_eq!(first_plot(&loaded).axis_overrides, axis_overrides);
-    assert_eq!(first_plot(&loaded).figure.x.label, "Chemical shift");
-    assert_eq!(first_plot(&loaded).figure.y.label, "Response");
+    assert_eq!(first_plot(&loaded).figure().x.label, "Chemical shift");
+    assert_eq!(first_plot(&loaded).figure().y.label, "Response");
     assert_eq!(
         first_plot(&loaded).viewport.full_x,
         AxisRange::new(1.0, 8.0)
@@ -619,7 +619,7 @@ fn project_roundtrip_preserves_overlay_binding() {
         Some(Color::rgb(10, 20, 30))
     );
     assert_eq!(binding.series[1].label.as_deref(), Some("treated"));
-    assert!(first_plot(&loaded).figure.show_legend);
+    assert!(first_plot(&loaded).figure().show_legend);
 }
 
 #[test]
@@ -731,9 +731,11 @@ fn scheme_save_load_apply_roundtrips() {
 fn snapshot_roundtrip_restores_materialized_figure() {
     let mut app = sample_app();
     let plot = first_plot_mut(&mut app);
-    plot.figure.x.label = "snapshot-only x label".to_owned();
-    plot.figure.x.min = 2.25;
-    plot.figure.x.max = 3.75;
+    let mut figure = plot.figure().clone();
+    figure.x.label = "snapshot-only x label".to_owned();
+    figure.x.min = 2.25;
+    figure.x.max = 3.75;
+    plot.adopt_rebuilt_figure(figure);
     plot.viewport.full_x = AxisRange::new(0.0, 10.0);
     plot.viewport.view_x = AxisRange::new(5.0, 6.0);
     let path = temp_project("snapshot");
@@ -744,9 +746,12 @@ fn snapshot_roundtrip_restores_materialized_figure() {
     let _ = std::fs::remove_file(&path);
 
     assert!(loaded.doc.save_include_view_snapshots);
-    assert_eq!(first_plot(&loaded).figure.x.label, "snapshot-only x label");
-    assert_eq!(first_plot(&loaded).figure.x.min, 2.25);
-    assert_eq!(first_plot(&loaded).figure.x.max, 3.75);
+    assert_eq!(
+        first_plot(&loaded).figure().x.label,
+        "snapshot-only x label"
+    );
+    assert_eq!(first_plot(&loaded).figure().x.min, 2.25);
+    assert_eq!(first_plot(&loaded).figure().x.max, 3.75);
     assert_eq!(
         first_plot(&loaded).viewport.view_x,
         AxisRange::new(5.0, 6.0)

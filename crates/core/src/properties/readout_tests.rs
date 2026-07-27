@@ -36,6 +36,12 @@ fn contour_readout(app: &PlotxApp, target: &crate::automation::TargetRef) -> Con
     {
         PropertyReadout::ContourBase(readout) => readout,
         PropertyReadout::Value(value) => panic!("expected a contour payload, got {value:?}"),
+        PropertyReadout::ZeroFillTarget(readout) => {
+            panic!("expected a contour payload, got {readout:?}")
+        }
+        PropertyReadout::PhasePivotPpm { ppm } => {
+            panic!("expected a contour payload, got pivot {ppm}")
+        }
     }
 }
 

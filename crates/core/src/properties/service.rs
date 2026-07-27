@@ -6,8 +6,8 @@
 //! planner for every property family.
 
 use super::target::{
-    app_target, canvas_object, document_target, processing_step_targets, series_context_unchecked,
-    series_targets,
+    app_target, canvas_object, canvas_target, document_target, processing_step_targets,
+    series_context_unchecked, series_targets,
 };
 use super::{
     AggregateValue, ComponentKind, EditOp, EncodingKind, PropertyAccess, PropertyAddress,
@@ -18,7 +18,7 @@ use super::{
 use crate::actions::{Action, DatasetProcessingState, PendingPropertyGesture};
 use crate::automation::{ComponentRef, ResourceRef, TargetRef, canvas_object_ref};
 use crate::state::{
-    DatasetId, ObjectId, PlotxApp, PresentationProfile, RequestedChart, default_encoding,
+    CanvasId, DatasetId, ObjectId, PlotxApp, PresentationProfile, RequestedChart, default_encoding,
     field_peak_magnitude,
 };
 use plotx_figure::SeriesEncoding;
@@ -29,6 +29,11 @@ impl PlotxApp {
     /// when the document currently contains no pages.
     pub fn document_target(&self) -> TargetRef {
         document_target()
+    }
+
+    /// The stable resource target of one canvas.
+    pub fn canvas_target(&self, id: CanvasId) -> TargetRef {
+        canvas_target(id)
     }
 
     /// The singleton target for application-owned persistent preferences.
@@ -48,6 +53,13 @@ impl PlotxApp {
             resource: canvas_object_ref(canvas_id, object),
             component: Some(ComponentRef::Series(series)),
         })
+    }
+
+    /// The component-free property target of one canvas object.
+    pub fn object_target(&self, canvas: usize, object: ObjectId) -> Option<TargetRef> {
+        let canvas_id = self.doc.canvases.get(canvas)?.resource_id;
+        self.doc.canvases[canvas].object(object)?;
+        Some(TargetRef::resource(canvas_object_ref(canvas_id, object)))
     }
 
     /// Every series of one plot object, in binding order.
@@ -153,7 +165,7 @@ impl PlotxApp {
         targets: &[TargetRef],
         value: &PropertyValue,
     ) -> Result<PropertyCommit, PropertyError> {
-        self.plan_edit(property, targets, EditOp::Set(*value))
+        self.plan_edit(property, targets, &EditOp::Set(value))
     }
 
     /// Move a property along the scale its provider owns.
@@ -163,7 +175,7 @@ impl PlotxApp {
         targets: &[TargetRef],
         step: PropertyStep,
     ) -> Result<PropertyCommit, PropertyError> {
-        self.plan_edit(property, targets, EditOp::Step(step))
+        self.plan_edit(property, targets, &EditOp::Step(step))
     }
 
     /// Reset one property in each target's current context.
@@ -172,7 +184,46 @@ impl PlotxApp {
         property: PropertyId,
         targets: &[TargetRef],
     ) -> Result<PropertyCommit, PropertyError> {
-        self.plan_edit(property, targets, EditOp::Reset)
+        self.plan_edit(property, targets, &EditOp::Reset)
+    }
+
+    /// Reset a related group through one transaction and therefore one undo
+    /// action. Each member still dispatches through its catalog provider.
+    pub fn plan_property_resets(
+        &self,
+        properties: &[PropertyId],
+        targets: &[TargetRef],
+    ) -> Result<PropertyCommit, PropertyError> {
+        let mut transaction = PropertyTransaction::default();
+        let mut skipped = Vec::new();
+        let mut applied = Vec::new();
+        for &property in properties {
+            let definition = self.definition_for(property)?;
+            if definition.access == PropertyAccess::ReadOnly {
+                return Err(PropertyError::ReadOnly(property));
+            }
+            let provider = provider_for(property)
+                .ok_or_else(|| PropertyError::UnknownProperty(property.as_str().to_owned()))?;
+            for target in targets {
+                let address = PropertyAddress::new(target.clone(), property);
+                transaction.begin_target();
+                match provider.edit(self, &mut transaction, &address, &EditOp::Reset) {
+                    Ok(()) if transaction.target_changed() => applied.push(address),
+                    Ok(()) => skipped.push(PropertySkip::new(
+                        target.clone(),
+                        SkipReason::AlreadyAtValue,
+                        format!("{} already has that value", definition.canonical_label),
+                    )),
+                    Err(error) if skipped_target(&error) => {
+                        transaction.rollback_target();
+                        skipped.push(PropertySkip::from_error(target.clone(), &error));
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+        }
+        transaction.ensure_single_storage()?;
+        Ok(transaction.into_commit(self, applied, skipped))
     }
 
     /// Reset a complete encoding through its existing default factory.
@@ -263,7 +314,7 @@ impl PlotxApp {
             }
         }
         transaction.ensure_single_storage()?;
-        Ok(transaction.into_commit(applied, skipped))
+        Ok(transaction.into_commit(self, applied, skipped))
     }
 
     /// Execute a validated commit and report the number of targets that were
@@ -286,6 +337,24 @@ impl PlotxApp {
         if applied != 0 {
             if let Some(action) = commit.document_action {
                 self.execute_property_action(action);
+            }
+            let direct_changed = !commit.canvas_direct.is_empty();
+            for edit in commit.canvas_direct {
+                match edit {
+                    super::transaction::CanvasDirectEdit::ShowGrid { canvas, show } => {
+                        if let Some(index) = self.doc.canvas_index(canvas) {
+                            self.set_show_grid(index, show);
+                        }
+                    }
+                    super::transaction::CanvasDirectEdit::AutoHeight { canvas, enabled } => {
+                        if let Some(index) = self.doc.canvas_index(canvas) {
+                            self.set_canvas_auto_height(index, enabled);
+                        }
+                    }
+                }
+            }
+            if direct_changed {
+                self.doc.automation_revision = self.doc.automation_revision.saturating_add(1);
             }
             if let Some(settings) = commit.app_preferences {
                 self.apply_settings(settings);
@@ -405,7 +474,7 @@ impl PlotxApp {
         &self,
         property: PropertyId,
         targets: &[TargetRef],
-        operation: EditOp,
+        operation: &EditOp<'_>,
     ) -> Result<PropertyCommit, PropertyError> {
         let definition = self.definition_for(property)?;
         if definition.access == PropertyAccess::ReadOnly {
@@ -437,7 +506,7 @@ impl PlotxApp {
             }
         }
         transaction.ensure_single_storage()?;
-        Ok(transaction.into_commit(applied, skipped))
+        Ok(transaction.into_commit(self, applied, skipped))
     }
 
     fn definition_for(

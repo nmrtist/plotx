@@ -157,7 +157,7 @@ fn recovery_older_than_a_committed_revision_is_rejected() {
     let root = dir.join("recovery");
     let original = dir.join("project.plotx");
     let mut app = crate::state::PlotxApp::new();
-    app.session.project_backup_generations = 0;
+    app.settings.general.project_backup_generations = 0;
     let first = super::super::save_project(&app, &original, false).unwrap();
     app.doc.project_path = Some(original.clone());
     app.doc.project_revision = Some(first.revision);

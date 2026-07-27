@@ -221,10 +221,13 @@ pub(crate) fn plot_under_cursor(
         let Some(plot_object) = canvas.object(id).and_then(|object| object.plot()) else {
             continue;
         };
-        let layout =
-            plotx_render::axis_layout(&plot_object.figure, outer.width / zoom, outer.height / zoom);
+        let layout = plotx_render::axis_layout(
+            plot_object.figure(),
+            outer.width / zoom,
+            outer.height / zoom,
+        );
         let plot =
-            plotx_render::Projector::new(&plot_object.figure, outer, &layout.margins.scaled(zoom))
+            plotx_render::Projector::new(plot_object.figure(), outer, &layout.margins.scaled(zoom))
                 .plot;
         return Some((id, outer_rect, plot));
     }
@@ -241,10 +244,14 @@ pub(crate) fn plot_inner_rect(
     let outer = object_screen_rect(app.session.board, canvas, object_id, screen)?;
     let plot_object = canvas.object(object_id).and_then(|object| object.plot())?;
     let zoom = app.session.board.zoom;
-    let layout =
-        plotx_render::axis_layout(&plot_object.figure, outer.width / zoom, outer.height / zoom);
+    let layout = plotx_render::axis_layout(
+        plot_object.figure(),
+        outer.width / zoom,
+        outer.height / zoom,
+    );
     Some(
-        plotx_render::Projector::new(&plot_object.figure, outer, &layout.margins.scaled(zoom)).plot,
+        plotx_render::Projector::new(plot_object.figure(), outer, &layout.margins.scaled(zoom))
+            .plot,
     )
 }
 

@@ -31,9 +31,11 @@ selection** 载入当前选择——再选择一个工具，点击 **Preflight**
 `{"key": "series.contour.count", "value": 12}`，另外两个用
 `{"key": "series.contour.count"}`。
 
-三个工具都接受图对象、数据集，以及文档本身（列为 **PlotX document**）。该勾
-选哪一类由参数本身决定：等高线和线条参数在图对象上，切趾参数在数据集上，图形
-排印参数在文档上。
+这三个工具够得到各面板能编辑的一切设置：对象与序列的样式、处理步骤的参数、
+文档与画布的设置，以及应用偏好。该指定哪个资源由参数本身决定——等高线和线条
+参数在图对象上，切趾参数在数据集上，图形排印在文档上（列为
+**PlotX document**），页面尺寸在画布上，偏好设置在应用上（列为
+**PlotX application**）。
 
 | 对象检查器中的设置 | id | 取值 |
 | --- | --- | --- |
@@ -47,6 +49,10 @@ selection** 载入当前选择——再选择一个工具，点击 **Preflight**
 | **Line width** | `series.contour.line_width` | 0.05 到 10 |
 | **Stroke width**（**Line** 区域） | `series.line.stroke_width` | 0.05 到 10 |
 | **Tick-label size**（**Figure typography** 区域） | `document.figure.typography.tick_pt` | 1 到 72 |
+
+应用偏好设置同样用这三个工具。对于
+`settings.appearance.accent.color`，**Set a property** 接受 `"#rrggbb"`，把画布
+强调色固定为该颜色；**Reset a property** 清除它，强调色重新跟随主题。
 
 | 切趾步骤上的设置 | id | 取值 |
 | --- | --- | --- |
@@ -107,6 +113,31 @@ selection** 载入当前选择——再选择一个工具，点击 **Preflight**
 进入运行记录，[命令行](/zh-cn/reference/cli/)写出的清单文件里也是同一份
 内容。在窗口里，数值显示在逐部件结果下方的 **Result value (JSON)** 区域：
 每个部件一份读数，包含当前值、默认值和它接受的范围。
+
+#### 一条读数包含什么
+
+每条读数写出自己的 `target`，并带上当前值 `value`、参数有默认值时的
+`default_value`、表示当前值是否偏离默认值的 `modified`、可用状态
+`availability`，以及约束取值的 `schema`。
+
+当前状态下不允许写入的参数照样会被读出：`availability` 为 `"disabled"`，
+`disabled_reason` 说明要先改什么——例如设置 φ0 之前，先把相位模式切到
+*Manual*。
+
+schema 以 `type` 标记，取值为 `bool`、`text`、`int`、`stepped_int`、`float`、
+`enum` 或 `color`。
+
+- `int` 与 `stepped_int` 带 `min` 与 `max`，参数有单位时还带 `unit`。
+  `stepped_int` 另有取值必须落在的格点 `step`——例如 Savitzky-Golay 窗口为
+  3 到 201，步长为 2。
+- `float` 带 `min`、`max` 与 `exclusive_min`；若参数拒绝某些取值，还带
+  `excluded`（单个取值）或 `excluded_magnitude`（绝对值不超过该阈值的全部
+  取值）。其 `display`（`linear`、`degrees` 或 `log10`）说明面板如何显示这个
+  数；旁边的 `unit` 与 `log` 只是同一件事的另一种写法。
+- `enum` 列出各变体，每个都带稳定 id 和标签。
+
+无论 `display` 是什么，边界和取值始终使用参数自身的单位：`display` 为
+`degrees` 的相位值，在线格式中仍是弧度。
 
 ## External Inputs
 

@@ -130,7 +130,7 @@ fn contour_slice_places_peak_and_exports_svg() {
     let fig = app.doc.canvases[0].objects[0]
         .plot()
         .unwrap()
-        .figure
+        .figure()
         .clone();
     assert!(!fig.contours.is_empty());
     assert!(!fig.contours[0].segments.is_empty());
@@ -551,7 +551,7 @@ fn a_json_property_write_reaches_the_drawn_figure() {
         .object(object)
         .and_then(|object| object.plot())
         .expect("plot")
-        .figure
+        .figure()
         .contours
         .len();
     assert!(before > 0, "the page draws contours to begin with");
@@ -569,10 +569,10 @@ fn a_json_property_write_reaches_the_drawn_figure() {
         .and_then(|object| object.plot())
         .expect("plot");
     assert!(
-        !plot.figure.contours.is_empty(),
+        !plot.figure().contours.is_empty(),
         "the positive half is still drawn"
     );
-    let svg = plotx_render::svg::export(&plot.figure);
+    let svg = plotx_render::svg::export(plot.figure());
     assert!(svg.contains("<path"), "the figure still exports geometry");
 }
 
@@ -626,7 +626,7 @@ fn an_apodization_property_reprocesses_a_real_2d_fid_after_jobs_settle() {
         .object(object)
         .and_then(|object| object.plot())
         .expect("the page still owns its plot")
-        .figure
+        .figure()
         .clone();
     assert!(
         !figure.contours.is_empty() && !figure.contours[0].segments.is_empty(),

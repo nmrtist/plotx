@@ -79,22 +79,22 @@ pub fn page_metrics(canvas: &CanvasDocument) -> PageMetrics {
                 if plot.panel.visible {
                     fonts.push(plot.panel.font_size);
                 }
-                let typography = plot.figure.typography;
-                if plot.figure.axis_frame != AxisFrame::Hidden {
+                let typography = plot.figure().typography;
+                if plot.figure().axis_frame != AxisFrame::Hidden {
                     fonts.extend([typography.tick_pt, typography.label_pt]);
                 }
-                if !plot.figure.title.trim().is_empty() {
+                if !plot.figure().title.trim().is_empty() {
                     fonts.push(typography.title_pt);
                 }
-                for annotation in &plot.figure.annotations {
+                for annotation in &plot.figure().annotations {
                     fonts.push(annotation.size);
                 }
-                for series in &plot.figure.series {
+                for series in &plot.figure().series {
                     if !series.points.is_empty() {
                         lines.push(series.width);
                     }
                 }
-                for contour in &plot.figure.contours {
+                for contour in &plot.figure().contours {
                     lines.push(contour.width);
                 }
             }
@@ -273,21 +273,24 @@ mod tests {
             locked: false,
             visible: true,
             group: None,
-            kind: CanvasObjectKind::Plot(Box::new(PlotObject {
-                next_series_id: crate::state::SeriesId::new(1),
-                binding: DataBinding { series: Vec::new() },
-                chart: ChartSpec::default(),
-                stack: StackSpec::default(),
-                projections: AxisProjections::default(),
-                axis_overrides: AxisOverrides::default(),
+            kind: CanvasObjectKind::Plot(Box::new(PlotObject::new(
+                crate::state::SeriesId::new(1),
+                DataBinding { series: Vec::new() },
+                ChartSpec::default(),
+                StackSpec::default(),
+                AxisProjections::default(),
+                AxisOverrides::default(),
                 figure,
                 viewport,
                 panel,
-            })),
+            ))),
         });
 
         assert_eq!(page_metrics(&canvas).min_font_pt, None);
-        canvas.objects[0].plot_mut().unwrap().figure.axis_frame = AxisFrame::Open;
+        canvas.objects[0]
+            .plot_mut()
+            .unwrap()
+            .set_axis_frame(AxisFrame::Open);
         assert_eq!(page_metrics(&canvas).min_font_pt, Some(3.0));
     }
 }

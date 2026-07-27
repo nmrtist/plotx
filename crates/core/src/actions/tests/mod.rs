@@ -198,7 +198,7 @@ fn processing_undo_redo_rebuilds_spectrum_and_canvas() {
     };
 
     let mut app = sample_app();
-    let original_y = first_plot(&app).figure.series[0].points[3][1];
+    let original_y = first_plot(&app).figure().series[0].points[3][1];
     let (_, original_auto) = phase0_of(&app);
     let before = DatasetProcessingState::from_dataset(&app.doc.datasets[0]);
     let mut after = before.clone();
@@ -218,17 +218,17 @@ fn processing_undo_redo_rebuilds_spectrum_and_canvas() {
         before,
         after,
     ));
-    let edited_y = first_plot(&app).figure.series[0].points[3][1];
+    let edited_y = first_plot(&app).figure().series[0].points[3][1];
     assert_ne!(edited_y, original_y);
     assert_eq!(phase0_of(&app), (0.5, false));
 
     app.undo();
     assert_eq!(phase0_of(&app).1, original_auto);
-    assert_eq!(first_plot(&app).figure.series[0].points[3][1], original_y);
+    assert_eq!(first_plot(&app).figure().series[0].points[3][1], original_y);
 
     app.redo();
     assert_eq!(phase0_of(&app), (0.5, false));
-    assert_eq!(first_plot(&app).figure.series[0].points[3][1], edited_y);
+    assert_eq!(first_plot(&app).figure().series[0].points[3][1], edited_y);
 }
 
 #[test]
@@ -315,15 +315,15 @@ fn viewport_undo_redo_keeps_figure_axes_in_sync() {
         after.clone(),
     ));
     assert_eq!(first_plot(&app).viewport.view_x, after.view_x);
-    assert_eq!(first_plot(&app).figure.x.min, after.view_x.min);
+    assert_eq!(first_plot(&app).figure().x.min, after.view_x.min);
 
     app.undo();
     assert_eq!(first_plot(&app).viewport.view_x, before.view_x);
-    assert_eq!(first_plot(&app).figure.x.min, before.view_x.min);
+    assert_eq!(first_plot(&app).figure().x.min, before.view_x.min);
 
     app.redo();
     assert_eq!(first_plot(&app).viewport.view_x, after.view_x);
-    assert_eq!(first_plot(&app).figure.x.max, after.view_x.max);
+    assert_eq!(first_plot(&app).figure().x.max, after.view_x.max);
 }
 
 fn size_state(size_mm: [f32; 2], preset_id: Option<&str>) -> PageSizeState {

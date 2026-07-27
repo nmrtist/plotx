@@ -2,6 +2,20 @@ use super::*;
 use plotx_processing::ProcessingStep;
 
 impl DatasetProcessingState {
+    pub(crate) fn group_delay_correct_mut(&mut self) -> Option<&mut bool> {
+        match self {
+            Self::Nmr {
+                group_delay_correct,
+                ..
+            }
+            | Self::Nmr2D {
+                group_delay_correct,
+                ..
+            } => Some(group_delay_correct),
+            Self::Table | Self::Electrophysiology(_) | Self::Afm => None,
+        }
+    }
+
     pub fn from_dataset(dataset: &Dataset) -> Self {
         match dataset {
             Dataset::Nmr(n) => Self::Nmr {
@@ -11,6 +25,7 @@ impl DatasetProcessingState {
             Dataset::Nmr2D(n) => Self::Nmr2D {
                 params: n.params.clone(),
                 preset: n.preset,
+                group_delay_correct: n.group_delay_correct,
             },
             Dataset::Table(_) => Self::Table,
             Dataset::Electrophysiology(d) => Self::Electrophysiology(d.processing),
@@ -70,11 +85,20 @@ impl DatasetProcessingState {
                 n.recompute_integrals();
                 Ok(rebuild)
             }
-            (Dataset::Nmr2D(n), Self::Nmr2D { params, preset }) => {
+            (
+                Dataset::Nmr2D(n),
+                Self::Nmr2D {
+                    params,
+                    preset,
+                    group_delay_correct,
+                },
+            ) => {
                 let full = plotx_processing::needs_retransform_2d(params, &n.params);
+                let full = full || *group_delay_correct != n.group_delay_correct;
                 n.params = params.clone();
                 n.repair_step_allocator();
                 n.preset = *preset;
+                n.group_delay_correct = *group_delay_correct;
                 if full {
                     n.retransform();
                     Ok(ProcessingRebuild::Retransformed)

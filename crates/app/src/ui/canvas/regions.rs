@@ -78,7 +78,7 @@ pub(crate) fn handle_region_drag(
             .object(object_id)
             .and_then(|object| object.plot())
             .unwrap()
-            .figure;
+            .figure();
         (fig.x.min, fig.x.span(), fig.x.reversed)
     };
 

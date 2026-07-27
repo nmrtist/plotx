@@ -41,6 +41,55 @@ fn document_typography_is_addressable_without_a_canvas_object() {
     assert_eq!(app.doc.style_library.figure_typography.tick_pt, 9.5);
 }
 
+#[test]
+fn every_document_typography_property_resets_to_its_declared_default() {
+    let mut app = PlotxApp::new();
+    let target = app.document_target();
+    for (property, changed) in [
+        (typography::TICK_PT, 12.0),
+        (typography::LABEL_PT, 13.0),
+        (typography::TITLE_PT, 14.0),
+    ] {
+        let commit = app
+            .plan_property_write(
+                property,
+                std::slice::from_ref(&target),
+                &PropertyValue::Float(changed),
+            )
+            .expect("typography write plans");
+        app.commit_property(commit);
+        let reset = app
+            .plan_property_reset(property, std::slice::from_ref(&target))
+            .expect("typography reset plans");
+        assert_eq!(reset.applied.len(), 1, "{property}");
+        app.commit_property(reset);
+        let resolved = app
+            .resolve_property(&PropertyAddress::new(target.clone(), property))
+            .expect("typography resolves after reset");
+        assert_eq!(resolved.value.uniform(), resolved.default_value.as_ref());
+    }
+}
+
+#[test]
+fn all_three_typography_sizes_share_the_declared_point_schema() {
+    for property in [
+        typography::TICK_PT,
+        typography::LABEL_PT,
+        typography::TITLE_PT,
+    ] {
+        let definition = definition(property).expect("typography is registered");
+        assert_eq!(
+            definition.value_schema,
+            ValueSchema::Float {
+                bounds: FloatBounds::inclusive(1.0, 72.0),
+                display: FloatDisplay::Linear("pt"),
+                drag_step: Some(0.25),
+            }
+        );
+        assert_eq!(definition.tier, Tier::Essential);
+    }
+}
+
 /// A write of the value already in typed storage is not an applied edit. The
 /// caller gets an explicit skip, and the empty composite cannot create a fake
 /// undo/revision entry.

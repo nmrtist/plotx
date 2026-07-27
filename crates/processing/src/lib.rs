@@ -531,7 +531,8 @@ impl AxisPipeline {
 
 pub use fft::transform_base;
 
-fn apply_freq_step(spec: &mut Spectrum, kind: &StepKind) {
+/// Apply one frequency-domain step to an already transformed spectrum.
+pub fn apply_freq_step(spec: &mut Spectrum, kind: &StepKind) {
     match kind {
         StepKind::Phase(p) => {
             let (p0, p1, piv) = match p.auto {

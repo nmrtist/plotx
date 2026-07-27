@@ -1,0 +1,268 @@
+use super::*;
+
+pub(crate) const GROUPS: &[PropertyGroup] = &[
+    PropertyGroup {
+        section: panel::AXIS_SECTION,
+        label: LocalizedText("Axes"),
+        icon: egui_phosphor::regular::CHART_POLAR,
+        ribbon: RibbonSpot {
+            tab: WorkflowTab::Figure,
+            group: "Style",
+            priority: 2,
+        },
+        unavailable_reason: "Select a plot before changing its axis text.",
+    },
+    PropertyGroup {
+        section: panel::STACK_SECTION,
+        label: LocalizedText("Stack"),
+        icon: egui_phosphor::regular::STACK,
+        ribbon: RibbonSpot {
+            tab: WorkflowTab::Figure,
+            group: "Data",
+            priority: 2,
+        },
+        unavailable_reason: "Select a stackable multi-series plot.",
+    },
+    PropertyGroup {
+        section: panel::CHART_SECTION,
+        label: LocalizedText("Chart"),
+        icon: egui_phosphor::regular::CHART_BAR,
+        ribbon: RibbonSpot {
+            tab: WorkflowTab::Figure,
+            group: "Data",
+            priority: 2,
+        },
+        unavailable_reason: "Select a plot before changing its chart options.",
+    },
+    PropertyGroup {
+        section: panel::TEXT_SECTION,
+        label: LocalizedText("Text"),
+        icon: egui_phosphor::regular::TEXT_T,
+        ribbon: RibbonSpot {
+            tab: WorkflowTab::Figure,
+            group: "Style",
+            priority: 2,
+        },
+        unavailable_reason: "Select an unlocked text object.",
+    },
+    PropertyGroup {
+        section: panel::SHAPE_SECTION,
+        label: LocalizedText("Shape"),
+        icon: egui_phosphor::regular::SQUARE,
+        ribbon: RibbonSpot {
+            tab: WorkflowTab::Figure,
+            group: "Style",
+            priority: 2,
+        },
+        unavailable_reason: "Select an unlocked shape object.",
+    },
+    PropertyGroup {
+        section: panel::PANEL_SECTION,
+        label: LocalizedText("Panel"),
+        icon: egui_phosphor::regular::NOTE,
+        ribbon: RibbonSpot {
+            tab: WorkflowTab::Figure,
+            group: "Style",
+            priority: 2,
+        },
+        unavailable_reason: "Select a plot before changing its panel note.",
+    },
+    PropertyGroup {
+        section: panel::OBJECT_SECTION,
+        label: LocalizedText("Object"),
+        icon: egui_phosphor::regular::LOCK,
+        ribbon: RibbonSpot {
+            tab: WorkflowTab::Arrange,
+            group: "Object",
+            priority: 2,
+        },
+        unavailable_reason: "Select an object before changing its flags.",
+    },
+    PropertyGroup {
+        section: panel::CONTOUR_SECTION,
+        label: LocalizedText("Contour"),
+        icon: egui_phosphor::regular::CHART_POLAR,
+        ribbon: RibbonSpot {
+            tab: WorkflowTab::Figure,
+            group: "Style",
+            priority: 2,
+        },
+        unavailable_reason: "Select a plot whose series draws contours before changing contour levels.",
+    },
+    PropertyGroup {
+        section: panel::LINE_SECTION,
+        label: LocalizedText("Line"),
+        icon: egui_phosphor::regular::LINE_SEGMENT,
+        ribbon: RibbonSpot {
+            tab: WorkflowTab::Figure,
+            group: "Style",
+            priority: 3,
+        },
+        unavailable_reason: "Select a plot whose series draws lines before changing line style.",
+    },
+    PropertyGroup {
+        section: panel::TYPOGRAPHY_SECTION,
+        label: LocalizedText("Figure typography"),
+        icon: egui_phosphor::regular::TEXT_T,
+        ribbon: RibbonSpot {
+            tab: WorkflowTab::Figure,
+            group: "Style",
+            priority: 3,
+        },
+        unavailable_reason: "Open a PlotX document before changing figure typography.",
+    },
+    PropertyGroup {
+        section: panel::CANVAS_MARGINS_SECTION,
+        label: LocalizedText("Margins and spacing"),
+        icon: egui_phosphor::regular::ARROWS_OUT,
+        ribbon: RibbonSpot {
+            tab: WorkflowTab::Arrange,
+            group: "Canvas",
+            priority: 2,
+        },
+        unavailable_reason: "Open a canvas before changing its margins and spacing.",
+    },
+    PropertyGroup {
+        section: panel::CANVAS_GRID_SECTION,
+        label: LocalizedText("Layout grid"),
+        icon: egui_phosphor::regular::DOTS_SIX,
+        ribbon: RibbonSpot {
+            tab: WorkflowTab::Arrange,
+            group: "Canvas",
+            priority: 2,
+        },
+        unavailable_reason: "Open a canvas before changing its layout grid.",
+    },
+    PropertyGroup {
+        section: panel::CANVAS_SIZE_SECTION,
+        label: LocalizedText("Page size"),
+        icon: egui_phosphor::regular::FRAME_CORNERS,
+        ribbon: RibbonSpot {
+            tab: WorkflowTab::Arrange,
+            group: "Canvas",
+            priority: 1,
+        },
+        unavailable_reason: "Open a canvas before changing its page size.",
+    },
+    PropertyGroup {
+        section: panel::CANVAS_CAPTION_SECTION,
+        label: LocalizedText("Caption and labels"),
+        icon: egui_phosphor::regular::TEXT_T,
+        ribbon: RibbonSpot {
+            tab: WorkflowTab::Figure,
+            group: "Canvas",
+            priority: 3,
+        },
+        unavailable_reason: "Open a canvas before changing its caption and panel labels.",
+    },
+    PropertyGroup {
+        section: panel::APODIZATION_SECTION,
+        label: LocalizedText("Apodization"),
+        icon: egui_phosphor::regular::WAVEFORM,
+        ribbon: RibbonSpot {
+            tab: WorkflowTab::Process,
+            group: "Processing",
+            priority: 1,
+        },
+        unavailable_reason: "Select a dataset with an apodization processing step.",
+    },
+    PropertyGroup {
+        section: panel::ZERO_FILL_SECTION,
+        label: LocalizedText("Zero fill"),
+        icon: egui_phosphor::regular::DOTS_SIX,
+        ribbon: RibbonSpot {
+            tab: WorkflowTab::Process,
+            group: "Processing",
+            priority: 1,
+        },
+        unavailable_reason: "Select a dataset with a zero-fill processing step.",
+    },
+    PropertyGroup {
+        section: panel::PHASE_SECTION,
+        label: LocalizedText("Phase"),
+        icon: egui_phosphor::regular::WAVE_SINE,
+        ribbon: RibbonSpot {
+            tab: WorkflowTab::Process,
+            group: "Processing",
+            priority: 1,
+        },
+        unavailable_reason: "Select a dataset with a phase processing step.",
+    },
+    PropertyGroup {
+        section: panel::BASELINE_SECTION,
+        label: LocalizedText("Baseline"),
+        icon: egui_phosphor::regular::LINE_SEGMENT,
+        ribbon: RibbonSpot {
+            tab: WorkflowTab::Process,
+            group: "Processing",
+            priority: 2,
+        },
+        unavailable_reason: "Select a dataset with a baseline processing step.",
+    },
+    PropertyGroup {
+        section: panel::REFERENCE_SECTION,
+        label: LocalizedText("Reference"),
+        icon: egui_phosphor::regular::TAG,
+        ribbon: RibbonSpot {
+            tab: WorkflowTab::Process,
+            group: "Processing",
+            priority: 2,
+        },
+        unavailable_reason: "Select a dataset with a reference processing step.",
+    },
+    PropertyGroup {
+        section: panel::SMOOTH_SECTION,
+        label: LocalizedText("Smoothing"),
+        icon: egui_phosphor::regular::WAVE_TRIANGLE,
+        ribbon: RibbonSpot {
+            tab: WorkflowTab::Process,
+            group: "Processing",
+            priority: 3,
+        },
+        unavailable_reason: "Select a dataset with a smoothing processing step.",
+    },
+    PropertyGroup {
+        section: panel::NORMALIZE_SECTION,
+        label: LocalizedText("Normalize"),
+        icon: egui_phosphor::regular::DIVIDE,
+        ribbon: RibbonSpot {
+            tab: WorkflowTab::Process,
+            group: "Processing",
+            priority: 3,
+        },
+        unavailable_reason: "Select a dataset with a normalization processing step.",
+    },
+    PropertyGroup {
+        section: panel::BIN_SECTION,
+        label: LocalizedText("Binning"),
+        icon: egui_phosphor::regular::CHART_BAR,
+        ribbon: RibbonSpot {
+            tab: WorkflowTab::Process,
+            group: "Processing",
+            priority: 3,
+        },
+        unavailable_reason: "Select a dataset with a binning processing step.",
+    },
+    PropertyGroup {
+        section: panel::PROCESSING_STEP_SECTION,
+        label: LocalizedText("Processing step"),
+        icon: egui_phosphor::regular::TOGGLE_LEFT,
+        ribbon: RibbonSpot {
+            tab: WorkflowTab::Process,
+            group: "Processing",
+            priority: 3,
+        },
+        unavailable_reason: "Select a dataset with a processing step.",
+    },
+    PropertyGroup {
+        section: panel::PROCESSING_ADVANCED_SECTION,
+        label: LocalizedText("Advanced processing"),
+        icon: egui_phosphor::regular::SLIDERS_HORIZONTAL,
+        ribbon: RibbonSpot {
+            tab: WorkflowTab::Process,
+            group: "Processing",
+            priority: 3,
+        },
+        unavailable_reason: "Select an NMR dataset before changing advanced processing.",
+    },
+];

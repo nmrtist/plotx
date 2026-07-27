@@ -192,7 +192,7 @@ pub fn apply_scheme(
     dataset: &Dataset,
 ) -> Result<DatasetProcessingState> {
     match dataset {
-        Dataset::Nmr(_) => {
+        Dataset::Nmr(n) => {
             if scheme.dimension_count != 1 {
                 return Err(incompatible("a 1D spectrum needs a single-axis scheme"));
             }
@@ -202,6 +202,8 @@ pub fn apply_scheme(
                 .ok_or_else(|| incompatible("scheme carries no pipeline"))?;
             require_fft(dto)?;
             let mut pipeline = pipeline_from_dto(dto);
+            validate_1d_pipeline(&n.data, &pipeline, scheme.group_delay_correct)
+                .map_err(ProjectError::Invalid)?;
             remint_pipeline(&mut pipeline, &mut dataset_next_step_id(dataset));
             Ok(DatasetProcessingState::Nmr {
                 pipeline,
@@ -237,6 +239,7 @@ pub fn apply_scheme(
             Ok(DatasetProcessingState::Nmr2D {
                 params,
                 preset: n.preset,
+                group_delay_correct: scheme.group_delay_correct,
             })
         }
         Dataset::Table(_) => Err(incompatible("a data table has no processing pipeline")),
@@ -268,13 +271,14 @@ fn remint_pipeline(pipeline: &mut AxisPipeline, next: &mut u64) {
 
 pub fn reset_processing(dataset: &Dataset) -> Option<DatasetProcessingState> {
     let mut state = match dataset {
-        Dataset::Nmr(_) => Some(DatasetProcessingState::Nmr {
+        Dataset::Nmr(n) => Some(DatasetProcessingState::Nmr {
             pipeline: AxisPipeline::default_1d(),
-            group_delay_correct: true,
+            group_delay_correct: crate::state::default_group_delay_correct(n.data.domain),
         }),
         Dataset::Nmr2D(n) => Some(DatasetProcessingState::Nmr2D {
             params: Params2D::default_for(n.preset),
             preset: n.preset,
+            group_delay_correct: crate::state::default_group_delay_correct(n.data.domain),
         }),
         Dataset::Table(_) => None,
         Dataset::Electrophysiology(_) => None,

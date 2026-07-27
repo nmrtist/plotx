@@ -39,6 +39,18 @@ introduces the same regions in walkthrough form.
   directly; the rest are folded into **Advanced**. Its **Contour** and **Line**
   sections appear only when the selection draws one; **Figure typography**
   belongs to the document and is always shown.
+- **Setting row** — one setting as it appears in the Object inspector, Canvas
+  settings, the Processing panel, or Preferences. Every row behaves the same
+  way wherever it is shown. A dot marks a value that differs from its default —
+  hover it to see that default — and the reset button beside it goes back.
+  <kbd>Ctrl</kbd>+<kbd>K</kbd> searches these settings by name: activating a
+  result opens the panel that holds the row, expands what it is folded into,
+  scrolls to it, and highlights it. A row that cannot be edited in the current
+  state stays visible but greyed; hover it for the switch to change first.
+  When your selection covers several objects, one edit applies to all of them.
+  If they do not already agree, the row reads **mixed** and shows a dash in
+  place of a value rather than presenting one object's as the answer; hover it
+  to see how many disagree and what setting a value now would do.
 - **Settings group** — a named set of related settings with one home. The Ribbon
   carries a button per group that opens that home rather than repeating the
   controls: **Contour settings**, **Line settings** and **Figure typography
@@ -46,6 +58,9 @@ introduces the same regions in walkthrough form.
   **Process → Processing**. The canvas right-click menu lists the same groups
   that currently apply, as *Contour settings…* and so on, and
   <kbd>Ctrl</kbd>+<kbd>K</kbd> finds the individual settings inside them.
+  Application preferences belong to no object, so the canvas menu does not list
+  them: reach them with **Preferences…** in **View → Display**, from the
+  command palette, or with <kbd>Ctrl</kbd>+<kbd>,</kbd>.
 - **Data sheet** — the spreadsheet view of a data table, opened by
   double-clicking the table.
 - **Command palette** — the searchable list of commands, settings, and data on

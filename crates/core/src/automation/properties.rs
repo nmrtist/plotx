@@ -16,9 +16,9 @@
 use super::registry::parse;
 use super::*;
 use crate::properties::{
-    AggregateValue, Availability, EnumVariant, FloatBounds, PropertyAccess, PropertyAddress,
-    PropertyDefinition, PropertyError, PropertySkip, PropertyValue, ResolvedProperty,
-    ResolvedSchema, ValueSchema, definition_by_key, variant_list,
+    AggregateValue, Availability, EnumVariant, FloatBounds, FloatDisplay, PropertyAccess,
+    PropertyAddress, PropertyDefinition, PropertyError, PropertySkip, PropertyValue,
+    ResolvedProperty, ResolvedSchema, ValueSchema, definition_by_key, variant_list,
 };
 use crate::state::PlotxApp;
 use serde::{Deserialize, Serialize};
@@ -337,13 +337,33 @@ fn decode_value(
             .as_bool()
             .map(PropertyValue::Bool)
             .ok_or_else(|| invalid(format!("expected true or false, got {}", json_kind(value)))),
-        ValueSchema::Int { min, max } => {
+        ValueSchema::Text => value
+            .as_str()
+            .map(|value| PropertyValue::Text(value.to_owned()))
+            .ok_or_else(|| invalid(format!("expected text, got {}", json_kind(value)))),
+        ValueSchema::Int { min, max } | ValueSchema::IntWithDrag { min, max, .. } => {
             let number = value
                 .as_i64()
                 .ok_or_else(|| invalid(format!("expected an integer, got {}", json_kind(value))))?;
             if number < min || number > max {
                 return Err(invalid(format!(
                     "{number} is out of range: it must be between {min} and {max}"
+                )));
+            }
+            Ok(PropertyValue::Int(number))
+        }
+        ValueSchema::SteppedInt { min, max, step, .. } => {
+            if step <= 0 {
+                return Err(invalid(format!(
+                    "internal schema error: integer step must be positive, got {step}"
+                )));
+            }
+            let number = value
+                .as_i64()
+                .ok_or_else(|| invalid(format!("expected an integer, got {}", json_kind(value))))?;
+            if number < min || number > max || (number - min) % step != 0 {
+                return Err(invalid(format!(
+                    "{number} is out of range: it must be between {min} and {max} in steps of {step}"
                 )));
             }
             Ok(PropertyValue::Int(number))
@@ -460,6 +480,8 @@ struct ReadingDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     default_value: Option<PropertyValueDto>,
     availability: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    disabled_reason: Option<&'static str>,
     modified: bool,
     schema: ResolvedSchemaDto,
 }
@@ -476,7 +498,10 @@ enum AggregateValueDto {
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 enum PropertyValueDto {
     Bool(bool),
+    Text(String),
     Int(i64),
+    /// Domain value, even when the resolved UI schema displays degrees or a
+    /// logarithm. Phase values therefore remain radians on the wire.
     Float(f64),
     Enum(&'static str),
     Color(String),
@@ -486,16 +511,36 @@ enum PropertyValueDto {
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ResolvedSchemaDto {
     Bool,
+    Text,
     Int {
         min: i64,
         max: i64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        drag_step: Option<f64>,
+        #[serde(skip_serializing_if = "str::is_empty")]
+        unit: &'static str,
+    },
+    SteppedInt {
+        min: i64,
+        max: i64,
+        step: i64,
+        drag_step: f64,
+        #[serde(skip_serializing_if = "str::is_empty")]
+        unit: &'static str,
     },
     Float {
+        // Bounds validate the domain value carried by `PropertyValueDto::Float`.
+        // `display` and `unit` describe only a UI projection of that value.
         min: f64,
         max: f64,
         exclusive_min: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        excluded: Option<f64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        excluded_magnitude: Option<f64>,
         log: bool,
         unit: &'static str,
+        display: &'static str,
     },
     Enum {
         variants: Vec<EnumVariantDto>,
@@ -513,10 +558,15 @@ fn reading(resolved: &ResolvedProperty) -> Result<ReadingDto, AutomationError> {
     Ok(ReadingDto {
         target: resolved.address.target.clone(),
         value: aggregate_dto(&resolved.value),
-        default_value: resolved.default_value.map(value_dto),
+        default_value: resolved.default_value.as_ref().map(value_dto),
         availability: match resolved.availability {
             Availability::Editable => "editable",
+            Availability::Disabled(_) => "disabled",
             Availability::ReadOnly => "read_only",
+        },
+        disabled_reason: match resolved.availability {
+            Availability::Disabled(reason) => Some(reason),
+            Availability::Editable | Availability::ReadOnly => None,
         },
         modified: resolved.is_modified(),
         schema: schema_dto(&resolved.schema),
@@ -526,18 +576,19 @@ fn reading(resolved: &ResolvedProperty) -> Result<ReadingDto, AutomationError> {
 fn aggregate_dto(value: &AggregateValue<PropertyValue>) -> AggregateValueDto {
     match value {
         AggregateValue::Uniform(value) => AggregateValueDto::Uniform {
-            value: value_dto(*value),
+            value: value_dto(value),
         },
         AggregateValue::Mixed => AggregateValueDto::Mixed,
         AggregateValue::Unavailable => AggregateValueDto::Unavailable,
     }
 }
 
-fn value_dto(value: PropertyValue) -> PropertyValueDto {
+fn value_dto(value: &PropertyValue) -> PropertyValueDto {
     match value {
-        PropertyValue::Bool(value) => PropertyValueDto::Bool(value),
-        PropertyValue::Int(value) => PropertyValueDto::Int(value),
-        PropertyValue::Float(value) => PropertyValueDto::Float(value),
+        PropertyValue::Bool(value) => PropertyValueDto::Bool(*value),
+        PropertyValue::Text(value) => PropertyValueDto::Text(value.clone()),
+        PropertyValue::Int(value) => PropertyValueDto::Int(*value),
+        PropertyValue::Float(value) => PropertyValueDto::Float(*value),
         PropertyValue::Enum(value) => PropertyValueDto::Enum(value),
         PropertyValue::Color(value) => PropertyValueDto::Color(value.to_hex()),
     }
@@ -546,11 +597,38 @@ fn value_dto(value: PropertyValue) -> PropertyValueDto {
 fn schema_dto(schema: &ResolvedSchema) -> ResolvedSchemaDto {
     match schema {
         ResolvedSchema::Bool => ResolvedSchemaDto::Bool,
-        ResolvedSchema::Int { min, max } => ResolvedSchemaDto::Int {
+        ResolvedSchema::Text => ResolvedSchemaDto::Text,
+        ResolvedSchema::Int { min, max, unit } => ResolvedSchemaDto::Int {
             min: *min,
             max: *max,
+            drag_step: None,
+            unit,
         },
-        ResolvedSchema::Float { bounds, log, unit } => float_schema_dto(*bounds, *log, unit),
+        ResolvedSchema::IntWithDrag {
+            min,
+            max,
+            drag_step,
+            unit,
+        } => ResolvedSchemaDto::Int {
+            min: *min,
+            max: *max,
+            drag_step: Some(*drag_step),
+            unit,
+        },
+        ResolvedSchema::SteppedInt {
+            min,
+            max,
+            step,
+            drag_step,
+            unit,
+        } => ResolvedSchemaDto::SteppedInt {
+            min: *min,
+            max: *max,
+            step: *step,
+            drag_step: *drag_step,
+            unit,
+        },
+        ResolvedSchema::Float { bounds, display } => float_schema_dto(*bounds, *display),
         ResolvedSchema::Enum { variants } => ResolvedSchemaDto::Enum {
             variants: variants.iter().copied().map(variant_dto).collect(),
         },
@@ -558,13 +636,16 @@ fn schema_dto(schema: &ResolvedSchema) -> ResolvedSchemaDto {
     }
 }
 
-fn float_schema_dto(bounds: FloatBounds, log: bool, unit: &'static str) -> ResolvedSchemaDto {
+fn float_schema_dto(bounds: FloatBounds, display: FloatDisplay) -> ResolvedSchemaDto {
     ResolvedSchemaDto::Float {
         min: bounds.min,
         max: bounds.max,
         exclusive_min: bounds.exclusive_min,
-        log,
-        unit,
+        excluded: bounds.excluded,
+        excluded_magnitude: bounds.excluded_magnitude,
+        log: matches!(display, FloatDisplay::Log10(_)),
+        unit: display.unit(),
+        display: display.as_str(),
     }
 }
 

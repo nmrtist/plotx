@@ -323,16 +323,20 @@ pub(super) fn reveal_property(app: &mut PlotxApp, property: PropertyId, now: f64
             app.session.secondary_sidebar_visible = true;
             app.session.ui.requested_tool_group = Some(ToolGroup::Processing);
         }
+        PanelRoute::CanvasSettings => {
+            app.session.ui.canvas_settings = app.session.active_canvas;
+        }
         PanelRoute::Preferences => {
             app.open_settings();
             if let Some(dialog) = app.session.ui.settings_dialog.as_mut()
-                && let Some(category) = SettingsCategory::ALL
-                    .into_iter()
-                    .find(|category| category.section_id() == route.section)
+                && let Some(category) = SettingsCategory::ALL.into_iter().find(|category| {
+                    category.section_id() == route.section
+                        || (route.section == properties::panel::PREFERENCES_UPDATES_SECTION
+                            && *category == SettingsCategory::General)
+                })
             {
                 dialog.category = category;
             }
-            return;
         }
     }
     // A property owned by an owner-local component needs that component opened,

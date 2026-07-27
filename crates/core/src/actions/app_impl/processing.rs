@@ -39,9 +39,17 @@ impl PlotxApp {
                 n.pipeline = pipeline.clone();
                 n.group_delay_correct = *group_delay_correct;
             }
-            (Dataset::Nmr2D(n), DatasetProcessingState::Nmr2D { params, preset }) => {
+            (
+                Dataset::Nmr2D(n),
+                DatasetProcessingState::Nmr2D {
+                    params,
+                    preset,
+                    group_delay_correct,
+                },
+            ) => {
                 n.params = params.clone();
                 n.preset = *preset;
+                n.group_delay_correct = *group_delay_correct;
             }
             _ => {}
         }
@@ -52,12 +60,20 @@ impl PlotxApp {
     /// the recipes, not by the caller. Lives beside the pause gate because it is
     /// the other half of it: this is what "not paused" does.
     pub fn set_dataset_processing_state(&mut self, dataset: usize, state: &DatasetProcessingState) {
-        if let (Some(Dataset::Nmr2D(current)), DatasetProcessingState::Nmr2D { params, preset }) =
-            (self.doc.datasets.get_mut(dataset), state)
+        if let (
+            Some(Dataset::Nmr2D(current)),
+            DatasetProcessingState::Nmr2D {
+                params,
+                preset,
+                group_delay_correct,
+            },
+        ) = (self.doc.datasets.get_mut(dataset), state)
         {
+            let force_full = current.group_delay_correct != *group_delay_correct;
             current.params = params.clone();
             current.preset = *preset;
-            self.schedule_2d_processing(dataset, false);
+            current.group_delay_correct = *group_delay_correct;
+            self.schedule_2d_processing(dataset, force_full);
             return;
         }
         let Some(current) = self.doc.datasets.get_mut(dataset) else {
