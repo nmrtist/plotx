@@ -31,14 +31,15 @@ pub(super) fn safe_name(name: &str) -> String {
 
 pub(super) fn write_1d<W: Write>(
     writer: &mut DelimitedWriter<W>,
-    ppm: &[f64],
+    axis: &[f64],
+    axis_label: &str,
     values: &[Complex64],
     channel: IntensityChannel,
 ) -> io::Result<()> {
-    writer.write_record(&[Field::Text("ppm"), Field::Text("intensity")])?;
-    for index in 0..ppm.len().max(values.len()) {
+    writer.write_record(&[Field::Text(axis_label), Field::Text("intensity")])?;
+    for index in 0..axis.len().max(values.len()) {
         writer.write_record(&[
-            ppm.get(index)
+            axis.get(index)
                 .map_or(Field::Empty, |value| Field::Number(*value)),
             values
                 .get(index)
@@ -53,10 +54,12 @@ pub(super) fn write_true_2d<W: Write>(
     spectrum: &Spectrum2D,
     request: DataExportRequest,
 ) -> io::Result<()> {
+    let f1_label = domain_column("f1", spectrum.f1_domain);
+    let f2_label = domain_column("f2", spectrum.f2_domain);
     if request.shape == TableShape::Long {
         writer.write_record(&[
-            Field::Text("f1_ppm"),
-            Field::Text("f2_ppm"),
+            Field::Text(&f1_label),
+            Field::Text(&f2_label),
             Field::Text("intensity"),
         ])?;
         for (row, f1) in spectrum.f1_ppm.iter().enumerate() {
@@ -76,7 +79,14 @@ pub(super) fn write_true_2d<W: Write>(
         return Ok(());
     }
     let mut header = Vec::with_capacity(spectrum.f2_ppm.len() + 1);
-    header.push(Field::Text("F1/F2 (ppm)"));
+    let corner = if spectrum.f1_domain == plotx_io::Domain::Frequency
+        && spectrum.f2_domain == plotx_io::Domain::Frequency
+    {
+        "F1/F2 (ppm)".to_owned()
+    } else {
+        format!("{f1_label}/{f2_label}")
+    };
+    header.push(Field::Text(&corner));
     header.extend(spectrum.f2_ppm.iter().map(|value| Field::Number(*value)));
     writer.write_record(&header)?;
     for (row, f1) in spectrum.f1_ppm.iter().enumerate() {
@@ -107,10 +117,14 @@ pub(super) fn write_pseudo_2d<W: Write>(
     request: DataExportRequest,
 ) -> io::Result<()> {
     let ruler_header = with_unit(ruler_name, ruler_unit);
+    let direct_label = match spectrum.direct_domain {
+        plotx_io::Domain::Time => "direct_time_s".to_owned(),
+        plotx_io::Domain::Frequency => "ppm".to_owned(),
+    };
     if request.shape == TableShape::Long {
         writer.write_record(&[
             Field::Text(&ruler_header),
-            Field::Text("ppm"),
+            Field::Text(&direct_label),
             Field::Text("intensity"),
         ])?;
         for (row, trace) in spectrum.traces.iter().enumerate() {
@@ -128,7 +142,7 @@ pub(super) fn write_pseudo_2d<W: Write>(
         }
         return Ok(());
     }
-    let corner = format!("{ruler_header} / ppm");
+    let corner = format!("{ruler_header} / {direct_label}");
     let mut header = Vec::with_capacity(spectrum.ppm.len() + 1);
     header.push(Field::Text(&corner));
     header.extend(spectrum.ppm.iter().map(|value| Field::Number(*value)));
@@ -148,6 +162,13 @@ pub(super) fn write_pseudo_2d<W: Write>(
         writer.write_record(&fields)?;
     }
     Ok(())
+}
+
+fn domain_column(axis: &str, domain: plotx_io::Domain) -> String {
+    match domain {
+        plotx_io::Domain::Time => format!("{axis}_time_s"),
+        plotx_io::Domain::Frequency => format!("{axis}_ppm"),
+    }
 }
 
 pub(super) fn write_peaks<W: Write>(

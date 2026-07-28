@@ -344,6 +344,21 @@ pub fn describe(app: &PlotxApp, id: CommandId) -> CommandDescriptor {
     let is_table = || table().is_some();
     let has_curves = || table().is_some_and(|table| !table.series_bindings.is_empty());
     let has_trace = || dataset().is_some_and(|d| d.has_displayed_trace(None));
+    let is_frequency_nmr = || {
+        dataset().is_some_and(|dataset| {
+            dataset
+                .as_nmr()
+                .is_some_and(|nmr| nmr.output_domain() == plotx_io::Domain::Frequency)
+        })
+    };
+    let is_time_nmr = || {
+        dataset().is_some_and(|dataset| {
+            dataset
+                .as_nmr()
+                .is_some_and(|nmr| nmr.output_domain() == plotx_io::Domain::Time)
+        })
+    };
+    let has_frequency_analysis_trace = || has_trace() && !is_time_nmr();
     let range = || active_dataset.and_then(|di| app.analysis_range_for(di));
 
     let is_series = || dataset().is_some_and(Dataset::supports_region_analysis);
@@ -428,7 +443,7 @@ pub fn describe(app: &PlotxApp, id: CommandId) -> CommandDescriptor {
             "Select at least two compatible datasets before stacking them.",
         ),
         CommandId::SelectRange => requires(
-            has_trace(),
+            has_frequency_analysis_trace(),
             "Plot 1D data before selecting an analysis range.",
         ),
         CommandId::ClearRange => requires(
@@ -453,25 +468,36 @@ pub fn describe(app: &PlotxApp, id: CommandId) -> CommandDescriptor {
         }),
         CommandId::DetectPeaks => requires(
             dataset().is_some_and(|dataset| {
-                dataset.has_displayed_trace(app.session.ui.peak_column) && dataset.peaks().is_some()
+                !is_time_nmr()
+                    && dataset.has_displayed_trace(app.session.ui.peak_column)
+                    && dataset.peaks().is_some()
             }),
             "Select a plotted 1D spectrum or table column before detecting peaks.",
         ),
-        CommandId::PeakList => requires(has_trace(), "Plot 1D data before opening the peak list."),
-        CommandId::LineFit => requires(has_trace(), "Plot 1D data before fitting peaks."),
-        CommandId::RunPeakFit => requires(has_trace(), "Plot 1D data before running Peak Fit.")
-            .and_then(|()| {
-                requires(
-                    range().is_some(),
-                    "Draw an analysis range before running Peak Fit.",
-                )
-            })
-            .and_then(|()| {
-                requires(
-                    app.session.line_fit_job.is_none(),
-                    "Wait for the running peak fit to finish before starting another.",
-                )
-            }),
+        CommandId::PeakList => requires(
+            has_frequency_analysis_trace(),
+            "Plot frequency-domain or tabular 1D data before opening the peak list.",
+        ),
+        CommandId::LineFit => requires(
+            has_frequency_analysis_trace(),
+            "Plot frequency-domain or tabular 1D data before fitting peaks.",
+        ),
+        CommandId::RunPeakFit => requires(
+            has_frequency_analysis_trace(),
+            "Plot frequency-domain or tabular 1D data before running Peak Fit.",
+        )
+        .and_then(|()| {
+            requires(
+                range().is_some(),
+                "Draw an analysis range before running Peak Fit.",
+            )
+        })
+        .and_then(|()| {
+            requires(
+                app.session.line_fit_job.is_none(),
+                "Wait for the running peak fit to finish before starting another.",
+            )
+        }),
         CommandId::CurveFit => requires(is_table(), "Select a data table before fitting curves."),
         CommandId::RunCurveFit => {
             requires(is_table(), "Select a data table before running Curve Fit.").and_then(|()| {
@@ -501,11 +527,20 @@ pub fn describe(app: &PlotxApp, id: CommandId) -> CommandDescriptor {
                 "Plot the table on a canvas before choosing its chart type.",
             )
         }),
-        CommandId::Integrate => requires(has_trace(), "Plot 1D data before integrating it."),
-        CommandId::Multiplets => requires(
-            range().is_some(),
-            "Draw an analysis range before analyzing multiplets.",
+        CommandId::Integrate => requires(
+            is_frequency_nmr(),
+            "Select a frequency-domain 1D NMR spectrum before integrating it.",
         ),
+        CommandId::Multiplets => requires(
+            is_frequency_nmr(),
+            "Select a frequency-domain 1D NMR spectrum before analyzing multiplets.",
+        )
+        .and_then(|()| {
+            requires(
+                range().is_some(),
+                "Draw an analysis range before analyzing multiplets.",
+            )
+        }),
         CommandId::CanvasSettings => {
             requires(has_canvas, "Open a canvas before changing its settings.")
         }

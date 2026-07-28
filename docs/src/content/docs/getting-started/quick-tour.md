@@ -11,8 +11,11 @@ flow from raw data to a finished figure.
 - **Primary Side Bar** (left) — datasets and project structure.
 - **Canvas** (center) — an infinite board holding your plots, arranged on
   grid-snapped pages.
-- **Secondary Side Bar** (right) — contextual tools for the selected data:
-  processing, peaks, regions, and more.
+- **Secondary Side Bar** (right) — the selected object's inspector and
+  contextual analysis tools such as peaks and regions.
+- **Task dock** (upper right of the canvas) — a card holding the multi-step
+  tasks: Processing, Regions, Curve Fit, and Statistics. Open two or more and
+  they become tabs on the same card, one page shown at a time.
 
 Hide either side bar from **View** or the **View** Ribbon to give the canvas
 more room.
@@ -41,8 +44,9 @@ dataset, task, and tool.
 **Search commands** opens the command palette. Menu items, Ribbon buttons,
 shortcuts, and palette rows share the same enabled and selected states.
 
-The **Process** and **Analyze** tabs also switch the Secondary Side Bar to their
-tool group, but they never reopen a side bar you have hidden.
+The **Process** tab opens Processing for the active spectrum in the task dock.
+The **Analyze** tab reveals the applicable tool group in the Secondary Side
+Bar, but never reopens a side bar you have hidden.
 
 ## Data browser
 
@@ -56,8 +60,8 @@ multi-selection, and saved board views.
 
 1. **Import** a dataset by dragging a file onto the window, using **File**, or
    choosing an import command on the **Data** Ribbon.
-2. **Process** it in the processing panel — the pipeline applies steps in
-   order and previews the result live.
+2. **Process** it from the **Process** Ribbon tab — the pipeline applies steps
+   in order and previews the result live.
 3. **Analyze** with the peak and region tools; extracted values appear in
    linked tables.
 4. **Arrange** plots on the board and **export** the figure.

@@ -36,7 +36,7 @@ pub(super) fn synthetic_1d() -> NmrData {
 // A small synthetic DOSY array: a decaying resonance whose amplitude follows a
 // Stejskal–Tanner decay across 8 gradient steps, carrying a gradient ruler and
 // diffusion metadata so `is_pseudo()` holds.
-fn synthetic_dosy_2d() -> NmrData2D {
+pub(super) fn synthetic_dosy_2d() -> NmrData2D {
     let (cols, rows) = (64usize, 8usize);
     let meta = DiffusionMeta {
         gamma: 2.675_222e8,

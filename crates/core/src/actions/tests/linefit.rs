@@ -22,11 +22,13 @@ fn two_lorentzian_dataset(name: &str) -> Dataset {
         })
         .collect();
     let slice = Slice1D {
-        ppm,
+        coordinates: ppm,
+        domain: plotx_io::Domain::Frequency,
         values,
         nucleus: "1H".to_owned(),
         observe_freq_mhz: 400.0,
-        position_ppm: None,
+        position: None,
+        position_domain: plotx_io::Domain::Frequency,
     };
     Dataset::Nmr(Box::new(NmrDataset::from_slice(slice, name.to_owned())))
 }

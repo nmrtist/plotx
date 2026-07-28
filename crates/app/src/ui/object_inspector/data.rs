@@ -13,9 +13,6 @@ pub(super) fn data_section(app: &mut PlotxApp, ci: usize, object: ObjectId, ui: 
         return;
     };
 
-    ui.separator();
-    ui.strong("Data");
-
     let is_stack = binding.series.len() > 1 && app.series_stackable(&binding);
     let count = binding.series.len();
     let mut next_binding: Option<DataBinding> = None;

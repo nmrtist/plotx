@@ -149,6 +149,15 @@ pub(crate) fn panel_section(
     object_section(app, canvas, objects, PANEL_SECTION, "Panel", ui)
 }
 
+pub(crate) fn general_object_section(
+    app: &mut PlotxApp,
+    canvas: usize,
+    objects: &[ObjectId],
+    ui: &mut Ui,
+) -> bool {
+    object_section(app, canvas, objects, OBJECT_SECTION, "Object", ui)
+}
+
 pub(crate) fn panel_inline_section(
     app: &mut PlotxApp,
     canvas: usize,
@@ -434,12 +443,18 @@ fn render_section(
 
     if layout == SectionLayout::Standard {
         ui.separator();
-        ui.horizontal(|ui| {
-            ui.strong(title);
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.weak(status_noun.counted(applicable.len()));
-            });
-        });
+        let response = ui
+            .horizontal(|ui| {
+                ui.strong(title);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.weak(status_noun.counted(applicable.len()));
+                });
+            })
+            .response;
+        if app.session.ui.requested_inspector_section.as_deref() == Some(section) {
+            response.scroll_to_me(Some(egui::Align::Min));
+            app.session.ui.requested_inspector_section = None;
+        }
     }
 
     // The rows rendered without expanding anything are exactly the list the

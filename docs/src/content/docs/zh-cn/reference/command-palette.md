@@ -33,7 +33,7 @@ description: 用键盘搜索命令、设置与数据。
 
 位于首选项中的设置则会打开首选项窗口并切到承载它的那一页，不会高亮其中某一行。
 
-若某个设置属于某一个处理步骤，激活它还会打开处理面板，并展开第一个真正带有该
+若某个设置属于某一个处理步骤，激活它还会在画布上打开处理卡片，并展开第一个真正带有该
 设置的步骤——例如窗函数没有 **GB** 的步骤会被跳过，而不会展开到一行并不存在
 的控件上。
 
@@ -77,7 +77,7 @@ description: 用键盘搜索命令、设置与数据。
 - 对象检查器 **Figure typography** 区域的 **Tick-label size**。`font size`、
   `tick size`、`points` 与 `figure typography` 都能命中它。参见
   [版面与导出](/zh-cn/guides/layout-and-export/)。
-- 处理面板中切趾步骤的 **Window**、**LB** 与 **GB**。`apodization`、
+- 处理卡片中切趾步骤的 **Window**、**LB** 与 **GB**。`apodization`、
   `window function`、`exponential`、`gaussian`、`LB`、`line broadening`、
   `GB` 与 `gaussian broadening` 都能命中它们。参见
   [数据处理](/zh-cn/guides/processing/)。

@@ -22,6 +22,12 @@ pub fn validate_1d_pipeline(
     pipeline: &AxisPipeline,
     group_delay_correct: bool,
 ) -> std::result::Result<(), String> {
+    let output = pipeline
+        .output_domain(data.domain)
+        .map_err(|error| error.to_string())?;
+    if output == plotx_io::Domain::Time {
+        return Ok(());
+    }
     let mut spectrum = plotx_processing::transform_base(data, pipeline, group_delay_correct);
     for step in pipeline
         .steps

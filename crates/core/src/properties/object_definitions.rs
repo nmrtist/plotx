@@ -76,9 +76,9 @@ const CHART_TYPES: &[EnumVariant] = &[
         crate::automation::CAP_FIELD_CURVE_1D,
         crate::automation::CAP_FIELD_SWEEP_COLLECTION,
     ]),
-    EnumVariant::new("nmr_spectrum", "Spectrum").requiring(&[
+    EnumVariant::new("nmr_spectrum", "NMR signal").requiring(&[
         crate::automation::CAP_FIELD_CURVE_1D,
-        crate::automation::CAP_FIELD_NMR_SPECTRUM,
+        crate::automation::CAP_FIELD_NMR_SIGNAL,
     ]),
     EnumVariant::new("nmr_contour", "Contour").requiring(&[
         crate::automation::CAP_FIELD_SCALAR_GRID_2D_REGULAR,

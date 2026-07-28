@@ -1,6 +1,6 @@
 use egui::{Button, Ui};
 use egui_phosphor::regular as icon;
-use plotx_core::state::{Dataset, LineShapeKind, PlotxApp, StoredLineFit, Tool};
+use plotx_core::state::{LineShapeKind, PlotxApp, StoredLineFit, Tool};
 
 use super::curve_fit::fmt_val_sigma;
 
@@ -152,7 +152,11 @@ fn multiplet_section(
     range: Option<plotx_core::state::AxisRange>,
     ui: &mut Ui,
 ) {
-    if !matches!(app.doc.datasets.get(di), Some(Dataset::Nmr(_))) {
+    if !app.doc.datasets.get(di).is_some_and(|dataset| {
+        dataset
+            .as_nmr()
+            .is_some_and(|nmr| nmr.output_domain() == plotx_io::Domain::Frequency)
+    }) {
         return;
     }
     ui.separator();

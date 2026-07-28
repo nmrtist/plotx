@@ -11,7 +11,12 @@ impl PlotxApp {
             .datasets
             .iter()
             .enumerate()
-            .filter(|(_, d)| d.as_nmr().is_some_and(|n| !n.spectrum.is_empty()))
+            .filter(|(_, dataset)| {
+                dataset
+                    .as_nmr()
+                    .and_then(NmrDataset::spectrum)
+                    .is_some_and(|spectrum| !spectrum.is_empty())
+            })
             .map(|(i, _)| i)
             .collect()
     }
@@ -95,7 +100,7 @@ impl PlotxApp {
             .datasets
             .get(dataset)
             .and_then(Dataset::as_nmr)
-            .map(|n| &n.spectrum)
+            .and_then(NmrDataset::spectrum)
             .filter(|s| !s.is_empty())
     }
 
@@ -112,11 +117,13 @@ impl PlotxApp {
             .filter_map(|index| self.doc.datasets.get(index).map(Dataset::resource_id))
             .collect::<Vec<_>>();
         let slice = Slice1D {
-            ppm: result.ppm,
+            coordinates: result.ppm,
+            domain: plotx_io::Domain::Frequency,
             values: result.values,
             nucleus: result.nucleus,
             observe_freq_mhz: result.observe_freq_mhz,
-            position_ppm: None,
+            position: None,
+            position_domain: plotx_io::Domain::Frequency,
         };
         let mut ds = Dataset::Nmr(Box::new(NmrDataset::from_slice(slice, name.clone())));
         ds.set_lineage(Some(DatasetLineage::new(

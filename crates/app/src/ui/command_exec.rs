@@ -264,6 +264,10 @@ fn open_active_region_table(app: &mut PlotxApp) {
 }
 
 fn reveal_group(app: &mut PlotxApp, group: ToolGroup) {
+    if group == ToolGroup::Processing {
+        super::tools::expand_processing_surface(app);
+        return;
+    }
     app.session.secondary_sidebar_visible = true;
     app.session.ui.requested_tool_group = Some(group);
 }

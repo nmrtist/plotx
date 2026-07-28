@@ -60,6 +60,13 @@ impl PlotxApp {
     /// the recipes, not by the caller. Lives beside the pause gate because it is
     /// the other half of it: this is what "not paused" does.
     pub fn set_dataset_processing_state(&mut self, dataset: usize, state: &DatasetProcessingState) {
+        let Some(current) = self.doc.datasets.get(dataset) else {
+            return;
+        };
+        if let Err(error) = validate_processing_state(current, state) {
+            self.session.status = error;
+            return;
+        }
         if let (
             Some(Dataset::Nmr2D(current)),
             DatasetProcessingState::Nmr2D {
@@ -76,9 +83,7 @@ impl PlotxApp {
             self.schedule_2d_processing(dataset, force_full);
             return;
         }
-        let Some(current) = self.doc.datasets.get_mut(dataset) else {
-            return;
-        };
+        let current = &mut self.doc.datasets[dataset];
         if let Err(error) = state.apply_to(current) {
             self.session.status = error.to_string();
             return;
@@ -291,5 +296,29 @@ impl PlotxApp {
                 break;
             }
         }
+    }
+}
+
+fn validate_processing_state(
+    dataset: &Dataset,
+    state: &DatasetProcessingState,
+) -> Result<(), String> {
+    match (dataset, state) {
+        (Dataset::Nmr(dataset), DatasetProcessingState::Nmr { pipeline, .. }) => pipeline
+            .output_domain(dataset.data.domain)
+            .map(|_| ())
+            .map_err(|error| format!("Cannot apply invalid direct processing pipeline: {error}")),
+        (Dataset::Nmr2D(dataset), DatasetProcessingState::Nmr2D { params, .. }) => {
+            params
+                .f2
+                .output_domain(dataset.data.domain)
+                .map_err(|error| format!("Cannot apply invalid F2 processing pipeline: {error}"))?;
+            params
+                .f1
+                .output_domain(dataset.data.domain)
+                .map_err(|error| format!("Cannot apply invalid F1 processing pipeline: {error}"))?;
+            Ok(())
+        }
+        _ => Ok(()),
     }
 }

@@ -156,7 +156,7 @@ impl PlotxApp {
             ProjectionSource::Slice(index) => spec.slice(kind, *index),
         };
         let points = slice
-            .ppm
+            .coordinates
             .iter()
             .zip(&slice.values)
             .map(|(&p, c)| [p, c.re])
@@ -172,8 +172,9 @@ impl PlotxApp {
     /// aligned to the contour by ppm. `None` if the target isn't a 1D spectrum.
     fn attached_axis_trace(&self, dataset: usize) -> Option<plotx_figure::AxisTrace> {
         let n = self.doc.datasets.get(dataset).and_then(Dataset::as_nmr)?;
+        let spectrum = n.spectrum()?;
         Some(plotx_figure::AxisTrace {
-            points: n.spectrum.real_points(),
+            points: spectrum.real_points(),
             color: Color::TRACE,
             width: plotx_figure::DEFAULT_DATA_LINE_WIDTH_PT,
         })

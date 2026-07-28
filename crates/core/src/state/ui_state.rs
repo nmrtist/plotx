@@ -5,6 +5,9 @@ use std::collections::HashSet;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
+mod task_dock;
+pub use task_dock::TaskDockTab;
+
 /// The current slice position of the Slice tool: which 2D dataset/plot it
 /// targets, the cut orientation, and the snapped grid index (a row/column index
 /// for a true-2D spectrum, or an increment index for a pseudo-2D stack). Drives
@@ -364,6 +367,19 @@ pub struct UiState {
     /// One-shot request from navigation (for example a double-click in the data
     /// browser) to reveal a contextual group in the Secondary Side Bar.
     pub requested_tool_group: Option<ToolGroup>,
+    /// One visible page in the top-right task dock. Other open task states stay
+    /// alive and appear as labelled tabs.
+    pub task_dock_active: Option<TaskDockTab>,
+    /// Dataset whose processing recipe is open in the task dock.
+    pub processing_task_dataset: Option<DatasetId>,
+    pub processing_task_collapsed: bool,
+    /// Last sorting or domain-reconciliation feedback for Processing. It remains beside
+    /// the pipeline as well as in the status bar, so the reason is not separated
+    /// from the control that produced it.
+    pub processing_surface_feedback: Option<(DatasetId, String)>,
+    /// One-shot section jump requested by the inspector's icon-and-label
+    /// navigation. A string keeps app presentation ids out of core state.
+    pub requested_inspector_section: Option<String>,
     /// A property the unified search asked the panels to reveal. Navigation
     /// state, so it is deliberately absent from the property catalog itself.
     pub property_focus: Option<PropertyFocus>,
@@ -518,6 +534,11 @@ impl Default for UiState {
             data_browser_selected_node: None,
             data_browser_last_active: None,
             requested_tool_group: None,
+            task_dock_active: None,
+            processing_task_dataset: None,
+            processing_task_collapsed: false,
+            processing_surface_feedback: None,
+            requested_inspector_section: None,
             property_focus: None,
             region_task_dataset: None,
             region_task_collapsed: false,
@@ -555,21 +576,6 @@ impl Default for UiState {
             proc_paused: false,
             proc_pending: None,
         }
-    }
-}
-
-impl UiState {
-    /// Close every floating canvas task card. The cards share one canvas
-    /// anchor, so each card's open path retires all of them before claiming
-    /// the spot; keeping the clearing here means a new card cannot be missed
-    /// by one of its siblings.
-    pub fn close_task_cards(&mut self) {
-        self.region_task_dataset = None;
-        self.region_task_collapsed = false;
-        self.curve_fit_task_dataset = None;
-        self.curve_fit_task_collapsed = false;
-        self.stat_task_dataset = None;
-        self.stat_task_collapsed = false;
     }
 }
 

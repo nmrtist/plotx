@@ -9,8 +9,8 @@ template** kept with your PlotX settings.
 
 ## Recipe files
 
-A pipeline (including the group-delay setting) can be saved from the
-Processing panel as a portable `.plotxproc` recipe file and applied to other
+A pipeline (including the group-delay setting) can be saved from the Processing
+card's ⋮ menu as a portable `.plotxproc` recipe file and applied to other
 datasets, on this machine or a colleague's. Recipes are also the processing
 building block for [automation workflows](/guides/automation/) and the
 [command line](/reference/cli/).
@@ -20,7 +20,7 @@ building block for [automation workflows](/guides/automation/) and the
 Recipes you use often can be kept as **named templates** stored with the
 application settings, so they are always at hand without a file dialog.
 
-- **Save as template…** in the Processing panel saves the current
+- **Save as template…** in the Processing card's ⋮ menu saves the current
   dataset's pipeline under a name you choose. If the name is already
   taken, the dialog warns and the button becomes *Overwrite*.
 - **Apply template…** lists the saved templates. Templates that don't

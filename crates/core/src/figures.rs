@@ -8,7 +8,7 @@ use plotx_figure::{
     Figure, Series,
 };
 use plotx_io::NmrData;
-use plotx_processing::{Preset2D, Spectrum, Spectrum2D, StackSpectrum};
+use plotx_processing::{Preset2D, Processed1D, Spectrum, Spectrum2D, StackSpectrum, TimeTrace};
 
 use crate::state::{
     EstimatedScale, FieldSummary, FiniteF64, ResolvedPeak, default_contour_spec,
@@ -28,6 +28,35 @@ pub fn build_figure(data: &NmrData, spec: &Spectrum, peaks: &[ResolvedPeak]) -> 
         .with_series(Series::line("real", spec.real_points()).colored(Color::TRACE));
 
     apply_peak_labels(fig, peaks)
+}
+
+pub fn build_time_figure(data: &NmrData, trace: &TimeTrace) -> Figure {
+    let (time_lo, time_hi) = trace.time_bounds();
+    let mut intensity = trace.values.iter().map(|value| value.re);
+    let first = intensity.next().unwrap_or(0.0);
+    let (minimum, maximum) = intensity.fold((first, first), |(minimum, maximum), value| {
+        (minimum.min(value), maximum.max(value))
+    });
+    let range = (maximum - minimum).max(f64::MIN_POSITIVE);
+    let x = Axis::new("Acquisition time (s)", time_lo, time_hi);
+    let y = Axis::new(
+        "Signal (a.u.)",
+        minimum - 0.05 * range,
+        maximum + 0.05 * range,
+    );
+    Figure::new(format!("{} FID — {}", data.nucleus, data.source), x, y)
+        .with_series(Series::line("real", trace.real_points()).colored(Color::TRACE))
+}
+
+pub fn build_processed_1d_figure(
+    data: &NmrData,
+    processed: &Processed1D,
+    peaks: &[ResolvedPeak],
+) -> Figure {
+    match processed {
+        Processed1D::Time(trace) => build_time_figure(data, trace),
+        Processed1D::Frequency(spectrum) => build_figure(data, spectrum, peaks),
+    }
 }
 
 pub fn apply_peak_labels(mut fig: Figure, peaks: &[ResolvedPeak]) -> Figure {
@@ -144,7 +173,12 @@ pub fn build_stack_figure(stack: &StackSpectrum) -> Figure {
     let dy = peak * 0.12;
     let y_top = peak + n as f64 * dy;
 
-    let x = Axis::new(axis_label(&stack.direct.nucleus), lo, hi).reversed(true);
+    let x = match stack.direct_domain {
+        plotx_io::Domain::Time => Axis::new("Direct acquisition time (s)", lo, hi),
+        plotx_io::Domain::Frequency => {
+            Axis::new(axis_label(&stack.direct.nucleus), lo, hi).reversed(true)
+        }
+    };
     // The stack is phased to absorptive, so traces carry the signed real part:
     // short-τ relaxation increments dip below their baseline (inverted peaks).
     let y = Axis::new("Increment (offset)", -1.1 * peak, y_top * 1.02);
@@ -504,6 +538,8 @@ mod tests {
         let f1_ppm = vec![0.0, 1.0, 2.0, 3.0];
         let (f2_size, f1_size) = (f2_ppm.len(), f1_ppm.len());
         Spectrum2D {
+            f2_domain: plotx_io::Domain::Frequency,
+            f1_domain: plotx_io::Domain::Frequency,
             data: vec![Complex64::new(1.0, 0.0); f1_size * f2_size],
             f2_ppm,
             f1_ppm,

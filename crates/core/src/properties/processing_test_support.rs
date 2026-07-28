@@ -153,7 +153,7 @@ pub(super) fn spectrum(app: &PlotxApp) -> (Vec<Complex64>, Vec<f64>) {
         panic!("the fixture owns a 1D NMR dataset");
     };
     (
-        dataset.spectrum.values.clone(),
-        dataset.spectrum.ppm.clone(),
+        dataset.spectrum().unwrap().values.clone(),
+        dataset.spectrum().unwrap().ppm.clone(),
     )
 }

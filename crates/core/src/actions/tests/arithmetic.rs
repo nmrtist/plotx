@@ -14,7 +14,8 @@ fn spectrum_values(app: &PlotxApp, di: usize) -> Vec<num_complex::Complex64> {
     app.doc.datasets[di]
         .as_nmr()
         .unwrap()
-        .spectrum
+        .spectrum()
+        .unwrap()
         .values
         .clone()
 }
@@ -33,10 +34,10 @@ fn subtract_with_coefficient_creates_named_dataset_on_new_canvas() {
     let result = app.doc.datasets[2].as_nmr().unwrap();
     assert!(result.name.as_deref().unwrap().contains("−"));
     assert!(result.name.as_deref().unwrap().contains("0.5·"));
-    for ((r, x), y) in result.spectrum.values.iter().zip(&a).zip(&b) {
+    for ((r, x), y) in result.spectrum().unwrap().values.iter().zip(&a).zip(&b) {
         assert!((r - (x - 0.5 * y)).norm() < 1e-9);
     }
-    assert_eq!(result.spectrum.nucleus, "1H");
+    assert_eq!(result.spectrum().unwrap().nucleus, "1H");
     assert_eq!(
         app.doc.datasets[2].lineage(),
         Some(&DatasetLineage::new(
@@ -84,13 +85,13 @@ fn result_dataset_replays_exactly_after_retransform() {
     let mut app = two_spectrum_app();
     app.combine_spectra_datasets(0, 1, SpectrumBinaryOp::Subtract, 0.5);
     let mut ds = app.doc.datasets[2].as_nmr().unwrap().clone();
-    let shown = ds.spectrum.clone();
+    let shown = ds.spectrum().unwrap().clone();
     ds.retransform();
-    assert_eq!(ds.spectrum.values.len(), shown.values.len());
-    for (a, b) in ds.spectrum.values.iter().zip(&shown.values) {
+    assert_eq!(ds.spectrum().unwrap().values.len(), shown.values.len());
+    for (a, b) in ds.spectrum().unwrap().values.iter().zip(&shown.values) {
         assert!((a - b).norm() < 1e-9);
     }
-    for (a, b) in ds.spectrum.ppm.iter().zip(&shown.ppm) {
+    for (a, b) in ds.spectrum().unwrap().ppm.iter().zip(&shown.ppm) {
         assert!((a - b).abs() < 1e-9);
     }
 }
@@ -130,11 +131,13 @@ fn single_point_operands_combine_without_panicking() {
     use plotx_processing::Slice1D;
     let mut app = PlotxApp::new();
     let point = |ppm: f64, re: f64| Slice1D {
-        ppm: vec![ppm],
+        coordinates: vec![ppm],
+        domain: plotx_io::Domain::Frequency,
         values: vec![num_complex::Complex64::new(re, 0.0)],
         nucleus: "1H".to_owned(),
         observe_freq_mhz: 400.0,
-        position_ppm: None,
+        position: None,
+        position_domain: plotx_io::Domain::Frequency,
     };
     for (i, s) in [point(1.0, 2.0), point(3.0, 5.0)].into_iter().enumerate() {
         app.doc
@@ -161,7 +164,7 @@ fn unary_scale_and_offset_create_independent_dataset() {
 
     assert_eq!(app.doc.datasets.len(), 2);
     let result = app.doc.datasets[1].as_nmr().unwrap();
-    for (r, x) in result.spectrum.values.iter().zip(&a) {
+    for (r, x) in result.spectrum().unwrap().values.iter().zip(&a) {
         let expected = 2.0 * x + num_complex::Complex64::new(3.0, 0.0);
         assert!((r - expected).norm() < 1e-9);
     }

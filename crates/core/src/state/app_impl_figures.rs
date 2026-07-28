@@ -124,7 +124,10 @@ impl PlotxApp {
                         })
                 })
                 .unwrap_or_else(|| default_chart_type(domain));
-            let fits_apply = domain != DataDomain::Table || selected_chart.id == "table_line";
+            let fits_apply = (domain != DataDomain::Table || selected_chart.id == "table_line")
+                && !self.doc.datasets[primary]
+                    .as_nmr()
+                    .is_some_and(|nmr| nmr.output_domain() == plotx_io::Domain::Time);
             if fits_apply {
                 fig = apply_line_fit_overlays(fig, self.doc.datasets[primary].line_fits());
             }

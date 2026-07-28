@@ -35,6 +35,7 @@ fn data_2d() -> Arc<NmrData2D> {
 
 fn stack_spectrum() -> Arc<StackSpectrum> {
     Arc::new(StackSpectrum {
+        direct_domain: Domain::Frequency,
         ppm: vec![0.0],
         traces: vec![vec![Complex64::new(1.0, 0.0); 1]; 3],
         direct: plotx_processing::AxisMeta {

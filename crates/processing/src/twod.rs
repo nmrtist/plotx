@@ -178,8 +178,14 @@ pub fn needs_retransform_2d(a: &Params2D, b: &Params2D) -> bool {
 /// indirect one.
 #[derive(Debug, Clone)]
 pub struct Spectrum2D {
+    /// Coordinate values for F2. The historical field name is retained for
+    /// project-internal compatibility; `f2_domain` decides whether values are
+    /// ppm or acquisition seconds.
     pub f2_ppm: Vec<f64>,
+    /// Coordinate values for F1; interpreted through `f1_domain`.
     pub f1_ppm: Vec<f64>,
+    pub f2_domain: plotx_io::Domain,
+    pub f1_domain: plotx_io::Domain,
     pub data: Vec<Complex64>,
     pub f2_size: usize,
     pub f1_size: usize,
@@ -249,7 +255,9 @@ impl Spectrum2D {
 /// one ppm axis, to be drawn as a stack of 1D traces.
 #[derive(Debug, Clone)]
 pub struct StackSpectrum {
+    /// Direct-axis coordinates, in ppm or seconds according to `direct_domain`.
     pub ppm: Vec<f64>,
+    pub direct_domain: plotx_io::Domain,
     pub traces: Vec<Vec<Complex64>>,
     pub direct: AxisMeta,
     pub source: String,

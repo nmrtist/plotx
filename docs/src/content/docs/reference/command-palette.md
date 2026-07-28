@@ -40,10 +40,10 @@ you can see the current value before editing it.
 A setting that lives in Preferences instead opens the Preferences window at the
 page that holds it; no individual row is highlighted there.
 
-A setting that belongs to one processing step also opens the Processing panel
-and expands the first step that actually carries it — a step whose window has no
-**GB**, for instance, is passed over rather than opened onto a row that is not
-there.
+A setting that belongs to one processing step also opens Processing on the
+canvas and expands the first step that actually carries it — a step whose
+window has no **GB**, for instance, is passed over rather than opened onto a
+row that is not there.
 
 ## Availability
 
@@ -88,7 +88,7 @@ Settings:
 - **Tick-label size** in the Object inspector's **Figure typography** section.
   `font size`, `tick size`, `points` and `figure typography` reach it. See
   [Layout and export](/guides/layout-and-export/).
-- **Window**, **LB** and **GB** on an apodization step in the Processing panel.
+- **Window**, **LB** and **GB** on an apodization step in Processing.
   `apodization`, `window function`, `exponential`, `gaussian`, `LB`, `line
   broadening`, `GB` and `gaussian broadening` reach them. See
   [Processing](/guides/processing/).

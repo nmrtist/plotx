@@ -1,4 +1,4 @@
-use crate::{Apodization, AxisPipeline, Spectrum};
+use crate::{Apodization, AxisPipeline, Spectrum, StepKind, TimeTrace};
 use num_complex::Complex64;
 use plotx_io::{Domain, NmrData};
 use rustfft::FftPlanner;
@@ -37,17 +37,9 @@ pub fn transform_base(data: &NmrData, pipe: &AxisPipeline, group_delay_correct: 
         };
     }
 
-    let dt = if data.spectral_width_hz != 0.0 {
-        1.0 / data.spectral_width_hz
-    } else {
-        0.0
-    };
-    let mut buf: Vec<Complex64> = data.points.clone();
-    for apo in pipe.apodizations() {
-        apply_apodization(&mut buf, apo, dt);
-    }
-    let n = pipe.zero_fill().target(n_raw);
-    buf.resize(n, Complex64::new(0.0, 0.0));
+    let dt = data.dwell_s();
+    let mut buf = apply_time_steps(data.points.clone(), pipe, dt);
+    let n = buf.len();
 
     if data.domain == Domain::Time {
         let mut planner = FftPlanner::<f64>::new();
@@ -78,6 +70,62 @@ pub fn transform_base(data: &NmrData, pipe: &AxisPipeline, group_delay_correct: 
         observe_freq_mhz: data.observe_freq_mhz,
         nucleus: data.nucleus.clone(),
     }
+}
+
+/// Apply the enabled time-domain prefix without inventing an FFT. Callers use
+/// this when the typed pipeline finishes in the time domain.
+pub fn transform_time(data: &NmrData, pipe: &AxisPipeline) -> TimeTrace {
+    let dt = data.dwell_s();
+    let values = apply_time_steps(data.points.clone(), pipe, dt);
+    TimeTrace {
+        time_s: (0..values.len()).map(|index| index as f64 * dt).collect(),
+        values,
+        nucleus: data.nucleus.clone(),
+        source: data.source.clone(),
+    }
+}
+
+/// Apply the enabled time-domain prefix exactly in recipe order.
+///
+/// Keeping this one kernel for time output and FFT input means adding/removing
+/// FFT changes only the domain transition: it cannot silently reorder windows
+/// or collapse multiple zero-fill steps.
+pub(crate) fn apply_time_steps(
+    mut values: Vec<Complex64>,
+    pipe: &AxisPipeline,
+    dt: f64,
+) -> Vec<Complex64> {
+    for step in pipe.steps.iter().filter(|step| step.enabled) {
+        match step.kind {
+            StepKind::Apodize(window) => apply_apodization(&mut values, window, dt),
+            StepKind::ZeroFill(fill) => {
+                let target = fill.target(values.len());
+                values.resize(target, Complex64::new(0.0, 0.0));
+            }
+            StepKind::Fft => break,
+            StepKind::Phase(_)
+            | StepKind::Baseline(_)
+            | StepKind::Reference(_)
+            | StepKind::Magnitude
+            | StepKind::Smooth(_)
+            | StepKind::Normalize(_)
+            | StepKind::Bin(_)
+            | StepKind::Reverse
+            | StepKind::Invert => {}
+        }
+    }
+    values
+}
+
+pub(crate) fn time_step_output_len(mut len: usize, pipe: &AxisPipeline) -> usize {
+    for step in pipe.steps.iter().filter(|step| step.enabled) {
+        match step.kind {
+            StepKind::ZeroFill(fill) => len = fill.target(len),
+            StepKind::Fft => break,
+            _ => {}
+        }
+    }
+    len
 }
 
 /// Apodize a FID in place over its populated samples. `t = i·dt` seconds, with
@@ -268,6 +316,43 @@ mod tests {
         };
         assert!((peak_ppm(&raw) - 2.0).abs() < 0.05);
         assert!((peak_ppm(&filled) - 2.0).abs() < 0.05);
+    }
+
+    #[test]
+    fn time_steps_keep_recipe_order_with_or_without_fft() {
+        let data = NmrData {
+            points: vec![Complex64::new(1.0, 0.0); 3],
+            domain: Domain::Time,
+            spectral_width_hz: 1000.0,
+            observe_freq_mhz: 400.0,
+            carrier_ppm: 0.0,
+            nucleus: "1H".into(),
+            source: "ordered time steps".into(),
+            group_delay: 0.0,
+        };
+        let kinds = [
+            StepKind::ZeroFill(ZeroFill::Size(5)),
+            StepKind::Apodize(Apodization::CosineBell),
+            StepKind::ZeroFill(ZeroFill::Factor(1)),
+            StepKind::Fft,
+        ];
+        let spectral = AxisPipeline {
+            steps: kinds
+                .into_iter()
+                .enumerate()
+                .map(|(index, kind)| {
+                    ProcessingStep::new(StepId::new(index as u64), kind, StepSource::User)
+                })
+                .collect(),
+        };
+        let mut temporal = spectral.clone();
+        temporal.steps.last_mut().unwrap().enabled = false;
+
+        let trace = transform_time(&data, &temporal);
+        let spectrum = transform_base(&data, &spectral, true);
+        assert_eq!(trace.values.len(), 8);
+        assert_eq!(spectrum.values.len(), trace.values.len());
+        assert!((trace.values[2].re - std::f64::consts::FRAC_1_SQRT_2).abs() < 1e-12);
     }
 
     #[test]

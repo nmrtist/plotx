@@ -1,12 +1,9 @@
 use egui::{Area, Button, Order, Ui};
 use egui_phosphor::regular as icon;
-use plotx_core::state::{Dataset, PlotxApp, TableDataset};
+use plotx_core::state::{Dataset, PlotxApp, TableDataset, TaskDockTab};
 
 use super::task_card::{self, TaskCardGeometry};
 
-/// Mirrors `region_analysis_group`: the Secondary Side Bar summarises the
-/// workflow and opens the canvas card, which owns the controls. Keeping the
-/// panel here too would mean two renderers for one piece of state.
 pub(super) fn curve_fit_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) -> bool {
     ui.strong("Curve Fit");
     let Some(table) = app.doc.datasets.get(di).and_then(Dataset::as_table) else {
@@ -28,18 +25,20 @@ pub(super) fn curve_fit_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) -> boo
     false
 }
 
-/// The one way to show the Curve Fit card. Both cards share the same canvas
-/// anchor, so opening either must retire the other.
+/// Opens or activates Curve Fit without discarding sibling task state.
 pub(crate) fn open_task(app: &mut PlotxApp, di: usize) {
     if !matches!(app.doc.datasets.get(di), Some(Dataset::Table(_))) {
         return;
     }
     ensure_curve_fit_state(app, di);
-    app.session.ui.close_task_cards();
     app.session.ui.curve_fit_task_dataset = Some(di);
+    app.session.ui.open_task_tab(TaskDockTab::CurveFit);
 }
 
 pub(crate) fn render_task(app: &mut PlotxApp, host: &mut Ui) {
+    if !task_card::is_active(app, TaskDockTab::CurveFit) {
+        return;
+    }
     let Some(di) = app.session.ui.curve_fit_task_dataset else {
         return;
     };
@@ -68,6 +67,9 @@ pub(crate) fn render_task(app: &mut PlotxApp, host: &mut Ui) {
         .show(host.ctx(), |ui| {
             ui.set_width(width);
             crate::ui::card_frame(dark, egui::Margin::ZERO).show(ui, |ui| {
+                if task_card::tab_bar(app, TaskDockTab::CurveFit, ui) {
+                    ui.separator();
+                }
                 let table = app.doc.datasets[di].as_table().unwrap();
                 let curves = table.series_bindings.len();
                 let points = table.typed_state.envelope.revision.snapshot.row_count;
@@ -123,8 +125,7 @@ pub(crate) fn render_task(app: &mut PlotxApp, host: &mut Ui) {
         app.session.ui.curve_fit_task_collapsed = !collapsed;
     }
     if close {
-        app.session.ui.curve_fit_task_dataset = None;
-        app.session.ui.curve_fit_task_collapsed = false;
+        app.session.ui.close_task_tab(TaskDockTab::CurveFit);
     }
 }
 

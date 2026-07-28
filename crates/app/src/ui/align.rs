@@ -19,7 +19,7 @@ pub(crate) fn open_align_spectra_dialog(app: &mut PlotxApp) {
                 .datasets
                 .get(di)
                 .and_then(Dataset::as_nmr)
-                .map(|n| n.spectrum.ppm_bounds())
+                .and_then(|n| n.spectrum().map(|spectrum| spectrum.ppm_bounds()))
         })
         .unwrap_or((0.0, 1.0));
     app.session.ui.align_spectra_dialog = Some(AlignSpectraDialogState {

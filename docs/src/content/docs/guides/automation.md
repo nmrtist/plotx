@@ -19,8 +19,8 @@ it, and the whole batch collapses into a single **Undo automation** step.
 
 ### Settings
 
-Three tools reach the settings the **Object inspector** and the **Processing**
-panel edit, so one level, colour, width, type size or window function can be
+Three tools reach the settings the **Object inspector** and the processing
+steps edit, so one level, colour, width, type size or window function can be
 applied across a whole project as a single reviewed batch:
 
 | Tool | What it does |

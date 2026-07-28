@@ -1,7 +1,7 @@
 use egui::{Area, Button, Order, Ui};
 use egui_phosphor::regular as icon;
 use plotx_core::actions::Action;
-use plotx_core::state::{Dataset, PlotxApp, RegionMetric, Tool};
+use plotx_core::state::{Dataset, PlotxApp, RegionMetric, TaskDockTab, Tool};
 
 use super::task_card::{self, TaskCardGeometry};
 
@@ -20,8 +20,7 @@ pub(super) fn region_analysis_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) 
     false
 }
 
-/// The one way to show the Regions card. The task cards share the same canvas
-/// anchor, so opening one must retire the others.
+/// Opens or activates Regions without discarding sibling task state.
 pub(crate) fn open_task(app: &mut PlotxApp, di: usize) {
     if !app
         .doc
@@ -31,11 +30,14 @@ pub(crate) fn open_task(app: &mut PlotxApp, di: usize) {
     {
         return;
     }
-    app.session.ui.close_task_cards();
     app.session.ui.region_task_dataset = Some(di);
+    app.session.ui.open_task_tab(TaskDockTab::Regions);
 }
 
 pub(crate) fn render_task(app: &mut PlotxApp, host: &mut Ui) {
+    if !task_card::is_active(app, TaskDockTab::Regions) {
+        return;
+    }
     let Some(di) = app.session.ui.region_task_dataset else {
         return;
     };
@@ -68,6 +70,9 @@ pub(crate) fn render_task(app: &mut PlotxApp, host: &mut Ui) {
         .show(host.ctx(), |ui| {
             ui.set_width(width);
             crate::ui::card_frame(dark, egui::Margin::ZERO).show(ui, |ui| {
+                if task_card::tab_bar(app, TaskDockTab::Regions, ui) {
+                    ui.separator();
+                }
                 let count = app.doc.datasets[di].as_nmr2d().unwrap().regions.len();
                 ui.horizontal(|ui| {
                     ui.strong("Regions");
@@ -141,8 +146,7 @@ pub(crate) fn render_task(app: &mut PlotxApp, host: &mut Ui) {
         open_region_table(app, di);
     }
     if close {
-        app.session.ui.region_task_dataset = None;
-        app.session.ui.region_task_collapsed = false;
+        app.session.ui.close_task_tab(TaskDockTab::Regions);
         if app.session.tool == Tool::Regions {
             app.set_tool(Tool::BrowseZoom);
         }
@@ -361,8 +365,6 @@ pub(crate) fn open_region_table(app: &mut PlotxApp, di: usize) {
         app.sync_selection_to_active_canvas();
     }
     app.focus_single(tj);
-    app.session.ui.region_task_dataset = None;
-    app.session.ui.region_task_collapsed = false;
     super::curve_fit::open_task(app, tj);
 }
 

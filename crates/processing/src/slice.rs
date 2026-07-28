@@ -4,6 +4,7 @@
 //! a later axis-projection feature share this one extraction core.
 
 use num_complex::Complex64;
+use plotx_io::Domain;
 
 use crate::{Spectrum2D, StackSpectrum};
 
@@ -26,17 +27,19 @@ pub enum ProjectionMode {
     Skyline,
 }
 
-/// A 1D trace lifted out of a 2D dataset: its ppm axis, complex intensities, and
-/// the axis metadata needed to re-plot and analyze it as a standalone spectrum.
+/// A 1D trace lifted out of a 2D dataset, retaining the scientific domain of
+/// both its surviving coordinate and (for a cut) its fixed-axis position.
 #[derive(Debug, Clone)]
 pub struct Slice1D {
-    pub ppm: Vec<f64>,
+    pub coordinates: Vec<f64>,
+    pub domain: Domain,
     pub values: Vec<Complex64>,
     pub nucleus: String,
     pub observe_freq_mhz: f64,
-    /// The fixed-axis coordinate (ppm) the cut was taken at, for labelling.
+    /// The fixed-axis coordinate the cut was taken at, for labelling.
     /// `None` for a projection, which spans the whole axis.
-    pub position_ppm: Option<f64>,
+    pub position: Option<f64>,
+    pub position_domain: Domain,
 }
 
 impl Spectrum2D {
@@ -57,21 +60,25 @@ impl Spectrum2D {
                 let r = index.min(self.f1_size.saturating_sub(1));
                 let start = r * self.f2_size;
                 Slice1D {
-                    ppm: self.f2_ppm.clone(),
+                    coordinates: self.f2_ppm.clone(),
+                    domain: self.f2_domain,
                     values: self.data[start..start + self.f2_size].to_vec(),
                     nucleus: self.direct.nucleus.clone(),
                     observe_freq_mhz: self.direct.observe_freq_mhz,
-                    position_ppm: self.f1_ppm.get(r).copied(),
+                    position: self.f1_ppm.get(r).copied(),
+                    position_domain: self.f1_domain,
                 }
             }
             SliceKind::Column => {
                 let c = index.min(self.f2_size.saturating_sub(1));
                 Slice1D {
-                    ppm: self.f1_ppm.clone(),
+                    coordinates: self.f1_ppm.clone(),
+                    domain: self.f1_domain,
                     values: (0..self.f1_size).map(|r| self.at(r, c)).collect(),
                     nucleus: self.indirect.nucleus.clone(),
                     observe_freq_mhz: self.indirect.observe_freq_mhz,
-                    position_ppm: self.f2_ppm.get(c).copied(),
+                    position: self.f2_ppm.get(c).copied(),
+                    position_domain: self.f2_domain,
                 }
             }
         }
@@ -83,22 +90,26 @@ impl Spectrum2D {
     pub fn project(&self, kind: SliceKind, mode: ProjectionMode) -> Slice1D {
         match kind {
             SliceKind::Row => Slice1D {
-                ppm: self.f2_ppm.clone(),
+                coordinates: self.f2_ppm.clone(),
+                domain: self.f2_domain,
                 values: (0..self.f2_size)
                     .map(|c| reduce((0..self.f1_size).map(|r| self.at(r, c)), mode))
                     .collect(),
                 nucleus: self.direct.nucleus.clone(),
                 observe_freq_mhz: self.direct.observe_freq_mhz,
-                position_ppm: None,
+                position: None,
+                position_domain: self.f1_domain,
             },
             SliceKind::Column => Slice1D {
-                ppm: self.f1_ppm.clone(),
+                coordinates: self.f1_ppm.clone(),
+                domain: self.f1_domain,
                 values: (0..self.f1_size)
                     .map(|r| reduce((0..self.f2_size).map(|c| self.at(r, c)), mode))
                     .collect(),
                 nucleus: self.indirect.nucleus.clone(),
                 observe_freq_mhz: self.indirect.observe_freq_mhz,
-                position_ppm: None,
+                position: None,
+                position_domain: self.f2_domain,
             },
         }
     }
@@ -109,11 +120,13 @@ impl StackSpectrum {
     pub fn slice(&self, increment: usize) -> Slice1D {
         let i = increment.min(self.increments().saturating_sub(1));
         Slice1D {
-            ppm: self.ppm.clone(),
+            coordinates: self.ppm.clone(),
+            domain: self.direct_domain,
             values: self.traces.get(i).cloned().unwrap_or_default(),
             nucleus: self.direct.nucleus.clone(),
             observe_freq_mhz: self.direct.observe_freq_mhz,
-            position_ppm: None,
+            position: None,
+            position_domain: self.direct_domain,
         }
     }
 }
@@ -147,6 +160,8 @@ mod tests {
             .flat_map(|r| (0..f2_size).map(move |c| Complex64::new((r * 10 + c) as f64, 0.0)))
             .collect();
         Spectrum2D {
+            f2_domain: plotx_io::Domain::Frequency,
+            f1_domain: plotx_io::Domain::Frequency,
             f2_ppm: vec![1.0, 2.0, 3.0],
             f1_ppm: vec![10.0, 20.0],
             data,
@@ -168,26 +183,28 @@ mod tests {
     fn row_slice_is_a_full_f2_trace_at_fixed_f1() {
         let s = spectrum();
         let row = s.slice(SliceKind::Row, 1);
-        assert_eq!(row.ppm, vec![1.0, 2.0, 3.0]);
+        assert_eq!(row.coordinates, vec![1.0, 2.0, 3.0]);
+        assert_eq!(row.domain, Domain::Frequency);
         assert_eq!(
             row.values.iter().map(|c| c.re).collect::<Vec<_>>(),
             vec![10.0, 11.0, 12.0]
         );
         assert_eq!(row.nucleus, "1H");
-        assert_eq!(row.position_ppm, Some(20.0));
+        assert_eq!(row.position, Some(20.0));
+        assert_eq!(row.position_domain, Domain::Frequency);
     }
 
     #[test]
     fn column_slice_is_a_full_f1_trace_at_fixed_f2() {
         let s = spectrum();
         let col = s.slice(SliceKind::Column, 2);
-        assert_eq!(col.ppm, vec![10.0, 20.0]);
+        assert_eq!(col.coordinates, vec![10.0, 20.0]);
         assert_eq!(
             col.values.iter().map(|c| c.re).collect::<Vec<_>>(),
             vec![2.0, 12.0]
         );
         assert_eq!(col.nucleus, "13C");
-        assert_eq!(col.position_ppm, Some(3.0));
+        assert_eq!(col.position, Some(3.0));
     }
 
     #[test]
@@ -199,7 +216,7 @@ mod tests {
             proj.values.iter().map(|c| c.re).collect::<Vec<_>>(),
             vec![10.0, 12.0, 14.0]
         );
-        assert_eq!(proj.position_ppm, None);
+        assert_eq!(proj.position, None);
     }
 
     #[test]

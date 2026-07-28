@@ -151,23 +151,29 @@ pub(super) fn nmr2d_sheet(ui: &mut Ui, n: &plotx_core::state::Nmr2DDataset) {
 }
 
 pub(super) fn nmr_sheet(ui: &mut Ui, n: &plotx_core::state::NmrDataset) {
-    let spec = &n.spectrum;
-    let len = spec.len();
-    ui.label(format!(
-        "{} · {} pts · {:.3} MHz · {:.3} Hz/pt",
-        spec.nucleus, len, spec.observe_freq_mhz, spec.hz_per_point
-    ));
+    let len = n.processed.values().len();
+    ui.label(format!("{} · {} pts", n.data.nucleus, len));
     ui.separator();
 
-    let columns: Vec<(String, Vec<f64>)> = vec![
-        ("ppm".to_owned(), spec.ppm.clone()),
-        ("Real".to_owned(), spec.real()),
-        (
-            "Imag".to_owned(),
-            spec.values.iter().map(|c| c.im).collect(),
-        ),
-        ("Magnitude".to_owned(), spec.magnitude()),
-    ];
+    let columns: Vec<(String, Vec<f64>)> = match &n.processed {
+        plotx_processing::Processed1D::Time(trace) => vec![
+            ("time (s)".to_owned(), trace.time_s.clone()),
+            ("Real".to_owned(), trace.real()),
+            (
+                "Imag".to_owned(),
+                trace.values.iter().map(|value| value.im).collect(),
+            ),
+        ],
+        plotx_processing::Processed1D::Frequency(spec) => vec![
+            ("ppm".to_owned(), spec.ppm.clone()),
+            ("Real".to_owned(), spec.real()),
+            (
+                "Imag".to_owned(),
+                spec.values.iter().map(|value| value.im).collect(),
+            ),
+            ("Magnitude".to_owned(), spec.magnitude()),
+        ],
+    };
 
     egui::ScrollArea::horizontal().show(ui, |ui| {
         ui.horizontal_top(|ui| {

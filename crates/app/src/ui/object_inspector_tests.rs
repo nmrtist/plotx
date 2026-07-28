@@ -29,6 +29,52 @@ fn property_target_filter_excludes_locked_plot_objects() {
 }
 
 #[test]
+fn multi_selection_context_names_objects_and_distinct_datasets() {
+    let (app, ids) = crate::ui::properties::fixture::contour_page(2);
+    assert_eq!(
+        edits::selection_context_label(&app, 0, &ids),
+        "2 objects · 1 dataset"
+    );
+}
+
+#[test]
+fn section_navigation_is_an_applicable_subsequence_of_the_catalog_order() {
+    let (app, _) = crate::ui::properties::fixture::contour_page(1);
+    let actual = inspector_catalog_sections(&app, true);
+    let canonical = crate::ui::properties::PanelRoute::SecondarySidebar.sections();
+    let positions: Vec<_> = actual
+        .iter()
+        .map(|section| {
+            canonical
+                .iter()
+                .position(|candidate| candidate == section)
+                .expect("navigation sections come from PanelRoute")
+        })
+        .collect();
+    assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
+}
+
+#[test]
+fn empty_inspector_navigation_keeps_only_document_level_typography() {
+    let (mut app, _) = crate::ui::properties::fixture::contour_page(1);
+    app.clear_selection();
+    assert_eq!(
+        inspector_catalog_sections(&app, false),
+        [crate::ui::properties::panel::TYPOGRAPHY_SECTION]
+    );
+}
+
+#[test]
+fn empty_selection_discards_a_stale_layout_jump() {
+    let (mut app, _) = crate::ui::properties::fixture::contour_page(1);
+    app.clear_selection();
+    app.session.ui.requested_inspector_section = Some("inspector.layout".to_owned());
+    let ctx = egui::Context::default();
+    let _ = ctx.run_ui(egui::RawInput::default(), |ui| render(&mut app, ui));
+    assert!(app.session.ui.requested_inspector_section.is_none());
+}
+
+#[test]
 fn frame_drag_with_mid_gesture_catalog_style_write_keeps_two_independent_undo_records() {
     let mut app = PlotxApp::new();
     let mut canvas = plotx_core::state::CanvasDocument::new("objects".to_owned(), [120.0, 80.0]);

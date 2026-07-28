@@ -58,11 +58,18 @@ fn a_factory_step_enabled_flag_resets_through_the_catalog() {
 }
 
 #[test]
-fn fft_anchor_does_not_expose_a_no_op_enabled_property() {
-    let app = time_domain_app();
+fn disabling_fft_switches_the_pipeline_to_time_domain() {
+    let mut app = time_domain_app();
     let target = target_for(&app, |kind| matches!(kind, StepKind::Fft));
-    assert!(matches!(
-        app.resolve_property(&PropertyAddress::new(target, step_enabled::ENABLED)),
-        Err(PropertyError::NotApplicable(message)) if message.contains("FFT")
-    ));
+    let changed = app
+        .plan_property_write(
+            step_enabled::ENABLED,
+            std::slice::from_ref(&target),
+            &PropertyValue::Bool(false),
+        )
+        .unwrap();
+    app.commit_property(changed);
+    let dataset = app.doc.datasets[0].as_nmr().unwrap();
+    assert_eq!(dataset.output_domain(), plotx_io::Domain::Time);
+    assert!(dataset.time_trace().is_some());
 }

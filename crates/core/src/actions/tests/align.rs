@@ -44,7 +44,7 @@ fn app_with(peaks: &[f64]) -> PlotxApp {
 }
 
 fn peak_ppm(app: &PlotxApp, di: usize) -> f64 {
-    let s = &app.doc.datasets[di].as_nmr().unwrap().spectrum;
+    let s = app.doc.datasets[di].as_nmr().unwrap().spectrum().unwrap();
     let i = s
         .values
         .iter()

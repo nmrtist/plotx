@@ -12,7 +12,7 @@ use super::properties::{self, PanelRoute};
 use super::*;
 use egui::{Align2, FontId, Key, TextEdit, vec2};
 use plotx_core::properties::PropertyId;
-use plotx_core::state::{ObjectId, PropertyFocus, SettingsCategory, ToolGroup};
+use plotx_core::state::{ObjectId, PropertyFocus, SettingsCategory};
 
 const PANEL_WIDTH: f32 = 540.0;
 const LIST_HEIGHT: f32 = 320.0;
@@ -320,8 +320,7 @@ pub(super) fn reveal_property(app: &mut PlotxApp, property: PropertyId, now: f64
     match route.panel {
         PanelRoute::SecondarySidebar => app.session.secondary_sidebar_visible = true,
         PanelRoute::Processing => {
-            app.session.secondary_sidebar_visible = true;
-            app.session.ui.requested_tool_group = Some(ToolGroup::Processing);
+            super::tools::expand_processing_surface(app);
         }
         PanelRoute::CanvasSettings => {
             app.session.ui.canvas_settings = app.session.active_canvas;

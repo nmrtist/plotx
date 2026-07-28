@@ -200,7 +200,6 @@ pub fn apply_scheme(
                 .pipelines
                 .first()
                 .ok_or_else(|| incompatible("scheme carries no pipeline"))?;
-            require_fft(dto)?;
             let mut pipeline = pipeline_from_dto(dto);
             validate_1d_pipeline(&n.data, &pipeline, scheme.group_delay_correct)
                 .map_err(ProjectError::Invalid)?;
@@ -222,7 +221,6 @@ pub fn apply_scheme(
                 .pipelines
                 .get(1)
                 .ok_or_else(|| incompatible("scheme carries no indirect-axis pipeline"))?;
-            require_fft(f2)?;
             let layout = scheme
                 .layout
                 .as_deref()
@@ -233,6 +231,14 @@ pub fn apply_scheme(
                 f2: pipeline_from_dto(f2),
                 f1: pipeline_from_dto(f1),
             };
+            params
+                .f2
+                .output_domain(n.data.domain)
+                .map_err(|error| incompatible(&error.to_string()))?;
+            params
+                .f1
+                .output_domain(n.data.domain)
+                .map_err(|error| incompatible(&error.to_string()))?;
             let mut next = dataset_next_step_id(dataset);
             remint_pipeline(&mut params.f2, &mut next);
             remint_pipeline(&mut params.f1, &mut next);
@@ -334,14 +340,6 @@ fn scheme_from_dataset(dataset: &Dataset) -> Option<ProcessingScheme> {
 fn force_user(dto: &mut AxisPipelineDto) {
     for step in &mut dto.steps {
         step.source = StepSourceDto::User;
-    }
-}
-
-fn require_fft(dto: &AxisPipelineDto) -> Result<()> {
-    if dto.steps.iter().any(|s| matches!(s.kind, StepKindDto::Fft)) {
-        Ok(())
-    } else {
-        Err(incompatible("scheme pipeline is missing its FFT anchor"))
     }
 }
 

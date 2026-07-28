@@ -8,13 +8,18 @@ pub mod cleanup;
 pub mod fft;
 pub mod fft2;
 pub mod nus;
+mod output;
 pub mod phase;
+mod preview;
 pub mod slice;
 pub mod timeseries;
 
+pub use output::{Processed1D, TimeTrace};
+pub use preview::{Preview, process_up_to};
 pub use slice::{ProjectionMode, Slice1D, SliceKind};
 
 use num_complex::Complex64;
+use plotx_io::Domain;
 
 #[derive(Debug, Clone)]
 pub struct Spectrum {
@@ -338,6 +343,45 @@ pub enum StepKind {
 }
 
 impl StepKind {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Apodize(_) => "Apodize",
+            Self::ZeroFill(_) => "Zero fill",
+            Self::Fft => "FFT",
+            Self::Phase(_) => "Phase",
+            Self::Baseline(_) => "Baseline",
+            Self::Reference(_) => "Reference",
+            Self::Magnitude => "Magnitude",
+            Self::Smooth(_) => "Smoothing",
+            Self::Normalize(_) => "Normalize",
+            Self::Bin(_) => "Binning",
+            Self::Reverse => "Reverse",
+            Self::Invert => "Invert",
+        }
+    }
+
+    pub fn input_domain(&self) -> Domain {
+        match self {
+            Self::Apodize(_) | Self::ZeroFill(_) | Self::Fft => Domain::Time,
+            Self::Phase(_)
+            | Self::Baseline(_)
+            | Self::Reference(_)
+            | Self::Magnitude
+            | Self::Smooth(_)
+            | Self::Normalize(_)
+            | Self::Bin(_)
+            | Self::Reverse
+            | Self::Invert => Domain::Frequency,
+        }
+    }
+
+    pub fn output_domain(&self) -> Domain {
+        match self {
+            Self::Fft => Domain::Frequency,
+            other => other.input_domain(),
+        }
+    }
+
     pub fn domain(&self) -> StepDomain {
         match self {
             StepKind::Apodize(_) | StepKind::ZeroFill(_) | StepKind::Fft => StepDomain::Time,
@@ -406,6 +450,24 @@ impl TemplateIds {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AxisPipeline {
     pub steps: Vec<ProcessingStep>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "step {step:?} ({kind}) requires {required} input, but the pipeline carries {actual} at that position"
+)]
+pub struct PipelineDomainError {
+    pub step: StepId,
+    pub kind: &'static str,
+    pub required: &'static str,
+    pub actual: &'static str,
+}
+
+fn domain_label(domain: Domain) -> &'static str {
+    match domain {
+        Domain::Time => "time-domain",
+        Domain::Frequency => "frequency-domain",
+    }
 }
 
 impl AxisPipeline {
@@ -501,17 +563,65 @@ impl AxisPipeline {
         }
     }
 
+    /// Type-check the enabled recipe from its real acquisition domain and
+    /// return the domain its final value has.
+    pub fn output_domain(&self, input: Domain) -> Result<Domain, PipelineDomainError> {
+        let mut domain = input;
+        for step in self.steps.iter().filter(|step| step.enabled) {
+            let required = step.kind.input_domain();
+            if required != domain {
+                return Err(PipelineDomainError {
+                    step: step.id,
+                    kind: step.kind.label(),
+                    required: domain_label(required),
+                    actual: domain_label(domain),
+                });
+            }
+            domain = step.kind.output_domain();
+        }
+        Ok(domain)
+    }
+
+    /// Disable enabled rows that no longer type-check after a structural edit.
+    ///
+    /// The rows remain in the recipe, so deleting an FFT can switch the canvas
+    /// to its FID without destroying frequency-side settings. Re-adding the
+    /// transform lets the user enable those settings again.
+    pub fn reconcile_domains(&mut self, input: Domain) -> Vec<StepId> {
+        let mut domain = input;
+        let mut disabled = Vec::new();
+        for step in &mut self.steps {
+            if !step.enabled {
+                continue;
+            }
+            if step.kind.input_domain() != domain {
+                step.enabled = false;
+                disabled.push(step.id);
+                continue;
+            }
+            domain = step.kind.output_domain();
+        }
+        disabled
+    }
+
+    pub fn has_enabled_fft(&self) -> bool {
+        self.steps
+            .iter()
+            .any(|step| step.enabled && matches!(step.kind, StepKind::Fft))
+    }
+
     /// The zero-fill target for this axis: the last enabled `ZeroFill` step, or
     /// `None` when the axis carries none.
     pub fn zero_fill(&self) -> ZeroFill {
         self.steps
             .iter()
-            .rev()
-            .filter(|s| s.enabled)
-            .find_map(|s| match s.kind {
+            .take_while(|step| !(step.enabled && matches!(step.kind, StepKind::Fft)))
+            .filter(|step| step.enabled)
+            .filter_map(|s| match s.kind {
                 StepKind::ZeroFill(z) => Some(z),
                 _ => None,
             })
+            .last()
             .unwrap_or(ZeroFill::None)
     }
 
@@ -519,7 +629,7 @@ impl AxisPipeline {
     pub fn apodizations(&self) -> Vec<Apodization> {
         self.steps
             .iter()
-            .take_while(|s| !matches!(s.kind, StepKind::Fft))
+            .take_while(|step| !(step.enabled && matches!(step.kind, StepKind::Fft)))
             .filter(|s| s.enabled)
             .filter_map(|s| match s.kind {
                 StepKind::Apodize(a) => Some(a),
@@ -574,13 +684,46 @@ pub fn reapply(base: &Spectrum, pipe: &AxisPipeline) -> Spectrum {
     spec
 }
 
-/// Full 1D pipeline: build the base then re-derive the display spectrum.
+pub fn transform_output_base(
+    data: &plotx_io::NmrData,
+    pipe: &AxisPipeline,
+    group_delay_correct: bool,
+) -> Result<Processed1D, PipelineDomainError> {
+    match pipe.output_domain(data.domain)? {
+        Domain::Time => Ok(Processed1D::Time(fft::transform_time(data, pipe))),
+        Domain::Frequency => Ok(Processed1D::Frequency(transform_base(
+            data,
+            pipe,
+            group_delay_correct,
+        ))),
+    }
+}
+
+pub fn reapply_output(base: &Processed1D, pipe: &AxisPipeline) -> Processed1D {
+    match base {
+        Processed1D::Time(trace) => Processed1D::Time(trace.clone()),
+        Processed1D::Frequency(spectrum) => Processed1D::Frequency(reapply(spectrum, pipe)),
+    }
+}
+
+pub fn process_output(
+    data: &plotx_io::NmrData,
+    pipe: &AxisPipeline,
+    group_delay_correct: bool,
+) -> Result<Processed1D, PipelineDomainError> {
+    transform_output_base(data, pipe, group_delay_correct).map(|base| reapply_output(&base, pipe))
+}
+
+/// Full 1D pipeline, preserving whether the recipe ends in time or frequency.
+///
+/// Callers that specifically require a spectrum must inspect the returned
+/// [`Processed1D`] instead of turning a valid time-domain output into a panic.
 pub fn process(
     data: &plotx_io::NmrData,
     pipe: &AxisPipeline,
     group_delay_correct: bool,
-) -> Spectrum {
-    reapply(&transform_base(data, pipe, group_delay_correct), pipe)
+) -> Result<Processed1D, PipelineDomainError> {
+    process_output(data, pipe, group_delay_correct)
 }
 
 /// Compute a phase `(phase0, phase1, pivot_frac)` from the spectrum itself, per
@@ -603,71 +746,6 @@ fn time_side(pipe: &AxisPipeline) -> Vec<(StepKind, bool)> {
 /// group-delay flags differ. Frequency-only edits need only a cheap [`reapply`].
 pub fn needs_retransform(a: &AxisPipeline, b: &AxisPipeline, gd_a: bool, gd_b: bool) -> bool {
     gd_a != gd_b || time_side(a) != time_side(b)
-}
-
-/// The intermediate output of [`process_up_to`]: a time-domain FID for a step
-/// before the FFT, or a frequency-domain spectrum once the FFT has run.
-#[derive(Debug, Clone)]
-pub enum Preview {
-    Time { fid: Vec<Complex64>, dt: f64 },
-    Freq(Spectrum),
-}
-
-/// Run the enabled steps in order until (and including) the step with id `stop`,
-/// returning the working buffer at that point.
-pub fn process_up_to(
-    data: &plotx_io::NmrData,
-    pipe: &AxisPipeline,
-    group_delay_correct: bool,
-    stop: StepId,
-) -> Preview {
-    let dt = if data.spectral_width_hz != 0.0 {
-        1.0 / data.spectral_width_hz
-    } else {
-        0.0
-    };
-    let stop_before_fft = pipe
-        .steps
-        .iter()
-        .take_while(|s| !matches!(s.kind, StepKind::Fft))
-        .any(|s| s.id == stop);
-
-    if stop_before_fft {
-        let mut buf = data.points.clone();
-        for step in &pipe.steps {
-            if step.enabled {
-                match step.kind {
-                    StepKind::Apodize(a) => fft::apply_apodization(&mut buf, a, dt),
-                    StepKind::ZeroFill(z) => {
-                        let n = z.target(buf.len());
-                        buf.resize(n, Complex64::new(0.0, 0.0));
-                    }
-                    _ => {}
-                }
-            }
-            if step.id == stop {
-                break;
-            }
-        }
-        return Preview::Time { fid: buf, dt };
-    }
-
-    let mut spec = transform_base(data, pipe, group_delay_correct);
-    for step in &pipe.steps {
-        if step.kind.at_or_before_fft() {
-            if step.id == stop {
-                break;
-            }
-            continue;
-        }
-        if step.enabled {
-            apply_freq_step(&mut spec, &step.kind);
-        }
-        if step.id == stop {
-            break;
-        }
-    }
-    Preview::Freq(spec)
 }
 
 mod twod;

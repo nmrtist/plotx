@@ -107,6 +107,40 @@ fn peak(spec: &Spectrum) -> Complex64 {
 }
 
 #[test]
+fn removing_fft_produces_a_time_trace_on_the_acquisition_axis() {
+    let data = fid(1.0, 0.0);
+    let mut pipeline = AxisPipeline::default_1d();
+    pipeline
+        .steps
+        .retain(|step| !matches!(step.kind, StepKind::Fft));
+    let disabled = pipeline.reconcile_domains(Domain::Time);
+    assert!(
+        !disabled.is_empty(),
+        "frequency-only defaults become inapplicable"
+    );
+
+    let Processed1D::Time(trace) = process_output(&data, &pipeline, true).unwrap() else {
+        panic!("a time pipeline must return a time trace");
+    };
+    assert_eq!(
+        trace.values.len(),
+        pipeline.zero_fill().target(data.points.len())
+    );
+    assert_eq!(trace.time_s[0], 0.0);
+    assert!((trace.time_s[1] - 1.0 / data.spectral_width_hz).abs() < 1e-12);
+}
+
+#[test]
+fn an_imported_frequency_pipeline_cannot_accept_fft() {
+    let mut pipeline = AxisPipeline::frequency_1d();
+    pipeline.steps.insert(0, step(StepKind::Fft));
+    assert!(pipeline.output_domain(Domain::Frequency).is_err());
+    let disabled = pipeline.reconcile_domains(Domain::Frequency);
+    assert_eq!(disabled.len(), 1);
+    assert!(!pipeline.steps[0].enabled);
+}
+
+#[test]
 fn multiple_apodizations_compose() {
     let data = fid(2.0, 0.0);
     let single = AxisPipeline {
@@ -389,8 +423,9 @@ fn auto_phase_makes_tallest_peak_real() {
     let pipe = AxisPipeline {
         steps: vec![step(StepKind::Fft), step(StepKind::Phase(absorptive))],
     };
-    let spec = process(&data, &pipe, true);
-    let p = peak(&spec);
+    let processed = process(&data, &pipe, true).unwrap();
+    let spec = processed.as_frequency().unwrap();
+    let p = peak(spec);
     assert!(p.re > 0.0);
     assert!(p.im.abs() / p.norm() < 1e-6, "peak not absorptive: {p:?}");
 }
@@ -401,7 +436,8 @@ fn magnitude_step_nulls_imaginary() {
     let pipe = AxisPipeline {
         steps: vec![step(StepKind::Fft), step(StepKind::Magnitude)],
     };
-    let spec = process(&data, &pipe, true);
+    let processed = process(&data, &pipe, true).unwrap();
+    let spec = processed.as_frequency().unwrap();
     assert!(spec.values.iter().all(|c| c.im == 0.0));
     assert!(spec.values.iter().all(|c| c.re >= 0.0));
 }
@@ -421,11 +457,20 @@ fn reference_step_shifts_ppm_axis() {
             })),
         ],
     };
-    let a = process(&data, &base_pipe, true);
-    let b = process(&data, &referenced, true);
+    let a = process(&data, &base_pipe, true).unwrap();
+    let b = process(&data, &referenced, true).unwrap();
+    let a = a.as_frequency().unwrap();
+    let b = b.as_frequency().unwrap();
     for (x, y) in a.ppm.iter().zip(&b.ppm) {
         assert!((y - x - 1.5).abs() < 1e-9);
     }
+}
+
+#[test]
+fn public_process_returns_a_time_output_instead_of_panicking() {
+    let data = fid(2.0, 0.0);
+    let output = process(&data, &AxisPipeline { steps: Vec::new() }, true).unwrap();
+    assert!(matches!(output, Processed1D::Time(_)));
 }
 
 #[test]

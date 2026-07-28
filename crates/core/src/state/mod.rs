@@ -5,8 +5,8 @@ use crate::actions::{
 use crate::export::{ExportDialogState, ExportFormat, ExportSettings};
 use crate::{
     DosyInvocation, DosyMethod, DosyResultProvenance, IltParams, Integral2D, IntegralResult,
-    PseudoDisplay, apply_peak_labels, build_dosy_figure, build_figure, build_ilt_figure,
-    build_stack_figure, extract_region_series,
+    PseudoDisplay, apply_peak_labels, build_dosy_figure, build_ilt_figure,
+    build_processed_1d_figure, build_stack_figure, extract_region_series,
 };
 use plotx_analysis::diffusion::{DiffusionMap, diffusion_map};
 use plotx_analysis::ilt::{IltResult, ilt_map, log_grid};
@@ -15,8 +15,9 @@ use plotx_io::{
     AfmData, Domain, ElectricalQuantity, ElectricalUnit, ElectrophysiologyData, NmrData, NmrData2D,
 };
 use plotx_processing::{
-    AxisPipeline, DisplayMode, Params2D, PhaseParams, Preset2D, Processed2D, Spectrum, StepId,
-    StepKind, fft, process_2d, reapply, reapply_2d, recommend_preset,
+    AxisPipeline, DisplayMode, Params2D, PhaseParams, Preset2D, Processed1D, Processed2D, Spectrum,
+    StepId, StepKind, process_2d, reapply_2d, reapply_output, recommend_preset,
+    transform_output_base,
 };
 
 mod afm;

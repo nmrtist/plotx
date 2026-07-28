@@ -10,7 +10,7 @@ mod geometry;
 use axes::{axes_section, commit_if_target_changed};
 use chart_gallery::chart_gallery;
 use data::data_section;
-use edits::{flush_inspector_edit, format_once_section, kind_targets, selection_label};
+use edits::{flush_inspector_edit, format_once_section, kind_targets, selection_context_label};
 use egui::{DragValue, Ui};
 use egui_phosphor::regular as icon;
 use geometry::geometry_section;
@@ -35,27 +35,30 @@ pub(crate) fn render(app: &mut PlotxApp, ui: &mut Ui) {
     });
     commit_if_target_changed(app, axis_target);
     let Some(ci) = app.session.active_canvas else {
+        inspector_header(app, None, &ids, ui);
+        ui.weak("Open a canvas to inspect its objects.");
         crate::ui::properties::panel::typography_section(app, ui);
         return;
     };
     if ci >= app.doc.canvases.len() {
+        inspector_header(app, None, &ids, ui);
+        ui.weak("Open a canvas to inspect its objects.");
         crate::ui::properties::panel::typography_section(app, ui);
         return;
     }
+    inspector_header(app, Some(ci), &ids, ui);
     if ids.is_empty() {
-        property_sections(app, ci, true, ui);
+        if app.session.ui.requested_inspector_section.as_deref() == Some("inspector.layout") {
+            app.session.ui.requested_inspector_section = None;
+        }
+        ui.weak("Select an object on this canvas to inspect it.");
+        section_navigation(app, ci, &ids, ui);
+        crate::ui::properties::panel::typography_section(app, ui);
         return;
     }
 
-    ui.add_space(4.0);
-    ui.horizontal(|ui| {
-        ui.strong("Object");
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.weak(selection_label(app, ci, &ids));
-        });
-    });
-    ui.add_space(4.0);
-
+    section_navigation(app, ci, &ids, ui);
+    custom_section_heading(app, "inspector.layout", "Layout", ui);
     geometry_section(app, ci, &ids, ui);
     let property_objects: Vec<_> = ids
         .iter()
@@ -66,6 +69,13 @@ pub(crate) fn render(app: &mut PlotxApp, ui: &mut Ui) {
                 .is_some_and(|object| !object.locked)
         })
         .collect();
+
+    // Catalog sections stay in their PanelRoute order. Non-catalog Layout and
+    // Data anchors are inserted at stable semantic boundaries without creating
+    // parallel property registrations.
+    crate::ui::properties::panel::contour_section(app, ci, &property_objects, ui);
+    crate::ui::properties::panel::heatmap_section(app, ci, &property_objects, ui);
+    crate::ui::properties::panel::line_section(app, ci, &property_objects, ui);
     crate::ui::properties::panel::axis_section(app, ci, &property_objects, ui);
 
     let mut axes_focused = false;
@@ -75,12 +85,10 @@ pub(crate) fn render(app: &mut PlotxApp, ui: &mut Ui) {
             .map(|o| o.plot().is_some())
             .unwrap_or(false)
     {
-        ui.separator();
         axes_focused = axes_section(app, ci, ids[0], ui);
-        crate::ui::properties::panel::panel_section(app, ci, &property_objects, ui);
+        custom_section_heading(app, "inspector.data", "Data", ui);
         data_section(app, ci, ids[0], ui);
     }
-    property_sections(app, ci, false, ui);
 
     let text_ids = kind_targets(app, ci, &ids, |o| o.text().is_some());
     let shape_ids = kind_targets(app, ci, &ids, |o| o.shape().is_some());
@@ -91,6 +99,9 @@ pub(crate) fn render(app: &mut PlotxApp, ui: &mut Ui) {
     if !shape_ids.is_empty() {
         crate::ui::properties::panel::shape_section(app, ci, &shape_ids, ui);
     }
+    crate::ui::properties::panel::panel_section(app, ci, &property_objects, ui);
+    crate::ui::properties::panel::general_object_section(app, ci, &ids, ui);
+    crate::ui::properties::panel::typography_section(app, ui);
 
     let primary = ids[0];
     if app.doc.canvases[ci]
@@ -107,32 +118,96 @@ pub(crate) fn render(app: &mut PlotxApp, ui: &mut Ui) {
     ui.add_space(2.0);
 }
 
-/// Catalog-driven rows for whatever the resolved plot selection draws.
-///
-/// The objects come from the same resolution the Ribbon button, the context
-/// menu and the canvas gesture use — every selected plot, or the page's active
-/// plot when nothing is selected — rather than from this panel's own
-/// single-selection guard. Reading the selection differently is what let those
-/// channels enable a jump to a section that then drew nothing, and it put the
-/// cross-target `Mixed` aggregate out of reach of the interface entirely. The
-/// section renders nothing at all when no resolved series has an applicable
-/// encoding.
-/// The typography section is deliberately unconditional: it is a *document*
-/// property, so it applies whenever a document is open, whatever is selected.
-/// Gating it on the selection would hide an always-applicable control for a
-/// transient reason, which the crate's hide-vs-disable rule forbids.
-fn property_sections(app: &mut PlotxApp, ci: usize, include_axes: bool, ui: &mut Ui) {
-    // The write side of the shared selection: these sections carry controls, so
-    // they take the editable subset. The lock lives in one place rather than
-    // being re-derived here.
-    let objects = crate::ui::properties::discovery::editable_objects(app);
-    if include_axes {
-        crate::ui::properties::panel::axis_section(app, ci, &objects, ui);
+fn inspector_header(app: &PlotxApp, canvas: Option<usize>, ids: &[ObjectId], ui: &mut Ui) {
+    let context = canvas
+        .map(|canvas| selection_context_label(app, canvas, ids))
+        .unwrap_or_else(|| "No canvas".to_owned());
+    ui.add_space(4.0);
+    egui::containers::Sides::new()
+        .shrink_right()
+        .truncate()
+        .show(
+            ui,
+            |ui| {
+                ui.strong("Inspector");
+            },
+            |ui| {
+                ui.add(egui::Label::new(&context).truncate())
+                    .on_hover_text(context);
+            },
+        );
+    ui.add_space(4.0);
+}
+
+fn section_navigation(app: &mut PlotxApp, ci: usize, ids: &[ObjectId], ui: &mut Ui) {
+    let has_single_plot = ids.len() == 1
+        && app.doc.canvases[ci]
+            .object(ids[0])
+            .is_some_and(|object| object.plot().is_some());
+    ui.horizontal_wrapped(|ui| {
+        if !ids.is_empty() {
+            section_button(app, "inspector.layout", icon::FRAME_CORNERS, "Layout", ui);
+        }
+        for section in inspector_catalog_sections(app, !ids.is_empty()) {
+            if let Some(group) = crate::ui::properties::discovery::group(section) {
+                section_button(
+                    app,
+                    section,
+                    group.icon,
+                    short_section_label(group.label.get()),
+                    ui,
+                );
+            }
+            if section == crate::ui::properties::panel::AXIS_SECTION && has_single_plot {
+                section_button(app, "inspector.data", icon::DATABASE, "Data", ui);
+            }
+        }
+    });
+    ui.separator();
+}
+
+fn inspector_catalog_sections(app: &PlotxApp, has_selection: bool) -> Vec<&'static str> {
+    crate::ui::properties::PanelRoute::SecondarySidebar
+        .sections()
+        .iter()
+        .copied()
+        .filter(|section| {
+            has_selection || *section == crate::ui::properties::panel::TYPOGRAPHY_SECTION
+        })
+        .filter(|section| crate::ui::properties::discovery::group_applies(app, section))
+        .collect()
+}
+
+fn short_section_label(label: &'static str) -> &'static str {
+    match label {
+        "Figure typography" => "Type",
+        value => value,
     }
-    crate::ui::properties::panel::contour_section(app, ci, &objects, ui);
-    crate::ui::properties::panel::heatmap_section(app, ci, &objects, ui);
-    crate::ui::properties::panel::line_section(app, ci, &objects, ui);
-    crate::ui::properties::panel::typography_section(app, ui);
+}
+
+fn section_button(
+    app: &mut PlotxApp,
+    section: &'static str,
+    icon: &'static str,
+    label: &'static str,
+    ui: &mut Ui,
+) {
+    if ui
+        .small_button(format!("{icon}  {label}"))
+        .on_hover_text(format!("Jump to {label}"))
+        .clicked()
+    {
+        app.session.ui.requested_inspector_section = Some(section.to_owned());
+    }
+}
+
+fn custom_section_heading(app: &mut PlotxApp, section: &'static str, title: &str, ui: &mut Ui) {
+    ui.separator();
+    let response = ui.strong(title);
+    if app.session.ui.requested_inspector_section.as_deref() == Some(section) {
+        response.scroll_to_me(Some(egui::Align::Min));
+        app.session.ui.requested_inspector_section = None;
+    }
 }
 
 #[cfg(test)]

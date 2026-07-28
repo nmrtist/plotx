@@ -1,50 +1,51 @@
 use super::*;
-use plotx_processing::{ProcessingStep, ProjectionMode, Slice1D, SliceKind, StepKind, StepSource};
+use plotx_processing::{Processed1D, ProjectionMode, Slice1D, SliceKind};
 
 impl NmrDataset {
-    /// Build a standalone 1D spectrum from a slice/projection lifted out of a 2D
-    /// dataset, bypassing the FID→FFT pipeline: the extracted trace becomes both
-    /// the cached base and the displayed spectrum. A synthetic frequency-domain
-    /// `data` reproduces it exactly through [`fft::transform_base`], so a later
-    /// reprocess or a save/reload round-trips the shown values.
+    /// Build a standalone 1D trace from a slice/projection lifted out of a 2D
+    /// dataset without changing its scientific domain.
     pub fn from_slice(slice: Slice1D, source: String) -> Self {
         let Slice1D {
-            ppm,
+            coordinates,
+            domain,
             values,
             nucleus,
             observe_freq_mhz,
             ..
         } = slice;
-        let (sw, carrier) = linear_axis_params(&ppm, observe_freq_mhz);
-        let n = ppm.len().max(1);
-        let spectrum = Spectrum {
-            ppm,
-            values: values.clone(),
-            hz_per_point: (sw / n as f64).abs(),
-            observe_freq_mhz,
-            nucleus: nucleus.clone(),
+        let (spectral_width_hz, carrier_ppm) = match domain {
+            plotx_io::Domain::Frequency => linear_axis_params(&coordinates, observe_freq_mhz),
+            plotx_io::Domain::Time => (time_axis_spectral_width(&coordinates), 0.0),
         };
         let data = NmrData {
-            points: values,
-            domain: plotx_io::Domain::Frequency,
-            spectral_width_hz: sw,
+            points: values.clone(),
+            domain,
+            spectral_width_hz,
             observe_freq_mhz,
-            carrier_ppm: carrier,
-            nucleus,
+            carrier_ppm,
+            nucleus: nucleus.clone(),
             source: source.clone(),
             group_delay: 0.0,
         };
         let group_delay_correct = super::default_group_delay_correct(data.domain);
-        // The trace is already a phased spectrum: the pipeline is the bare FFT
-        // anchor, so the transform reproduces the values with no further steps.
-        // This dataset owns the pipeline it is built with, so the single step
-        // takes id 0 and the allocator starts one past it.
-        let pipeline = AxisPipeline {
-            steps: vec![ProcessingStep::new(
-                StepId::new(0),
-                StepKind::Fft,
-                StepSource::Default,
-            )],
+        let pipeline = AxisPipeline { steps: Vec::new() };
+        let processed = match domain {
+            plotx_io::Domain::Frequency => {
+                let n = coordinates.len().max(1);
+                Processed1D::Frequency(Spectrum {
+                    ppm: coordinates,
+                    values,
+                    hz_per_point: (spectral_width_hz / n as f64).abs(),
+                    observe_freq_mhz,
+                    nucleus,
+                })
+            }
+            plotx_io::Domain::Time => Processed1D::Time(plotx_processing::TimeTrace {
+                time_s: coordinates,
+                values,
+                nucleus,
+                source: source.clone(),
+            }),
         };
         let mut field_catalog = nmr_field_catalog();
         field_catalog.attach_provenance(&data.source, None);
@@ -52,12 +53,12 @@ impl NmrDataset {
             resource_id: DatasetId::new(),
             field_catalog,
             data,
-            base: spectrum.clone(),
+            base: processed.clone(),
             pipeline,
-            next_step_id: 1,
+            next_step_id: 0,
             group_delay_correct,
             has_imaginary: true,
-            spectrum,
+            processed,
             name: Some(source),
             lineage: None,
             peaks: PeakSet::default(),
@@ -85,6 +86,21 @@ fn linear_axis_params(ppm: &[f64], obs: f64) -> (f64, f64) {
     let sw = dp * n as f64 * obs;
     let carrier = ppm[0] + (n as f64 / 2.0) * dp;
     (sw, carrier)
+}
+
+fn time_axis_spectral_width(time_s: &[f64]) -> f64 {
+    let Some((&first, &last)) = time_s.first().zip(time_s.last()) else {
+        return 1.0;
+    };
+    if time_s.len() < 2 {
+        return 1.0;
+    }
+    let dwell = (last - first).abs() / (time_s.len() - 1) as f64;
+    if dwell.is_finite() && dwell > f64::MIN_POSITIVE {
+        1.0 / dwell
+    } else {
+        1.0
+    }
 }
 
 impl PlotxApp {
@@ -174,9 +190,20 @@ fn slice_name(
     if is_stack {
         return format!("{parent} — increment {index}");
     }
-    match slice.position_ppm {
-        Some(p) => format!("{parent} — {} slice @ {p:.3} ppm", slice_axis_label(kind)),
+    match slice.position {
+        Some(position) => format!(
+            "{parent} — {} slice @ {position:.3} {}",
+            slice_axis_label(kind),
+            domain_unit(slice.position_domain)
+        ),
         None => format!("{parent} — {} slice", slice_axis_label(kind)),
+    }
+}
+
+fn domain_unit(domain: plotx_io::Domain) -> &'static str {
+    match domain {
+        plotx_io::Domain::Time => "s",
+        plotx_io::Domain::Frequency => "ppm",
     }
 }
 
@@ -187,11 +214,13 @@ mod tests {
 
     fn slice() -> Slice1D {
         Slice1D {
-            ppm: vec![2.0, 1.0],
+            coordinates: vec![2.0, 1.0],
+            domain: plotx_io::Domain::Frequency,
             values: vec![Complex64::new(1.0, 0.0), Complex64::new(0.5, 0.0)],
             nucleus: "1H".to_owned(),
             observe_freq_mhz: 400.0,
-            position_ppm: Some(3.0),
+            position: Some(3.0),
+            position_domain: plotx_io::Domain::Frequency,
         }
     }
 
@@ -237,5 +266,16 @@ mod tests {
             dataset.group_delay_correct,
             default_group_delay_correct(dataset.data.domain)
         );
+    }
+
+    #[test]
+    fn time_domain_slice_stays_a_time_trace() {
+        let mut time = slice();
+        time.coordinates = vec![0.0, 0.002];
+        time.domain = plotx_io::Domain::Time;
+        let dataset = NmrDataset::from_slice(time, "FID slice".to_owned());
+        assert_eq!(dataset.data.domain, plotx_io::Domain::Time);
+        assert_eq!(dataset.output_domain(), plotx_io::Domain::Time);
+        assert_eq!(dataset.time_trace().unwrap().time_s, vec![0.0, 0.002]);
     }
 }

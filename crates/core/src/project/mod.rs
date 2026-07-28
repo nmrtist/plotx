@@ -694,6 +694,8 @@ mod linefit_tests;
 #[cfg(test)]
 mod multiplet_tests;
 #[cfg(test)]
+mod pipeline_domain_tests;
+#[cfg(test)]
 mod pseudo_tests;
 #[cfg(test)]
 mod reference_tests;

@@ -144,19 +144,36 @@ pub(super) fn nmr2d_recipe_extensions(
     }
 }
 
-pub fn apply_2d_recipe(dataset: &mut Nmr2DDataset, recipe: &RecipeObject) {
+pub fn apply_2d_recipe(dataset: &mut Nmr2DDataset, recipe: &RecipeObject) -> Result<()> {
     let p = &recipe.parameters;
-    dataset.preset = p
+    let preset = p
         .preset
         .as_deref()
         .map(preset_from_str)
         .unwrap_or(dataset.preset);
+    let mut params = dataset.params.clone();
     if let Some(f2) = p.pipelines.first() {
-        dataset.params.f2 = pipeline_from_dto(f2);
+        params.f2 = pipeline_from_dto(f2);
     }
     if let Some(f1) = p.pipelines.get(1) {
-        dataset.params.f1 = pipeline_from_dto(f1);
+        params.f1 = pipeline_from_dto(f1);
     }
+    params.layout = p
+        .layout
+        .as_deref()
+        .map(layout_from_str)
+        .unwrap_or_else(|| preset.layout());
+    params
+        .f2
+        .output_domain(dataset.data.domain)
+        .map_err(|error| ProjectError::Invalid(format!("invalid F2 pipeline: {error}")))?;
+    params
+        .f1
+        .output_domain(dataset.data.domain)
+        .map_err(|error| ProjectError::Invalid(format!("invalid F1 pipeline: {error}")))?;
+
+    dataset.preset = preset;
+    dataset.params = params;
     dataset.next_step_id = recipe
         .extensions
         .get("plotx.step_allocator")
@@ -164,11 +181,7 @@ pub fn apply_2d_recipe(dataset: &mut Nmr2DDataset, recipe: &RecipeObject) {
         .and_then(serde_json::Value::as_u64)
         .unwrap_or(0);
     dataset.repair_step_allocator();
-    dataset.params.layout = p
-        .layout
-        .as_deref()
-        .map(layout_from_str)
-        .unwrap_or_else(|| dataset.preset.layout());
     dataset.group_delay_correct = p.group_delay_correct;
     dataset.has_imaginary = true;
+    Ok(())
 }

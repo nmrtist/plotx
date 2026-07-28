@@ -2,7 +2,7 @@ use super::field_runtime::*;
 use super::{FieldCatalog, FieldId, electrophysiology_channel_key};
 use crate::automation::{
     CAP_FIELD_AFM_MAP, CAP_FIELD_BOUNDED, CAP_FIELD_COLORED_RASTER_2D, CAP_FIELD_CURVE_1D,
-    CAP_FIELD_FORCE_CURVE, CAP_FIELD_LOCATION_SCALE, CAP_FIELD_NMR_CONTOUR, CAP_FIELD_NMR_SPECTRUM,
+    CAP_FIELD_FORCE_CURVE, CAP_FIELD_LOCATION_SCALE, CAP_FIELD_NMR_CONTOUR, CAP_FIELD_NMR_SIGNAL,
     CAP_FIELD_NMR_STACK, CAP_FIELD_NOISE_SCALE, CAP_FIELD_SCALAR_GRID_2D_REGULAR, CAP_FIELD_SIGNED,
     CAP_FIELD_SWEEP_COLLECTION, CAP_FIELD_TABLE, CapabilityId,
 };
@@ -59,48 +59,66 @@ impl super::Dataset {
                     descriptor(
                         id,
                         "nmr.real",
-                        "Real",
-                        capabilities(id, &[CAP_FIELD_NMR_SPECTRUM]),
-                        vec![nmr.spectrum.values.len()],
-                        vec!["ppm".to_owned()],
+                        match nmr.output_domain() {
+                            plotx_io::Domain::Time => "FID",
+                            plotx_io::Domain::Frequency => "Real",
+                        },
+                        capabilities(id, &[CAP_FIELD_NMR_SIGNAL]),
+                        vec![nmr.processed.values().len()],
+                        vec![match nmr.output_domain() {
+                            plotx_io::Domain::Time => "s".to_owned(),
+                            plotx_io::Domain::Frequency => "ppm".to_owned(),
+                        }],
                         "line",
                     )
                 })
                 .collect(),
-            Self::Nmr2D(nmr) if nmr.is_true_2d() => [
-                nmr.field_catalog.id_for_key("nmr.real").map(|id| {
-                    descriptor(
-                        id,
-                        "nmr.real",
-                        "Real",
-                        capabilities(
+            Self::Nmr2D(nmr) if nmr.is_true_2d() => {
+                let (dimensions, units) = match &nmr.processed {
+                    plotx_processing::Processed2D::Ft(spectrum) => (
+                        vec![spectrum.f1_size, spectrum.f2_size],
+                        vec![
+                            domain_unit(spectrum.f1_domain),
+                            domain_unit(spectrum.f2_domain),
+                        ],
+                    ),
+                    plotx_processing::Processed2D::Stack(_) => unreachable!("true 2D is FT"),
+                };
+                [
+                    nmr.field_catalog.id_for_key("nmr.real").map(|id| {
+                        descriptor(
                             id,
-                            &[
-                                CAP_FIELD_SIGNED,
-                                CAP_FIELD_NOISE_SCALE,
-                                CAP_FIELD_NMR_CONTOUR,
-                            ],
-                        ),
-                        vec![nmr.data.rows, nmr.data.cols],
-                        vec!["ppm".to_owned(), "ppm".to_owned()],
-                        "contour",
-                    )
-                }),
-                nmr.field_catalog.id_for_key("nmr.magnitude").map(|id| {
-                    descriptor(
-                        id,
-                        "nmr.magnitude",
-                        "Magnitude",
-                        capabilities(id, &[CAP_FIELD_BOUNDED]),
-                        vec![nmr.data.rows, nmr.data.cols],
-                        vec!["ppm".to_owned(), "ppm".to_owned()],
-                        "heatmap",
-                    )
-                }),
-            ]
-            .into_iter()
-            .flatten()
-            .collect(),
+                            "nmr.real",
+                            "Real",
+                            capabilities(
+                                id,
+                                &[
+                                    CAP_FIELD_SIGNED,
+                                    CAP_FIELD_NOISE_SCALE,
+                                    CAP_FIELD_NMR_CONTOUR,
+                                ],
+                            ),
+                            dimensions.clone(),
+                            units.clone(),
+                            "contour",
+                        )
+                    }),
+                    nmr.field_catalog.id_for_key("nmr.magnitude").map(|id| {
+                        descriptor(
+                            id,
+                            "nmr.magnitude",
+                            "Magnitude",
+                            capabilities(id, &[CAP_FIELD_BOUNDED]),
+                            dimensions,
+                            units,
+                            "heatmap",
+                        )
+                    }),
+                ]
+                .into_iter()
+                .flatten()
+                .collect()
+            }
             Self::Nmr2D(nmr) => nmr
                 .field_catalog
                 .id_for_key("nmr.stack")
@@ -112,7 +130,14 @@ impl super::Dataset {
                         "Stack",
                         capabilities(id, &[CAP_FIELD_NMR_STACK]),
                         vec![nmr.data.cols],
-                        vec!["ppm".to_owned()],
+                        vec![match &nmr.processed {
+                            plotx_processing::Processed2D::Stack(spectrum) => {
+                                domain_unit(spectrum.direct_domain)
+                            }
+                            plotx_processing::Processed2D::Ft(_) => {
+                                unreachable!("pseudo 2D is stack")
+                            }
+                        }],
                         "line",
                     )
                 })
@@ -248,9 +273,9 @@ impl super::Dataset {
         }
         match self {
             Self::Nmr(nmr) => match encoding {
-                SeriesEncoding::Line(_) => Some(crate::figures::build_figure(
+                SeriesEncoding::Line(_) => Some(crate::figures::build_processed_1d_figure(
                     &nmr.data,
-                    &nmr.spectrum,
+                    &nmr.processed,
                     &nmr.peaks.resolve(),
                 )),
                 SeriesEncoding::Contour(_)
@@ -345,6 +370,14 @@ impl super::Dataset {
                 .collect(),
         }
     }
+}
+
+fn domain_unit(domain: plotx_io::Domain) -> String {
+    match domain {
+        plotx_io::Domain::Time => "s",
+        plotx_io::Domain::Frequency => "ppm",
+    }
+    .to_owned()
 }
 
 /// Central capability gate for scalar fields. A provider must derive

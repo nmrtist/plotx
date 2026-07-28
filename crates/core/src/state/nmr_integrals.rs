@@ -4,6 +4,9 @@ use super::*;
 
 impl NmrDataset {
     pub(crate) fn integral_curves(&self) -> Vec<plotx_figure::IntegralCurve> {
+        if self.spectrum().is_none() {
+            return Vec::new();
+        }
         self.integrals
             .iter()
             .map(|integral| plotx_figure::IntegralCurve {
@@ -33,12 +36,15 @@ impl NmrDataset {
     /// reference-area × the reference's user-selected target value; without a
     /// reference, each keeps its total-spectrum fraction.
     pub fn recompute_integrals(&mut self) {
+        let Some(spectrum) = self.spectrum() else {
+            return;
+        };
         let refreshed: Vec<Option<(f64, f64)>> = self
             .integrals
             .iter()
             .map(|integ| {
                 crate::integrate_region(
-                    &self.spectrum,
+                    spectrum,
                     DisplayMode::Real,
                     (integ.start_ppm, integ.end_ppm),
                 )
@@ -68,7 +74,10 @@ impl NmrDataset {
     }
 
     fn ppm_ends(&self) -> (f64, f64) {
-        let p = &self.base.ppm;
+        let Some(base) = self.base.as_frequency() else {
+            return (0.0, 1.0);
+        };
+        let p = &base.ppm;
         match (p.first(), p.last()) {
             (Some(&a), Some(&b)) => (a, b),
             _ => (0.0, 1.0),
@@ -76,6 +85,9 @@ impl NmrDataset {
     }
 
     pub fn pivot_ppm(&self) -> f64 {
+        let Some(base) = self.base.as_frequency() else {
+            return 0.0;
+        };
         let (lo, hi) = self.ppm_ends();
         let frac = self
             .pipeline
@@ -87,7 +99,7 @@ impl NmrDataset {
                 // show the peak the pass actually rotates about so the on-plot handle
                 // sits where the user expects instead of pinned to an edge.
                 StepKind::Phase(p) => Some(match p.auto {
-                    Some(_) => plotx_processing::phase::peak_pivot_frac(&self.base.values),
+                    Some(_) => plotx_processing::phase::peak_pivot_frac(&base.values),
                     None => p.pivot_frac,
                 }),
                 _ => None,

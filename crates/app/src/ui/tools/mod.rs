@@ -16,7 +16,7 @@ use curve_fit::curve_fit_group;
 use egui::{Button, DragValue, Id, Ui};
 use egui_phosphor::regular as icon;
 use line_fit::line_fit_group;
-use plotx_core::state::{Dataset, PlotxApp, Tool, ToolGroup};
+use plotx_core::state::{Dataset, PlotxApp, TaskDockTab, Tool, ToolGroup};
 use pseudo::experiment_group;
 use region_analysis::region_analysis_group;
 use slice::slice_group;
@@ -67,6 +67,25 @@ pub(crate) fn render_curve_fit_task(app: &mut PlotxApp, ui: &mut Ui) {
 
 pub(crate) fn render_statistics_task(app: &mut PlotxApp, ui: &mut Ui) {
     statistics::render_task(app, ui);
+}
+
+pub(crate) fn render_processing_task(app: &mut PlotxApp, ui: &mut Ui) {
+    processing::render_task(app, ui);
+}
+
+pub(crate) fn expand_processing_surface(app: &mut PlotxApp) {
+    let Some(dataset) = app
+        .active_dataset()
+        .and_then(|index| app.doc.datasets.get(index))
+    else {
+        return;
+    };
+    if !matches!(dataset, Dataset::Nmr(_) | Dataset::Nmr2D(_)) {
+        app.session.status = "Select an NMR dataset before opening Processing.".to_owned();
+        return;
+    }
+    app.session.ui.processing_task_dataset = Some(dataset.resource_id());
+    app.session.ui.open_task_tab(TaskDockTab::Processing);
 }
 
 pub(crate) fn open_statistics_task(app: &mut PlotxApp, dataset: usize) {

@@ -216,17 +216,27 @@ impl Dataset {
     }
 
     pub fn supports_region_analysis(&self) -> bool {
-        matches!(self, Dataset::Nmr2D(d) if d.is_pseudo())
+        matches!(
+            self,
+            Dataset::Nmr2D(dataset)
+                if dataset.is_pseudo()
+                    && matches!(
+                        &dataset.processed,
+                        Processed2D::Stack(stack)
+                            if stack.direct_domain == plotx_io::Domain::Frequency
+                    )
+        )
     }
 
     pub fn tool_groups(&self) -> &'static [ToolGroup] {
         match self {
-            Dataset::Nmr(_) => &[
+            Dataset::Nmr(dataset) if dataset.output_domain() == plotx_io::Domain::Frequency => &[
                 ToolGroup::Processing,
                 ToolGroup::Nmr1dAnalysis,
                 ToolGroup::Peaks,
                 ToolGroup::LineFit,
             ],
+            Dataset::Nmr(_) => &[ToolGroup::Processing],
             Dataset::Nmr2D(_) if self.supports_region_analysis() => &[
                 ToolGroup::Processing,
                 ToolGroup::Nmr2dExperiment,
@@ -337,7 +347,7 @@ impl Dataset {
                     _ => None,
                 })?;
         match self {
-            Dataset::Nmr(n) => Some(plotx_processing::auto_phase(&n.base, method)),
+            Dataset::Nmr(n) => Some(plotx_processing::auto_phase(n.base.as_frequency()?, method)),
             Dataset::Nmr2D(n) => match &n.base {
                 Processed2D::Ft(s) => {
                     let peak_arg = s
@@ -361,7 +371,12 @@ impl Dataset {
 
     pub fn pivot_ppm(&self, axis: PhaseAxis) -> Option<f64> {
         match self {
-            Dataset::Nmr(n) if axis == PhaseAxis::Direct => Some(n.pivot_ppm()),
+            Dataset::Nmr(n)
+                if axis == PhaseAxis::Direct
+                    && n.output_domain() == plotx_io::Domain::Frequency =>
+            {
+                Some(n.pivot_ppm())
+            }
             Dataset::Nmr2D(n) => n.pivot_ppm(axis),
             _ => None,
         }

@@ -47,7 +47,6 @@ fn scheme(path: &Path) {
   "schema_version": 1,
   "dimension_count": 1,
   "pipelines": [{"steps": [
-    {"kind": "Fft", "enabled": true, "source": "User"},
     {"kind": {"Phase": {"phase0": 0.0, "phase1": 0.0, "pivot_frac": 0.5, "auto": null}}, "enabled": true, "source": "User"}
   ]}],
   "group_delay_correct": false

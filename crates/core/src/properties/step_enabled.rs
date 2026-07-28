@@ -44,9 +44,7 @@ impl PropertyProvider for StepEnabledProvider {
         address: &PropertyAddress,
     ) -> Result<ResolvedProperty, PropertyError> {
         let definition = property_definition(address.definition)?;
-        let context = step_context(app, address, definition, |kind| {
-            !matches!(kind, plotx_processing::StepKind::Fft)
-        })?;
+        let context = step_context(app, address, definition, |_| true)?;
         Ok(ResolvedProperty {
             address: address.clone(),
             modified: None,
@@ -68,9 +66,7 @@ impl PropertyProvider for StepEnabledProvider {
         operation: &EditOp<'_>,
     ) -> Result<(), PropertyError> {
         let definition = property_definition(address.definition)?;
-        let context = step_context(app, address, definition, |kind| {
-            !matches!(kind, plotx_processing::StepKind::Fft)
-        })?;
+        let context = step_context(app, address, definition, |_| true)?;
         let value = match operation {
             EditOp::Set(PropertyValue::Bool(value)) => *value,
             EditOp::Set(value) => return Err(wrong_kind(definition, value, "true or false")),
@@ -81,8 +77,23 @@ impl PropertyProvider for StepEnabledProvider {
                 .ok_or_else(|| no_factory_default(definition))?,
             EditOp::Step(_) => return Err(no_step_gesture(definition)),
         };
+        let input_domain = match context.dataset {
+            crate::state::Dataset::Nmr(dataset) => dataset.data.domain,
+            crate::state::Dataset::Nmr2D(dataset) => dataset.data.domain,
+            crate::state::Dataset::Table(_)
+            | crate::state::Dataset::Electrophysiology(_)
+            | crate::state::Dataset::Afm(_) => {
+                return Err(PropertyError::NotApplicable(
+                    "this dataset has no spectral processing pipeline".to_owned(),
+                ));
+            }
+        };
         let state = transaction.processing_state(app, context.dataset_id)?;
         step_mut(state, context.step.id, &address.target)?.enabled = value;
+        state
+            .axis_pipeline_mut(context.axis)
+            .expect("step context resolved this axis")
+            .reconcile_domains(input_domain);
         Ok(())
     }
 }

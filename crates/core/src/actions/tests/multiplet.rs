@@ -7,11 +7,13 @@ fn doublet_marked_app() -> PlotxApp {
     let ppm: Vec<f64> = (0..600).map(|i| 10.0 * i as f64 / 599.0).collect();
     let values = ppm.iter().map(|_| Complex64::new(0.0, 0.0)).collect();
     let slice = Slice1D {
-        ppm,
+        coordinates: ppm,
+        domain: plotx_io::Domain::Frequency,
         values,
         nucleus: "1H".to_owned(),
         observe_freq_mhz: 400.0,
-        position_ppm: None,
+        position: None,
+        position_domain: plotx_io::Domain::Frequency,
     };
     let mut nmr = NmrDataset::from_slice(slice, "doublet".to_owned());
     for (id, x) in [(0u64, 2.0), (1u64, 2.0 + 7.0 / 400.0)] {

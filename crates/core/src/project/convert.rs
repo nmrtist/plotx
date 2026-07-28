@@ -368,7 +368,7 @@ pub fn object_to_dataset(
                 source: nmr_source(data),
             });
             dataset.field_catalog = read_field_catalog(data)?;
-            apply_2d_recipe(&mut dataset, recipe);
+            apply_2d_recipe(&mut dataset, recipe)?;
             read_regions(&mut dataset, recipe);
             read_integrals_2d(&mut dataset, recipe)?;
             dataset.name = data.label.clone();

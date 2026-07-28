@@ -129,14 +129,13 @@ pub fn render(
             ribbon::render(app, clipboard_table_paste, ui);
         });
 
-    let workspace_width = ui.available_width();
-    render_sidebars(app, ui, dark, workspace_width);
-
     feedback_banner(app, ui, dark);
     render_status(app, ui, dark);
 
-    // The sidebars above may have expanded/collapsed a Phase step this frame; put
-    // the canvas into (or out of) on-plot phase mode before it paints.
+    let workspace_width = ui.available_width();
+    render_sidebars(app, ui, dark, workspace_width);
+
+    // A sidebar may have changed an expanded Phase step before the canvas paints.
     app.sync_phase_interaction();
     egui::CentralPanel::default()
         .frame(
@@ -151,6 +150,7 @@ pub fn render(
         )
         .show_inside(ui, |ui| {
             canvas::render_central(app, ui);
+            tools::render_processing_task(app, ui);
             tools::render_region_task(app, ui);
             tools::render_curve_fit_task(app, ui);
             tools::render_statistics_task(app, ui);

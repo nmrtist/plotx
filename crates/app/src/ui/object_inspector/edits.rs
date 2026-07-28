@@ -46,15 +46,50 @@ pub(super) fn kind_targets(
         .collect()
 }
 
-pub(super) fn selection_label(app: &PlotxApp, ci: usize, ids: &[ObjectId]) -> String {
-    if ids.len() > 1 {
-        format!("{} selected", ids.len())
-    } else {
-        app.doc.canvases[ci]
-            .object(ids[0])
-            .map(|o| o.name.clone())
-            .unwrap_or_default()
+pub(super) fn selection_context_label(app: &PlotxApp, ci: usize, ids: &[ObjectId]) -> String {
+    let Some(canvas) = app.doc.canvases.get(ci) else {
+        return "No canvas".to_owned();
+    };
+    if ids.is_empty() {
+        return format!("Canvas · {}", canvas.name);
     }
+    let datasets: std::collections::HashSet<_> = ids
+        .iter()
+        .filter_map(|&id| canvas.object(id))
+        .filter_map(CanvasObject::plot)
+        .flat_map(|plot| {
+            plot.binding
+                .series
+                .iter()
+                .map(|series| series.source.resource)
+        })
+        .collect();
+    if ids.len() > 1 {
+        let objects = format!("{} objects", ids.len());
+        return if datasets.is_empty() {
+            objects
+        } else {
+            format!(
+                "{objects} · {} {}",
+                datasets.len(),
+                if datasets.len() == 1 {
+                    "dataset"
+                } else {
+                    "datasets"
+                }
+            )
+        };
+    }
+    let object = canvas
+        .object(ids[0])
+        .map(|object| object.name.clone())
+        .unwrap_or_else(|| "Object".to_owned());
+    let dataset = datasets
+        .iter()
+        .next()
+        .and_then(|id| app.doc.dataset_by_id(*id))
+        .map(Dataset::display_name);
+    dataset.map_or(object.clone(), |dataset| format!("{object} · {dataset}"))
 }
 
 /// Snapshot the touched objects' pre-edit frames once per interaction; later

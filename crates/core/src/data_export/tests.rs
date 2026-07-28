@@ -24,7 +24,8 @@ fn snapshot(data: SnapshotData, content: DataExportContent) -> DataExportSnapsho
 fn one_dimensional_channels_use_processed_complex_values() {
     let mut value = snapshot(
         SnapshotData::Nmr1D {
-            ppm: vec![1.0],
+            axis: vec![1.0],
+            axis_label: "ppm",
             values: vec![Complex64::new(3.0, 4.0)],
         },
         DataExportContent::ProcessedData,
@@ -84,6 +85,8 @@ fn complete_table_interleaves_sigma_and_leaves_missing_values_empty() {
 #[test]
 fn true_2d_matrix_and_long_keep_row_major_axis_order() {
     let spectrum = Arc::new(Spectrum2D {
+        f2_domain: plotx_io::Domain::Frequency,
+        f1_domain: plotx_io::Domain::Frequency,
         f2_ppm: vec![10.0, 20.0],
         f1_ppm: vec![1.0, 2.0],
         data: vec![
@@ -157,7 +160,8 @@ fn fit_parameters_keep_long_header_and_escape_names() {
 fn default_name_is_stable_and_descriptive() {
     let value = snapshot(
         SnapshotData::Nmr1D {
-            ppm: vec![1.0],
+            axis: vec![1.0],
+            axis_label: "ppm",
             values: vec![Complex64::new(2.0, 0.0)],
         },
         DataExportContent::ProcessedData,
@@ -171,6 +175,7 @@ fn default_name_is_stable_and_descriptive() {
 #[test]
 fn pseudo_2d_long_uses_the_actual_ruler_name_and_unit() {
     let spectrum = Arc::new(StackSpectrum {
+        direct_domain: plotx_io::Domain::Frequency,
         ppm: vec![7.0, 8.0],
         traces: vec![vec![Complex64::new(1.0, 2.0), Complex64::new(3.0, 4.0)]],
         direct: plotx_processing::AxisMeta {

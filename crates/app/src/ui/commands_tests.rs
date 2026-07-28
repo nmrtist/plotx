@@ -3,7 +3,7 @@ use num_complex::Complex64;
 use plotx_core::actions::Action;
 use plotx_core::state::{
     AnalysisSelection, DEFAULT_CANVAS_SIZE_MM, FloatSeries, LineShapeKind, NmrDataset,
-    ProcessingTemplateDialogState, Selection, materialized_float_series_table,
+    ProcessingTemplateDialogState, Selection, ToolGroup, materialized_float_series_table,
 };
 use plotx_io::{Domain, NmrData};
 
@@ -75,6 +75,56 @@ fn app_with_nmr() -> PlotxApp {
     );
     app.execute_action(action);
     app
+}
+
+#[test]
+fn time_domain_nmr_hides_frequency_analysis_and_disables_spectral_commands() {
+    let mut app = app_with_nmr();
+    let dataset = app.doc.datasets[0].as_nmr_mut().unwrap();
+    dataset.pipeline.steps.retain(|step| {
+        !matches!(
+            step.kind,
+            plotx_processing::StepKind::Fft
+                | plotx_processing::StepKind::Phase(_)
+                | plotx_processing::StepKind::Baseline(_)
+                | plotx_processing::StepKind::Reference(_)
+                | plotx_processing::StepKind::Magnitude
+                | plotx_processing::StepKind::Smooth(_)
+                | plotx_processing::StepKind::Normalize(_)
+                | plotx_processing::StepKind::Bin(_)
+                | plotx_processing::StepKind::Reverse
+                | plotx_processing::StepKind::Invert
+        )
+    });
+    dataset.retransform();
+
+    assert!(
+        !app.doc.datasets[0]
+            .tool_groups()
+            .contains(&ToolGroup::Nmr1dAnalysis)
+    );
+    assert!(!describe(&app, CommandId::Integrate).enabled);
+    assert!(!describe(&app, CommandId::Multiplets).enabled);
+    assert!(!describe(&app, CommandId::DetectPeaks).enabled);
+    assert!(!describe(&app, CommandId::LineFit).enabled);
+}
+
+#[test]
+fn processing_does_not_replace_an_open_task_for_a_table() {
+    let mut app = app_with_table(1);
+    crate::ui::tools::open_curve_fit_task(&mut app, 0);
+    assert_eq!(
+        app.session.ui.task_dock_active,
+        Some(plotx_core::state::TaskDockTab::CurveFit)
+    );
+
+    crate::ui::tools::expand_processing_surface(&mut app);
+
+    assert_eq!(
+        app.session.ui.task_dock_active,
+        Some(plotx_core::state::TaskDockTab::CurveFit)
+    );
+    assert!(app.session.ui.processing_task_dataset.is_none());
 }
 
 fn ribbon_groups(app: &PlotxApp) -> Vec<(WorkflowTab, Vec<&'static str>)> {
@@ -464,7 +514,7 @@ fn disabled_reason_reports_the_first_unmet_requirement() {
     assert!(!run_peak.enabled);
     assert_eq!(
         run_peak.disabled_reason,
-        Some("Plot 1D data before running Peak Fit.")
+        Some("Plot frequency-domain or tabular 1D data before running Peak Fit.")
     );
 }
 

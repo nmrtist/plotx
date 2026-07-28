@@ -122,20 +122,25 @@ impl Nmr2DDataset {
 fn nmr_axes(spectrum: &plotx_processing::Spectrum2D) -> (Axis, Axis) {
     let (f2_lo, f2_hi) = spectrum.f2_bounds();
     let (f1_lo, f1_hi) = spectrum.f1_bounds();
-    (
-        Axis::new(
+    let f2 = match spectrum.f2_domain {
+        plotx_io::Domain::Time => Axis::new("F2 acquisition time (s)", f2_lo, f2_hi),
+        plotx_io::Domain::Frequency => Axis::new(
             format!("{} chemical shift (ppm)", spectrum.direct.nucleus),
             f2_lo,
             f2_hi,
         )
         .reversed(true),
-        Axis::new(
+    };
+    let f1 = match spectrum.f1_domain {
+        plotx_io::Domain::Time => Axis::new("F1 acquisition time (s)", f1_lo, f1_hi),
+        plotx_io::Domain::Frequency => Axis::new(
             format!("{} chemical shift (ppm)", spectrum.indirect.nucleus),
             f1_lo,
             f1_hi,
         )
         .reversed(true),
-    )
+    };
+    (f2, f1)
 }
 
 fn nmr_scalar_heatmap(
@@ -154,7 +159,9 @@ fn nmr_scalar_heatmap(
     });
     let mut figure = Figure::new(format!("{field_name} — {}", spectrum.source), x, y)
         .with_axis_frame(AxisFrame::Box);
-    figure.lock_aspect = spectrum.direct.nucleus == spectrum.indirect.nucleus;
+    figure.lock_aspect = spectrum.f2_domain == plotx_io::Domain::Frequency
+        && spectrum.f1_domain == plotx_io::Domain::Frequency
+        && spectrum.direct.nucleus == spectrum.indirect.nucleus;
     figure.heatmap = Some(HeatmapGrid {
         rows: spectrum.f1_size,
         cols: spectrum.f2_size,
@@ -188,7 +195,9 @@ fn nmr_contour_base(
         y,
     )
     .with_axis_frame(AxisFrame::Box);
-    figure.lock_aspect = preset.homonuclear();
+    figure.lock_aspect = spectrum.f2_domain == plotx_io::Domain::Frequency
+        && spectrum.f1_domain == plotx_io::Domain::Frequency
+        && preset.homonuclear();
     figure
 }
 

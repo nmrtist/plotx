@@ -113,11 +113,11 @@ static CHART_TYPES: &[ChartDescriptor] = &[
     },
     ChartDescriptor {
         id: "nmr_spectrum",
-        name: "Spectrum",
+        name: "NMR signal",
         recommended_domains: &[DataDomain::Nmr1d],
         required_capabilities: &[
             crate::automation::CAP_FIELD_CURVE_1D,
-            crate::automation::CAP_FIELD_NMR_SPECTRUM,
+            crate::automation::CAP_FIELD_NMR_SIGNAL,
         ],
         needs_column: false,
         build: build_nmr_spectrum,
@@ -361,7 +361,11 @@ impl ChartSpec {
 
 fn build_nmr_spectrum(dataset: &Dataset, _ctx: &ChartContext) -> Option<Figure> {
     let n = dataset.as_nmr()?;
-    Some(build_figure(&n.data, &n.spectrum, &n.peaks.resolve()))
+    Some(build_processed_1d_figure(
+        &n.data,
+        &n.processed,
+        &n.peaks.resolve(),
+    ))
 }
 
 fn build_electrophysiology(dataset: &Dataset, _ctx: &ChartContext) -> Option<Figure> {

@@ -1,7 +1,7 @@
-//! The ordered processing step-list panel: one editable pipeline per axis, with
-//! an FFT anchor separating time- and frequency-domain steps.
+//! Ordered, typed processing pipelines in the shared canvas task dock.
 
 mod editors;
+mod surface;
 
 use egui::{Button, Ui};
 use egui_phosphor::regular as icon;
@@ -10,8 +10,7 @@ use plotx_core::automation::{ResourceRef, TargetRef};
 use plotx_core::state::{Dataset, DatasetId, PhaseAxis, PlotxApp};
 use plotx_processing::{
     Apodization, AxisPipeline, BaselineMethod, BinParams, NormalizeMethod, PhaseParams,
-    ProcessingStep, ReferenceParams, SmoothMethod, StepDomain, StepId, StepKind, StepSource,
-    ZeroFill,
+    ProcessingStep, ReferenceParams, SmoothMethod, StepId, StepKind, StepSource, ZeroFill,
 };
 
 /// A structural change to a step, deferred until after the row loop so the list
@@ -24,44 +23,70 @@ enum RowOp {
     MoveDown,
 }
 
-pub(super) fn processing_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) -> bool {
-    if matches!(app.doc.datasets[di], Dataset::Table(_)) {
-        return false;
-    }
+/// Why a step cannot move one slot in each direction — `None` on a side that is
+/// free. Resolved once per row so the menu can disable the entry and state the
+/// reason in the same place the user reached for.
+#[derive(Clone, Copy)]
+struct MoveBlocks {
+    up: Option<&'static str>,
+    down: Option<&'static str>,
+}
 
-    header_row(app, di, ui);
-    let axis = axis_selector(app, di, ui);
-    ui.separator();
-    step_list(app, di, axis, ui);
-    action_bar(app, di, ui);
-    analysis_card(app, di, ui);
+/// What stops the step at `idx` from moving one slot in `op`'s direction, or
+/// `None` when the move is legal.
+///
+/// Only the physical ends block a one-slot move. Domain reconciliation happens
+/// atomically after the swap: an FFT may move like any other row, while steps
+/// that no longer accept the value at their new position are visibly disabled.
+fn move_block(steps: &[ProcessingStep], idx: usize, op: RowOp) -> Option<&'static str> {
+    match op {
+        RowOp::MoveUp if idx == 0 => return Some("This is already the first step."),
+        RowOp::MoveUp => {}
+        RowOp::MoveDown if idx + 1 >= steps.len() => {
+            return Some("This is already the last step.");
+        }
+        RowOp::MoveDown => {}
+        // Duplicating or deleting a step does not reorder the ones around it.
+        RowOp::Duplicate | RowOp::Delete => return None,
+    }
+    None
+}
+
+pub(super) fn processing_group(_app: &mut PlotxApp, _di: usize, ui: &mut Ui) -> bool {
+    ui.weak("Open Processing in the task dock.");
     false
 }
 
-fn header_row(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
-    let (name, default) = badge(&app.doc.datasets[di]);
-    ui.horizontal(|ui| {
-        ui.strong(name);
-        ui.weak(if default { "· default" } else { "· modified" });
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.menu_button(icon::DOTS_THREE_VERTICAL, |ui| panel_menu(app, di, ui));
-        });
-    });
-}
-
-fn badge(dataset: &Dataset) -> (String, bool) {
-    let default = is_default_processing(dataset);
-    let name = match dataset {
-        Dataset::Nmr(n) => n.data.nucleus.clone(),
-        Dataset::Nmr2D(n) => n.preset.label().to_owned(),
-        Dataset::Table(_) => String::new(),
-        Dataset::Electrophysiology(_) => "Patch clamp".to_owned(),
-        Dataset::Afm(_) => "AFM".to_owned(),
-    };
-    (name, default)
+pub(crate) fn render_task(app: &mut PlotxApp, ui: &mut Ui) {
+    surface::render(app, ui);
 }
 
 fn panel_menu(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
+    ui.label("Recipe");
+    if ui
+        .button(format!("{}  Reset to default", icon::ARROW_ARC_LEFT))
+        .clicked()
+    {
+        reset_to_default(app, di);
+        ui.close();
+    }
+    if ui.button("Load scheme…").clicked() {
+        crate::ui::file_dialogs::load_processing_scheme(app, di);
+        ui.close();
+    }
+    if ui.button("Save scheme…").clicked() {
+        crate::ui::file_dialogs::save_processing_scheme(app, di);
+        ui.close();
+    }
+    if ui.button("Save as template…").clicked() {
+        crate::ui::processing_templates::open_save_template_dialog(app, di);
+        ui.close();
+    }
+    if ui.button("Apply template…").clicked() {
+        crate::ui::processing_templates::open_template_browser(app, di);
+        ui.close();
+    }
+    ui.separator();
     ui.label("Advanced");
     let target = TargetRef {
         resource: ResourceRef::from(app.doc.datasets[di].resource_id()),
@@ -77,121 +102,12 @@ fn panel_menu(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
     }
 }
 
-fn axis_selector(app: &mut PlotxApp, di: usize, ui: &mut Ui) -> PhaseAxis {
-    let axes = app.doc.datasets[di].phase_axes();
-    let mut sel = app.doc.datasets[di].active_phase_axis(app.session.ui.phase_axis);
-    if axes.len() > 1 {
-        ui.horizontal(|ui| {
-            for &a in axes {
-                if ui.selectable_label(sel == a, a.label()).clicked() {
-                    sel = a;
-                }
-            }
-        });
-    }
-    app.session.ui.phase_axis = sel;
-    sel
-}
-
-fn step_list(app: &mut PlotxApp, di: usize, axis: PhaseAxis, ui: &mut Ui) {
-    let Some(steps) = app.doc.datasets[di]
-        .axis_pipeline(axis)
-        .map(|p| p.steps.clone())
-    else {
-        ui.small("This axis has no processing pipeline.");
-        return;
-    };
-
-    let Some(owner) = app.doc.datasets.get(di).map(Dataset::resource_id) else {
-        return;
-    };
-    let last = steps.len().saturating_sub(1);
-    let mut op: Option<(StepId, RowOp)> = None;
-    for (i, step) in steps.iter().enumerate() {
-        if matches!(step.kind, StepKind::Fft) {
-            fft_anchor(ui);
-            continue;
-        }
-        row(app, di, owner, axis, step, i == 0, i == last, ui, &mut op);
-    }
-    if let Some((id, o)) = op {
-        apply_row_op(app, di, axis, id, o);
-    }
-
-    ui.add_space(2.0);
-    add_step_menu(app, di, axis, ui);
-}
-
-fn fft_anchor(ui: &mut Ui) {
-    ui.horizontal(|ui| {
-        ui.add_space(2.0);
-        ui.weak(icon::WAVEFORM);
-        ui.strong("FFT");
-        ui.weak("anchor");
-    });
-    ui.separator();
-}
-
-#[allow(clippy::too_many_arguments)]
-fn row(
-    app: &mut PlotxApp,
-    di: usize,
-    owner: DatasetId,
-    axis: PhaseAxis,
-    step: &ProcessingStep,
-    first: bool,
-    last: bool,
-    ui: &mut Ui,
-    op: &mut Option<(StepId, RowOp)>,
-) {
-    let id = step.id;
-    // Expansion is this panel's own state and nothing else's. A search hit that
-    // wants a step opened sets it in `reveal_property`, once, as the direct
-    // consequence of the user activating the hit; deriving it here from the
-    // property focus instead let the focus's own highlight timer collapse the
-    // row again ~800 ms later — a layout change with no user action behind it —
-    // and, because a focus names a property rather than a step, opened every
-    // step that could carry the setting at once and asked each to scroll.
-    let expanded = app.session.ui.proc_expanded_step == Some((owner, id));
-    ui.horizontal(|ui| {
-        ui.weak(icon::DOTS_SIX_VERTICAL);
-        let target = TargetRef {
-            resource: ResourceRef::from(owner),
-            component: Some(plotx_core::automation::ComponentRef::ProcessingStep(id)),
-        };
-        crate::ui::properties::panel::processing_step_section(app, &target, ui);
-        ui.label(editors::kind_icon(&step.kind));
-        if ui
-            .selectable_label(expanded, editors::kind_label(&step.kind))
-            .clicked()
-        {
-            app.session.ui.proc_expanded_step = if expanded { None } else { Some((owner, id)) };
-        }
-        if step.source == StepSource::User {
-            ui.weak("•");
-        }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.menu_button(icon::DOTS_THREE, |ui| {
-                row_menu(app, owner, id, first, last, op, ui)
-            });
-            ui.weak(editors::kind_summary(&step.kind));
-        });
-    });
-
-    if expanded {
-        ui.indent(("step_editor", id), |ui| {
-            editors::editor(app, di, axis, step, ui);
-        });
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
 fn row_menu(
     app: &mut PlotxApp,
     owner: DatasetId,
     id: StepId,
-    first: bool,
-    last: bool,
+    is_fft: bool,
+    blocks: MoveBlocks,
     op: &mut Option<(StepId, RowOp)>,
     ui: &mut Ui,
 ) {
@@ -199,98 +115,146 @@ fn row_menu(
         app.session.ui.proc_expanded_step = Some((owner, id));
         ui.close();
     }
-    if ui.button(format!("{}  Duplicate", icon::COPY)).clicked() {
+    if ui
+        .add_enabled(!is_fft, Button::new(format!("{}  Duplicate", icon::COPY)))
+        .on_disabled_hover_text("A pipeline has at most one active Time to Frequency transition.")
+        .clicked()
+    {
         *op = Some((id, RowOp::Duplicate));
         ui.close();
     }
-    if ui
-        .add_enabled(!first, Button::new(format!("{}  Move up", icon::ARROW_UP)))
-        .clicked()
-    {
-        *op = Some((id, RowOp::MoveUp));
-        ui.close();
-    }
-    if ui
-        .add_enabled(
-            !last,
-            Button::new(format!("{}  Move down", icon::ARROW_DOWN)),
-        )
-        .clicked()
-    {
-        *op = Some((id, RowOp::MoveDown));
-        ui.close();
-    }
+    move_entry(
+        ui,
+        format!("{}  Move earlier", icon::ARROW_LEFT),
+        blocks.up,
+        id,
+        RowOp::MoveUp,
+        op,
+    );
+    move_entry(
+        ui,
+        format!("{}  Move later", icon::ARROW_RIGHT),
+        blocks.down,
+        id,
+        RowOp::MoveDown,
+        op,
+    );
     if ui.button(format!("{}  Delete", icon::TRASH)).clicked() {
         *op = Some((id, RowOp::Delete));
         ui.close();
     }
 }
 
+/// One move entry, disabled with its reason attached to the entry itself.
+///
+/// A blocked move used to be offered and then silently do nothing, which is
+/// indistinguishable from a broken menu. The reason travels with the control the
+/// user pointed at rather than only reaching the status bar at the other end of
+/// the window.
+fn move_entry(
+    ui: &mut Ui,
+    label: String,
+    block: Option<&'static str>,
+    id: StepId,
+    kind: RowOp,
+    op: &mut Option<(StepId, RowOp)>,
+) {
+    let entry = ui.add_enabled(block.is_none(), Button::new(label));
+    if let Some(reason) = block {
+        entry.on_disabled_hover_text(reason);
+    } else if entry.clicked() {
+        *op = Some((id, kind));
+        ui.close();
+    }
+}
+
 fn add_step_menu(app: &mut PlotxApp, di: usize, axis: PhaseAxis, ui: &mut Ui) {
+    let dataset = &app.doc.datasets[di];
+    let input_domain = match dataset {
+        Dataset::Nmr(dataset) => dataset.data.domain,
+        Dataset::Nmr2D(dataset) => dataset.data.domain,
+        Dataset::Table(_) | Dataset::Electrophysiology(_) | Dataset::Afm(_) => return,
+    };
+    let Some(pipeline) = dataset.axis_pipeline(axis) else {
+        return;
+    };
+    let has_fft = pipeline
+        .steps
+        .iter()
+        .any(|step| matches!(step.kind, StepKind::Fft));
+    let output_domain = pipeline.output_domain(input_domain).unwrap_or(input_domain);
     ui.menu_button(format!("{}  Add step", icon::PLUS), |ui| {
-        ui.label("Time domain");
-        if ui.button("Apodize").clicked() {
-            add_step(
-                app,
-                di,
-                axis,
-                StepKind::Apodize(Apodization::Exponential { lb_hz: 1.0 }),
-            );
-            ui.close();
-        }
-        if ui.button("Zero fill").clicked() {
-            add_step(app, di, axis, StepKind::ZeroFill(ZeroFill::Factor(2)));
-            ui.close();
-        }
-        ui.separator();
-        ui.label("Frequency domain");
-        if ui.button("Phase").clicked() {
-            add_step(app, di, axis, StepKind::Phase(PhaseParams::AUTO));
-            ui.close();
-        }
-        if ui.button("Baseline").clicked() {
-            add_step(app, di, axis, StepKind::Baseline(BaselineMethod::AUTO));
-            ui.close();
-        }
-        if ui.button("Reference").clicked() {
-            add_step(
-                app,
-                di,
-                axis,
-                StepKind::Reference(ReferenceParams {
-                    at_ppm: 0.0,
-                    target_ppm: 0.0,
-                }),
-            );
-            ui.close();
-        }
-        if ui.button("Magnitude").clicked() {
-            add_step(app, di, axis, StepKind::Magnitude);
-            ui.close();
-        }
-        if matches!(app.doc.datasets[di], Dataset::Nmr(_)) {
+        if input_domain == plotx_io::Domain::Time {
+            ui.label("Time domain");
+            if ui.button("Apodize").clicked() {
+                add_step(
+                    app,
+                    di,
+                    axis,
+                    StepKind::Apodize(Apodization::Exponential { lb_hz: 1.0 }),
+                );
+                ui.close();
+            }
+            if ui.button("Zero fill").clicked() {
+                add_step(app, di, axis, StepKind::ZeroFill(ZeroFill::Factor(2)));
+                ui.close();
+            }
+            if !has_fft && ui.button("FFT · Time to Frequency").clicked() {
+                add_step(app, di, axis, StepKind::Fft);
+                ui.close();
+            }
             ui.separator();
-            ui.label("Cleanup");
-            if ui.button("Smoothing").clicked() {
-                add_step(app, di, axis, StepKind::Smooth(SmoothMethod::DEFAULT));
+        }
+        if output_domain == plotx_io::Domain::Frequency {
+            ui.label("Frequency domain");
+            if ui.button("Phase").clicked() {
+                add_step(app, di, axis, StepKind::Phase(PhaseParams::AUTO));
                 ui.close();
             }
-            if ui.button("Normalize").clicked() {
-                add_step(app, di, axis, StepKind::Normalize(NormalizeMethod::MaxPeak));
+            if ui.button("Baseline").clicked() {
+                add_step(app, di, axis, StepKind::Baseline(BaselineMethod::AUTO));
                 ui.close();
             }
-            if ui.button("Binning").clicked() {
-                let params = default_bin_params(app, di);
-                add_step(app, di, axis, StepKind::Bin(params));
+            if ui.button("Reference").clicked() {
+                add_step(
+                    app,
+                    di,
+                    axis,
+                    StepKind::Reference(ReferenceParams {
+                        at_ppm: 0.0,
+                        target_ppm: 0.0,
+                    }),
+                );
                 ui.close();
             }
-            if ui.button("Reverse").clicked() {
-                add_step(app, di, axis, StepKind::Reverse);
+            if ui.button("Magnitude").clicked() {
+                add_step(app, di, axis, StepKind::Magnitude);
                 ui.close();
             }
-            if ui.button("Invert").clicked() {
-                add_step(app, di, axis, StepKind::Invert);
-                ui.close();
+            if matches!(app.doc.datasets[di], Dataset::Nmr(_)) {
+                ui.separator();
+                ui.label("Cleanup");
+                if ui.button("Smoothing").clicked() {
+                    add_step(app, di, axis, StepKind::Smooth(SmoothMethod::DEFAULT));
+                    ui.close();
+                }
+                if ui.button("Normalize").clicked() {
+                    add_step(app, di, axis, StepKind::Normalize(NormalizeMethod::MaxPeak));
+                    ui.close();
+                }
+                if ui.button("Binning").clicked() {
+                    let params = default_bin_params(app, di);
+                    add_step(app, di, axis, StepKind::Bin(params));
+                    ui.close();
+                }
+                if ui.button("Reverse").clicked() {
+                    add_step(app, di, axis, StepKind::Reverse);
+                    ui.close();
+                }
+                if ui.button("Invert").clicked() {
+                    add_step(app, di, axis, StepKind::Invert);
+                    ui.close();
+                }
             }
         }
     });
@@ -300,15 +264,17 @@ fn default_bin_params(app: &PlotxApp, dataset: usize) -> BinParams {
     let Some(Dataset::Nmr(dataset)) = app.doc.datasets.get(dataset) else {
         return BinParams::DEFAULT;
     };
-    let effective_minimum = 1.5 * plotx_processing::cleanup::axis_step(&dataset.spectrum.ppm);
+    let Some(spectrum) = dataset.spectrum() else {
+        return BinParams::DEFAULT;
+    };
+    let effective_minimum = 1.5 * plotx_processing::cleanup::axis_step(&spectrum.ppm);
     BinParams {
         width: BinParams::DEFAULT.width.max(effective_minimum.next_up()),
         ..BinParams::DEFAULT
     }
 }
 
-fn action_bar(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
-    ui.separator();
+fn action_bar(app: &mut PlotxApp, ui: &mut Ui) {
     if app.session.ui.proc_paused && app.has_pending_processing() {
         ui.horizontal(|ui| {
             ui.colored_label(ui.visuals().warn_fg_color, "Changes pending");
@@ -317,28 +283,6 @@ fn action_bar(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
             }
         });
     }
-    ui.horizontal(|ui| {
-        if ui
-            .button(format!("{}  Reset to default", icon::ARROW_ARC_LEFT))
-            .clicked()
-        {
-            reset_to_default(app, di);
-        }
-        if ui.button("Load scheme…").clicked() {
-            crate::ui::file_dialogs::load_processing_scheme(app, di);
-        }
-        if ui.button("Save scheme…").clicked() {
-            crate::ui::file_dialogs::save_processing_scheme(app, di);
-        }
-    });
-    ui.horizontal(|ui| {
-        if ui.button("Save as template…").clicked() {
-            crate::ui::processing_templates::open_save_template_dialog(app, di);
-        }
-        if ui.button("Apply template…").clicked() {
-            crate::ui::processing_templates::open_template_browser(app, di);
-        }
-    });
 }
 
 fn analysis_card(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
@@ -349,11 +293,10 @@ fn analysis_card(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
     if !is_pseudo {
         return;
     }
-    ui.add_space(4.0);
-    egui::Frame::group(ui.style()).show(ui, |ui| {
-        ui.strong(format!("{}  Analysis (DOSY / T1 / T2)", icon::ARROW_RIGHT));
-        ui.small("Use Region analysis to track peaks into a series table.");
-    });
+    ui.small(format!(
+        "{}  Pseudo-2D analysis uses Region analysis to track peaks into a series table.",
+        icon::ARROW_RIGHT
+    ));
 }
 
 fn state_pipe(state: &mut DatasetProcessingState, axis: PhaseAxis) -> Option<&mut AxisPipeline> {
@@ -371,6 +314,12 @@ fn state_pipe(state: &mut DatasetProcessingState, axis: PhaseAxis) -> Option<&mu
 fn apply_row_op(app: &mut PlotxApp, di: usize, axis: PhaseAxis, id: StepId, op: RowOp) {
     let Some(dataset) = app.doc.datasets.get(di) else {
         return;
+    };
+    let owner = dataset.resource_id();
+    let input_domain = match dataset {
+        Dataset::Nmr(dataset) => dataset.data.domain,
+        Dataset::Nmr2D(dataset) => dataset.data.domain,
+        Dataset::Table(_) | Dataset::Electrophysiology(_) | Dataset::Afm(_) => return,
     };
     let before = DatasetProcessingState::from_dataset(dataset);
     let mut after = before.clone();
@@ -400,22 +349,36 @@ fn apply_row_op(app: &mut PlotxApp, di: usize, axis: PhaseAxis, id: StepId, op: 
             RowOp::Delete => {
                 pipe.steps.remove(idx);
             }
-            RowOp::MoveUp => {
-                if idx > 0
-                    && !matches!(pipe.steps[idx - 1].kind, StepKind::Fft)
-                    && !matches!(pipe.steps[idx].kind, StepKind::Fft)
-                {
-                    pipe.steps.swap(idx, idx - 1);
+            RowOp::MoveUp | RowOp::MoveDown => {
+                if let Some(reason) = move_block(&pipe.steps, idx, op) {
+                    let reason = reason.to_owned();
+                    app.session.status = reason.clone();
+                    app.session.ui.processing_surface_feedback = Some((owner, reason));
+                    return;
                 }
+                app.session.ui.processing_surface_feedback = None;
+                let target = match op {
+                    RowOp::MoveUp => idx - 1,
+                    _ => idx + 1,
+                };
+                pipe.steps.swap(idx, target);
             }
-            RowOp::MoveDown => {
-                if idx + 1 < pipe.steps.len()
-                    && !matches!(pipe.steps[idx + 1].kind, StepKind::Fft)
-                    && !matches!(pipe.steps[idx].kind, StepKind::Fft)
-                {
-                    pipe.steps.swap(idx, idx + 1);
-                }
-            }
+        }
+        let disabled = pipe.reconcile_domains(input_domain);
+        if disabled.is_empty() {
+            app.session.ui.processing_surface_feedback = None;
+        } else {
+            let labels = disabled
+                .iter()
+                .filter_map(|id| pipe.steps.iter().find(|step| step.id == *id))
+                .map(|step| step.kind.label())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let message = format!(
+                "Disabled {labels}: the reordered pipeline no longer provides its required input domain."
+            );
+            app.session.status = message.clone();
+            app.session.ui.processing_surface_feedback = Some((owner, message));
         }
     }
     app.commit_processing_edit(di, before, after);
@@ -444,9 +407,16 @@ fn add_step(app: &mut PlotxApp, di: usize, axis: PhaseAxis, kind: StepKind) {
         let fft = pipe
             .steps
             .iter()
-            .position(|s| matches!(s.kind, StepKind::Fft));
-        let at = match (kind.domain(), fft) {
-            (StepDomain::Time, Some(i)) => i,
+            .position(|step| step.enabled && matches!(step.kind, StepKind::Fft));
+        let at = match &kind {
+            StepKind::Fft => pipe
+                .steps
+                .iter()
+                .position(|step| step.kind.input_domain() == plotx_io::Domain::Frequency)
+                .unwrap_or(pipe.steps.len()),
+            kind if kind.input_domain() == plotx_io::Domain::Time => {
+                fft.unwrap_or(pipe.steps.len())
+            }
             _ => pipe.steps.len(),
         };
         pipe.steps
@@ -544,5 +514,111 @@ mod tests {
         assert!(is_default_processing(&dataset));
         dataset.as_nmr2d_mut().unwrap().group_delay_correct = false;
         assert!(!is_default_processing(&dataset));
+    }
+
+    /// `apodize, zero_fill, FFT, phase, baseline` — the factory time-domain
+    /// recipe, whose shape is what the boundary rule is about.
+    fn recipe() -> Vec<ProcessingStep> {
+        AxisPipeline::default_1d().steps
+    }
+
+    #[test]
+    fn fft_and_neighbours_can_move_like_other_steps() {
+        let steps = recipe();
+        let fft = steps
+            .iter()
+            .position(|step| matches!(step.kind, StepKind::Fft))
+            .expect("the factory recipe transforms");
+
+        assert_eq!(move_block(&steps, fft - 1, RowOp::MoveDown), None);
+        assert_eq!(move_block(&steps, fft, RowOp::MoveUp), None);
+        assert_eq!(move_block(&steps, fft, RowOp::MoveDown), None);
+        assert_eq!(move_block(&steps, fft + 1, RowOp::MoveUp), None);
+    }
+
+    #[test]
+    fn moves_within_one_domain_stay_legal() {
+        let steps = recipe();
+        let fft = steps
+            .iter()
+            .position(|step| matches!(step.kind, StepKind::Fft))
+            .expect("the factory recipe transforms");
+
+        assert_eq!(move_block(&steps, 1, RowOp::MoveUp), None);
+        assert_eq!(move_block(&steps, fft + 1, RowOp::MoveDown), None);
+    }
+
+    #[test]
+    fn deleting_fft_switches_canvas_data_to_time_domain() {
+        let mut app = PlotxApp::new();
+        app.doc
+            .datasets
+            .push(crate::ui::properties::fixture::time_domain_1d());
+
+        let axis = PhaseAxis::Direct;
+        let steps = app.doc.datasets[0]
+            .axis_pipeline(axis)
+            .expect("a time-domain acquisition has a direct-axis pipeline")
+            .steps
+            .clone();
+        let fft = steps
+            .iter()
+            .find(|step| matches!(step.kind, StepKind::Fft))
+            .expect("the factory recipe transforms")
+            .id;
+        let undo_before = app.session.undo_stack.len();
+
+        apply_row_op(&mut app, 0, axis, fft, RowOp::Delete);
+
+        let dataset = app.doc.datasets[0].as_nmr().unwrap();
+        assert_eq!(dataset.output_domain(), plotx_io::Domain::Time);
+        assert!(dataset.time_trace().is_some());
+        assert!(
+            dataset
+                .pipeline
+                .steps
+                .iter()
+                .filter(|step| step.enabled)
+                .all(|step| step.kind.input_domain() == plotx_io::Domain::Time)
+        );
+        assert_eq!(app.session.undo_stack.len(), undo_before + 1);
+    }
+
+    #[test]
+    fn a_legal_move_commits_exactly_one_undo_record() {
+        let mut app = PlotxApp::new();
+        app.doc
+            .datasets
+            .push(crate::ui::properties::fixture::time_domain_1d());
+        let axis = PhaseAxis::Direct;
+        let before = app.doc.datasets[0]
+            .axis_pipeline(axis)
+            .expect("pipeline")
+            .steps
+            .clone();
+        let moved = before[1].id;
+        let undo_before = app.session.undo_stack.len();
+
+        apply_row_op(&mut app, 0, axis, moved, RowOp::MoveUp);
+
+        let after = &app.doc.datasets[0]
+            .axis_pipeline(axis)
+            .expect("pipeline")
+            .steps;
+        assert_eq!(after[0].id, moved);
+        assert_eq!(app.session.undo_stack.len(), undo_before + 1);
+        assert!(app.session.ui.processing_surface_feedback.is_none());
+    }
+
+    #[test]
+    fn the_ends_of_the_pipeline_say_which_end_they_are() {
+        let steps = recipe();
+        let last = steps.len() - 1;
+        assert!(
+            move_block(&steps, 0, RowOp::MoveUp).is_some_and(|reason| reason.contains("first")),
+        );
+        assert!(
+            move_block(&steps, last, RowOp::MoveDown).is_some_and(|reason| reason.contains("last")),
+        );
     }
 }

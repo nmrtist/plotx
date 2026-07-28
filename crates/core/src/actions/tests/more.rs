@@ -194,7 +194,13 @@ fn axis_projections_attach_and_project_survive_undo() {
     let fig = app.doc.canvases[ci].objects[0].plot().unwrap().figure();
     let top = fig.top_projection.as_ref().expect("attached top trace");
     let left = fig.left_projection.as_ref().expect("sum left trace");
-    let expected = app.doc.datasets[0].as_nmr().unwrap().spectrum.ppm.len();
+    let expected = app.doc.datasets[0]
+        .as_nmr()
+        .unwrap()
+        .spectrum()
+        .unwrap()
+        .ppm
+        .len();
     assert_eq!(top.points.len(), expected);
     let f1 = match &app.doc.datasets[1].as_nmr2d().unwrap().processed {
         plotx_processing::Processed2D::Ft(s) => s.f1_size,

@@ -23,8 +23,9 @@ standard pipeline — apodization, zero filling, FFT, phase correction, and
 baseline correction — with automatic phasing enabled, so in most cases the
 spectrum on screen is already usable.
 
-To adjust it, edit the steps in the processing panel: every change is
-previewed live and can be undone. Two edits cover most sessions:
+The tab opens the Processing card at the upper right of the canvas, listing
+those steps in order. Edit them there: every change is previewed live and can
+be undone. Two edits cover most sessions:
 
 - If the baseline rolls, enable the **Baseline correction** step.
 - If the automatic phase is off, open the **Phase correction** step and adjust

@@ -1,7 +1,20 @@
 use super::*;
+use crate::state::PhaseAxis;
 use plotx_processing::ProcessingStep;
 
 impl DatasetProcessingState {
+    pub(crate) fn axis_pipeline_mut(&mut self, axis: PhaseAxis) -> Option<&mut AxisPipeline> {
+        match self {
+            Self::Nmr { pipeline, .. } if axis == PhaseAxis::Direct => Some(pipeline),
+            Self::Nmr2D { params, .. } => match axis {
+                PhaseAxis::F2 => Some(&mut params.f2),
+                PhaseAxis::F1 => Some(&mut params.f1),
+                PhaseAxis::Direct => None,
+            },
+            Self::Nmr { .. } | Self::Table | Self::Electrophysiology(_) | Self::Afm => None,
+        }
+    }
+
     pub(crate) fn group_delay_correct_mut(&mut self) -> Option<&mut bool> {
         match self {
             Self::Nmr {
@@ -66,6 +79,12 @@ impl DatasetProcessingState {
                     group_delay_correct,
                 },
             ) => {
+                pipeline.output_domain(n.data.domain).map_err(|error| {
+                    ProcessingStateError::InvalidPipeline {
+                        axis: "direct",
+                        details: error.to_string(),
+                    }
+                })?;
                 let full = plotx_processing::needs_retransform(
                     pipeline,
                     &n.pipeline,
@@ -93,6 +112,18 @@ impl DatasetProcessingState {
                     group_delay_correct,
                 },
             ) => {
+                params.f2.output_domain(n.data.domain).map_err(|error| {
+                    ProcessingStateError::InvalidPipeline {
+                        axis: "F2",
+                        details: error.to_string(),
+                    }
+                })?;
+                params.f1.output_domain(n.data.domain).map_err(|error| {
+                    ProcessingStateError::InvalidPipeline {
+                        axis: "F1",
+                        details: error.to_string(),
+                    }
+                })?;
                 let full = plotx_processing::needs_retransform_2d(params, &n.params);
                 let full = full || *group_delay_correct != n.group_delay_correct;
                 n.params = params.clone();
@@ -113,7 +144,7 @@ impl DatasetProcessingState {
                 Ok(ProcessingRebuild::Rebuilt)
             }
             (Dataset::Afm(_), Self::Afm) => Ok(ProcessingRebuild::Unchanged),
-            (dataset, state) => Err(ProcessingStateError {
+            (dataset, state) => Err(ProcessingStateError::KindMismatch {
                 dataset_kind: dataset.kind_label(),
                 state_kind: state.kind_label(),
             }),
@@ -139,8 +170,12 @@ pub enum ProcessingRebuild {
 }
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
-#[error("cannot apply {state_kind} processing state to {dataset_kind} dataset")]
-pub struct ProcessingStateError {
-    pub dataset_kind: &'static str,
-    pub state_kind: &'static str,
+pub enum ProcessingStateError {
+    #[error("cannot apply {state_kind} processing state to {dataset_kind} dataset")]
+    KindMismatch {
+        dataset_kind: &'static str,
+        state_kind: &'static str,
+    },
+    #[error("cannot apply invalid {axis} processing pipeline: {details}")]
+    InvalidPipeline { axis: &'static str, details: String },
 }

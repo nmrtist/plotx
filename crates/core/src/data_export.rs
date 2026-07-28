@@ -168,7 +168,7 @@ impl DataExportAvailability {
 
 fn processed_data_available(dataset: &Dataset) -> bool {
     match dataset {
-        Dataset::Nmr(nmr) => !nmr.spectrum.is_empty(),
+        Dataset::Nmr(nmr) => !nmr.processed.is_empty(),
         Dataset::Nmr2D(nmr) => match &nmr.processed {
             Processed2D::Ft(spectrum) => !spectrum.is_empty(),
             Processed2D::Stack(stack) => {
@@ -266,7 +266,8 @@ pub struct DataExportSnapshot {
 #[derive(Clone)]
 enum SnapshotData {
     Nmr1D {
-        ppm: Vec<f64>,
+        axis: Vec<f64>,
+        axis_label: &'static str,
         values: Vec<Complex64>,
     },
     True2D(Arc<Spectrum2D>),
@@ -363,9 +364,11 @@ impl DataExportSnapshot {
     ) -> Result<(), DataExportError> {
         let mut writer = DelimitedWriter::new(output, delimiter);
         match &self.data {
-            SnapshotData::Nmr1D { ppm, values } => {
-                write_1d(&mut writer, ppm, values, self.request.channel)?
-            }
+            SnapshotData::Nmr1D {
+                axis,
+                axis_label,
+                values,
+            } => write_1d(&mut writer, axis, axis_label, values, self.request.channel)?,
             SnapshotData::True2D(spectrum) => write_true_2d(&mut writer, spectrum, self.request)?,
             SnapshotData::Pseudo2D {
                 spectrum,
@@ -403,10 +406,17 @@ impl DataExportSnapshot {
 
 fn capture_processed(dataset: &Dataset) -> Result<SnapshotData, DataExportError> {
     match dataset {
-        Dataset::Nmr(nmr) => Ok(SnapshotData::Nmr1D {
-            ppm: nmr.spectrum.ppm.clone(),
-            values: nmr.spectrum.values.clone(),
-        }),
+        Dataset::Nmr(nmr) => {
+            let (axis, axis_label) = match &nmr.processed {
+                plotx_processing::Processed1D::Time(trace) => (trace.time_s.clone(), "time_s"),
+                plotx_processing::Processed1D::Frequency(spectrum) => (spectrum.ppm.clone(), "ppm"),
+            };
+            Ok(SnapshotData::Nmr1D {
+                axis,
+                axis_label,
+                values: nmr.processed.values().to_vec(),
+            })
+        }
         Dataset::Nmr2D(nmr) => match &nmr.processed {
             Processed2D::Ft(spectrum) => Ok(SnapshotData::True2D(Arc::clone(spectrum))),
             Processed2D::Stack(spectrum) => {

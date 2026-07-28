@@ -43,7 +43,7 @@ pub const CAP_FIELD_BOUNDED: &str = "field.bounded";
 /// Provider semantics consumed only by legacy chart builders. They keep those
 /// builders from masquerading as universally applicable curve/grid encodings.
 pub const CAP_FIELD_TABLE: &str = "field.tabular";
-pub const CAP_FIELD_NMR_SPECTRUM: &str = "field.nmr.spectrum";
+pub const CAP_FIELD_NMR_SIGNAL: &str = "field.nmr.signal";
 pub const CAP_FIELD_NMR_CONTOUR: &str = "field.nmr.contour";
 pub const CAP_FIELD_NMR_STACK: &str = "field.nmr.stack";
 pub const CAP_FIELD_SWEEP_COLLECTION: &str = "field.sweep_collection";
@@ -134,8 +134,11 @@ impl<'a> ProjectResourceProvider<'a> {
                 )
             }
             Dataset::Nmr(nmr) => (
-                vec![nmr.spectrum.values.len()],
-                vec!["ppm".to_owned()],
+                vec![nmr.processed.values().len()],
+                vec![match nmr.output_domain() {
+                    plotx_io::Domain::Time => "s".to_owned(),
+                    plotx_io::Domain::Frequency => "ppm".to_owned(),
+                }],
                 Vec::new(),
             ),
             Dataset::Nmr2D(nmr) => (
@@ -619,8 +622,8 @@ fn preview_dataset(
         }
         Dataset::Nmr(nmr) => {
             let values = nmr
-                .spectrum
-                .values
+                .processed
+                .values()
                 .iter()
                 .map(|value| value.re)
                 .collect::<Vec<_>>();

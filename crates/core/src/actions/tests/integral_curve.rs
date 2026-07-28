@@ -5,7 +5,7 @@ use crate::{DisplayModeLabel, IntegralResult};
 
 fn sample_integral(id: u64, normalized_area: f64, reference_value: Option<f64>) -> IntegralResult {
     let app = sample_app();
-    let spectrum = &app.doc.datasets[0].as_nmr().unwrap().spectrum;
+    let spectrum = app.doc.datasets[0].as_nmr().unwrap().spectrum().unwrap();
     let (lo, hi) = spectrum.ppm_bounds();
     IntegralResult {
         id,
@@ -52,6 +52,56 @@ fn set_integrals_apply_undo_redo_keeps_all_primary_figures_synced() {
             .len()
             == 1
     }));
+}
+
+#[test]
+fn removing_fft_keeps_integral_definitions_but_hides_stale_curves() {
+    use crate::actions::DatasetProcessingState;
+
+    let mut app = sample_app();
+    let integral = sample_integral(7, 3.0, Some(3.0));
+    app.execute_action(Action::set_integrals(
+        dataset_id(&app, 0),
+        Vec::new(),
+        vec![integral],
+    ));
+    let before = DatasetProcessingState::from_dataset(&app.doc.datasets[0]);
+    let mut after = before.clone();
+    let DatasetProcessingState::Nmr { pipeline, .. } = &mut after else {
+        unreachable!();
+    };
+    pipeline.steps.retain(|step| {
+        !matches!(
+            step.kind,
+            plotx_processing::StepKind::Fft
+                | plotx_processing::StepKind::Phase(_)
+                | plotx_processing::StepKind::Baseline(_)
+                | plotx_processing::StepKind::Reference(_)
+                | plotx_processing::StepKind::Magnitude
+                | plotx_processing::StepKind::Smooth(_)
+                | plotx_processing::StepKind::Normalize(_)
+                | plotx_processing::StepKind::Bin(_)
+                | plotx_processing::StepKind::Reverse
+                | plotx_processing::StepKind::Invert
+        )
+    });
+    app.execute_action(Action::update_dataset_processing(
+        dataset_id(&app, 0),
+        before,
+        after,
+    ));
+
+    let nmr = app.doc.datasets[0].as_nmr().unwrap();
+    assert_eq!(nmr.output_domain(), plotx_io::Domain::Time);
+    assert_eq!(nmr.integrals.len(), 1);
+    assert!(
+        app.doc.canvases[0].objects[0]
+            .plot()
+            .unwrap()
+            .figure()
+            .integral_curves
+            .is_empty()
+    );
 }
 
 #[test]

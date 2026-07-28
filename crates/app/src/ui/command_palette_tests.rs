@@ -401,6 +401,9 @@ fn revealing_a_step_setting_opens_that_step_and_leaves_it_open() {
         .datasets
         .push(crate::ui::properties::fixture::time_domain_2d());
     app.set_active_dataset(Some(0));
+    let owner = app.doc.datasets[0].resource_id();
+    app.session.ui.processing_task_dataset = None;
+    app.session.ui.task_dock_active = None;
 
     let expected = properties::discovery::targets_for_property(&app, apodization::KIND)
         .into_iter()
@@ -411,6 +414,10 @@ fn revealing_a_step_setting_opens_that_step_and_leaves_it_open() {
         .expect("the time-domain factory recipe has an apodization step");
 
     reveal_property(&mut app, apodization::KIND, 10.0);
+    assert!(
+        app.session.ui.processing_task_dataset == Some(owner),
+        "a processing reveal opens the one canonical editing surface"
+    );
     assert_eq!(
         app.session.ui.proc_expanded_step.map(|(_, step)| step),
         Some(expected),

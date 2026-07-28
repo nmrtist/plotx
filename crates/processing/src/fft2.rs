@@ -1,4 +1,4 @@
-use crate::fft::apply_apodization;
+use crate::fft::{apply_time_steps, time_step_output_len};
 use crate::phase::apply_slice;
 use crate::{AxisMeta, Params2D, Spectrum2D, StackSpectrum};
 use num_complex::Complex64;
@@ -45,6 +45,8 @@ pub fn transform_cancellable(
                 data.indirect.observe_freq_mhz,
                 data.indirect.carrier_ppm,
             ),
+            f2_domain: Domain::Frequency,
+            f1_domain: Domain::Frequency,
             data: data.data.clone(),
             f2_size: cols,
             f1_size: rows,
@@ -54,27 +56,32 @@ pub fn transform_cancellable(
         });
     }
 
+    let f2_domain = params
+        .f2
+        .output_domain(data.domain)
+        .expect("live F2 pipeline is domain-valid");
+    let f1_domain = params
+        .f1
+        .output_domain(data.domain)
+        .expect("live F1 pipeline is domain-valid");
     let mut planner = FftPlanner::<f64>::new();
 
-    let f2_apo = params.f2.apodizations();
     let f2_dt = sample_interval(data.direct.spectral_width_hz);
-    let f2_n = params.f2.zero_fill().target(cols);
-    let f2_fft = planner.plan_fft_forward(f2_n);
+    let f2_n = time_step_output_len(cols, &params.f2);
+    let f2_fft = (data.domain == Domain::Time && f2_domain == Domain::Frequency)
+        .then(|| planner.plan_fft_forward(f2_n));
     let mut rows_ft: Vec<Vec<Complex64>> = Vec::with_capacity(rows);
     for r in 0..rows {
         if cancelled() {
             return None;
         }
-        let mut buf: Vec<Complex64> = data.row(r).to_vec();
-        for apo in &f2_apo {
-            apply_apodization(&mut buf, *apo, f2_dt);
-        }
-        buf.resize(f2_n, Complex64::new(0.0, 0.0));
-        if data.domain == Domain::Time {
-            f2_fft.process(&mut buf);
+        let mut buf = apply_time_steps(data.row(r).to_vec(), &params.f2, f2_dt);
+        if let Some(fft) = &f2_fft {
+            fft.process(&mut buf);
             remove_group_delay(&mut buf, data.direct.group_delay);
+            buf = fftshift(&buf);
         }
-        rows_ft.push(fftshift(&buf));
+        rows_ft.push(buf);
     }
 
     // For NUS the acquired increments are reconstructed onto the full grid
@@ -88,10 +95,10 @@ pub fn transform_cancellable(
         return None;
     }
     let f1_inc = t1_rows.len();
-    let f1_apo = params.f1.apodizations();
     let f1_dt = sample_interval(data.indirect.spectral_width_hz);
-    let f1_n = params.f1.zero_fill().target(f1_inc);
-    let f1_fft = planner.plan_fft_forward(f1_n);
+    let f1_n = time_step_output_len(f1_inc, &params.f1);
+    let f1_fft = (data.domain == Domain::Time && f1_domain == Domain::Frequency)
+        .then(|| planner.plan_fft_forward(f1_n));
 
     let mut out = vec![Complex64::new(0.0, 0.0); f1_n * f2_n];
     let mut col: Vec<Complex64> = Vec::with_capacity(f1_n);
@@ -103,33 +110,24 @@ pub fn transform_cancellable(
         for row in t1_rows.iter() {
             col.push(row[c]);
         }
-        for apo in &f1_apo {
-            apply_apodization(&mut col, *apo, f1_dt);
+        col = apply_time_steps(std::mem::take(&mut col), &params.f1, f1_dt);
+        if let Some(fft) = &f1_fft {
+            fft.process(&mut col);
+            col = fftshift(&col);
         }
-        col.resize(f1_n, Complex64::new(0.0, 0.0));
-        f1_fft.process(&mut col);
-        let shifted = fftshift(&col);
-        for (k, v) in shifted.into_iter().enumerate() {
+        for (k, v) in col.iter().copied().enumerate() {
             out[k * f2_n + c] = v;
         }
     }
 
-    let f2_ppm = ppm_axis(
-        f2_n,
-        data.direct.spectral_width_hz,
-        data.direct.observe_freq_mhz,
-        data.direct.carrier_ppm,
-    );
-    let f1_ppm = ppm_axis(
-        f1_n,
-        data.indirect.spectral_width_hz,
-        data.indirect.observe_freq_mhz,
-        data.indirect.carrier_ppm,
-    );
+    let f2_ppm = coordinate_axis(f2_domain, f2_n, &data.direct);
+    let f1_ppm = coordinate_axis(f1_domain, f1_n, &data.indirect);
 
     Some(Spectrum2D {
         f2_ppm,
         f1_ppm,
+        f2_domain,
+        f1_domain,
         data: out,
         f2_size: f2_n,
         f1_size: f1_n,
@@ -214,18 +212,24 @@ pub fn stack_cancellable(
     let cols = data.cols;
     let rows = data.rows;
     if cols == 0 || rows == 0 {
+        let direct_domain = params.f2.output_domain(data.domain).unwrap_or(data.domain);
         return Some(StackSpectrum {
             ppm: Vec::new(),
+            direct_domain,
             traces: Vec::new(),
             direct: AxisMeta::from(&data.direct),
             source: data.source.clone(),
         });
     }
-    let f2_apo = params.f2.apodizations();
+    let direct_domain = params
+        .f2
+        .output_domain(data.domain)
+        .expect("live direct-axis pipeline is domain-valid");
     let f2_dt = sample_interval(data.direct.spectral_width_hz);
-    let f2_n = params.f2.zero_fill().target(cols);
+    let f2_n = time_step_output_len(cols, &params.f2);
     let mut planner = FftPlanner::<f64>::new();
-    let fft = planner.plan_fft_forward(f2_n);
+    let fft = (data.domain == Domain::Time && direct_domain == Domain::Frequency)
+        .then(|| planner.plan_fft_forward(f2_n));
 
     // Unphased traces; the absorptive phase is derived by `reapply_phase_stack`.
     let mut traces = Vec::with_capacity(rows);
@@ -233,27 +237,20 @@ pub fn stack_cancellable(
         if cancelled() {
             return None;
         }
-        let mut buf: Vec<Complex64> = data.row(r).to_vec();
-        for apo in &f2_apo {
-            apply_apodization(&mut buf, *apo, f2_dt);
-        }
-        buf.resize(f2_n, Complex64::new(0.0, 0.0));
-        if data.domain == Domain::Time {
+        let mut buf = apply_time_steps(data.row(r).to_vec(), &params.f2, f2_dt);
+        if let Some(fft) = &fft {
             fft.process(&mut buf);
             remove_group_delay(&mut buf, data.direct.group_delay);
+            buf = fftshift(&buf);
         }
-        traces.push(fftshift(&buf));
+        traces.push(buf);
     }
 
-    let ppm = ppm_axis(
-        f2_n,
-        data.direct.spectral_width_hz,
-        data.direct.observe_freq_mhz,
-        data.direct.carrier_ppm,
-    );
+    let ppm = coordinate_axis(direct_domain, f2_n, &data.direct);
 
     Some(StackSpectrum {
         ppm,
+        direct_domain,
         traces,
         direct: AxisMeta::from(&data.direct),
         source: data.source.clone(),
@@ -333,6 +330,21 @@ fn ppm_axis(n: usize, sw_hz: f64, obs_mhz: f64, carrier_ppm: f64) -> Vec<f64> {
         .collect()
 }
 
+fn coordinate_axis(domain: Domain, count: usize, dim: &plotx_io::Dim) -> Vec<f64> {
+    match domain {
+        Domain::Time => {
+            let dwell = dim.dwell_s();
+            (0..count).map(|index| index as f64 * dwell).collect()
+        }
+        Domain::Frequency => ppm_axis(
+            count,
+            dim.spectral_width_hz,
+            dim.observe_freq_mhz,
+            dim.carrier_ppm,
+        ),
+    }
+}
+
 /// Estimate a zero-order `(phase0, phase1)` that makes the highest-energy
 /// trace's tallest peak purely absorptive-positive: `phase0 = arg(peak)`,
 /// `phase1 = 0`. Applied uniformly, this phases the dominant resonance — the one
@@ -388,6 +400,8 @@ fn empty(data: &NmrData2D) -> Spectrum2D {
     Spectrum2D {
         f2_ppm: Vec::new(),
         f1_ppm: Vec::new(),
+        f2_domain: data.domain,
+        f1_domain: data.domain,
         data: Vec::new(),
         f2_size: 0,
         f1_size: 0,
@@ -517,5 +531,23 @@ mod tests {
         };
         assert!((peak_ppm(&s.traces[0]) - 2.0).abs() < 0.05);
         assert!((peak_ppm(&s.traces[10]) - 2.0).abs() < 0.05);
+    }
+
+    #[test]
+    fn stack_does_not_fft_imported_frequency_rows_again() {
+        let mut data = single_peak_2d(2.0, 1.0);
+        data.domain = Domain::Frequency;
+        data.rows = 2;
+        data.cols = 3;
+        data.data = (0..6)
+            .map(|value| Complex64::new(value as f64, -(value as f64)))
+            .collect();
+        let params = Params2D::frequency_domain(crate::Preset2D::Dosy);
+
+        let result = stack(&data, &params);
+
+        assert_eq!(result.direct_domain, Domain::Frequency);
+        assert_eq!(result.traces[0], data.row(0));
+        assert_eq!(result.traces[1], data.row(1));
     }
 }

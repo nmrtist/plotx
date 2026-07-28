@@ -6,7 +6,7 @@
 
 use egui::{Area, Button, Order, Ui};
 use egui_phosphor::regular as icon;
-use plotx_core::state::{Dataset, PlotxApp, StatDraft};
+use plotx_core::state::{Dataset, PlotxApp, StatDraft, TaskDockTab};
 
 use super::statistics_config::{self, column_names};
 use super::task_card::{self, TaskCardGeometry};
@@ -30,18 +30,20 @@ pub(super) fn statistics_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) -> bo
     false
 }
 
-/// The one way to show the Statistics card. Shares the canvas anchor with the
-/// other task cards, so opening it retires them.
+/// Opens or activates Statistics without discarding sibling task state.
 pub(crate) fn open_task(app: &mut PlotxApp, di: usize) {
     if !matches!(app.doc.datasets.get(di), Some(Dataset::Table(_))) {
         return;
     }
     ensure_draft(app, di);
-    app.session.ui.close_task_cards();
     app.session.ui.stat_task_dataset = Some(di);
+    app.session.ui.open_task_tab(TaskDockTab::Statistics);
 }
 
 pub(crate) fn render_task(app: &mut PlotxApp, host: &mut Ui) {
+    if !task_card::is_active(app, TaskDockTab::Statistics) {
+        return;
+    }
     let Some(di) = app.session.ui.stat_task_dataset else {
         return;
     };
@@ -70,6 +72,9 @@ pub(crate) fn render_task(app: &mut PlotxApp, host: &mut Ui) {
         .show(host.ctx(), |ui| {
             ui.set_width(width);
             crate::ui::card_frame(dark, egui::Margin::ZERO).show(ui, |ui| {
+                if task_card::tab_bar(app, TaskDockTab::Statistics, ui) {
+                    ui.separator();
+                }
                 let table = app.doc.datasets[di].as_table().unwrap();
                 let columns = table.numeric_analysis_columns().len();
                 let points = table.typed_state.envelope.revision.snapshot.row_count;
@@ -120,8 +125,7 @@ pub(crate) fn render_task(app: &mut PlotxApp, host: &mut Ui) {
         app.session.ui.stat_task_collapsed = !collapsed;
     }
     if close {
-        app.session.ui.stat_task_dataset = None;
-        app.session.ui.stat_task_collapsed = false;
+        app.session.ui.close_task_tab(TaskDockTab::Statistics);
     }
 }
 

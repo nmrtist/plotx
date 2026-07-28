@@ -59,7 +59,8 @@ impl PlotxApp {
                     .datasets
                     .get(di)
                     .and_then(Dataset::as_nmr)
-                    .is_some_and(|n| !n.spectrum.is_empty())
+                    .and_then(NmrDataset::spectrum)
+                    .is_some_and(|spectrum| !spectrum.is_empty())
             })
             .collect()
     }
@@ -82,7 +83,8 @@ impl PlotxApp {
         let ref_nucleus = reference
             .and_then(|di| self.doc.datasets.get(di))
             .and_then(Dataset::as_nmr)
-            .map(|n| n.spectrum.nucleus.trim().to_owned())
+            .and_then(NmrDataset::spectrum)
+            .map(|spectrum| spectrum.nucleus.trim().to_owned())
             .unwrap_or_default();
 
         let mut rows: Vec<AlignRow> = self
@@ -90,17 +92,22 @@ impl PlotxApp {
             .into_iter()
             .map(|di| {
                 let outcome = match self.doc.datasets.get(di) {
-                    Some(Dataset::Nmr(n)) if n.spectrum.is_empty() => {
-                        AlignOutcome::Skip("Empty spectrum.".into())
+                    Some(Dataset::Nmr(n)) if n.spectrum().is_none() => {
+                        AlignOutcome::Skip("Pipeline output is an FID, not a spectrum.".into())
                     }
-                    Some(Dataset::Nmr(n)) if n.spectrum.nucleus.trim() != ref_nucleus => {
+                    Some(Dataset::Nmr(n))
+                        if n.spectrum()
+                            .is_some_and(|spectrum| spectrum.nucleus.trim() != ref_nucleus) =>
+                    {
+                        let nucleus = &n.spectrum().expect("guarded spectrum").nucleus;
                         AlignOutcome::Skip(format!(
                             "Nucleus {} differs from {}.",
-                            n.spectrum.nucleus, ref_nucleus
+                            nucleus, ref_nucleus
                         ))
                     }
                     Some(Dataset::Nmr(n)) => {
-                        match reference_peak(&n.spectrum.ppm, &n.spectrum.real(), lo, hi) {
+                        let spectrum = n.spectrum().expect("non-spectrum handled above");
+                        match reference_peak(&spectrum.ppm, &spectrum.real(), lo, hi) {
                             Some(ppm) => AlignOutcome::Peak { ppm, shift: None },
                             None => AlignOutcome::Skip("No significant peak in the window.".into()),
                         }

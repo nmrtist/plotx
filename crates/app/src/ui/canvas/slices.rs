@@ -119,16 +119,16 @@ pub(crate) fn paint_slice(
         Processed2D::Stack(s) => (s.slice(cursor.index), true, DisplayMode::Real),
     };
 
-    if let Some(ppm) = slice.position_ppm {
+    if let Some(position) = slice.position {
         if along_x {
-            let py = y_to_screen(ppm, plot, fig.y.min, fig.y.span(), fig.y.reversed)
+            let py = y_to_screen(position, plot, fig.y.min, fig.y.span(), fig.y.reversed)
                 .clamp(plot.top, plot.bottom());
             painter.line_segment(
                 [Pos2::new(plot.left, py), Pos2::new(plot.right(), py)],
                 Stroke::new(1.2_f32, SLICE_COLOR),
             );
         } else {
-            let px = x_to_screen(ppm, plot, fig.x.min, fig.x.span(), fig.x.reversed)
+            let px = x_to_screen(position, plot, fig.x.min, fig.x.span(), fig.x.reversed)
                 .clamp(plot.left, plot.right());
             painter.line_segment(
                 [Pos2::new(px, plot.top), Pos2::new(px, plot.bottom())],
@@ -172,11 +172,11 @@ fn paint_inset(
             Color32::from_black_alpha(20),
         );
         let pts: Vec<Pos2> = slice
-            .ppm
+            .coordinates
             .iter()
             .zip(&disp)
-            .map(|(&ppm, &v)| {
-                let x = x_to_screen(ppm, plot, fig.x.min, fig.x.span(), fig.x.reversed);
+            .map(|(&coordinate, &v)| {
+                let x = x_to_screen(coordinate, plot, fig.x.min, fig.x.span(), fig.x.reversed);
                 let t = ((v - lo) / span) as f32;
                 Pos2::new(x, base_y - inset_h * (0.04 + 0.92 * t))
             })
@@ -193,11 +193,11 @@ fn paint_inset(
             Color32::from_black_alpha(20),
         );
         let pts: Vec<Pos2> = slice
-            .ppm
+            .coordinates
             .iter()
             .zip(&disp)
-            .map(|(&ppm, &v)| {
-                let y = y_to_screen(ppm, plot, fig.y.min, fig.y.span(), fig.y.reversed);
+            .map(|(&coordinate, &v)| {
+                let y = y_to_screen(coordinate, plot, fig.y.min, fig.y.span(), fig.y.reversed);
                 let t = ((v - lo) / span) as f32;
                 Pos2::new(plot.left + inset_w * (0.04 + 0.92 * t), y)
             })

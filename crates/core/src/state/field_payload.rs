@@ -18,11 +18,16 @@ impl super::Dataset {
         crate::contour_probe::record_field_payload();
         match self {
             Self::Nmr(nmr) => (nmr.field_catalog.id_for_key("nmr.real") == Some(id)).then(|| {
+                let (x, values) = match &nmr.processed {
+                    plotx_processing::Processed1D::Time(trace) => (&trace.time_s, &trace.values),
+                    plotx_processing::Processed1D::Frequency(spectrum) => {
+                        (&spectrum.ppm, &spectrum.values)
+                    }
+                };
                 FieldPayload::Curve1D(Curve1D {
-                    x: Arc::from(nmr.spectrum.ppm.clone()),
+                    x: Arc::from(x.clone()),
                     values: Arc::from(
-                        nmr.spectrum
-                            .values
+                        values
                             .iter()
                             .map(|value| value.re as f32)
                             .collect::<Vec<_>>(),

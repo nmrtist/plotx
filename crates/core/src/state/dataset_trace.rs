@@ -3,7 +3,10 @@ use super::{Dataset, Trace1d};
 impl Dataset {
     pub fn trace_x_unit(&self) -> String {
         match self {
-            Self::Nmr(_) => "ppm".into(),
+            Self::Nmr(data) => match data.output_domain() {
+                plotx_io::Domain::Time => "s".into(),
+                plotx_io::Domain::Frequency => "ppm".into(),
+            },
             Self::Table(table) => table
                 .x_binding
                 .and_then(|id| {
@@ -44,10 +47,17 @@ impl Dataset {
 
     pub fn displayed_trace(&self, column: Option<plotx_data::ColumnId>) -> Option<Trace1d> {
         match self {
-            Self::Nmr(data) => Some(Trace1d {
-                xs: data.spectrum.ppm.clone(),
-                ys: data.spectrum.real(),
-                x_reversed: true,
+            Self::Nmr(data) => Some(match &data.processed {
+                plotx_processing::Processed1D::Time(trace) => Trace1d {
+                    xs: trace.time_s.clone(),
+                    ys: trace.real(),
+                    x_reversed: false,
+                },
+                plotx_processing::Processed1D::Frequency(spectrum) => Trace1d {
+                    xs: spectrum.ppm.clone(),
+                    ys: spectrum.real(),
+                    x_reversed: true,
+                },
             }),
             Self::Table(table) => typed_table_trace(table, column),
             Self::Nmr2D(_) => None,

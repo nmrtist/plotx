@@ -44,7 +44,8 @@ fn full_slice_load_process_figure_export() {
     let data = ethanol_fid();
     assert_eq!(data.len(), 16_384);
 
-    let spec = process(&data, &AxisPipeline::default_1d(), true);
+    let processed = process(&data, &AxisPipeline::default_1d(), true).unwrap();
+    let spec = processed.as_frequency().unwrap();
     assert_eq!(spec.len(), data.len());
 
     let ys = spec.real();
@@ -64,7 +65,7 @@ fn full_slice_load_process_figure_export() {
     assert!(has(2.61), "missing OH peak; got {peaks:?}");
     assert!(has(3.70), "missing CH2 peak; got {peaks:?}");
 
-    let fig = build_figure(&data, &spec, &[]);
+    let fig = build_figure(&data, spec, &[]);
     let svg = plotx_render::svg::export(&fig);
     assert!(svg.starts_with("<svg"));
     assert!(svg.contains("<polyline"));

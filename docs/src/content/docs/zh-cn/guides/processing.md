@@ -4,13 +4,14 @@ description: 有序处理管线——切趾、FFT、相位与基线校正。
 ---
 
 PlotX 的处理是应用于原始数据的**有序步骤列表**。步骤可随时增删、编辑和
-调整顺序（通过每行的*上移* / *下移*菜单）；结果实时重算并预览。大型 2D
-谱图的重算不会卡住界面——期间可以继续缩放、平移和编辑，更新后的谱图
-稍后自动显示。
+调整顺序：用步骤的 ⋯ 菜单（**Move earlier** / **Move later**），或点选步骤
+后按 <kbd>Alt</kbd>+<kbd>↑</kbd> / <kbd>Alt</kbd>+<kbd>↓</kbd>。结果实时重算
+并预览。大型 2D 谱图的重算不会卡住界面——期间可以继续缩放、平移和编辑，
+更新后的谱图稍后自动显示。
 
 ## 典型的 1D 谱
 
-新导入的 1D 数据集已带有标准管线——切趾、零填充、FFT、相位校正、基线
+新导入的时域 1D 数据集已带有标准管线——切趾、零填充、FFT、相位校正、基线
 校正，按此顺序——并默认启用自动相位。多数情况下屏幕上的谱图立即可用，
 一次会话最多只需调整三处：
 
@@ -19,8 +20,48 @@ PlotX 的处理是应用于原始数据的**有序步骤列表**。步骤可随�
 2. **基线**——基线校正默认关闭；基线起伏或偏移时启用该步骤。
 3. **参考**——添加参考步骤，把已知峰定标到其化学位移位置。
 
-2D 数据集默认启用余弦钟形切趾。已经变换过的数据（频域数据）获得不含
-时域步骤的管线。
+2D 数据集默认启用余弦钟形切趾。真 2D 谱会按处理顺序显示两条管线：先
+**F2 (direct)**，后 **F1 (indirect)**。已经变换过的数据标记为
+**Imported spectrum**，没有时域步骤，也没有 FFT——PlotX 不会为它没有采集过的
+自由感应衰减凭空造一个 FID。
+
+## 处理界面在哪里
+
+处理以卡片形式出现在画布右上角，可从 Ribbon 的 **Process** 页签打开，或用
+<kbd>Ctrl</kbd>+<kbd>K</kbd> 搜到某个处理设置后激活它。若当前数据集不是 NMR
+数据集，状态栏会提示 *Select an NMR dataset before opening Processing.*，卡片
+不会打开。
+
+这个角落由 Processing、Regions、Curve Fit、Statistics 几个任务共用。同时打开
+两个及以上时，卡片顶部会出现 **Process**、**Regions**、**Fit**、**Stats**
+标签，一次显示一页。切换标签会保留各页已有的设置，只有用 ✕ 关闭某一页才会
+丢弃它；选中某个标签也会把该页对应的数据集设为当前数据集，因此你看到的控件
+始终属于画布上的这张谱。
+
+步骤列表上方标出数据集名称、数据来源（**Raw FID**、**2D acquisition** 或
+**Imported spectrum**）、配方是否仍为默认，以及当前管线的输出是
+**Time-domain output** 还是 **Frequency-domain output**。⋮ 菜单里是
+**Reset to default**、**Load scheme…**、**Save scheme…**、
+**Save as template…**、**Apply template…**，以及 **Advanced** 一节。
+
+## FFT 步骤
+
+FFT 是一个普通的 *Time to Frequency* 类型步骤，而不是列表中固定的分界线。
+可从 **Add step → Time domain → FFT · Time to Frequency** 添加，也可以像其他
+步骤一样删除、禁用或移动。一条管线最多只有一个 FFT，因此它的 **Duplicate**
+不可用。
+
+在原始采集数据上删除或禁用 FFT，画布会立即改为显示 FID，横轴是以秒为单位的
+采集时间。后面的频域步骤仍留在配方中，标注为
+*Disabled: requires Frequency input*；重新加回 FFT 就能恢复它们的设置，不必
+重新填写。
+
+无论 FFT 在与不在，时域步骤都严格按列表顺序执行：两次零填充会依次叠加，移到
+零填充之后的切趾会使用填充后的长度。
+
+输出为 FID 时，需要频域谱的分析会被禁用并说明原因——寻峰与峰列表、谱峰拟合、
+积分、多重峰都会提示先绘制频域数据。已有的峰和积分不会被删除，FFT 恢复后它们
+也随之恢复。
 
 ## 可用步骤
 
@@ -55,13 +96,13 @@ PlotX 的处理是应用于原始数据的**有序步骤列表**。步骤可随�
 ## 群延迟校正
 
 部分谱仪会在 FID 开头记录数字滤波延迟，表现为谱图前几个点的畸变。
-数字群延迟校正用于消除它；这是步骤列表旁的按数据集开关，在管线之前
-应用。它对 1D 与 2D 数据一视同仁：在 2D 数据集上关掉它，直接维同样保持
+数字群延迟校正用于消除它；它是处理卡片 ⋮ 菜单 **Advanced** 下的
+**Group-delay correction** 开关，按数据集设置，在管线之前应用。它对 1D 与 2D 数据一视同仁：在 2D 数据集上关掉它，直接维同样保持
 未校正。
 
 ## 切趾
 
-在步骤列表中点击 **Apodize** 一行即可展开它的设置。所有控件都直接显示在
+点击 **Apodize** 步骤即可展开它的设置。所有控件都直接显示在
 **Apodization** 标题下，不需要再展开任何折叠：
 
 - **Window**——*None*、*Cosine bell*、*Exponential* 或 *Gaussian*。
@@ -88,7 +129,7 @@ PlotX 的处理是应用于原始数据的**有序步骤列表**。步骤可随�
 
 ### 暂停自动重算时
 
-处理面板顶部 ⋮ 菜单中 **Advanced** 下的 **Pause auto-recompute** 同样管着这
+处理卡片 ⋮ 菜单 **Advanced** 下的 **Pause auto-recompute** 同样管着这
 几行。开启它之后修改 **Window**、**LB** 或 **GB**，配方会记下改动但不重算：
 面板显示 **Changes pending** 和一个 **Apply** 按钮，按下之前不会有任何重算。
 
@@ -96,7 +137,7 @@ PlotX 的处理是应用于原始数据的**有序步骤列表**。步骤可随�
 
 - <kbd>Ctrl</kbd>+<kbd>K</kbd>（macOS 上为 <kbd>Cmd</kbd>）除命令和数据外也
   搜索设置。`LB`、`line broadening`、`apodization window`、`gaussian
-  broadening` 都能命中这几行；激活后会打开处理面板，展开第一个真正带有该设置
+  broadening` 都能命中这几行；激活后会打开处理卡片，展开第一个真正带有该设置
   的步骤并高亮它。参见[命令面板](/zh-cn/reference/command-palette/)。
 - Ribbon **Process** 页签 **Processing** 组中的 **Apodization settings** 通向
   同一处。

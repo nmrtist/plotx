@@ -117,7 +117,7 @@ fn select_workflow_tab(app: &mut PlotxApp, tab: WorkflowTab) {
     app.session.ui.ribbon_tab = tab;
     match tab {
         WorkflowTab::Data => {}
-        WorkflowTab::Process => reveal_context(app, ToolGroup::Processing),
+        WorkflowTab::Process => super::tools::expand_processing_surface(app),
         WorkflowTab::Analyze => {
             if let Some(dataset) = app.active_dataset().and_then(|di| app.doc.datasets.get(di)) {
                 let groups = dataset.tool_groups();
@@ -135,10 +135,6 @@ fn select_workflow_tab(app: &mut PlotxApp, tab: WorkflowTab) {
         }
         WorkflowTab::View | WorkflowTab::Figure | WorkflowTab::Arrange => {}
     }
-}
-
-fn reveal_context(app: &mut PlotxApp, group: ToolGroup) {
-    app.session.ui.requested_tool_group = Some(group);
 }
 
 fn command_row(

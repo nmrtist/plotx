@@ -20,9 +20,9 @@ pub(super) fn slice_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
     ui.separator();
     ui.strong("Slice");
     ui.small(if is_true_2d {
-        "Pull a 1D row or column out of the contour as an independent spectrum."
+        "Pull a 1D row or column out of the contour as an independent trace."
     } else {
-        "Pull one increment's 1D spectrum out of the stack."
+        "Pull one increment's 1D trace out of the stack."
     });
 
     let active = app.session.tool == Tool::Slice;
@@ -61,11 +61,12 @@ fn slice_group_2d(app: &mut PlotxApp, di: usize, active: bool, ui: &mut Ui) {
     }
 
     match app.session.ui.slice.filter(|c| c.dataset == di) {
-        Some(c) => match slice_position_ppm(app, di, c) {
-            Some(p) => {
+        Some(c) => match slice_position(app, di, c) {
+            Some((position, domain)) => {
                 ui.small(format!(
-                    "At {} = {p:.3} ppm  (index {})",
+                    "At {} = {position:.3} {}  (index {})",
                     fixed_axis(c.kind),
+                    domain_unit(domain),
                     c.index
                 ));
             }
@@ -314,13 +315,28 @@ fn slice_group_stack(app: &mut PlotxApp, di: usize, increments: usize, ui: &mut 
     }
 }
 
-fn slice_position_ppm(app: &PlotxApp, di: usize, c: SliceCursor) -> Option<f64> {
+fn slice_position(app: &PlotxApp, di: usize, c: SliceCursor) -> Option<(f64, plotx_io::Domain)> {
     let Processed2D::Ft(s) = &app.doc.datasets.get(di)?.as_nmr2d()?.processed else {
         return None;
     };
     match c.kind {
-        SliceKind::Row => s.f1_ppm.get(c.index).copied(),
-        SliceKind::Column => s.f2_ppm.get(c.index).copied(),
+        SliceKind::Row => s
+            .f1_ppm
+            .get(c.index)
+            .copied()
+            .map(|position| (position, s.f1_domain)),
+        SliceKind::Column => s
+            .f2_ppm
+            .get(c.index)
+            .copied()
+            .map(|position| (position, s.f2_domain)),
+    }
+}
+
+fn domain_unit(domain: plotx_io::Domain) -> &'static str {
+    match domain {
+        plotx_io::Domain::Time => "s",
+        plotx_io::Domain::Frequency => "ppm",
     }
 }
 

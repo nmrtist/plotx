@@ -7,8 +7,32 @@
 use plotx_core::automation::TargetRef;
 use plotx_core::properties::{PropertyValue, contour};
 use plotx_core::state::{
-    CanvasDocument, Dataset, Nmr2DDataset, ObjectFrame, ObjectId, PlotxApp, Selection,
+    CanvasDocument, Dataset, Nmr2DDataset, NmrDataset, ObjectFrame, ObjectId, PlotxApp, Selection,
 };
+
+fn nmr1d(domain: plotx_io::Domain) -> Dataset {
+    let data = plotx_io::NmrData {
+        points: (0..16)
+            .map(|value| num_complex::Complex64::new(f64::from(value) - 7.0, 0.5))
+            .collect(),
+        domain,
+        spectral_width_hz: 4_000.0,
+        observe_freq_mhz: 400.0,
+        carrier_ppm: 0.0,
+        nucleus: "1H".to_owned(),
+        source: "fixture".to_owned(),
+        group_delay: 0.0,
+    };
+    Dataset::Nmr(Box::new(NmrDataset::load(data)))
+}
+
+pub(crate) fn time_domain_1d() -> Dataset {
+    nmr1d(plotx_io::Domain::Time)
+}
+
+pub(crate) fn frequency_domain_1d() -> Dataset {
+    nmr1d(plotx_io::Domain::Frequency)
+}
 
 fn nmr2d(source: &str) -> plotx_io::NmrData2D {
     let dimension = |nucleus: &str| plotx_io::Dim {

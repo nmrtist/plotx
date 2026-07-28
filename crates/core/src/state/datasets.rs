@@ -25,8 +25,8 @@ pub struct PhaseDrag {
     pub gesture_before: DatasetProcessingState,
 }
 
-/// A loaded acquisition and its processing recipe. `base` is the post-FFT,
-/// pre-phase spectrum cached at load; `spectrum` is the current view from it.
+/// A loaded acquisition and its processing recipe. `base` is the expensive
+/// time-prefix/FFT result; `processed` is the current time trace or spectrum.
 #[derive(Clone)]
 pub struct NmrDataset {
     /// Stable automation and persistence identity. Array positions remain a UI
@@ -35,7 +35,7 @@ pub struct NmrDataset {
     /// Persisted child-field identity allocator and key mapping.
     pub field_catalog: FieldCatalog,
     pub data: NmrData,
-    pub base: Spectrum,
+    pub base: Processed1D,
     pub pipeline: AxisPipeline,
     /// Persistent owner-local allocator; excluded from processing undo snapshots.
     pub next_step_id: u64,
@@ -44,7 +44,7 @@ pub struct NmrDataset {
     pub group_delay_correct: bool,
     /// Whether a dispersive channel exists, so phase steps can rotate real↔imag.
     pub has_imaginary: bool,
-    pub spectrum: Spectrum,
+    pub processed: Processed1D,
     pub name: Option<String>,
     pub lineage: Option<DatasetLineage>,
     pub peaks: PeakSet,
@@ -68,8 +68,9 @@ impl NmrDataset {
         };
         let group_delay_correct = default_group_delay_correct(data.domain);
         let has_imaginary = data.domain == Domain::Time || data.points.iter().any(|v| v.im != 0.0);
-        let base = fft::transform_base(&data, &pipeline, group_delay_correct);
-        let spectrum = reapply(&base, &pipeline);
+        let base = transform_output_base(&data, &pipeline, group_delay_correct)
+            .expect("factory processing pipeline is domain-valid");
+        let processed = reapply_output(&base, &pipeline);
         let mut field_catalog = nmr_field_catalog();
         field_catalog.attach_provenance(&data.source, None);
         let mut result = Self {
@@ -81,7 +82,7 @@ impl NmrDataset {
             next_step_id: 0,
             group_delay_correct,
             has_imaginary,
-            spectrum,
+            processed,
             name: None,
             lineage: None,
             peaks: PeakSet::default(),
@@ -100,15 +101,29 @@ impl NmrDataset {
         result
     }
 
-    /// Cheap re-apply of the frequency-domain steps from the cached `base` (no FFT).
+    /// Cheap re-apply of the frequency-domain steps from the cached `base`.
     pub fn rebuild(&mut self) {
-        self.spectrum = reapply(&self.base, &self.pipeline);
+        self.processed = reapply_output(&self.base, &self.pipeline);
     }
 
-    /// Rebuild `base` from the FID (a time-domain step changed) then re-derive.
+    /// Rebuild `base` from the acquisition, including a real output-domain
+    /// transition when FFT was added or removed.
     pub fn retransform(&mut self) {
-        self.base = fft::transform_base(&self.data, &self.pipeline, self.group_delay_correct);
+        self.base = transform_output_base(&self.data, &self.pipeline, self.group_delay_correct)
+            .expect("live processing pipelines are reconciled before application");
         self.rebuild();
+    }
+
+    pub fn spectrum(&self) -> Option<&Spectrum> {
+        self.processed.as_frequency()
+    }
+
+    pub fn time_trace(&self) -> Option<&plotx_processing::TimeTrace> {
+        self.processed.as_time()
+    }
+
+    pub fn output_domain(&self) -> Domain {
+        self.processed.domain()
     }
 
     pub fn pipeline_mut(&mut self) -> &mut AxisPipeline {
@@ -314,9 +329,17 @@ impl Nmr2DDataset {
             _ => None,
         };
         match (axis, &self.processed) {
-            (PhaseAxis::F2, Processed2D::Ft(s)) => ends(&s.f2_ppm),
-            (PhaseAxis::F1, Processed2D::Ft(s)) => ends(&s.f1_ppm),
-            (PhaseAxis::F2, Processed2D::Stack(s)) => ends(&s.ppm),
+            (PhaseAxis::F2, Processed2D::Ft(s)) if s.f2_domain == plotx_io::Domain::Frequency => {
+                ends(&s.f2_ppm)
+            }
+            (PhaseAxis::F1, Processed2D::Ft(s)) if s.f1_domain == plotx_io::Domain::Frequency => {
+                ends(&s.f1_ppm)
+            }
+            (PhaseAxis::F2, Processed2D::Stack(s))
+                if s.direct_domain == plotx_io::Domain::Frequency =>
+            {
+                ends(&s.ppm)
+            }
             _ => None,
         }
     }

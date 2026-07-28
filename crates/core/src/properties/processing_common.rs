@@ -171,7 +171,7 @@ pub(super) fn spectrum_before_step(context: &StepContext<'_>) -> Option<Spectrum
     let Dataset::Nmr(dataset) = context.dataset else {
         return None;
     };
-    let mut spectrum = dataset.base.clone();
+    let mut spectrum = dataset.base.as_frequency()?.clone();
     for step in dataset
         .pipeline
         .steps

@@ -181,7 +181,10 @@ fn is_linked(app: &PlotxApp, di: usize) -> bool {
 
 fn analysis_items(dataset: &Dataset) -> Vec<AnalysisItem> {
     let mut result = Vec::new();
-    if let Some(peaks) = dataset.peaks() {
+    let time_nmr = dataset
+        .as_nmr()
+        .is_some_and(|nmr| nmr.output_domain() == plotx_io::Domain::Time);
+    if !time_nmr && let Some(peaks) = dataset.peaks() {
         result.extend(peaks.marks.iter().map(|peak| {
             AnalysisItem {
                 kind: AnalysisKind::Peak(peak.id),
@@ -193,7 +196,7 @@ fn analysis_items(dataset: &Dataset) -> Vec<AnalysisItem> {
             }
         }));
     }
-    if let Some(nmr) = dataset.as_nmr() {
+    if !time_nmr && let Some(nmr) = dataset.as_nmr() {
         result.extend(nmr.integrals.iter().map(|integral| AnalysisItem {
             kind: AnalysisKind::Integral(integral.id),
             label: format!("Integral {:.3}–{:.3}", integral.start_ppm, integral.end_ppm),
@@ -213,14 +216,16 @@ fn analysis_items(dataset: &Dataset) -> Vec<AnalysisItem> {
             label: region.column_name(),
         }));
     }
-    result.extend(dataset.line_fits().iter().map(|fit| AnalysisItem {
-        kind: AnalysisKind::LineFit(fit.id),
-        label: format!("Peak fit #{} ({:.3}–{:.3})", fit.id + 1, fit.lo, fit.hi),
-    }));
-    result.extend(dataset.multiplets().iter().map(|multiplet| AnalysisItem {
-        kind: AnalysisKind::Multiplet(multiplet.id),
-        label: multiplet.descriptor(),
-    }));
+    if !time_nmr {
+        result.extend(dataset.line_fits().iter().map(|fit| AnalysisItem {
+            kind: AnalysisKind::LineFit(fit.id),
+            label: format!("Peak fit #{} ({:.3}–{:.3})", fit.id + 1, fit.lo, fit.hi),
+        }));
+        result.extend(dataset.multiplets().iter().map(|multiplet| AnalysisItem {
+            kind: AnalysisKind::Multiplet(multiplet.id),
+            label: multiplet.descriptor(),
+        }));
+    }
     if let Some(table) = dataset.as_table() {
         result.extend(
             table

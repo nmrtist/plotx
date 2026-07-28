@@ -16,9 +16,16 @@ introduces the same regions in walkthrough form.
 - **Canvas** / **the board** — the central area: an infinite board holding
   your plots, arranged on grid-snapped pages. "Page" is one framed area of
   the board that exports as one figure.
-- **Secondary Side Bar** — the right panel, holding contextual tools for the
-  selected data. The **Processing panel**, **Analysis panel**, and **Dataset
-  tools** named throughout this manual are tool groups shown here.
+- **Secondary Side Bar** — the right panel, holding the Object inspector and
+  contextual analysis tools for the selection. It scrolls as one column, so a
+  long inspector never pushes the tools below it out of reach. Processing is
+  not here; it lives on the canvas.
+- **Task dock** — the card at the upper right of the canvas that holds the
+  multi-step tasks: Processing, Regions, Curve Fit, and Statistics. When two or
+  more are open it grows tabs — **Process**, **Regions**, **Fit**, **Stats** —
+  and shows one page at a time. Its Processing page lists one pipeline for a 1D
+  or pseudo-2D dataset and two, **F2 (direct)** then **F1 (indirect)**, for a
+  true 2D spectrum. See [Processing](/guides/processing/).
 - **Ribbon** — the command strip under the title bar, organized into task
   tabs (**Data**, **Process**, **Analyze**, **Figure**, **Arrange**,
   **View**). It is a shortcut surface: everything on it is also in the menus
@@ -30,17 +37,22 @@ introduces the same regions in walkthrough form.
 
 ## Recurring elements
 
-- **Task card** — a floating card at the upper-right of the canvas that walks
-  through a multi-step task (Regions, Curve Fit, Statistics). Drag its
-  lower-right handle to resize it.
+- **Task page** — one task's page in the task dock. Drag its lower edge to
+  change its height. Switching tabs keeps a page's settings; closing it with
+  its ✕ is what discards them, and selecting a tab makes that page's dataset
+  active.
 - **Object inspector** — the properties panel for the selected board object:
   chart type, styling, geometry, and the display settings of what it draws, such
   as [contour levels](/guides/contour-levels/). Everyday settings are shown
-  directly; the rest are folded into **Advanced**. Its **Contour** and **Line**
-  sections appear only when the selection draws one; **Figure typography**
-  belongs to the document and is always shown.
+  directly; the rest are folded into **Advanced**. A row of small buttons at the
+  top — **Layout**, **Data**, **Type**, and whichever style sections apply —
+  scrolls straight to that section. Its heading names what you have selected: an
+  object and its dataset, or, for several objects at once, how many objects and
+  how many datasets they draw from. Its **Contour** and **Line** sections appear
+  only when the selection draws one; **Figure typography** belongs to the
+  document and is always shown.
 - **Setting row** — one setting as it appears in the Object inspector, Canvas
-  settings, the Processing panel, or Preferences. Every row behaves the same
+  settings, a processing step, or Preferences. Every row behaves the same
   way wherever it is shown. A dot marks a value that differs from its default —
   hover it to see that default — and the reset button beside it goes back.
   <kbd>Ctrl</kbd>+<kbd>K</kbd> searches these settings by name: activating a
@@ -68,6 +80,11 @@ introduces the same regions in walkthrough form.
   [Command palette](/reference/command-palette/).
 - **Size chip** — the label above a page's top-left corner showing its
   dimensions and matched journal preset.
+- **Step row** — one step of the active dataset's processing pipeline. Click it
+  to edit its parameters; move it with **Move earlier** / **Move later** in its
+  ⋯ menu or with <kbd>Alt</kbd>+<kbd>↑</kbd>/<kbd>↓</kbd>. Every step in the
+  list is a step that runs, FFT included; an imported spectrum has no FFT row
+  because its recipe has no FFT. See [Processing](/guides/processing/).
 
 ## Data terms
 
