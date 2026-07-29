@@ -136,7 +136,7 @@ pub(crate) fn render_inline_panel_note_editor(app: &mut PlotxApp, screen: egui::
             .and_then(|object| object.plot_mut())
         {
             plot.panel.user_note = buffer.clone();
-            app.doc.dirty = true;
+            app.mark_document_dirty();
         }
     }
 

@@ -31,7 +31,9 @@ pub(crate) fn recent_open_kind(path: &std::path::Path) -> RecentOpenKind {
 
 pub(crate) fn open_recent_path(app: &mut PlotxApp, path: &std::path::Path) {
     match recent_open_kind(path) {
-        RecentOpenKind::Project => app.load_project_from(path),
+        RecentOpenKind::Project => app.request_project_transition(
+            plotx_core::state::ProjectTransition::Open(path.to_owned()),
+        ),
         RecentOpenKind::DelimitedTable => import_delimited_table_path(app, path),
         RecentOpenKind::XlsxTable => import_xlsx_table_path(app, path),
         RecentOpenKind::Folder => open_folder_path(app, path),

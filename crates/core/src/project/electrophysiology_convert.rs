@@ -8,12 +8,13 @@ use crate::state::ElectrophysiologyDataset;
 /// disk. Loading of the legacy tag is retained below.
 const STORAGE_ELECTROPHYSIOLOGY_BIN: &str = "electrophysiology-bin-v1";
 const STORAGE_ELECTROPHYSIOLOGY_JSON: &str = "electrophysiology-json-v1";
+pub(super) const VALUES_PER_CHUNK: usize = 4096;
 
 pub(super) fn electrophysiology_to_objects(
     recording: &ElectrophysiologyDataset,
     data_id: &str,
     recipe_id: &str,
-) -> Result<(DataObject, Vec<u8>, RecipeObject)> {
+) -> Result<(DataObject, RecipeObject)> {
     // Build the metadata skeleton first and release its sample memory before the
     // blob is allocated, so peak usage stays near one extra copy rather than two.
     // Cloning (not field-mapping) guarantees a future field can never be silently
@@ -23,14 +24,6 @@ pub(super) fn electrophysiology_to_objects(
         *samples = Vec::new();
     }
     let skeleton_value = serde_json::to_value(&skeleton)?;
-
-    let mut blob = Vec::new();
-    for samples in sample_vectors(&recording.data) {
-        blob.extend_from_slice(&(samples.len() as u64).to_le_bytes());
-        for &value in samples {
-            blob.extend_from_slice(&value.to_le_bytes());
-        }
-    }
 
     let data = DataObject {
         id: data_id.to_owned(),
@@ -82,7 +75,28 @@ pub(super) fn electrophysiology_to_objects(
         parameters: RecipeParameters::default(),
         extensions: serde_json::Value::Null,
     };
-    Ok((data, blob, recipe))
+    Ok((data, recipe))
+}
+
+pub(super) fn write_electrophysiology_blob(
+    output: &mut impl std::io::Write,
+    recording: &ElectrophysiologyDataset,
+) -> Result<()> {
+    let mut buffer = Vec::with_capacity(VALUES_PER_CHUNK * std::mem::size_of::<f64>());
+    for samples in sample_vectors(&recording.data) {
+        let len = u64::try_from(samples.len()).map_err(|_| {
+            ProjectError::Invalid("electrophysiology sample count exceeds u64".to_owned())
+        })?;
+        output.write_all(&len.to_le_bytes())?;
+        for chunk in samples.chunks(VALUES_PER_CHUNK) {
+            buffer.clear();
+            for &value in chunk {
+                buffer.extend_from_slice(&value.to_le_bytes());
+            }
+            output.write_all(&buffer)?;
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn electrophysiology_from_object(

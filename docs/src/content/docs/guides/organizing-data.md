@@ -47,6 +47,19 @@ it reopens exactly where you left off and can be shared as a single file. See
 [File formats](/reference/file-formats/) for what the file contains and how
 versions are handled.
 
+Saving runs in the background. If you continue editing while it runs, the
+completed file contains the revision captured when saving began and PlotX
+keeps the project marked as unsaved for the newer edits.
+
+PlotX also writes an internal crash-recovery checkpoint after edits settle,
+with a maximum one-minute recovery interval during continuous work. A
+checkpoint is written only when the document has changed since the previous
+one; it is cleared after a successful up-to-date save or a clean exit.
+
 **Preferences → General → Project backup copies** keeps a chosen number of
 complete previous saves as hidden files beside the project, so an accidental
 overwrite is recoverable.
+
+**File → New Project**, **Close Project**, opening another project, and
+quitting all use the same **Save / Discard / Cancel** check when the current
+project has unsaved changes.

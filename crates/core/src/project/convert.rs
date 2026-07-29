@@ -7,16 +7,22 @@ use super::*;
 use crate::{DosyMethod, PseudoDisplay};
 use plotx_processing::Processed2D;
 
-pub struct DatasetObjects {
+pub enum DatasetBlob<'a> {
+    Complex(&'a [Complex64]),
+    Electrophysiology(&'a crate::state::ElectrophysiologyDataset),
+    Afm(&'a plotx_io::AfmData),
+}
+
+pub struct DatasetObjects<'a> {
     pub data: DataObject,
-    pub blob: Vec<u8>,
+    pub blob: DatasetBlob<'a>,
     pub recipe: RecipeObject,
     /// Extra blobs this dataset owns, as (zip path, bytes). Written verbatim.
     pub extra_blobs: Vec<(String, Vec<u8>)>,
 }
 
-impl DatasetObjects {
-    fn primary(data: DataObject, blob: Vec<u8>, recipe: RecipeObject) -> Self {
+impl<'a> DatasetObjects<'a> {
+    fn primary(data: DataObject, blob: DatasetBlob<'a>, recipe: RecipeObject) -> Self {
         Self {
             data,
             blob,
@@ -26,14 +32,13 @@ impl DatasetObjects {
     }
 }
 
-pub fn dataset_to_objects(
-    dataset: &Dataset,
+pub fn dataset_to_objects<'a>(
+    dataset: &'a Dataset,
     data_id: &str,
     recipe_id: &str,
-) -> Result<DatasetObjects> {
+) -> Result<DatasetObjects<'a>> {
     Ok(match dataset {
         Dataset::Nmr(n) => {
-            let blob = complex_to_bytes(&n.data.points);
             let data = DataObject {
                 id: data_id.to_owned(),
                 role: "data".to_owned(),
@@ -76,10 +81,9 @@ pub fn dataset_to_objects(
                     }
                 }),
             };
-            DatasetObjects::primary(data, blob, recipe)
+            DatasetObjects::primary(data, DatasetBlob::Complex(&n.data.points), recipe)
         }
         Dataset::Nmr2D(n) => {
-            let blob = complex_to_bytes(&n.data.data);
             let data = DataObject {
                 id: data_id.to_owned(),
                 role: "data".to_owned(),
@@ -167,7 +171,7 @@ pub fn dataset_to_objects(
             };
             DatasetObjects {
                 data,
-                blob,
+                blob: DatasetBlob::Complex(&n.data.data),
                 recipe,
                 extra_blobs,
             }
@@ -179,11 +183,10 @@ pub fn dataset_to_objects(
             )));
         }
         Dataset::Electrophysiology(recording) => {
-            let (data, blob, recipe) = electrophysiology_to_objects(recording, data_id, recipe_id)?;
-            DatasetObjects::primary(data, blob, recipe)
+            let (data, recipe) = electrophysiology_to_objects(recording, data_id, recipe_id)?;
+            DatasetObjects::primary(data, DatasetBlob::Electrophysiology(recording), recipe)
         }
         Dataset::Afm(afm) => {
-            let blob = super::afm_convert::encode_afm(&afm.data)?;
             let data = DataObject {
                 id: data_id.to_owned(),
                 role: "data".to_owned(),
@@ -225,7 +228,7 @@ pub fn dataset_to_objects(
                 parameters: RecipeParameters::default(),
                 extensions: serde_json::Value::Null,
             };
-            DatasetObjects::primary(data, blob, recipe)
+            DatasetObjects::primary(data, DatasetBlob::Afm(&afm.data), recipe)
         }
     })
 }

@@ -37,7 +37,9 @@ pub enum Applicability {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CommandId {
+    NewProject,
     OpenProject,
+    CloseProject,
     OpenFile,
     OpenFolder,
     RunBatchWorkflow,
@@ -175,7 +177,9 @@ pub struct CommandDescriptor {
 
 pub fn catalog(app: &PlotxApp) -> Vec<CommandDescriptor> {
     let mut ids = vec![
+        CommandId::NewProject,
         CommandId::OpenProject,
+        CommandId::CloseProject,
         CommandId::OpenFile,
         CommandId::OpenFolder,
         CommandId::RunBatchWorkflow,
@@ -368,6 +372,18 @@ pub fn describe(app: &PlotxApp, id: CommandId) -> CommandDescriptor {
     // command can never be blocked by one requirement while explaining another.
     // `and_then` reports the first unmet requirement and skips the rest.
     let gate: Result<(), &'static str> = match id {
+        CommandId::CloseProject => requires(
+            app.session.project_present
+                || app.doc.project_path.is_some()
+                || !app.doc.datasets.is_empty()
+                || !app.doc.canvases.is_empty()
+                || app.doc.dirty,
+            "There is no project to close.",
+        ),
+        CommandId::SaveProject => requires(
+            !app.session.ui.project_save_in_progress,
+            "Wait for the current project save to finish.",
+        ),
         CommandId::OpenRecent(index) => requires(
             index < app.session.recent_files.len(),
             "Open a file or project to fill the recent list.",

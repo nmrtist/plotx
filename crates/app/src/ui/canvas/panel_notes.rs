@@ -98,7 +98,7 @@ pub(crate) fn handle_panel_label_interactions(
                     (drag.before.position[0] + delta.x).clamp(0.0, max_x),
                     (drag.before.position[1] + delta.y).clamp(0.0, max_y),
                 ];
-                app.doc.dirty = true;
+                app.mark_document_dirty();
             }
         }
         if primary_released || !primary_down {

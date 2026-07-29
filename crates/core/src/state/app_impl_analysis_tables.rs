@@ -41,7 +41,7 @@ impl PlotxApp {
         self.session.view = PrimaryView::Data;
         self.session.ui.frame_selection = vec![FrameRef::Sheet(di)];
         self.session.ui.sheet_open = Some(di);
-        self.doc.dirty = true;
+        self.mark_document_dirty();
         self.session.status = "Created a data table.".to_owned();
     }
 

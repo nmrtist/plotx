@@ -20,6 +20,24 @@ fn save_recovery(manager: &RecoveryManager, app: &crate::state::PlotxApp) {
 }
 
 #[test]
+fn recovery_omits_optional_view_snapshots() {
+    let dir = temp_dir("recovery-without-view-snapshots");
+    let root = dir.join("recovery");
+    let manager = RecoveryManager::new_in(root).unwrap();
+    let mut app = crate::state::PlotxApp::new();
+    app.doc.save_include_view_snapshots = true;
+
+    save_recovery(&manager, &app);
+
+    let file = std::fs::File::open(manager.target().path()).unwrap();
+    let mut archive = zip::ZipArchive::new(file).unwrap();
+    let manifest: super::super::Manifest =
+        super::super::read_json(&mut archive, "manifest.json").unwrap();
+    assert!(!manifest.save_profile.include_view_snapshots);
+    manager.shutdown().unwrap();
+}
+
+#[test]
 fn replacement_failure_leaves_original_untouched() {
     let dir = temp_dir("replace-failure");
     let target = dir.join("project.plotx");

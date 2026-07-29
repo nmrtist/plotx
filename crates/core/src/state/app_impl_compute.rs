@@ -211,7 +211,7 @@ impl PlotxApp {
                     // The method, map and provenance above are persisted state and
                     // land on both branches; dirtying only the populated one would
                     // drop an empty result silently on close.
-                    self.doc.dirty = true;
+                    self.mark_document_dirty();
                     if any {
                         self.rebuild_canvases_for(dataset);
                         self.session.status = "Built ILT DOSY map.".into();
@@ -263,7 +263,7 @@ impl PlotxApp {
                     }
                     // See the ILT arm: the map and provenance are persisted and
                     // land regardless of whether any column fitted.
-                    self.doc.dirty = true;
+                    self.mark_document_dirty();
                     if any {
                         self.rebuild_canvases_for(dataset);
                         self.session.status = "Built DOSY map.".into();
@@ -315,7 +315,7 @@ impl PlotxApp {
                     }
                     self.recompute_integrals_2d_after_processing(dataset);
                     self.rebuild_canvases_for(dataset);
-                    self.doc.dirty = true;
+                    self.mark_document_dirty();
                     self.session.status = "Updated 2D processing.".into();
                 }
                 Done::EstimateField { key, result } => {

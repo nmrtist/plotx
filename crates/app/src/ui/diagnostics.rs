@@ -14,11 +14,12 @@ pub(super) fn diagnostic_history_window(app: &mut PlotxApp, ctx: &egui::Context)
         .open(&mut open);
     // Save failures link here from a foreground modal. Keep the history above
     // that modal while it is open so its details remain visible and interactive.
-    let window = if app.session.ui.save_project_options || app.session.ui.quit_confirm {
-        window.order(egui::Order::Foreground)
-    } else {
-        window
-    };
+    let window =
+        if app.session.ui.save_project_options || app.session.ui.project_transition.is_some() {
+            window.order(egui::Order::Foreground)
+        } else {
+            window
+        };
     window.show(ctx, |ui| {
         ui.horizontal(|ui| {
             ui.label(format!(

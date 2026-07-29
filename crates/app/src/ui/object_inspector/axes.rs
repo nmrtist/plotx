@@ -245,7 +245,7 @@ fn begin_edit(app: &mut PlotxApp, canvas: usize, object: ObjectId) {
 fn apply_live(app: &mut PlotxApp, canvas: usize, object: ObjectId, after: AxisOverrides) {
     begin_edit(app, canvas, object);
     app.set_axis_overrides_value(canvas, object, &after);
-    app.doc.dirty = true;
+    app.mark_document_dirty();
 }
 
 fn commit_edit(app: &mut PlotxApp) {

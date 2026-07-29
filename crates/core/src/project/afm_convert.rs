@@ -3,8 +3,9 @@ use plotx_io::AfmData;
 use std::sync::Arc;
 
 const MAGIC: &[u8; 8] = b"PXAFM1\0\0";
+const VALUES_PER_CHUNK: usize = 4096;
 
-pub(super) fn encode_afm(data: &AfmData) -> Result<Vec<u8>> {
+pub(super) fn write_afm(output: &mut impl std::io::Write, data: &AfmData) -> Result<()> {
     let mut metadata = data.clone();
     for image in &mut metadata.images {
         image.raw = Arc::from([]);
@@ -18,20 +19,26 @@ pub(super) fn encode_afm(data: &AfmData) -> Result<Vec<u8>> {
     }
 
     let json = serde_json::to_vec(&metadata)?;
-    let mut output = Vec::with_capacity(json.len().saturating_add(64));
-    output.extend_from_slice(MAGIC);
-    write_len(&mut output, json.len())?;
-    output.extend_from_slice(&json);
+    output.write_all(MAGIC)?;
+    write_len(output, json.len())?;
+    output.write_all(&json)?;
     for image in &data.images {
-        write_i32s(&mut output, &image.raw)?;
+        write_i32s(output, &image.raw)?;
     }
     if let Some(forces) = &data.forces {
-        write_i32s(&mut output, &forces.raw)?;
-        write_usizes(&mut output, &forces.display_order)?;
+        write_i32s(output, &forces.raw)?;
+        write_usizes(output, &forces.display_order)?;
         if let Some(z) = &forces.z_positions {
-            write_f64s(&mut output, z)?;
+            write_f64s(output, z)?;
         }
     }
+    Ok(())
+}
+
+#[cfg(test)]
+pub(super) fn encode_afm(data: &AfmData) -> Result<Vec<u8>> {
+    let mut output = Vec::new();
+    write_afm(&mut output, data)?;
     Ok(output)
 }
 
@@ -99,35 +106,42 @@ fn require_len(label: &str, actual: usize, expected: usize) -> Result<()> {
     Ok(())
 }
 
-fn write_len(output: &mut Vec<u8>, len: usize) -> Result<()> {
+fn write_len(output: &mut impl std::io::Write, len: usize) -> Result<()> {
     let len = u64::try_from(len)
         .map_err(|_| ProjectError::Invalid("AFM array length exceeds u64".to_owned()))?;
-    output.extend_from_slice(&len.to_le_bytes());
+    output.write_all(&len.to_le_bytes())?;
     Ok(())
 }
 
-fn write_i32s(output: &mut Vec<u8>, values: &[i32]) -> Result<()> {
-    write_len(output, values.len())?;
-    for value in values {
-        output.extend_from_slice(&value.to_le_bytes());
-    }
-    Ok(())
+fn write_i32s(output: &mut impl std::io::Write, values: &[i32]) -> Result<()> {
+    write_scalars(output, values, |value| Ok(value.to_le_bytes()))
 }
 
-fn write_usizes(output: &mut Vec<u8>, values: &[usize]) -> Result<()> {
-    write_len(output, values.len())?;
-    for &value in values {
-        let value = u64::try_from(value)
+fn write_usizes(output: &mut impl std::io::Write, values: &[usize]) -> Result<()> {
+    write_scalars(output, values, |&value| {
+        let encoded = u64::try_from(value)
             .map_err(|_| ProjectError::Invalid("AFM sample index exceeds u64".to_owned()))?;
-        output.extend_from_slice(&value.to_le_bytes());
-    }
-    Ok(())
+        Ok(encoded.to_le_bytes())
+    })
 }
 
-fn write_f64s(output: &mut Vec<u8>, values: &[f64]) -> Result<()> {
+fn write_f64s(output: &mut impl std::io::Write, values: &[f64]) -> Result<()> {
+    write_scalars(output, values, |value| Ok(value.to_le_bytes()))
+}
+
+fn write_scalars<T, const WIDTH: usize>(
+    output: &mut impl std::io::Write,
+    values: &[T],
+    mut encode: impl FnMut(&T) -> Result<[u8; WIDTH]>,
+) -> Result<()> {
     write_len(output, values.len())?;
-    for value in values {
-        output.extend_from_slice(&value.to_le_bytes());
+    let mut buffer = Vec::with_capacity(VALUES_PER_CHUNK * WIDTH);
+    for chunk in values.chunks(VALUES_PER_CHUNK) {
+        buffer.clear();
+        for value in chunk {
+            buffer.extend_from_slice(&encode(value)?);
+        }
+        output.write_all(&buffer)?;
     }
     Ok(())
 }

@@ -63,3 +63,31 @@ fn binary_afm_rejects_truncation_and_trailing_bytes() {
     trailing.push(0);
     assert!(decode_afm(&trailing).is_err());
 }
+
+#[test]
+fn scalar_arrays_are_written_in_bounded_chunks() {
+    #[derive(Default)]
+    struct WriteCounter {
+        calls: usize,
+        bytes: usize,
+    }
+
+    impl std::io::Write for WriteCounter {
+        fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+            self.calls += 1;
+            self.bytes += buffer.len();
+            Ok(buffer.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let values = vec![42_i32; VALUES_PER_CHUNK + 1];
+    let mut output = WriteCounter::default();
+    write_i32s(&mut output, &values).unwrap();
+
+    assert_eq!(output.calls, 3);
+    assert_eq!(output.bytes, 8 + values.len() * std::mem::size_of::<i32>());
+}

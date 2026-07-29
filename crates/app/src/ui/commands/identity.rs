@@ -39,7 +39,9 @@ pub(super) fn command_identity(
 ) -> (String, Option<&'static str>, Option<bool>) {
     let plain = |text: &str, glyph| (text.to_owned(), glyph, None);
     match id {
+        CommandId::NewProject => plain("New Project", Some(icon::FILE_PLUS)),
         CommandId::OpenProject => plain("Open Project…", Some(icon::FOLDER_OPEN)),
+        CommandId::CloseProject => plain("Close Project", Some(icon::X)),
         CommandId::OpenFile => plain("Open File…", Some(icon::FILE)),
         CommandId::OpenFolder => plain("Open Folder…", Some(icon::FOLDER)),
         CommandId::RunBatchWorkflow => plain("Automation…", Some(icon::PLAY)),
@@ -329,7 +331,9 @@ fn recent_label(app: &PlotxApp, index: usize) -> String {
 
 fn simple_stable_id(id: CommandId) -> &'static str {
     match id {
+        CommandId::NewProject => "file.new_project",
         CommandId::OpenProject => "file.open_project",
+        CommandId::CloseProject => "file.close_project",
         CommandId::OpenFile => "file.open_file",
         CommandId::OpenFolder => "file.open_folder",
         CommandId::RunBatchWorkflow => "tools.automation",

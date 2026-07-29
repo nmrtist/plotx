@@ -1,6 +1,55 @@
 use super::*;
 
 #[test]
+fn sample_vectors_are_written_in_bounded_chunks() {
+    #[derive(Default)]
+    struct WriteCounter {
+        calls: usize,
+        bytes: usize,
+    }
+
+    impl std::io::Write for WriteCounter {
+        fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+            self.calls += 1;
+            self.bytes += buffer.len();
+            Ok(buffer.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let samples = vec![1.25; super::electrophysiology_convert::VALUES_PER_CHUNK + 1];
+    let recording = crate::state::ElectrophysiologyDataset::load(plotx_io::ElectrophysiologyData {
+        abf_version: "2.9.0.0".to_owned(),
+        sample_rate_hz: 10_000.0,
+        channels: vec![plotx_io::RecordedChannel {
+            name: "Current".to_owned(),
+            unit: plotx_io::ElectricalUnit::from_symbol("pA"),
+        }],
+        sweeps: vec![plotx_io::Sweep {
+            start_time_s: 0.0,
+            channels: vec![samples],
+            commands: Vec::new(),
+        }],
+        protocol: None,
+        source: "synthetic.abf".to_owned(),
+        import_warnings: Vec::new(),
+    });
+    let mut output = WriteCounter::default();
+
+    super::electrophysiology_convert::write_electrophysiology_blob(&mut output, &recording)
+        .unwrap();
+
+    assert_eq!(output.calls, 3);
+    assert_eq!(
+        output.bytes,
+        8 + (super::electrophysiology_convert::VALUES_PER_CHUNK + 1) * std::mem::size_of::<f64>()
+    );
+}
+
+#[test]
 fn project_roundtrip_preserves_raw_data_and_settings() {
     let path = std::env::temp_dir().join(format!(
         "plotx-electrophysiology-roundtrip-{}.plotx",

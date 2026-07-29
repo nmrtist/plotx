@@ -19,6 +19,8 @@ migrated silently. If that happens, update PlotX and reopen.
 
 **Preferences → General → Project backup copies** keeps previous saves as
 hidden files beside the project, so an accidental overwrite can be recovered.
+Automatic crash-recovery checkpoints are separate internal files. They are
+updated only after new edits and are not portable project copies.
 
 For pseudo-2D DOSY, a project also holds the per-column and ILT maps
 themselves, the ILT settings each was built with, your **Show** and **DOSY

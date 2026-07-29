@@ -29,7 +29,7 @@ impl PlotxApp {
             self.session.undo_stack.remove(0);
         }
         self.session.redo_stack.clear();
-        self.doc.dirty = true;
+        self.mark_document_dirty();
         self.doc.automation_revision = self.doc.automation_revision.saturating_add(1);
         Ok(())
     }
@@ -45,7 +45,7 @@ impl PlotxApp {
         let label = action.undo_label();
         self.revert_action(&action);
         self.session.redo_stack.push(action);
-        self.doc.dirty = true;
+        self.mark_document_dirty();
         self.doc.automation_revision = self.doc.automation_revision.saturating_add(1);
         self.session.status = format!("Undid {label}.");
     }
@@ -61,7 +61,7 @@ impl PlotxApp {
         let label = action.undo_label();
         self.apply_action(&action);
         self.session.undo_stack.push(action);
-        self.doc.dirty = true;
+        self.mark_document_dirty();
         self.doc.automation_revision = self.doc.automation_revision.saturating_add(1);
         self.session.status = format!("Redid {label}.");
     }

@@ -147,6 +147,8 @@ fn ribbon_groups(app: &PlotxApp) -> Vec<(WorkflowTab, Vec<&'static str>)> {
 
 #[test]
 fn stable_ids_cover_static_and_dynamic_commands() {
+    assert_eq!(CommandId::NewProject.stable_id(), "file.new_project");
+    assert_eq!(CommandId::CloseProject.stable_id(), "file.close_project");
     assert_eq!(CommandId::SaveProject.stable_id(), "file.save");
     assert_eq!(CommandId::ArrangeGrid(2, 3).stable_id(), "arrange.grid.2x3");
     assert_eq!(CommandId::Tool(Tool::LineFit).stable_id(), "tool.line_fit");

@@ -196,7 +196,7 @@ pub(crate) fn handle_phase_drag(
                 if let Some(ppm) = preview
                     && app.doc.datasets[di].repivot_ppm(axis, ppm)
                 {
-                    app.doc.dirty = true;
+                    app.mark_document_dirty();
                 }
                 finish_phase_drag(app);
             }

@@ -17,7 +17,7 @@ impl PlotxApp {
             self.session.undo_stack.remove(0);
         }
         self.session.redo_stack.clear();
-        self.doc.dirty = true;
+        self.mark_document_dirty();
         self.doc.automation_revision = self.doc.automation_revision.saturating_add(1);
         Ok(())
     }

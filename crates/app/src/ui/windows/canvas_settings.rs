@@ -80,7 +80,7 @@ pub(in crate::ui) fn canvas_settings_window(app: &mut PlotxApp, ctx: &egui::Cont
                 ));
             }
             if resp.changed() {
-                app.doc.dirty = true;
+                app.mark_document_dirty();
             }
             if resp.lost_focus() {
                 commit_caption_edit(app, ci);

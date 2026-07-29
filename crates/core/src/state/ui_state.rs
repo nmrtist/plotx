@@ -321,9 +321,9 @@ pub struct UiState {
     pub sheet_open: Option<usize>,
     pub rename: Option<RenameState>,
     pub save_project_options: bool,
-    /// Set when a window-close request is intercepted because the project has
-    /// unsaved changes: shows a Save / Discard / Cancel dialog instead of quitting.
-    pub quit_confirm: bool,
+    pub pending_project_save: Option<PendingProjectSave>,
+    pub project_save_in_progress: bool,
+    pub project_transition: Option<PendingProjectTransition>,
     pub export_options: Option<ExportDialogState>,
     pub data_export: Option<crate::data_export::DataExportDialogState>,
     pub table_import_preview: Option<TableImportPreviewState>,
@@ -507,7 +507,9 @@ impl Default for UiState {
             sheet_open: None,
             rename: None,
             save_project_options: false,
-            quit_confirm: false,
+            pending_project_save: None,
+            project_save_in_progress: false,
+            project_transition: None,
             export_options: None,
             data_export: None,
             table_import_preview: None,
@@ -592,6 +594,9 @@ pub struct Document {
     pub project_revision: Option<String>,
     pub automation_revision: u64,
     pub automation_runs: Vec<crate::automation::RunManifest>,
+    /// Incremented for every persisted edit. Background save completion uses
+    /// this token instead of clearing `dirty` unconditionally.
+    pub edit_generation: u64,
     pub dirty: bool,
     pub save_include_view_snapshots: bool,
 }
@@ -630,6 +635,9 @@ impl DerefMut for SharedDocument {
 /// Window/UI chrome and transient interaction state: viewports, tool selection,
 /// sidebars, the undo history, and in-flight gestures. Not the document itself.
 pub struct Session {
+    /// Distinguishes the welcome state from an intentionally created, still
+    /// empty untitled project.
+    pub project_present: bool,
     pub active_canvas: Option<usize>,
     /// Pan/zoom of the board that holds every page-frame.
     pub board: BoardViewport,

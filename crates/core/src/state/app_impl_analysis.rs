@@ -20,7 +20,7 @@ impl PlotxApp {
         };
         d2.set_nus_schedule(values, base)?;
         self.schedule_2d_processing(dataset, true);
-        self.doc.dirty = true;
+        self.mark_document_dirty();
         self.session.status =
             "Reconstructing the NUS spectrum from the entered sampling list…".into();
         Ok(())
@@ -46,7 +46,7 @@ impl PlotxApp {
         // The builder installs the map and its provenance whether or not any
         // column fitted, and both are persisted state. Dirtying only the populated
         // branch would let an empty result be lost on close with no save prompt.
-        self.doc.dirty = true;
+        self.mark_document_dirty();
         if any {
             self.rebuild_canvases_for(dataset);
             self.session.status = "Built DOSY map.".into();
@@ -97,7 +97,7 @@ impl PlotxApp {
         let any = d2.build_ilt_map(params);
         // See `build_dosy_map_for`: the method switch, the map and its provenance
         // land whether or not the inversion produced anything.
-        self.doc.dirty = true;
+        self.mark_document_dirty();
         if any {
             self.rebuild_canvases_for(dataset);
             self.session.status = "Built ILT DOSY map.".into();
@@ -222,7 +222,7 @@ impl PlotxApp {
         }
         if changed {
             self.rebuild_canvases_for(dataset);
-            self.doc.dirty = true;
+            self.mark_document_dirty();
         }
     }
 
@@ -243,7 +243,7 @@ impl PlotxApp {
         }
         if changed {
             self.rebuild_canvases_for(dataset);
-            self.doc.dirty = true;
+            self.mark_document_dirty();
         }
     }
 

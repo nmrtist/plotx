@@ -227,7 +227,7 @@ pub fn execute_tool(
 /// against moved".
 pub(super) fn record_run(document: &mut Document, manifest: RunManifest) {
     document.automation_runs.push(manifest);
-    document.dirty = true;
+    document.mark_dirty();
 }
 
 /// The node id a single call is recorded under.

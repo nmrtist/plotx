@@ -53,6 +53,34 @@ pub fn write_bytes(
     Ok(())
 }
 
+pub fn write_dataset_blob(
+    zip: &mut zip::ZipWriter<File>,
+    options: SimpleFileOptions,
+    path: &str,
+    blob: &DatasetBlob<'_>,
+) -> Result<()> {
+    zip.start_file(path, options)?;
+    match blob {
+        DatasetBlob::Complex(values) => {
+            const VALUES_PER_CHUNK: usize = 4096;
+            let mut buffer = Vec::with_capacity(VALUES_PER_CHUNK * 16);
+            for chunk in values.chunks(VALUES_PER_CHUNK) {
+                buffer.clear();
+                for value in chunk {
+                    buffer.extend_from_slice(&value.re.to_le_bytes());
+                    buffer.extend_from_slice(&value.im.to_le_bytes());
+                }
+                zip.write_all(&buffer)?;
+            }
+            Ok(())
+        }
+        DatasetBlob::Electrophysiology(recording) => {
+            super::electrophysiology_convert::write_electrophysiology_blob(zip, recording)
+        }
+        DatasetBlob::Afm(data) => super::afm_convert::write_afm(zip, data),
+    }
+}
+
 pub fn read_json<T: for<'de> Deserialize<'de>>(
     zip: &mut zip::ZipArchive<File>,
     path: &str,

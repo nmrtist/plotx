@@ -2,7 +2,9 @@
 //! descriptions makes the live catalog easy to inspect and keeps source files
 //! within the repository size limit.
 
-use plotx_core::state::{CommandPaletteState, LineShapeKind, PlotxApp, Tool, ToolGroup};
+use plotx_core::state::{
+    CommandPaletteState, LineShapeKind, PlotxApp, ProjectTransition, Tool, ToolGroup,
+};
 
 use super::clipboard_table::ClipboardTablePaste;
 use super::commands::{self, CommandId};
@@ -26,7 +28,13 @@ pub fn execute(
         return;
     }
     match id {
+        CommandId::NewProject => {
+            app.request_project_transition(ProjectTransition::New);
+        }
         CommandId::OpenProject => super::file_dialogs::open_project(app),
+        CommandId::CloseProject => {
+            app.request_project_transition(ProjectTransition::Close);
+        }
         CommandId::OpenFile => super::file_dialogs::open_file(app),
         CommandId::OpenFolder => super::file_dialogs::open_folder(app),
         CommandId::RunBatchWorkflow => super::batch_workflow::AutomationUi::request_open(ctx),

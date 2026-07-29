@@ -4,12 +4,13 @@ use crate::operation::{
 };
 
 impl PlotxApp {
-    pub fn load_project_from(&mut self, path: &std::path::Path) {
+    pub fn load_project_from(&mut self, path: &std::path::Path) -> bool {
         let operation_id = self.session.begin_operation();
         match crate::project::load_project(path) {
             Ok(mut loaded) => {
                 loaded.doc.project_path = Some(path.to_owned());
                 loaded.doc.dirty = false;
+                loaded.session.project_present = true;
                 loaded.clear_history();
                 self.install_loaded_project(loaded);
                 // A dataset whose stored analysis result could not be restored is
@@ -67,6 +68,7 @@ impl PlotxApp {
                 }
                 self.session.record_operation(report);
                 self.note_recent_file(path);
+                true
             }
             Err(e) => {
                 self.session
@@ -83,6 +85,7 @@ impl PlotxApp {
                         .with_context("path", path.display().to_string())
                         .with_context("error", e.to_string()),
                     ));
+                false
             }
         }
     }
@@ -193,79 +196,6 @@ impl PlotxApp {
     fn sync_recent_files_to_settings(&mut self, files: Vec<std::path::PathBuf>) {
         self.settings.recent.files = files;
         self.persist_settings();
-    }
-
-    /// Save the project and report whether persistence completed. The return
-    /// value lets modal close/quit flows remain open on failure and offer a
-    /// visible recovery path instead of relying on the status bar.
-    pub fn save_project_to(
-        &mut self,
-        path: &std::path::Path,
-        include_view_snapshots: bool,
-    ) -> bool {
-        let operation_id = self.session.begin_operation();
-        match crate::project::save_project(self, path, include_view_snapshots) {
-            Ok(outcome) => {
-                self.doc.project_path = Some(path.to_owned());
-                self.doc.save_include_view_snapshots = include_view_snapshots;
-                self.settings.export.include_view_snapshots = include_view_snapshots;
-                self.doc.dirty = false;
-                self.doc.project_revision = Some(outcome.revision.clone());
-                let mut report = OperationReport::success(
-                    operation_id,
-                    OperationKind::ProjectSave,
-                    format!("Saved project {}", path.display()),
-                    (),
-                )
-                .with_diagnostic(
-                    Diagnostic::new(
-                        Severity::Info,
-                        DiagnosticCode::ProjectSaveSucceeded,
-                        "Project saved successfully.",
-                    )
-                    .with_source("core.project")
-                    .with_context("path", path.display().to_string()),
-                );
-                if let Some(warning) = outcome.backup_warning {
-                    report = report.with_diagnostic(
-                        Diagnostic::new(
-                            Severity::Warning,
-                            DiagnosticCode::ProjectSaveSucceeded,
-                            "The project was saved, but its backup could not be hidden.",
-                        )
-                        .with_source("core.project.backup")
-                        .with_context("error", warning),
-                    );
-                }
-                self.session.record_operation(report);
-                // Flush the save-profile preference above on its own,
-                // rather than relying on the recent-file call below to write
-                // the whole struct as a side effect: that dependency is
-                // invisible, and reordering either line would silently stop
-                // persisting them. It follows the success report so a failed
-                // write keeps its diagnostic instead of being overwritten.
-                self.persist_settings();
-                self.note_recent_file(path);
-                true
-            }
-            Err(e) => {
-                self.session
-                    .record_operation(OperationReport::<()>::failure(
-                        operation_id,
-                        OperationKind::ProjectSave,
-                        format!("Save failed: {e}"),
-                        Diagnostic::new(
-                            Severity::Error,
-                            DiagnosticCode::ProjectSaveFailed,
-                            "Project could not be saved.",
-                        )
-                        .with_source("core.project")
-                        .with_context("path", path.display().to_string())
-                        .with_context("error", e.to_string()),
-                    ));
-                false
-            }
-        }
     }
 
     pub fn load_from(&mut self, path: &std::path::Path) {

@@ -127,7 +127,7 @@ impl PlotxApp {
                 && !preset_by_id(id).is_some_and(|preset| preset.matches(canvas.size_mm))
             {
                 canvas.size_preset_id = None;
-                self.doc.dirty = true;
+                self.mark_document_dirty();
             }
             let canvas = &self.doc.canvases[ci];
             if !canvas.auto_height {
@@ -139,7 +139,7 @@ impl PlotxApp {
             if (target - canvas.size_mm[1]).abs() > 0.05 {
                 self.doc.canvases[ci].size_mm[1] = target;
                 self.rebuild_canvas(ci);
-                self.doc.dirty = true;
+                self.mark_document_dirty();
             }
         }
     }

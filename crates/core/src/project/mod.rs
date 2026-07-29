@@ -147,20 +147,52 @@ pub struct RecoverySaveRequest {
     metadata: RecoveryMetadata,
 }
 
+/// Immutable state handed to a manual-save worker.
+pub struct ProjectSaveRequest {
+    doc: crate::state::SharedDocument,
+    workspace: WorkspaceSnapshot,
+    path: PathBuf,
+    include_view_snapshots: bool,
+    revision: String,
+    backup_count: usize,
+}
+
 pub fn save_project(
     app: &PlotxApp,
     path: &Path,
     include_view_snapshots: bool,
 ) -> Result<SaveOutcome> {
-    let revision = persistence::new_revision();
-    let backup_warning = save_project_impl(
-        &app.doc,
-        &WorkspaceSnapshot::capture(app),
-        path,
+    save_project_snapshot(prepare_project_save(app, path, include_view_snapshots))
+}
+
+pub fn prepare_project_save(
+    app: &PlotxApp,
+    path: &Path,
+    include_view_snapshots: bool,
+) -> ProjectSaveRequest {
+    ProjectSaveRequest {
+        doc: app.doc.clone(),
+        workspace: WorkspaceSnapshot::capture(app),
+        path: path.to_owned(),
         include_view_snapshots,
+        revision: persistence::new_revision(),
+        backup_count: usize::from(app.settings.general.project_backup_generations),
+    }
+}
+
+/// Serialize and atomically commit a captured manual-save revision. This is
+/// intentionally independent of live application state so callers may run it
+/// on a background worker.
+pub fn save_project_snapshot(request: ProjectSaveRequest) -> Result<SaveOutcome> {
+    let revision = request.revision;
+    let backup_warning = save_project_impl(
+        &request.doc,
+        &request.workspace,
+        &request.path,
+        request.include_view_snapshots,
         revision.clone(),
         None,
-        usize::from(app.settings.general.project_backup_generations),
+        request.backup_count,
     )?;
     Ok(SaveOutcome {
         backup_warning,
@@ -189,12 +221,11 @@ pub fn prepare_recovery_snapshot(app: &PlotxApp) -> Result<RecoverySaveRequest> 
 /// Serialize and atomically commit a captured document to its per-process slot.
 /// This function is intended to run on a background worker.
 pub fn save_recovery_snapshot(request: RecoverySaveRequest, target: RecoveryTarget) -> Result<()> {
-    let include_view_snapshots = request.doc.save_include_view_snapshots;
     save_project_impl(
         &request.doc,
         &request.workspace,
         target.path(),
-        include_view_snapshots,
+        false,
         persistence::new_revision(),
         Some(request.metadata),
         0,
@@ -206,7 +237,8 @@ pub fn restore_recovery(snapshot: &RecoverySnapshot) -> Result<PlotxApp> {
     let mut app = load_project(&snapshot.path)?;
     app.doc.project_path = snapshot.original_path.clone();
     app.doc.project_revision = snapshot.base_revision.clone();
-    app.doc.dirty = true;
+    app.doc.save_include_view_snapshots = app.settings.export.include_view_snapshots;
+    app.mark_document_dirty();
     Ok(app)
 }
 
@@ -266,7 +298,7 @@ fn save_project_impl(
         } else {
             let objects = dataset_to_objects(dataset, &data_id, &recipe_id)?;
             write_json(&mut zip, options, &data_path, &objects.data)?;
-            write_bytes(&mut zip, options, &objects.data.payload.blob, &objects.blob)?;
+            write_dataset_blob(&mut zip, options, &objects.data.payload.blob, &objects.blob)?;
             for (path, bytes) in &objects.extra_blobs {
                 write_bytes(&mut zip, options, path, bytes)?;
             }
@@ -528,6 +560,7 @@ pub fn load_project(path: &Path) -> Result<PlotxApp> {
         .collect();
     app.doc.save_include_view_snapshots = manifest.save_profile.include_view_snapshots;
     app.doc.project_revision = manifest.revision;
+    app.doc.edit_generation = 0;
     app.doc.dirty = false;
     Ok(app)
 }

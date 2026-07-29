@@ -36,6 +36,7 @@ mod app_impl_io;
 mod app_impl_linefit;
 mod app_impl_multiplet;
 mod app_impl_peaks;
+mod app_impl_project;
 mod app_impl_slice;
 mod app_impl_statistics;
 #[cfg(test)]
@@ -54,6 +55,7 @@ mod datasets_dispatch;
 mod derived_axes;
 mod document;
 mod document_identity;
+mod document_lifecycle;
 mod electrophysiology;
 mod field;
 mod field_cache;
@@ -111,6 +113,7 @@ pub(crate) use datasets_2d_maps::{
 };
 pub use derived_axes::*;
 pub use document::*;
+pub use document_lifecycle::*;
 pub use electrophysiology::*;
 pub use field::*;
 pub(crate) use field_cache::FieldRuntime;

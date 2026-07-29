@@ -58,6 +58,8 @@ from the Object inspector.
 
 | Input | Action |
 | --- | --- |
+| `Ctrl` + `N` | Start a new project |
+| `Ctrl` + `W` | Close the current project |
 | `Ctrl` + `S` | Open project save options |
 | `Ctrl` + `Z` | Undo |
 | `Ctrl` + `Shift` + `Z` or `Ctrl` + `Y` | Redo |

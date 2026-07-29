@@ -48,7 +48,10 @@ pub(crate) fn menu_bar_spec() -> Vec<(&'static str, Vec<MenuEntry>)> {
         (
             "File",
             vec![
+                Command(CommandId::NewProject),
                 Command(CommandId::OpenProject),
+                Command(CommandId::CloseProject),
+                Separator,
                 Command(CommandId::OpenFile),
                 Command(CommandId::OpenFolder),
                 Command(CommandId::RunBatchWorkflow),

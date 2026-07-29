@@ -264,7 +264,7 @@ impl PlotxApp {
             && c.layout.show_grid != show
         {
             c.layout.show_grid = show;
-            self.doc.dirty = true;
+            self.mark_document_dirty();
         }
     }
 
@@ -278,7 +278,7 @@ impl PlotxApp {
             && c.auto_height != enabled
         {
             c.auto_height = enabled;
-            self.doc.dirty = true;
+            self.mark_document_dirty();
         }
     }
 

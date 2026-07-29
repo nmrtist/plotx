@@ -15,9 +15,7 @@ mod xlsx;
 pub(crate) use delimited::DelimitedTableSource;
 use path::{ensure_extension, ensure_plotx_extension, io_error_category};
 pub(crate) use preview::table_import_preview_window;
-pub(crate) use recent::open_recent_path;
-#[cfg(test)]
-use recent::{RecentOpenKind, recent_open_kind};
+pub(crate) use recent::{RecentOpenKind, open_recent_path, recent_open_kind};
 use xlsx::import_xlsx_table_path;
 
 pub(crate) fn import_delimited_table(app: &mut PlotxApp) {
@@ -348,20 +346,17 @@ pub(crate) fn open_project(app: &mut PlotxApp) {
         .set_title("Open PlotX project")
         .pick_file()
     {
-        app.load_project_from(&path);
+        app.request_project_transition(plotx_core::state::ProjectTransition::Open(path));
     }
 }
 
-pub(crate) fn save_project_as(app: &mut PlotxApp, include_view_snapshots: bool) {
-    if let Some(path) = rfd::FileDialog::new()
+pub(crate) fn choose_project_save_path() -> Option<std::path::PathBuf> {
+    rfd::FileDialog::new()
         .add_filter("PlotX project (*.plotx)", &["plotx"])
         .set_file_name("project.plotx")
         .set_title("Save PlotX project")
         .save_file()
-    {
-        let path = ensure_plotx_extension(path);
-        let _ = app.save_project_to(&path, include_view_snapshots);
-    }
+        .map(ensure_plotx_extension)
 }
 
 pub(crate) fn open_folder(app: &mut PlotxApp) {

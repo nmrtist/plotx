@@ -55,6 +55,7 @@ pub fn render(
     input_blocked: bool,
 ) {
     let ctx = ui.ctx().clone();
+    ctx.send_viewport_cmd(egui::ViewportCommand::Title(project_window_title(app)));
     sync_chrome_theme(&ctx, app.settings.appearance.theme);
     clipboard_table_paste.begin_frame(app, &ctx);
     if let Some(payload) = app.poll_data_export() {
@@ -85,7 +86,7 @@ pub fn render(
         || app.session.ui.align_spectra_dialog.is_some()
         || app.session.ui.command_palette.is_some()
         || app.session.ui.save_project_options
-        || app.session.ui.quit_confirm
+        || app.session.ui.project_transition.is_some()
         || app.session.ui.export_options.is_some()
         || app.session.ui.data_export.is_some()
         || app.session.ui.table_import_preview.is_some()
@@ -184,6 +185,21 @@ pub fn render(
     let now = ctx.input(|i| i.time);
     app.finish_pending_wheel_zoom(now, false);
     app.finish_pending_wheel_property(now, false);
+}
+
+fn project_window_title(app: &PlotxApp) -> String {
+    let project = app
+        .doc
+        .project_path
+        .as_deref()
+        .and_then(std::path::Path::file_name)
+        .map(|name| name.to_string_lossy().into_owned())
+        .or_else(|| app.session.project_present.then(|| "Untitled".to_owned()));
+    match project {
+        Some(project) if app.doc.dirty => format!("* {project} — PlotX"),
+        Some(project) => format!("{project} — PlotX"),
+        None => "PlotX".to_owned(),
+    }
 }
 
 fn copy_table_export(ctx: &egui::Context, payload: plotx_core::data_export::ClipboardExport) {

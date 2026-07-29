@@ -14,6 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 const RECOVERY_INTERVAL: Duration = Duration::from_secs(60);
+const RECOVERY_DEBOUNCE: Duration = Duration::from_secs(10);
 const RECOVERY_RETRY_INTERVAL: Duration = Duration::from_secs(15);
 
 /// Intended logical (point) size of a fresh main window; also the physical
@@ -25,6 +26,34 @@ pub(crate) const DEFAULT_WINDOW_PT: [f32; 2] = [1100.0, 700.0];
 static PENDING_INSTALL: Mutex<Option<plotx_core::update::InstallPlan>> = Mutex::new(None);
 static RELAUNCH_REQUESTED: AtomicBool = AtomicBool::new(false);
 static SHOT_FAILURE: Mutex<Option<String>> = Mutex::new(None);
+
+struct RecoveryJob {
+    generation: u64,
+    handle: std::thread::JoinHandle<Result<(), plotx_core::project::ProjectError>>,
+}
+
+struct ManualProjectSaveJob {
+    operation_id: plotx_core::operation::OperationId,
+    path: std::path::PathBuf,
+    include_view_snapshots: bool,
+    captured_generation: u64,
+    continue_transition: bool,
+    handle: std::thread::JoinHandle<
+        Result<plotx_core::project::SaveOutcome, plotx_core::project::ProjectError>,
+    >,
+}
+
+fn recovery_needed(dirty: bool, generation: u64, recovered: Option<u64>) -> bool {
+    dirty && recovered != Some(generation)
+}
+
+fn transition_ready_after_save(
+    saved: bool,
+    captured_generation: u64,
+    current_generation: u64,
+) -> bool {
+    saved && captured_generation == current_generation
+}
 
 pub(crate) fn record_shot_failure(error: String) {
     let mut failure = SHOT_FAILURE.lock().unwrap();
@@ -47,8 +76,12 @@ struct Shell {
     recovery: Option<plotx_core::project::RecoveryManager>,
     pending_recovery: Option<plotx_core::project::RecoverySnapshot>,
     pending_crash_report: Option<std::path::PathBuf>,
-    recovery_job: Option<std::thread::JoinHandle<Result<(), plotx_core::project::ProjectError>>>,
+    recovery_job: Option<RecoveryJob>,
+    manual_save_job: Option<ManualProjectSaveJob>,
     recovery_written: bool,
+    last_recovered_generation: Option<u64>,
+    observed_edit_generation: u64,
+    recovery_deadline: Option<Instant>,
     next_recovery_at: Instant,
     clipboard_table_paste: ui::clipboard_table::ClipboardTablePaste,
     batch_workflow: ui::batch_workflow::AutomationUi,
@@ -93,6 +126,11 @@ impl eframe::App for Shell {
             ui,
             recovery_blocked,
         );
+        // Apply save completion after every edit-producing poll. This makes the
+        // generation check below cover compute results that arrived this frame.
+        self.poll_manual_project_save(&ctx);
+        self.start_pending_project_save(&ctx);
+        self.drive_project_transition(&ctx);
         if fitting {
             ctx.request_repaint_after(std::time::Duration::from_millis(50));
         }
@@ -109,8 +147,15 @@ impl eframe::App for Shell {
     }
 
     fn on_exit(&mut self) {
+        if let Some(job) = self.manual_save_job.take() {
+            match job.handle.join() {
+                Ok(Ok(_)) => {}
+                Ok(Err(error)) => log::error!("project save failed on exit: {error}"),
+                Err(_) => log::error!("project save worker panicked on exit"),
+            }
+        }
         if let Some(job) = self.recovery_job.take() {
-            match job.join() {
+            match job.handle.join() {
                 Ok(Ok(())) => {}
                 Ok(Err(error)) => log::error!("automatic recovery save failed on exit: {error}"),
                 Err(_) => log::error!("automatic recovery worker panicked on exit"),
@@ -126,21 +171,180 @@ impl eframe::App for Shell {
 }
 
 impl Shell {
+    fn start_pending_project_save(&mut self, ctx: &egui::Context) {
+        if self.manual_save_job.is_some() || self.recovery_job.is_some() {
+            if self.app.session.ui.pending_project_save.is_some() {
+                ctx.request_repaint_after(Duration::from_millis(100));
+            }
+            return;
+        }
+        let Some(pending) = self.app.session.ui.pending_project_save.take() else {
+            return;
+        };
+        let operation_id = self.app.session.begin_operation();
+        let captured_generation = self.app.doc.edit_generation;
+        let request = plotx_core::project::prepare_project_save(
+            &self.app,
+            &pending.path,
+            pending.include_view_snapshots,
+        );
+        self.app.session.status = format!("Saving project {}…", pending.path.display());
+        self.manual_save_job = Some(ManualProjectSaveJob {
+            operation_id,
+            path: pending.path,
+            include_view_snapshots: pending.include_view_snapshots,
+            captured_generation,
+            continue_transition: pending.continue_transition,
+            handle: std::thread::spawn(move || plotx_core::project::save_project_snapshot(request)),
+        });
+        ctx.request_repaint_after(Duration::from_millis(100));
+    }
+
+    fn poll_manual_project_save(&mut self, ctx: &egui::Context) {
+        let finished = self
+            .manual_save_job
+            .as_ref()
+            .is_some_and(|job| job.handle.is_finished());
+        if !finished {
+            if self.manual_save_job.is_some() {
+                ctx.request_repaint_after(Duration::from_millis(100));
+            }
+            return;
+        }
+        let job = self
+            .manual_save_job
+            .take()
+            .expect("finished project save worker is present");
+        let result = match job.handle.join() {
+            Ok(result) => result,
+            Err(_) => Err(plotx_core::project::ProjectError::Invalid(
+                "project save worker failed unexpectedly".to_owned(),
+            )),
+        };
+        let saved = self.app.complete_project_save(
+            job.operation_id,
+            &job.path,
+            job.include_view_snapshots,
+            job.captured_generation,
+            result,
+        );
+        self.app.session.ui.project_save_in_progress = false;
+        if job.continue_transition {
+            if let Some(transition) = self.app.session.ui.project_transition.as_mut() {
+                transition.phase = if transition_ready_after_save(
+                    saved,
+                    job.captured_generation,
+                    self.app.doc.edit_generation,
+                ) {
+                    plotx_core::state::ProjectTransitionPhase::Ready
+                } else {
+                    plotx_core::state::ProjectTransitionPhase::NeedsConfirmation
+                };
+            }
+        } else if !saved {
+            self.app.session.ui.save_project_options = true;
+        }
+        ctx.request_repaint();
+    }
+
+    fn drive_project_transition(&mut self, ctx: &egui::Context) {
+        use plotx_core::state::{ProjectTransition, ProjectTransitionPhase};
+
+        let Some(mut transition) = self.app.session.ui.project_transition.clone() else {
+            return;
+        };
+        if transition.phase == ProjectTransitionPhase::NeedsConfirmation
+            && let Some(save) = self.manual_save_job.as_mut()
+        {
+            save.continue_transition = true;
+            transition.phase = ProjectTransitionPhase::Saving;
+            if let Some(pending) = self.app.session.ui.project_transition.as_mut() {
+                pending.phase = ProjectTransitionPhase::Saving;
+            }
+            ctx.request_repaint_after(Duration::from_millis(100));
+            return;
+        }
+        if transition.phase == ProjectTransitionPhase::NeedsConfirmation
+            && let Some(save) = self.app.session.ui.pending_project_save.as_mut()
+        {
+            save.continue_transition = true;
+            if let Some(pending) = self.app.session.ui.project_transition.as_mut() {
+                pending.phase = ProjectTransitionPhase::Saving;
+            }
+            ctx.request_repaint_after(Duration::from_millis(100));
+            return;
+        }
+        if transition.phase != ProjectTransitionPhase::Ready {
+            return;
+        }
+        if self.manual_save_job.is_some() || self.recovery_job.is_some() {
+            ctx.request_repaint_after(Duration::from_millis(100));
+            return;
+        }
+
+        let completed = match transition.target {
+            ProjectTransition::New => {
+                self.clear_recovery_for_project_swap();
+                self.app.start_new_project();
+                true
+            }
+            ProjectTransition::Close => {
+                self.clear_recovery_for_project_swap();
+                self.app.close_project();
+                true
+            }
+            ProjectTransition::Open(path) => {
+                let opened = self.app.load_project_from(&path);
+                if opened {
+                    self.clear_recovery_for_project_swap();
+                }
+                opened
+            }
+            ProjectTransition::Quit => {
+                self.app.session.ui.project_transition = None;
+                self.app.session.allow_close = true;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                return;
+            }
+        };
+        if !completed {
+            self.app.session.ui.project_transition = None;
+        }
+        self.observed_edit_generation = self.app.doc.edit_generation;
+        self.last_recovered_generation = None;
+        self.recovery_deadline = None;
+        self.next_recovery_at = Instant::now() + RECOVERY_INTERVAL;
+    }
+
+    fn clear_recovery_for_project_swap(&mut self) {
+        if let Some(Err(error)) = self
+            .recovery
+            .as_ref()
+            .map(plotx_core::project::RecoveryManager::clear_current)
+        {
+            self.app.session.status =
+                format!("Project changed, but old recovery data could not be cleared: {error}");
+        }
+        self.recovery_written = false;
+        self.last_recovered_generation = None;
+    }
+
     fn tick_recovery(&mut self, ctx: &egui::Context) {
         let now = Instant::now();
         if self
             .recovery_job
             .as_ref()
-            .is_some_and(std::thread::JoinHandle::is_finished)
+            .is_some_and(|job| job.handle.is_finished())
         {
-            let result = self
+            let job = self
                 .recovery_job
                 .take()
-                .expect("finished recovery worker is present")
-                .join();
-            match result {
+                .expect("finished recovery worker is present");
+            match job.handle.join() {
                 Ok(Ok(())) => {
                     self.recovery_written = true;
+                    self.last_recovered_generation = Some(job.generation);
+                    self.recovery_deadline = None;
                     self.next_recovery_at = now + RECOVERY_INTERVAL;
                 }
                 Ok(Err(error)) => {
@@ -169,14 +373,41 @@ impl Shell {
                         self.app.session.status =
                             format!("Saved project, but could not clear recovery data: {error}");
                         self.recovery_written = false;
+                        self.last_recovered_generation = None;
                     }
-                    _ => self.recovery_written = false,
+                    _ => {
+                        self.recovery_written = false;
+                        self.last_recovered_generation = None;
+                    }
                 }
             }
+            self.recovery_deadline = None;
             self.next_recovery_at = now + RECOVERY_INTERVAL;
             return;
         }
+        let generation = self.app.doc.edit_generation;
+        if !recovery_needed(
+            self.app.doc.dirty,
+            generation,
+            self.last_recovered_generation,
+        ) {
+            self.recovery_deadline = None;
+            self.next_recovery_at = now + RECOVERY_INTERVAL;
+            return;
+        }
+        if self.observed_edit_generation != generation || self.recovery_deadline.is_none() {
+            self.observed_edit_generation = generation;
+            let deadline = self
+                .recovery_deadline
+                .get_or_insert(now + RECOVERY_INTERVAL);
+            self.next_recovery_at = (now + RECOVERY_DEBOUNCE).min(*deadline);
+        }
         if self.recovery_job.is_some() {
+            ctx.request_repaint_after(Duration::from_millis(100));
+            return;
+        }
+        if self.manual_save_job.is_some() || self.app.session.ui.pending_project_save.is_some() {
+            self.next_recovery_at = now + RECOVERY_RETRY_INTERVAL;
             ctx.request_repaint_after(Duration::from_millis(100));
             return;
         }
@@ -198,9 +429,12 @@ impl Shell {
                     }
                 };
                 let target = recovery.target();
-                self.recovery_job = Some(std::thread::spawn(move || {
-                    plotx_core::project::save_recovery_snapshot(request, target)
-                }));
+                self.recovery_job = Some(RecoveryJob {
+                    generation,
+                    handle: std::thread::spawn(move || {
+                        plotx_core::project::save_recovery_snapshot(request, target)
+                    }),
+                });
                 ctx.request_repaint_after(Duration::from_millis(100));
             } else {
                 self.next_recovery_at = now + RECOVERY_INTERVAL;
@@ -271,6 +505,9 @@ impl Shell {
                     self.app = app;
                     self.pending_recovery = None;
                     self.recovery_written = true;
+                    self.last_recovered_generation = Some(self.app.doc.edit_generation);
+                    self.observed_edit_generation = self.app.doc.edit_generation;
+                    self.recovery_deadline = None;
                     self.next_recovery_at = Instant::now() + RECOVERY_INTERVAL;
                 }
                 Err(error) => {
@@ -390,7 +627,7 @@ fn main() -> eframe::Result<()> {
         ..Default::default()
     };
     eframe::run_native(
-        "plotx",
+        "PlotX",
         native_options,
         Box::new(move |cc| {
             #[cfg(windows)]
@@ -454,13 +691,18 @@ fn main() -> eframe::Result<()> {
                 ui::native_menu::NativeMenu::new(&app, &cc.egui_ctx).map_err(|error| {
                     std::io::Error::other(format!("failed to install macOS menu: {error}"))
                 })?;
+            let observed_edit_generation = app.doc.edit_generation;
             Ok(Box::new(Shell {
                 app,
                 recovery,
                 pending_recovery,
                 pending_crash_report,
                 recovery_job: None,
+                manual_save_job: None,
                 recovery_written: false,
+                last_recovered_generation: None,
+                observed_edit_generation,
+                recovery_deadline: None,
                 next_recovery_at: Instant::now() + RECOVERY_INTERVAL,
                 clipboard_table_paste: Default::default(),
                 batch_workflow: Default::default(),
@@ -498,5 +740,20 @@ mod tests {
         assert!(RELAUNCH_REQUESTED.load(Ordering::Relaxed));
         cancel_relaunch();
         assert!(!RELAUNCH_REQUESTED.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn recovery_is_not_rewritten_without_a_new_generation() {
+        assert!(recovery_needed(true, 7, None));
+        assert!(!recovery_needed(true, 7, Some(7)));
+        assert!(recovery_needed(true, 8, Some(7)));
+        assert!(!recovery_needed(false, 8, Some(7)));
+    }
+
+    #[test]
+    fn transition_waits_when_an_edit_lands_after_the_save_snapshot() {
+        assert!(transition_ready_after_save(true, 7, 7));
+        assert!(!transition_ready_after_save(true, 7, 8));
+        assert!(!transition_ready_after_save(false, 7, 7));
     }
 }

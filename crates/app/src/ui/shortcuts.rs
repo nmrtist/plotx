@@ -75,6 +75,8 @@ const fn tool_key(tool: Tool, key: egui::Key) -> CommandBinding {
 }
 
 static BINDINGS: &[CommandBinding] = &[
+    bound(commands::CommandId::NewProject, cmd(egui::Key::N)),
+    bound(commands::CommandId::CloseProject, cmd(egui::Key::W)),
     bound(commands::CommandId::SaveProject, cmd(egui::Key::S)),
     bound(commands::CommandId::Undo, cmd(egui::Key::Z)),
     CommandBinding {
@@ -530,6 +532,19 @@ pub(super) fn handle_file_drop(app: &mut PlotxApp, ctx: &egui::Context) {
             .filter_map(|f| f.path.clone())
             .collect()
     });
+    if let Some(project) = dropped.iter().find(|path| {
+        super::file_dialogs::recent_open_kind(path) == super::file_dialogs::RecentOpenKind::Project
+    }) {
+        let ignored = dropped.len().saturating_sub(1);
+        super::file_dialogs::open_recent_path(app, project);
+        if ignored > 0 {
+            app.session.status = format!(
+                "Opening {}. Ignored {ignored} other dropped item(s) because a project open replaces the current document.",
+                project.display()
+            );
+        }
+        return;
+    }
     for path in dropped {
         // Route by shape through the same dispatcher as the recent list and the
         // welcome page, so a dropped CSV reaches the delimited importer instead

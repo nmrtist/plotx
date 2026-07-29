@@ -36,10 +36,12 @@ impl PlotxApp {
                 project_revision: None,
                 automation_revision: 0,
                 automation_runs: Vec::new(),
+                edit_generation: 0,
                 dirty: false,
                 save_include_view_snapshots: settings.export.include_view_snapshots,
             }),
             session: Session {
+                project_present: false,
                 active_canvas: None,
                 board: BoardViewport::default(),
                 board_views: Vec::new(),
@@ -665,11 +667,11 @@ impl PlotxApp {
             n.recompute_integrals();
         } else if self.doc.datasets[dataset].as_nmr2d().is_some() {
             self.schedule_2d_processing(dataset, false);
-            self.doc.dirty = true;
+            self.mark_document_dirty();
             return;
         }
         self.rebuild_canvases_for(dataset);
-        self.doc.dirty = true;
+        self.mark_document_dirty();
     }
 
     /// Like [`Self::apply_dataset_edit`] but re-runs the FFT first — the live path
@@ -680,11 +682,11 @@ impl PlotxApp {
             n.recompute_integrals();
         } else if self.doc.datasets[dataset].as_nmr2d().is_some() {
             self.schedule_2d_processing(dataset, true);
-            self.doc.dirty = true;
+            self.mark_document_dirty();
             return;
         }
         self.rebuild_canvases_for(dataset);
-        self.doc.dirty = true;
+        self.mark_document_dirty();
     }
 
     pub fn rebuild_canvas(&mut self, ci: usize) {

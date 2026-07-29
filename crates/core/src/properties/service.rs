@@ -467,7 +467,7 @@ impl PlotxApp {
             gesture.last = Some(action.clone());
         }
         self.apply_action(&action);
-        self.doc.dirty = true;
+        self.mark_document_dirty();
     }
 
     fn plan_edit(

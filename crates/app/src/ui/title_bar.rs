@@ -59,7 +59,7 @@ pub(super) fn render(
     // Centered window title, drawn only when it fits between the menus and
     // the window controls.
     let galley = ui.painter().layout_no_wrap(
-        "PlotX".to_owned(),
+        super::project_window_title(app),
         FontId::proportional(13.0),
         ui.visuals().weak_text_color(),
     );
