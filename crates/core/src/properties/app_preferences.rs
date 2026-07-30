@@ -14,6 +14,8 @@ use crate::update::{UpdateChannel, UpdateChannelSetting};
 use plotx_figure::Color;
 
 pub const SNAP_ENABLED: PropertyId = PropertyId("settings.general.snap_enabled");
+pub const EQUAL_SCALE_HOMONUCLEAR_2D_IMPORTS: PropertyId =
+    PropertyId("settings.general.equal_scale_homonuclear_2d_imports");
 pub const KEEP_EMPTY_SOURCE_CANVAS: PropertyId =
     PropertyId("settings.general.keep_empty_source_canvas");
 pub const PROJECT_BACKUP_GENERATIONS: PropertyId =
@@ -105,6 +107,17 @@ pub(crate) const DEFINITIONS: &[PropertyDefinition] = &[
         DefaultPolicy::Fixed(PropertyValue::Bool(true)),
         "Object snapping",
         &["snap", "snap to guides"],
+    ),
+    app_definition(
+        EQUAL_SCALE_HOMONUCLEAR_2D_IMPORTS,
+        ValueSchema::Bool,
+        DefaultPolicy::Fixed(PropertyValue::Bool(true)),
+        "Equal scale for homonuclear 2D imports",
+        &[
+            "1:1 F1 F2 scale",
+            "lock homonuclear aspect",
+            "equal axis scale",
+        ],
     ),
     app_definition(
         KEEP_EMPTY_SOURCE_CANVAS,
@@ -295,6 +308,9 @@ fn value_of(app: &PlotxApp, id: PropertyId) -> Result<PropertyValue, PropertyErr
     let settings = &app.settings;
     Ok(match id {
         SNAP_ENABLED => PropertyValue::Bool(settings.general.snap_enabled),
+        EQUAL_SCALE_HOMONUCLEAR_2D_IMPORTS => {
+            PropertyValue::Bool(settings.general.equal_scale_homonuclear_2d_imports)
+        }
         KEEP_EMPTY_SOURCE_CANVAS => PropertyValue::Bool(settings.general.keep_empty_source_canvas),
         PROJECT_BACKUP_GENERATIONS => {
             PropertyValue::Int(i64::from(settings.general.project_backup_generations))
@@ -362,6 +378,9 @@ fn write_value(
 ) -> Result<(), PropertyError> {
     match (id, value) {
         (SNAP_ENABLED, PropertyValue::Bool(value)) => settings.general.snap_enabled = value,
+        (EQUAL_SCALE_HOMONUCLEAR_2D_IMPORTS, PropertyValue::Bool(value)) => {
+            settings.general.equal_scale_homonuclear_2d_imports = value
+        }
         (KEEP_EMPTY_SOURCE_CANVAS, PropertyValue::Bool(value)) => {
             settings.general.keep_empty_source_canvas = value
         }

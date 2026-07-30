@@ -12,6 +12,7 @@ fn temp_settings(name: &str) -> PathBuf {
 fn missing_fields_take_defaults() {
     let settings: Settings = serde_json::from_str(r#"{"general":{}}"#).unwrap();
     assert!(settings.general.snap_enabled);
+    assert!(settings.general.equal_scale_homonuclear_2d_imports);
     assert_eq!(settings.general.project_backup_generations, 1);
     assert_eq!(settings.export.dpi, crate::export::DEFAULT_BITMAP_DPI);
     assert!(!settings.export.trim_to_visible_content);
@@ -116,6 +117,7 @@ fn save_and_load_roundtrip() {
     let _ = std::fs::remove_file(&path);
     let mut settings = Settings::default();
     settings.general.snap_enabled = false;
+    settings.general.equal_scale_homonuclear_2d_imports = false;
     settings.general.project_backup_generations = 3;
     settings.export.include_view_snapshots = true;
     settings.export.trim_to_visible_content = true;
@@ -125,6 +127,7 @@ fn save_and_load_roundtrip() {
     let _ = std::fs::remove_file(&path);
 
     assert!(!loaded.general.snap_enabled);
+    assert!(!loaded.general.equal_scale_homonuclear_2d_imports);
     assert_eq!(loaded.general.project_backup_generations, 3);
     assert!(loaded.export.include_view_snapshots);
     assert!(loaded.export.trim_to_visible_content);

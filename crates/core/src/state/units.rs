@@ -91,6 +91,9 @@ pub enum Tool {
     Regions,
     Integrate,
     Peaks,
+    InspectCursor,
+    DeltaCursor,
+    Symmetry,
     Slice,
     LineFit,
     Annotate,
@@ -124,6 +127,9 @@ impl Tool {
             Self::Regions => "Regions",
             Self::Integrate => "Integrate",
             Self::Peaks => "Peaks",
+            Self::InspectCursor => "Inspect cursor",
+            Self::DeltaCursor => "Delta cursor",
+            Self::Symmetry => "Symmetry review",
             Self::Slice => "Slice",
             Self::LineFit => "Peak fit",
             Self::Annotate => "Annotate",
@@ -153,6 +159,9 @@ impl Tool {
             | Self::Regions
             | Self::Integrate
             | Self::Peaks
+            | Self::InspectCursor
+            | Self::DeltaCursor
+            | Self::Symmetry
             | Self::Slice
             | Self::LineFit
             | Self::PeakAnalysis => ToolAxis::Analyze,
@@ -178,6 +187,9 @@ impl Tool {
                 | Tool::Regions
                 | Tool::Integrate
                 | Tool::Peaks
+                | Tool::InspectCursor
+                | Tool::DeltaCursor
+                | Tool::Symmetry
                 | Tool::Slice
                 | Tool::LineFit
                 | Tool::PeakAnalysis

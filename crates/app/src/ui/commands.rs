@@ -33,6 +33,7 @@ pub enum Applicability {
     Always,
     TableOnly,
     SeriesOnly,
+    Homonuclear2dOnly,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -119,6 +120,9 @@ pub enum CommandId {
     /// Move the canvas-steppable property one rung (§8.5 channel 3). The
     /// property is derived from the catalog, so the binding does not name one.
     StepProperty(PropertyStep),
+    /// Advance through the cursor family. Unlike ordinary tool bindings, repeated
+    /// presses select the next applicable cursor instead of leaving the tool.
+    CycleCursor,
     Tool(Tool),
 }
 
@@ -295,6 +299,7 @@ pub fn catalog(app: &PlotxApp) -> Vec<CommandDescriptor> {
             .map(|group| CommandId::PropertyGroup(group.section)),
     );
     ids.extend([PropertyStep::Lower, PropertyStep::Raise].map(CommandId::StepProperty));
+    ids.push(CommandId::CycleCursor);
     ids.extend(tool_commands().into_iter().map(CommandId::Tool));
     ids.into_iter()
         .map(|id| {
@@ -596,6 +601,25 @@ pub fn describe(app: &PlotxApp, id: CommandId) -> CommandDescriptor {
             super::properties::discovery::step_target(app).is_some(),
             "Select a plot whose series draws contours before stepping its lowest level.",
         ),
+        CommandId::CycleCursor
+        | CommandId::Tool(Tool::InspectCursor)
+        | CommandId::Tool(Tool::DeltaCursor) => requires(
+            matches!(
+                dataset(),
+                Some(Dataset::Nmr(nmr))
+                    if nmr.output_domain() == plotx_io::Domain::Frequency
+            ) || matches!(
+                dataset(),
+                Some(Dataset::Nmr2D(nmr)) if nmr.is_true_2d()
+            ),
+            "Select a frequency-domain 1D or true-2D NMR spectrum.",
+        ),
+        CommandId::Tool(Tool::Symmetry) => requires(
+            dataset()
+                .and_then(Dataset::as_nmr2d)
+                .is_some_and(|dataset| dataset.supports_symmetry_review()),
+            "Select a homonuclear COSY, TOCSY, or NOESY / ROESY contour spectrum.",
+        ),
         CommandId::Tool(tool) if tool.is_data_tool() => requires(
             dataset().is_some(),
             "Select a dataset before using this data tool.",
@@ -626,6 +650,9 @@ pub fn describe(app: &PlotxApp, id: CommandId) -> CommandDescriptor {
         Applicability::Always => true,
         Applicability::TableOnly => is_table(),
         Applicability::SeriesOnly => is_series(),
+        Applicability::Homonuclear2dOnly => dataset()
+            .and_then(Dataset::as_nmr2d)
+            .is_some_and(|dataset| dataset.preset.homonuclear()),
     });
     CommandDescriptor {
         id,
@@ -641,7 +668,7 @@ pub fn describe(app: &PlotxApp, id: CommandId) -> CommandDescriptor {
 }
 
 fn ribbon_placement(id: CommandId) -> Option<RibbonPlacement> {
-    use Applicability::{Always, SeriesOnly, TableOnly};
+    use Applicability::{Always, Homonuclear2dOnly, SeriesOnly, TableOnly};
     use WorkflowTab::{Analyze, Arrange, Data, Figure, Process, View};
     let (tab, group, priority, applicability) = match id {
         CommandId::Tool(Tool::BrowseZoom) | CommandId::ZoomToFit | CommandId::ZoomToSelection => {
@@ -661,6 +688,7 @@ fn ribbon_placement(id: CommandId) -> Option<RibbonPlacement> {
         CommandId::Tool(Tool::Peaks) | CommandId::DetectPeaks | CommandId::PeakList => {
             (Analyze, "Peaks", 1, Always)
         }
+        CommandId::Tool(Tool::Symmetry) => (Analyze, "Review", 1, Homonuclear2dOnly),
         CommandId::Tool(Tool::ManualPhase) => (Process, "Correct", 0, Always),
         CommandId::SpectrumArithmetic | CommandId::AlignSpectra => {
             (Process, "Transform", 1, Always)
@@ -715,13 +743,16 @@ fn ribbon_placement(id: CommandId) -> Option<RibbonPlacement> {
     })
 }
 
-fn tool_commands() -> [Tool; 14] {
+fn tool_commands() -> [Tool; 17] {
     [
         Tool::Select,
         Tool::BrowseZoom,
         Tool::ManualPhase,
         Tool::Integrate,
         Tool::Peaks,
+        Tool::InspectCursor,
+        Tool::DeltaCursor,
+        Tool::Symmetry,
         Tool::Slice,
         Tool::LineFit,
         Tool::Annotate,

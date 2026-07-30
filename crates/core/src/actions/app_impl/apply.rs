@@ -211,6 +211,9 @@ impl PlotxApp {
             Action::SetPeaks { dataset, after, .. } => {
                 self.set_peaks(dataset_index!(*dataset), after);
             }
+            Action::SetPeaks2D { dataset, after, .. } => {
+                self.set_peaks_2d(dataset_index!(*dataset), after);
+            }
             Action::SetLineFits { dataset, after, .. } => {
                 self.set_line_fits(dataset_index!(*dataset), after);
             }

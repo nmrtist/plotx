@@ -374,6 +374,7 @@ pub fn object_to_dataset(
             apply_2d_recipe(&mut dataset, recipe)?;
             read_regions(&mut dataset, recipe);
             read_integrals_2d(&mut dataset, recipe)?;
+            read_peaks_2d(&mut dataset, recipe)?;
             dataset.name = data.label.clone();
             dataset.retransform();
             // `retransform` deliberately invalidates every analysis map. Restore

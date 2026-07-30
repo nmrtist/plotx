@@ -69,6 +69,7 @@ impl PlotxApp {
                 compute: ComputeService::new(),
                 updates: crate::update::UpdateService::new(&settings.updates),
                 line_fit_job: None,
+                symmetry_audit_job: None,
                 table_transform_job: None,
                 table_refresh_job: None,
                 data_export_job: None,

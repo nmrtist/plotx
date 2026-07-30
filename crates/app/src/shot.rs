@@ -28,7 +28,7 @@ use plotx_core::actions::Action;
 use plotx_core::settings::Settings;
 use plotx_core::state::{
     AnalysisSelection, AxisRange, DEFAULT_CANVAS_SIZE_MM, Dataset, FrameRef, LineShapeKind,
-    NmrDataset, PlotxApp, Tool,
+    Nmr2DDataset, NmrDataset, Peak2DOrigin, Peak2DPoint, Peak2DReview, PlotxApp, Tool,
 };
 use plotx_io::{Domain, NmrData};
 
@@ -75,6 +75,14 @@ enum Op {
     Setup,
     /// Fit the FID band and frame the result.
     LineFit,
+    /// Load a homonuclear COSY plane and open its symmetry-review workflow.
+    SymmetrySetup,
+    /// Pin the ordinary readout cursor on the synthetic COSY.
+    InspectCursor,
+    /// Pin a two-point measurement on the synthetic COSY.
+    DeltaCursor,
+    /// Pin a detected cross-diagonal pair after the background audit settles.
+    PinSymmetry,
     Zoom(f32),
     Resize(f32, f32),
 }
@@ -129,6 +137,13 @@ const SCENES: &[Scene] = &[
     shot(12, "ribbon_900"),
     act(2, Op::Resize(1440.0, 900.0)),
     shot(12, "ribbon_1440"),
+    act(2, Op::SymmetrySetup),
+    act(2, Op::InspectCursor),
+    shot(6, "cursor_inspect"),
+    act(2, Op::DeltaCursor),
+    shot(6, "cursor_delta"),
+    act(18, Op::PinSymmetry),
+    shot(8, "symmetry_review"),
 ];
 
 pub struct ShotDriver {
@@ -300,6 +315,10 @@ fn run_op(op: Op, app: &mut PlotxApp, ctx: &egui::Context) -> Result<(), String>
             setup(app);
         }
         Op::LineFit => line_fit(app, ctx)?,
+        Op::SymmetrySetup => symmetry_setup(app)?,
+        Op::InspectCursor => inspect_cursor(app)?,
+        Op::DeltaCursor => delta_cursor(app)?,
+        Op::PinSymmetry => pin_symmetry(app)?,
         Op::Zoom(factor) => ctx.set_zoom_factor(factor),
         Op::Resize(w, h) => {
             ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(w, h)));
@@ -355,6 +374,95 @@ fn line_fit(app: &mut PlotxApp, ctx: &egui::Context) -> Result<(), String> {
     Ok(())
 }
 
+fn symmetry_setup(app: &mut PlotxApp) -> Result<(), String> {
+    *app = PlotxApp::new_with_settings(Settings::default());
+    let mut dataset = Nmr2DDataset::load(synthetic_cosy());
+    let ids = dataset
+        .peaks
+        .add_pair(
+            Peak2DPoint {
+                f2: 7.0,
+                f1: 3.0,
+                intensity: 1.0,
+            },
+            Peak2DPoint {
+                f2: 3.0,
+                f1: 7.0,
+                intensity: 0.82,
+            },
+            [0.08, 0.08],
+            Peak2DOrigin::Manual,
+        )
+        .map_err(|error| error.to_string())?;
+    dataset.peaks.set_review(ids[0], Peak2DReview::Confirmed);
+    let action = Action::insert_dataset_with_default_canvas(
+        app,
+        Dataset::Nmr2D(Box::new(dataset)),
+        "Canvas 1 — synthetic COSY".to_owned(),
+        DEFAULT_CANVAS_SIZE_MM,
+    );
+    app.execute_action(action);
+    app.set_tool(Tool::Symmetry);
+    app.session.secondary_sidebar_visible = true;
+    app.session.ui.requested_tool_group = Some(plotx_core::state::ToolGroup::Nmr2dExperiment);
+    app.start_symmetry_audit(0)
+}
+
+fn pin_symmetry(app: &mut PlotxApp) -> Result<(), String> {
+    app.poll_symmetry_audit();
+    app.set_tool(Tool::Symmetry);
+    app.session.ui.symmetry_pin = app.symmetry_reading(0, 7.0, 3.0, true);
+    if app.session.ui.symmetry_pin.is_none() {
+        return Err("synthetic COSY symmetry audit did not produce a reading".to_owned());
+    }
+    Ok(())
+}
+
+fn cursor_point(
+    app: &PlotxApp,
+    f2: f64,
+    f1: f64,
+    intensity: f64,
+) -> Result<plotx_core::state::CursorPoint, String> {
+    let canvas = app
+        .doc
+        .canvases
+        .first()
+        .ok_or_else(|| "synthetic COSY canvas is missing".to_owned())?;
+    let object = canvas
+        .selected_plot_object_id()
+        .or_else(|| canvas.active_plot_object_id())
+        .ok_or_else(|| "synthetic COSY plot is missing".to_owned())?;
+    let dataset = app
+        .doc
+        .datasets
+        .first()
+        .ok_or_else(|| "synthetic COSY dataset is missing".to_owned())?;
+    Ok(plotx_core::state::CursorPoint {
+        canvas: canvas.resource_id,
+        object,
+        dataset: dataset.resource_id(),
+        x: f2,
+        y: Some(f1),
+        intensity,
+    })
+}
+
+fn inspect_cursor(app: &mut PlotxApp) -> Result<(), String> {
+    app.set_tool(Tool::InspectCursor);
+    app.session.ui.inspect_cursor_pin = Some(cursor_point(app, 7.0, 3.0, 1.0)?);
+    Ok(())
+}
+
+fn delta_cursor(app: &mut PlotxApp) -> Result<(), String> {
+    app.set_tool(Tool::DeltaCursor);
+    app.session.ui.delta_cursor_pin = Some(plotx_core::state::CursorDelta {
+        first: cursor_point(app, 7.0, 3.0, 1.0)?,
+        second: cursor_point(app, 3.0, 7.0, 0.82)?,
+    });
+    Ok(())
+}
+
 fn synthetic_fid() -> NmrData {
     let npoints = 4096;
     let (sw, obs, carrier) = (4000.0, 400.0, 5.0);
@@ -384,6 +492,55 @@ fn synthetic_fid() -> NmrData {
         nucleus: "1H".to_owned(),
         source: "synthetic".to_owned(),
         group_delay: 0.0,
+    }
+}
+
+fn synthetic_cosy() -> plotx_io::NmrData2D {
+    const SIDE: usize = 96;
+    let mut data = vec![Complex64::new(0.0, 0.0); SIDE * SIDE];
+    let peaks = [
+        (29.0, 67.0, 1.0),
+        (67.0, 29.0, 0.82),
+        (48.0, 48.0, 1.7),
+        (29.0, 29.0, 1.3),
+        (67.0, 67.0, 1.1),
+        (20.0, 76.0, 0.42),
+    ];
+    for row in 0..SIDE {
+        for col in 0..SIDE {
+            let signal = peaks
+                .iter()
+                .map(|&(cx, cy, amplitude): &(f64, f64, f64)| {
+                    let dx = col as f64 - cx;
+                    let dy = row as f64 - cy;
+                    amplitude * (-(dx * dx + dy * dy) / 5.0).exp()
+                })
+                .sum::<f64>();
+            let noise = (((row * 37 + col * 19) % 23) as f64 - 11.0) * 0.0008;
+            data[row * SIDE + col] = Complex64::new(signal + noise, 0.0);
+        }
+    }
+    let dimension = plotx_io::Dim {
+        spectral_width_hz: 4_000.0,
+        observe_freq_mhz: 400.0,
+        carrier_ppm: 5.0,
+        nucleus: "1H".to_owned(),
+        group_delay: 0.0,
+    };
+    plotx_io::NmrData2D {
+        data,
+        rows: SIDE,
+        cols: SIDE,
+        domain: Domain::Frequency,
+        direct: dimension.clone(),
+        indirect: dimension,
+        quad: plotx_io::QuadMode::Complex,
+        indirect_conjugate: false,
+        experiment: Some("cosy".to_owned()),
+        pseudo_axis: None,
+        diffusion: None,
+        nus: None,
+        source: "synthetic COSY".to_owned(),
     }
 }
 
@@ -430,9 +587,9 @@ mod tests {
     #[test]
     fn expected_count_covers_every_scene_in_both_palettes() {
         let per_pass = SCENES.iter().filter(|s| s.shot.is_some()).count();
-        assert_eq!(per_pass, 5, "scene list should define 5 captures");
+        assert_eq!(per_pass, 8, "scene list should define 8 captures");
         // Default run (no PLOTX_SHOT_THEME) replays every scene in both palettes.
-        assert_eq!(per_pass * 2, 10);
+        assert_eq!(per_pass * 2, 16);
     }
 
     #[test]

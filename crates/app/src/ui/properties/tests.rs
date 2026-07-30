@@ -314,7 +314,7 @@ fn migrated_preferences_keep_their_real_section_density() {
     for (section, expected, combination) in [
         (
             SettingsCategory::General.section_id(),
-            3,
+            4,
             "all catalog-backed General preferences",
         ),
         (
@@ -352,7 +352,7 @@ fn migrated_preferences_keep_their_real_section_density() {
 }
 
 #[test]
-fn migrated_axis_controls_remain_six_essential_rows() {
+fn equal_scale_is_directly_visible_and_title_visibility_is_advanced() {
     let essential: Vec<PropertyId> = essential_in(panel::AXIS_SECTION)
         .iter()
         .map(|entry| entry.id)
@@ -360,13 +360,24 @@ fn migrated_axis_controls_remain_six_essential_rows() {
     assert_eq!(
         essential,
         [
+            axis::EQUAL_F1_F2_SCALE,
             axis::X_LABEL,
             axis::Y_LABEL,
             axis::X_SHOW_TICK_LABELS,
-            axis::X_SHOW_LABEL,
             axis::Y_SHOW_TICK_LABELS,
-            axis::Y_SHOW_LABEL,
         ]
+    );
+    assert_eq!(
+        presentation(axis::X_SHOW_LABEL)
+            .expect("x-title visibility presentation")
+            .tier(),
+        Some(Tier::Advanced)
+    );
+    assert_eq!(
+        presentation(axis::Y_SHOW_LABEL)
+            .expect("y-title visibility presentation")
+            .tier(),
+        Some(Tier::Advanced)
     );
 }
 

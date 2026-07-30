@@ -34,6 +34,7 @@ fn every_axis_property_reset_clears_its_stored_override() {
         &AxisOverrides {
             x_label: Some("X".to_owned()),
             y_label: Some("Y".to_owned()),
+            lock_aspect: Some(true),
             x_show_tick_labels: Some(false),
             x_show_label: Some(false),
             y_show_tick_labels: Some(false),
@@ -43,6 +44,9 @@ fn every_axis_property_reset_clears_its_stored_override() {
     );
 
     let cases: &[ResetCase] = &[
+        (axis::EQUAL_F1_F2_SCALE, |value: &AxisOverrides| {
+            value.lock_aspect.is_none()
+        }),
         (axis::X_LABEL, |value: &AxisOverrides| {
             value.x_label.is_none()
         }),
@@ -69,6 +73,47 @@ fn every_axis_property_reset_clears_its_stored_override() {
         app.commit_property(commit);
         assert!(cleared(overrides(&app, object)), "{property} did not clear");
     }
+}
+
+#[test]
+fn equal_scale_write_changes_the_2d_plot_and_undo_restores_it() {
+    let (mut app, target, object) = axis_app();
+    let before = app.doc.canvases[0]
+        .object(object)
+        .and_then(|object| object.plot())
+        .expect("plot")
+        .figure()
+        .lock_aspect;
+    let commit = app
+        .plan_property_write(
+            axis::EQUAL_F1_F2_SCALE,
+            std::slice::from_ref(&target),
+            &PropertyValue::Bool(!before),
+        )
+        .expect("equal-scale write plans");
+    app.commit_property(commit);
+
+    assert_eq!(overrides(&app, object).lock_aspect, Some(!before));
+    assert_eq!(
+        app.doc.canvases[0]
+            .object(object)
+            .and_then(|object| object.plot())
+            .expect("plot")
+            .figure()
+            .lock_aspect,
+        !before
+    );
+
+    app.undo();
+    assert_eq!(
+        app.doc.canvases[0]
+            .object(object)
+            .and_then(|object| object.plot())
+            .expect("plot")
+            .figure()
+            .lock_aspect,
+        before
+    );
 }
 
 #[test]

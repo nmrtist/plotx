@@ -195,6 +195,13 @@ pub fn process_file(
 /// The only acquisition-to-dataset conversion path. Loading frontends retain
 /// provenance separately and hand the neutral acquisition to this function.
 pub fn dataset_from_acquisition(acquisition: Acquisition) -> (Dataset, String) {
+    dataset_from_acquisition_with_equal_scale_preference(acquisition, true)
+}
+
+pub fn dataset_from_acquisition_with_equal_scale_preference(
+    acquisition: Acquisition,
+    equal_scale_homonuclear_2d_imports: bool,
+) -> (Dataset, String) {
     match acquisition {
         Acquisition::D1(data) => {
             let source = data.source.clone();
@@ -202,7 +209,13 @@ pub fn dataset_from_acquisition(acquisition: Acquisition) -> (Dataset, String) {
         }
         Acquisition::D2(data) => {
             let source = data.source.clone();
-            (Dataset::Nmr2D(Box::new(Nmr2DDataset::load(*data))), source)
+            (
+                Dataset::Nmr2D(Box::new(Nmr2DDataset::load_with_equal_scale_preference(
+                    *data,
+                    equal_scale_homonuclear_2d_imports,
+                ))),
+                source,
+            )
         }
         Acquisition::Electrophysiology(data) => {
             let source = data.source.clone();
@@ -281,6 +294,11 @@ pub fn build_plot_object(
     let figure = build_dataset_figure(dataset, &chart, size_mm);
     let viewport = CanvasViewport::from_figure(&figure);
     let panel = PanelMeta::new(dataset_title(dataset), frame.width);
+    let axis_overrides = AxisOverrides {
+        lock_aspect: matches!(dataset, Dataset::Nmr2D(dataset) if dataset.is_true_2d())
+            .then_some(figure.lock_aspect),
+        ..AxisOverrides::default()
+    };
     CanvasObject {
         id,
         name,
@@ -294,7 +312,7 @@ pub fn build_plot_object(
             chart,
             StackSpec::default(),
             AxisProjections::default(),
-            AxisOverrides::default(),
+            axis_overrides,
             figure,
             viewport,
             panel,
@@ -534,6 +552,31 @@ mod tests {
         })
     }
 
+    fn homonuclear_2d_acquisition() -> Acquisition {
+        let dimension = plotx_io::Dim {
+            spectral_width_hz: 4_000.0,
+            observe_freq_mhz: 400.0,
+            carrier_ppm: 4.7,
+            nucleus: "1H".to_owned(),
+            group_delay: 0.0,
+        };
+        Acquisition::D2(Box::new(plotx_io::NmrData2D {
+            data: vec![Complex64::new(1.0, 0.0); 16],
+            rows: 4,
+            cols: 4,
+            domain: Domain::Frequency,
+            direct: dimension.clone(),
+            indirect: dimension,
+            quad: plotx_io::QuadMode::Complex,
+            indirect_conjugate: false,
+            experiment: Some("cosy".to_owned()),
+            pseudo_axis: None,
+            diffusion: None,
+            nus: None,
+            source: "cosy".to_owned(),
+        }))
+    }
+
     #[test]
     fn canonical_conversion_and_default_canvas_share_dataset_identity() {
         let (dataset, source) = dataset_from_acquisition(acquisition());
@@ -541,6 +584,20 @@ mod tests {
         let canvas = build_default_canvas(&dataset, &source);
         assert_eq!(canvas.dataset_ids(), vec![dataset.resource_id()]);
         assert_eq!(canvas.objects.len(), 1);
+    }
+
+    #[test]
+    fn import_preference_seeds_one_persistent_plot_override() {
+        for (preference, expected) in [(true, true), (false, false)] {
+            let (dataset, source) = dataset_from_acquisition_with_equal_scale_preference(
+                homonuclear_2d_acquisition(),
+                preference,
+            );
+            let canvas = build_default_canvas(&dataset, &source);
+            let plot = canvas.objects[0].plot().expect("default plot");
+            assert_eq!(plot.axis_overrides.lock_aspect, Some(expected));
+            assert_eq!(plot.figure().lock_aspect, expected);
+        }
     }
 
     #[test]

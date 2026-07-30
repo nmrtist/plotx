@@ -34,6 +34,7 @@ mod dto;
 mod electrophysiology_convert;
 mod field_catalog;
 mod integrals2d;
+mod peaks2d;
 mod persistence;
 mod pipeline_conv;
 mod scheme;
@@ -47,6 +48,7 @@ pub use convert_recipes::*;
 pub use convert_views::*;
 pub use dto::*;
 use integrals2d::read_integrals_2d;
+use peaks2d::read_peaks_2d;
 pub(crate) use persistence::commit_atomic_file;
 pub use persistence::{RecoveryManager, RecoverySnapshot, RecoveryTarget};
 pub use pipeline_conv::*;
@@ -736,6 +738,8 @@ mod reference_tests;
 mod schema_tests;
 #[cfg(test)]
 mod step_identity_tests;
+#[cfg(test)]
+mod symmetry_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

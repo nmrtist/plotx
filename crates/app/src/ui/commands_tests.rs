@@ -6,6 +6,7 @@ use plotx_core::state::{
     ProcessingTemplateDialogState, Selection, ToolGroup, materialized_float_series_table,
 };
 use plotx_io::{Domain, NmrData};
+use plotx_processing::Processed2D;
 
 fn app() -> PlotxApp {
     PlotxApp::new_with_settings(plotx_core::settings::Settings::default())
@@ -158,6 +159,7 @@ fn stable_ids_cover_static_and_dynamic_commands() {
     assert_eq!(CommandId::ClearRecentFiles.stable_id(), "file.clear_recent");
     assert_eq!(CommandId::HelpManual.stable_id(), "help.manual");
     assert_eq!(CommandId::RunBatchWorkflow.stable_id(), "tools.automation");
+    assert_eq!(CommandId::CycleCursor.stable_id(), "tool.next_cursor");
     assert_eq!(
         CommandId::SimplifyInnerAxes.stable_id(),
         "arrange.simplify_inner_axes"
@@ -591,6 +593,50 @@ fn ribbon_separates_peak_and_curve_fit_tasks() {
             priority: 0,
             applicability: Applicability::TableOnly,
         })
+    );
+    assert_eq!(
+        ribbon_placement(CommandId::Tool(Tool::Symmetry)),
+        Some(RibbonPlacement {
+            tab: WorkflowTab::Analyze,
+            group: "Review",
+            priority: 1,
+            applicability: Applicability::Homonuclear2dOnly,
+        })
+    );
+}
+
+#[test]
+fn symmetry_review_is_contextual_to_homonuclear_true_2d_data() {
+    let empty = app();
+    assert!(!describe(&empty, CommandId::Tool(Tool::Symmetry)).enabled);
+    assert_eq!(
+        describe(&empty, CommandId::Tool(Tool::Symmetry)).ribbon,
+        None
+    );
+
+    let mut eligible = app();
+    let action = Action::insert_dataset_with_default_canvas(
+        &eligible,
+        crate::ui::properties::fixture::homonuclear_frequency_2d(),
+        "COSY review".to_owned(),
+        DEFAULT_CANVAS_SIZE_MM,
+    );
+    eligible.execute_action(action);
+    let command = describe(&eligible, CommandId::Tool(Tool::Symmetry));
+    assert!(command.enabled);
+    assert_eq!(command.ribbon.unwrap().group, "Review");
+
+    let nmr = eligible.doc.datasets[0].as_nmr2d_mut().unwrap();
+    let Processed2D::Ft(spectrum) = &mut nmr.processed else {
+        panic!("fixture should produce a true-2D spectrum");
+    };
+    std::sync::Arc::make_mut(spectrum).f1_domain = Domain::Time;
+    let transiently_unavailable = describe(&eligible, CommandId::Tool(Tool::Symmetry));
+    assert!(!transiently_unavailable.enabled);
+    assert_eq!(
+        transiently_unavailable.ribbon.unwrap().group,
+        "Review",
+        "processing state should disable the command without hiding its group"
     );
 }
 

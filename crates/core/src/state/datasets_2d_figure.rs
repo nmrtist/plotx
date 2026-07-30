@@ -159,9 +159,7 @@ fn nmr_scalar_heatmap(
     });
     let mut figure = Figure::new(format!("{field_name} — {}", spectrum.source), x, y)
         .with_axis_frame(AxisFrame::Box);
-    figure.lock_aspect = spectrum.f2_domain == plotx_io::Domain::Frequency
-        && spectrum.f1_domain == plotx_io::Domain::Frequency
-        && spectrum.direct.nucleus == spectrum.indirect.nucleus;
+    figure.lock_aspect = crate::figures::equal_scale_for_nmr_2d(spectrum);
     figure.heatmap = Some(HeatmapGrid {
         rows: spectrum.f1_size,
         cols: spectrum.f2_size,
@@ -195,9 +193,7 @@ fn nmr_contour_base(
         y,
     )
     .with_axis_frame(AxisFrame::Box);
-    figure.lock_aspect = spectrum.f2_domain == plotx_io::Domain::Frequency
-        && spectrum.f1_domain == plotx_io::Domain::Frequency
-        && preset.homonuclear();
+    figure.lock_aspect = crate::figures::equal_scale_for_nmr_2d(spectrum);
     figure
 }
 

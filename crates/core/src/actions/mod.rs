@@ -352,6 +352,12 @@ pub enum Action {
         before: crate::state::PeakSet,
         after: crate::state::PeakSet,
     },
+    /// Replace a true-2D dataset's cross-peak marks and symmetry relationships.
+    SetPeaks2D {
+        dataset: DatasetId,
+        before: crate::state::Peak2DSet,
+        after: crate::state::Peak2DSet,
+    },
     /// Replace a 1D dataset's stored lineshape deconvolutions as one undoable step.
     SetLineFits {
         dataset: DatasetId,
@@ -532,6 +538,7 @@ impl Action {
             Self::SetIntegrals { before, after, .. } => before == after,
             Self::SetIntegrals2D { before, after, .. } => before == after,
             Self::SetPeaks { before, after, .. } => before == after,
+            Self::SetPeaks2D { before, after, .. } => before == after,
             Self::SetLineFits { before, after, .. } => before == after,
             Self::SetMultiplets { before, after, .. } => before == after,
             Self::SetTableStatistics { before, after, .. } => before == after,

@@ -38,6 +38,7 @@ pub(super) fn experiment_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) -> bo
         matches!(n.params.layout, Layout2D::Stack)
     };
 
+    super::cursor_group(app, di, ui);
     nus_group(app, di, ui);
 
     let is_pseudo = app.doc.datasets[di]
@@ -56,6 +57,7 @@ pub(super) fn experiment_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) -> bo
     }
 
     if !is_stack {
+        super::symmetry_group(app, di, ui);
         super::integrate_group(app, di, ui);
     }
 

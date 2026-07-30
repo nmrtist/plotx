@@ -53,6 +53,10 @@ fn default_auto_check() -> bool {
 pub struct GeneralSettings {
     #[serde(default = "default_snap_enabled")]
     pub snap_enabled: bool,
+    /// Use equal data units per screen unit for eligible homonuclear 2D NMR
+    /// spectra when they are imported.
+    #[serde(default = "default_equal_scale_homonuclear_2d_imports")]
+    pub equal_scale_homonuclear_2d_imports: bool,
     /// Keep a source canvas after tiling away its final object.
     #[serde(default)]
     pub keep_empty_source_canvas: bool,
@@ -270,6 +274,7 @@ impl Default for GeneralSettings {
     fn default() -> Self {
         Self {
             snap_enabled: default_snap_enabled(),
+            equal_scale_homonuclear_2d_imports: default_equal_scale_homonuclear_2d_imports(),
             keep_empty_source_canvas: false,
             project_backup_generations: default_project_backup_generations(),
         }
@@ -303,6 +308,10 @@ fn current_app_version() -> String {
 }
 
 fn default_snap_enabled() -> bool {
+    true
+}
+
+fn default_equal_scale_homonuclear_2d_imports() -> bool {
     true
 }
 

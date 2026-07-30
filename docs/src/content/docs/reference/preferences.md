@@ -11,6 +11,12 @@ restores everything except your recent-files list.
 
 - **Object snapping** — snap plots and shapes to guides while dragging (also
   toggleable from the toolbar).
+- **Equal scale for homonuclear 2D imports** — when both axes are frequency
+  axes of the same nucleus, start an imported spectrum with equal F1/F2 scale
+  if the wider range is no more than twice the narrower range. The imported
+  plot keeps this initial setting even if you later change the preference.
+  Change an individual plot with **F1/F2 equal scale (1:1)** under **Axes** in
+  the Object inspector.
 - **Keep source canvas when tiling its last object** — keep a page that a
   drag-to-tile move empties, instead of deleting it along with the drop. Off by
   default; hold `Alt` while releasing to reverse the choice for a single drop.

@@ -128,10 +128,20 @@ pub(super) fn nmr2d_recipe_extensions(
             }),
         );
     }
+    let mut analysis = serde_json::Map::new();
     if !dataset.integrals.is_empty() {
+        analysis.insert(
+            "integrals_2d".to_owned(),
+            serde_json::json!(&dataset.integrals),
+        );
+    }
+    if !dataset.peaks.marks.is_empty() {
+        analysis.insert("peaks_2d".to_owned(), serde_json::json!(&dataset.peaks));
+    }
+    if !analysis.is_empty() {
         extensions.insert(
             "plotx.analysis".to_owned(),
-            serde_json::json!({ "integrals_2d": &dataset.integrals }),
+            serde_json::Value::Object(analysis),
         );
     }
     if let Some(dosy) = dosy {

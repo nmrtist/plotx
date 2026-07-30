@@ -152,7 +152,7 @@ pub(crate) fn paint_wheel_target_hint(
                 .and_then(|object| object.plot())
                 .is_some_and(|plot| plot.figure().lock_aspect)
             {
-                " · aspect locked"
+                " · F1/F2 1:1"
             } else {
                 ""
             };

@@ -348,7 +348,11 @@ impl PlotxApp {
     // Turn a loaded acquisition into a dataset on its own default canvas, as one
     // undoable step, and return its source label.
     fn insert_acquisition(&mut self, acq: plotx_io::Acquisition) -> String {
-        let (dataset, source) = crate::workflow::dataset_from_acquisition(acq);
+        let (dataset, source) =
+            crate::workflow::dataset_from_acquisition_with_equal_scale_preference(
+                acq,
+                self.settings.general.equal_scale_homonuclear_2d_imports,
+            );
         let name = Self::short_name(&source);
         self.execute_action(Action::insert_dataset_with_default_canvas(
             self,

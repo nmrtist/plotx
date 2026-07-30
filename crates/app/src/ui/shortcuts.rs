@@ -168,6 +168,7 @@ static BINDINGS: &[CommandBinding] = &[
         dispatch: true,
         menu_accelerator: false,
     },
+    bound(commands::CommandId::CycleCursor, plain(egui::Key::C)),
     tool_key(Tool::Select, egui::Key::V),
     tool_key(Tool::BrowseZoom, egui::Key::Z),
     tool_key(Tool::Text, egui::Key::T),
@@ -580,6 +581,11 @@ mod tests {
             shortcut_label(commands::CommandId::Tool(Tool::Select)).as_deref(),
             Some("V")
         );
+        assert_eq!(
+            shortcut_label(commands::CommandId::CycleCursor).as_deref(),
+            Some("C")
+        );
+        assert!(shortcut_label(commands::CommandId::Tool(Tool::Symmetry)).is_none());
         assert!(shortcut_label(commands::CommandId::About).is_none());
     }
 

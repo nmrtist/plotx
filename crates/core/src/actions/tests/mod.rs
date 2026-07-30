@@ -17,6 +17,7 @@ mod multiplet;
 mod scheme_apply;
 mod stable_identity;
 mod stack;
+mod symmetry;
 mod tiling;
 use num_complex::Complex64;
 use plotx_io::{Domain, NmrData};

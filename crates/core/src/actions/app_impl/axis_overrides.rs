@@ -101,6 +101,7 @@ impl PlotxApp {
             || cleared(&before.y_label, &after.y_label)
             || cleared(&before.x_range, &after.x_range)
             || cleared(&before.y_range, &after.y_range)
+            || cleared(&before.lock_aspect, &after.lock_aspect)
             || cleared(&before.x_show_tick_labels, &after.x_show_tick_labels)
             || cleared(&before.x_show_label, &after.x_show_label)
             || cleared(&before.y_show_tick_labels, &after.y_show_tick_labels)

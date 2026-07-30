@@ -217,6 +217,8 @@ pub struct Nmr2DDataset {
     /// Rectangular volumes on true-2D contour spectra. Independent of pseudo-2D
     /// Regions windows, so both collections survive layout/project round-trips.
     pub integrals: Vec<Integral2D>,
+    /// Persistent cross-peak marks and their optional symmetry relationships.
+    pub peaks: Peak2DSet,
     /// Runtime id source reconstructed from persisted stable ids on load.
     pub next_integral_id: u64,
     /// Last volume-recompute failure for user-visible diagnostics.
@@ -226,6 +228,13 @@ pub struct Nmr2DDataset {
 }
 impl Nmr2DDataset {
     pub fn load(data: NmrData2D) -> Self {
+        Self::load_with_equal_scale_preference(data, true)
+    }
+
+    pub fn load_with_equal_scale_preference(
+        data: NmrData2D,
+        equal_scale_homonuclear_2d_imports: bool,
+    ) -> Self {
         let preset = recommend_preset(&data);
         let params = match data.domain {
             Domain::Time => Params2D::default_for(preset),
@@ -235,7 +244,11 @@ impl Nmr2DDataset {
         let has_imaginary = data.domain == Domain::Time || data.data.iter().any(|v| v.im != 0.0);
         let base = process_2d(&data, &params);
         let processed = reapply_2d(&base, &params);
-        let processed_figure = Arc::new(build_processed_figure(&processed, preset));
+        let mut processed_figure = build_processed_figure(&processed, preset);
+        if !equal_scale_homonuclear_2d_imports {
+            processed_figure.lock_aspect = false;
+        }
+        let processed_figure = Arc::new(processed_figure);
         let mut field_catalog = nmr2d_field_catalog();
         field_catalog.attach_provenance(
             &data.source,
@@ -272,6 +285,7 @@ impl Nmr2DDataset {
             region_metric: RegionMetric::Height,
             next_region_id: 0,
             integrals: Vec::new(),
+            peaks: Peak2DSet::default(),
             next_integral_id: 0,
             integral_error: None,
             dosy_provenance_warning: None,

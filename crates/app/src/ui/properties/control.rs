@@ -1,7 +1,7 @@
 //! Property row controls, value descriptions, and gesture edges.
 
 use super::*;
-use plotx_core::properties::{contour, line};
+use plotx_core::properties::{app_preferences, axis, contour, line};
 use plotx_core::state::CanvasSizeUnit;
 use std::borrow::Cow;
 
@@ -159,6 +159,10 @@ fn modified_marker(row: &Row, pending: &mut Option<Pending>, ui: &mut Ui) {
 
 fn property_hint(row: &Row) -> &'static str {
     match row.presentation.id {
+        axis::EQUAL_F1_F2_SCALE => "Use the same data units per screen unit on the F1 and F2 axes.",
+        app_preferences::EQUAL_SCALE_HOMONUCLEAR_2D_IMPORTS => {
+            "On import, use equal F1/F2 scale when both axes are frequency axes of the same nucleus and the wider range is no more than twice the narrower range."
+        }
         line::STROKE_WIDTH => "Width of spectrum and line-series strokes, in points.",
         contour::LINE_WIDTH => {
             "Width of contour strokes, in points. Lowest level and Levels control which features are drawn."

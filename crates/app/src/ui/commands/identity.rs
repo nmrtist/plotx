@@ -255,6 +255,7 @@ pub(super) fn command_identity(
                 PropertyStep::Lower => (format!("Lower {setting}"), Some(icon::MINUS), None),
             }
         }
+        CommandId::CycleCursor => plain("Next Cursor", Some(icon::CROSSHAIR)),
         CommandId::Tool(tool) => (
             format!("Tool: {}", tool.label()),
             tool_icon(tool),
@@ -280,6 +281,8 @@ fn tool_icon(tool: Tool) -> Option<&'static str> {
         Tool::SelectRegion => icon::SELECTION,
         Tool::Integrate => icon::SIGMA,
         Tool::Peaks => icon::MAP_PIN,
+        Tool::InspectCursor | Tool::DeltaCursor => icon::CROSSHAIR,
+        Tool::Symmetry => icon::CROSSHAIR,
         Tool::Slice => icon::SCISSORS,
         Tool::LineFit => icon::CHART_LINE,
         Tool::Annotate => icon::TEXT_AA,
@@ -389,6 +392,7 @@ fn simple_stable_id(id: CommandId) -> &'static str {
         CommandId::TidyBoard => "arrange.tidy",
         CommandId::CanvasSettings => "figure.canvas_settings",
         CommandId::SimplifyInnerAxes => "arrange.simplify_inner_axes",
+        CommandId::CycleCursor => "tool.next_cursor",
         _ => unreachable!("dynamic commands have formatted stable IDs"),
     }
 }
@@ -484,6 +488,9 @@ fn tool_slug(tool: Tool) -> &'static str {
         Tool::Regions => "regions",
         Tool::Integrate => "integrate",
         Tool::Peaks => "peaks",
+        Tool::InspectCursor => "inspect_cursor",
+        Tool::DeltaCursor => "delta_cursor",
+        Tool::Symmetry => "symmetry",
         Tool::Slice => "slice",
         Tool::LineFit => "line_fit",
         Tool::Annotate => "annotate",

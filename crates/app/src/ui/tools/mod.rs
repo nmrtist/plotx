@@ -1,6 +1,7 @@
 //! Renders a single `ToolGroup` for the active dataset; new data domains plug
 //! in here without touching the sidebar or the toolbar.
 
+mod cursors;
 mod curve_fit;
 mod electrophysiology;
 mod line_fit;
@@ -10,8 +11,10 @@ mod region_analysis;
 mod slice;
 mod statistics;
 mod statistics_config;
+mod symmetry;
 mod task_card;
 
+use cursors::cursor_group;
 use curve_fit::curve_fit_group;
 use egui::{Button, DragValue, Id, Ui};
 use egui_phosphor::regular as icon;
@@ -20,6 +23,7 @@ use plotx_core::state::{Dataset, PlotxApp, TaskDockTab, Tool, ToolGroup};
 use pseudo::experiment_group;
 use region_analysis::region_analysis_group;
 use slice::slice_group;
+use symmetry::symmetry_group;
 
 pub(super) use line_fit::line_fit_shape_id;
 
@@ -128,6 +132,8 @@ fn analysis_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) -> bool {
         ui.small("2D analysis is not available in this phase.");
         return false;
     }
+
+    cursor_group(app, di, ui);
 
     let has_selection = app
         .session

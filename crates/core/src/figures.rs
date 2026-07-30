@@ -82,9 +82,26 @@ pub fn build_figure_2d(spec: &Spectrum2D, preset: Preset2D) -> Figure {
 
     let mut fig = Figure::new(format!("{} — {}", preset.label(), spec.source), x, y)
         .with_axis_frame(AxisFrame::Box);
-    // Homonuclear spectra share a nucleus/range on both axes; render them square.
-    fig.lock_aspect = preset.homonuclear();
+    fig.lock_aspect = equal_scale_for_nmr_2d(spec);
     fig
+}
+
+/// Whether an imported true-2D spectrum has commensurate frequency axes whose
+/// full ranges remain useful when rendered with equal data units per pixel.
+pub(crate) fn equal_scale_for_nmr_2d(spec: &Spectrum2D) -> bool {
+    if spec.f2_domain != plotx_io::Domain::Frequency
+        || spec.f1_domain != plotx_io::Domain::Frequency
+        || spec.direct.nucleus != spec.indirect.nucleus
+    {
+        return false;
+    }
+    let (f2_lo, f2_hi) = spec.f2_bounds();
+    let (f1_lo, f1_hi) = spec.f1_bounds();
+    let f2_span = (f2_hi - f2_lo).abs();
+    let f1_span = (f1_hi - f1_lo).abs();
+    let narrow = f2_span.min(f1_span);
+    let wide = f2_span.max(f1_span);
+    narrow.is_finite() && wide.is_finite() && narrow > 0.0 && wide / narrow <= 2.0
 }
 
 /// Resolve levels for the existing DOSY/ILT analysis-map workers. Ordinary
@@ -555,6 +572,30 @@ mod tests {
             },
             source: "test".to_owned(),
         }
+    }
+
+    #[test]
+    fn equal_scale_requires_matching_frequency_axes_and_ranges_within_twofold() {
+        let mut spectrum = spectrum_2d();
+        spectrum.indirect.nucleus = "1H".to_owned();
+        assert!(equal_scale_for_nmr_2d(&spectrum));
+
+        spectrum.f2_ppm = vec![0.0, 2.0, 4.0, 6.0];
+        assert!(
+            equal_scale_for_nmr_2d(&spectrum),
+            "a range exactly twice as wide remains eligible"
+        );
+
+        spectrum.f2_ppm = vec![0.0, 2.1, 4.2, 6.3];
+        assert!(!equal_scale_for_nmr_2d(&spectrum));
+
+        spectrum.f2_ppm = vec![0.0, 1.0, 2.0, 3.0];
+        spectrum.indirect.nucleus = "13C".to_owned();
+        assert!(!equal_scale_for_nmr_2d(&spectrum));
+
+        spectrum.indirect.nucleus = "1H".to_owned();
+        spectrum.f1_domain = plotx_io::Domain::Time;
+        assert!(!equal_scale_for_nmr_2d(&spectrum));
     }
 
     // The 2D NMR convention places low chemical shift at the top of the plot. The

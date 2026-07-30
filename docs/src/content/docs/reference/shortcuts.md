@@ -12,7 +12,9 @@ Single keys, no modifiers:
 
 Press the same key again to leave a tool. Analysis tools return to **Zoom**;
 drawing tools such as **Text** and **Rectangle** return to **Select**. Pressing
-`V` or `Z` again leaves that neutral tool active.
+`V` or `Z` again leaves that neutral tool active. The cursor family is the
+exception: repeated `C` presses advance to the next applicable cursor, and
+`Esc` leaves the cursor.
 
 | Key | Tool |
 | --- | --- |
@@ -20,12 +22,19 @@ drawing tools such as **Text** and **Rectangle** return to **Select**. Pressing
 | `Z` | Zoom (rubber-band box zoom) |
 | `I` | Integrate (1D band or true-2D rectangle, according to the dataset) |
 | `P` | Peaks |
+| `C` | Cycle cursors: **Inspect**, **Delta**, then **Symmetry review** when the selected spectrum supports it |
 | `S` | Slice |
 | `D` | Peak Fit |
 | `T` | Text |
 | `R` | Rectangle |
 | `O` | Ellipse |
 | `L` | Line |
+
+**Inspect** reports the coordinates and sampled intensity under the pointer;
+click to pin it. **Delta** measures chemical-shift, frequency, and intensity
+differences between two clicked positions. On an eligible homonuclear true-2D
+spectrum, the third `C` press selects **Symmetry review**. On other spectra
+that support cursors, `C` alternates between **Inspect** and **Delta**.
 
 ## Navigation
 
@@ -66,7 +75,7 @@ from the Object inspector.
 | `Ctrl` + `A` | Select all objects on the page |
 | `Ctrl` + `G` | Group the selected objects |
 | `Ctrl` + `Shift` + `G` | Ungroup |
-| `Delete` or `Backspace` | Delete the selected annotation objects; in the Peaks and Integrate tools, delete the selected peak or region |
+| `Delete` or `Backspace` | Delete the selected annotation objects; in Peaks or Integrate, delete the selected peak or region; in Symmetry review, delete the selected cross-peak mark |
 | `+` (or `=`) / `-` | Raise / lower the lowest contour level of the selected plot |
 | `F2` | Rename the selected dataset or canvas |
 | `Esc` | Cancel the active drag; further presses clear the Analysis Range and selections one at a time, then leave the active tool |

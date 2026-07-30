@@ -62,6 +62,17 @@ pub const PRESENTATIONS: &[PropertyPresentation] = &[
     object_entry(object::SHAPE_FILL_COLOR, "Fill color", SHAPE_HOME),
     object_entry(object::LOCKED, "Locked", OBJECT_HOME),
     PropertyPresentation {
+        id: axis::EQUAL_F1_F2_SCALE,
+        localized_label: LocalizedText("F1/F2 equal scale (1:1)"),
+        localized_aliases: &[
+            LocalizedText("aspect lock"),
+            LocalizedText("equal axis scale"),
+        ],
+        home_route: AXIS_HOME,
+        canvas_step: false,
+        uses_canvas_length_unit: false,
+    },
+    PropertyPresentation {
         id: axis::X_LABEL,
         localized_label: LocalizedText("X title"),
         localized_aliases: &[LocalizedText("x-axis label")],
@@ -550,6 +561,15 @@ pub const PRESENTATIONS: &[PropertyPresentation] = &[
         app_preferences::SNAP_ENABLED,
         "Object snapping",
         &[LocalizedText("snap to guides")],
+        GENERAL_PREFERENCES_HOME,
+    ),
+    preference_entry(
+        app_preferences::EQUAL_SCALE_HOMONUCLEAR_2D_IMPORTS,
+        "Equal scale for homonuclear 2D imports",
+        &[
+            LocalizedText("1:1 F1 F2 scale"),
+            LocalizedText("lock homonuclear aspect"),
+        ],
         GENERAL_PREFERENCES_HOME,
     ),
     preference_entry(

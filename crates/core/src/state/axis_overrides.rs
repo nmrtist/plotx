@@ -159,6 +159,7 @@ pub struct AxisOverrides {
     pub y_label: Option<String>,
     pub x_range: Option<AxisRange>,
     pub y_range: Option<AxisRange>,
+    pub lock_aspect: Option<bool>,
     pub x_show_tick_labels: Option<bool>,
     pub x_show_label: Option<bool>,
     pub y_show_tick_labels: Option<bool>,
@@ -184,6 +185,9 @@ impl AxisOverrides {
         {
             figure.y.min = range.min;
             figure.y.max = range.max;
+        }
+        if let Some(lock) = self.lock_aspect {
+            figure.lock_aspect = lock;
         }
         if let Some(show) = self.x_show_tick_labels {
             figure.x.show_tick_labels = show;
@@ -246,6 +250,7 @@ mod tests {
         AxisOverrides {
             x_label: Some("Time".to_owned()),
             y_range: Some(AxisRange::new(-2.0, 2.0)),
+            lock_aspect: Some(true),
             ..AxisOverrides::default()
         }
         .apply_to(&mut figure);
@@ -253,6 +258,7 @@ mod tests {
         assert_eq!(figure.y.label, "automatic y");
         assert_eq!(AxisRange::from_axis(&figure.x), AxisRange::new(0.0, 10.0));
         assert_eq!(AxisRange::from_axis(&figure.y), AxisRange::new(-2.0, 2.0));
+        assert!(figure.lock_aspect);
     }
 
     #[test]

@@ -56,7 +56,8 @@ fn body(app: &mut PlotxApp, ui: &mut Ui) {
     for (position, group) in groups.into_iter().enumerate() {
         ui.add_space(2.0);
         let id = ui.make_persistent_id(("secondary_tool_group", group.title()));
-        if app.session.ui.requested_tool_group == Some(group) {
+        let reveal = app.session.ui.requested_tool_group == Some(group);
+        if reveal {
             let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
                 ui.ctx(),
                 id,
@@ -66,12 +67,17 @@ fn body(app: &mut PlotxApp, ui: &mut Ui) {
             state.store(ui.ctx());
             app.session.ui.requested_tool_group = None;
         }
-        egui::CollapsingHeader::new(group.title())
+        let response = egui::CollapsingHeader::new(group.title())
             .id_salt(("secondary_tool_group", group.title()))
             .default_open(position == 0)
             .show(ui, |ui| {
                 dirty |= tools::render_group(app, di, group, ui);
             });
+        if reveal {
+            response
+                .header_response
+                .scroll_to_me(Some(egui::Align::Min));
+        }
     }
 
     if dirty {

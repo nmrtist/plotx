@@ -161,3 +161,10 @@ pub(crate) fn time_domain_2d() -> Dataset {
     data.domain = plotx_io::Domain::Time;
     Dataset::Nmr2D(Box::new(Nmr2DDataset::load(data)))
 }
+
+pub(crate) fn homonuclear_frequency_2d() -> Dataset {
+    let mut data = nmr2d("homonuclear frequency domain");
+    data.indirect = data.direct.clone();
+    data.experiment = Some("cosy".to_owned());
+    Dataset::Nmr2D(Box::new(Nmr2DDataset::load(data)))
+}

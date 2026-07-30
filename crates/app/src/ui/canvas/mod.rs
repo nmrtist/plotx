@@ -30,6 +30,7 @@ mod authoring;
 mod board;
 mod board_notes;
 mod chrome;
+mod cursors;
 mod geometry;
 mod integrals;
 mod integrals2d;
@@ -43,12 +44,14 @@ mod readout;
 mod regions;
 mod slices;
 mod snap;
+mod symmetry;
 mod tiling;
 
 pub(crate) use authoring::*;
 pub(crate) use board::*;
 pub(crate) use board_notes::*;
 pub(crate) use chrome::*;
+pub(crate) use cursors::*;
 pub(crate) use geometry::*;
 pub(crate) use integrals::*;
 pub(crate) use integrals2d::*;
@@ -62,6 +65,7 @@ pub(crate) use readout::*;
 pub(crate) use regions::*;
 pub(crate) use slices::*;
 pub(crate) use snap::*;
+pub(crate) use symmetry::*;
 pub(crate) use tiling::*;
 
 fn finite_rect_intersects(a: egui::Rect, b: egui::Rect) -> bool {
@@ -331,6 +335,10 @@ pub fn render_central(app: &mut PlotxApp, ui: &mut Ui) {
                 }
             }
             Tool::Peaks => handle_peaks(app, ci, object_id, di, plot, ui, &resp),
+            Tool::InspectCursor | Tool::DeltaCursor => {
+                handle_cursor_tool(app, ci, object_id, di, plot, ui)
+            }
+            Tool::Symmetry => handle_symmetry(app, ci, object_id, di, plot, ui),
             Tool::Slice => handle_slice(app, ci, object_id, di, plot, ui),
             Tool::Text
             | Tool::PanelLabel
@@ -346,6 +354,19 @@ pub fn render_central(app: &mut PlotxApp, ui: &mut Ui) {
     paint_integrals(app, ci, object_id, di, plot, &painter, chrome);
     paint_integrals_2d(app, ci, object_id, di, plot, &painter, chrome);
     paint_peaks(app, ci, object_id, di, plot, &painter, chrome);
+    paint_cursor_tool(app, ci, object_id, di, plot, ui, &painter, chrome);
+    paint_symmetry(
+        app,
+        SymmetryPaintTarget {
+            canvas: ci,
+            object: object_id,
+            dataset: di,
+            plot,
+        },
+        ui,
+        &painter,
+        chrome,
+    );
     paint_slice(app, ci, object_id, di, plot, &painter);
     paint_analysis_selection(app, ci, object_id, plot, &painter, chrome);
     paint_selection_drag(app, ci, object_id, plot, &painter, chrome);

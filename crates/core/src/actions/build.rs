@@ -357,6 +357,18 @@ impl Action {
         }
     }
 
+    pub fn set_peaks_2d(
+        dataset: DatasetId,
+        before: crate::state::Peak2DSet,
+        after: crate::state::Peak2DSet,
+    ) -> Self {
+        Self::SetPeaks2D {
+            dataset,
+            before,
+            after,
+        }
+    }
+
     pub fn set_line_fits(
         dataset: DatasetId,
         before: Vec<StoredLineFit>,

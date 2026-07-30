@@ -118,6 +118,7 @@ impl eframe::App for Shell {
             *PENDING_INSTALL.lock().unwrap() = Some(plan.clone());
         }
         let fitting = self.app.poll_line_fit();
+        let symmetry = self.app.poll_symmetry_audit();
         let transforming = self.app.poll_table_transform();
         ui::render(
             &mut self.app,
@@ -132,6 +133,9 @@ impl eframe::App for Shell {
         self.start_pending_project_save(&ctx);
         self.drive_project_transition(&ctx);
         if fitting {
+            ctx.request_repaint_after(std::time::Duration::from_millis(50));
+        }
+        if symmetry {
             ctx.request_repaint_after(std::time::Duration::from_millis(50));
         }
         if transforming {

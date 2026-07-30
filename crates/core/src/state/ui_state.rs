@@ -8,18 +8,6 @@ use std::sync::Arc;
 mod task_dock;
 pub use task_dock::TaskDockTab;
 
-/// The current slice position of the Slice tool: which 2D dataset/plot it
-/// targets, the cut orientation, and the snapped grid index (a row/column index
-/// for a true-2D spectrum, or an increment index for a pseudo-2D stack). Drives
-/// the live preview and the "Extract" button; transient (never serialized).
-#[derive(Clone, Copy, PartialEq)]
-pub struct SliceCursor {
-    pub dataset: usize,
-    pub object: ObjectId,
-    pub kind: plotx_processing::SliceKind,
-    pub index: usize,
-}
-
 /// Which sidebar entry an in-progress inline rename targets.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum RenameTarget {
@@ -413,6 +401,24 @@ pub struct UiState {
     pub selected_integral: Option<u64>,
     /// The selected hand-placed peak's mark id (drives Delete and the label editor).
     pub selected_peak: Option<u64>,
+    /// Selected cross peak and its owning dataset while the Symmetry tool is active.
+    pub selected_peak_2d: Option<Peak2DSelection>,
+    /// Click-pinned symmetry comparison. Hover readings remain frame-local.
+    pub symmetry_pin: Option<SymmetryCursorReading>,
+    /// Click-pinned Inspect reading. Hover readings remain frame-local.
+    pub inspect_cursor_pin: Option<CursorPoint>,
+    /// First click of an in-progress Delta measurement.
+    pub delta_cursor_anchor: Option<CursorPoint>,
+    /// Completed two-point Delta measurement.
+    pub delta_cursor_pin: Option<CursorDelta>,
+    /// Completed audit for the exact current processed spectrum.
+    pub symmetry_audit: Option<SymmetryAuditState>,
+    /// Exact processed spectrum for which an automatic audit was already
+    /// attempted, including failed attempts (prevents a failure loop per frame).
+    pub symmetry_attempted_spectrum: Option<Arc<plotx_processing::Spectrum2D>>,
+    /// Whether cursor positions snap without holding Shift.
+    pub symmetry_snap: bool,
+    pub symmetry_filter: SymmetryAuditFilter,
     /// Pre-edit region snapshot for an in-progress panel rename, so a typing run
     /// commits as one undo step on focus loss.
     pub region_edit_before: Option<Vec<Region>>,
@@ -558,6 +564,15 @@ impl Default for UiState {
             selected_region: None,
             selected_integral: None,
             selected_peak: None,
+            selected_peak_2d: None,
+            symmetry_pin: None,
+            inspect_cursor_pin: None,
+            delta_cursor_anchor: None,
+            delta_cursor_pin: None,
+            symmetry_audit: None,
+            symmetry_attempted_spectrum: None,
+            symmetry_snap: false,
+            symmetry_filter: SymmetryAuditFilter::All,
             region_edit_before: None,
             fit_dataset: None,
             fit_model: String::new(),
@@ -664,6 +679,7 @@ pub struct Session {
     /// Background update checker/downloader. Not serialized.
     pub updates: crate::update::UpdateService,
     pub line_fit_job: Option<crate::state::LineFitJob>,
+    pub symmetry_audit_job: Option<crate::state::SymmetryAuditJob>,
     pub table_transform_job: Option<crate::state::TableTransformJob>,
     pub table_refresh_job: Option<crate::state::TableRefreshJob>,
     /// Unified numerical export worker. Serialization and file I/O stay off the UI thread.

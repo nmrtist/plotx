@@ -168,8 +168,49 @@ pub fn execute(
         }
         // Channel 3 edits, and does so through the property planner.
         CommandId::StepProperty(step) => super::properties::discovery::step_selection(app, step),
+        CommandId::CycleCursor => cycle_cursor(app),
+        CommandId::Tool(Tool::Symmetry) => {
+            reveal_tool_group(app, Tool::Symmetry, ToolGroup::Nmr2dExperiment);
+        }
         CommandId::Tool(tool) => app.toggle_tool(tool),
     }
+}
+
+fn cycle_cursor(app: &mut PlotxApp) {
+    let Some(dataset) = app.active_dataset() else {
+        return;
+    };
+    let symmetry = app.doc.datasets[dataset]
+        .as_nmr2d()
+        .is_some_and(|nmr| nmr.supports_symmetry_review());
+    let tools: &[Tool] = if symmetry {
+        &[Tool::InspectCursor, Tool::DeltaCursor, Tool::Symmetry]
+    } else {
+        &[Tool::InspectCursor, Tool::DeltaCursor]
+    };
+    let current = tools.iter().position(|&tool| tool == app.session.tool);
+    let next = tools[current.map_or(0, |index| (index + 1) % tools.len())];
+    app.set_tool(next);
+    reveal_group(
+        app,
+        if app.doc.datasets[dataset].as_nmr2d().is_some() {
+            ToolGroup::Nmr2dExperiment
+        } else {
+            ToolGroup::Nmr1dAnalysis
+        },
+    );
+    let position = tools
+        .iter()
+        .position(|&tool| tool == next)
+        .expect("next cursor comes from the applicable cursor list");
+    let following = tools[(position + 1) % tools.len()];
+    app.session.status = format!(
+        "Cursor {}/{}: {}. Press C for {}; Esc exits.",
+        position + 1,
+        tools.len(),
+        next.label(),
+        following.label(),
+    );
 }
 
 fn detect_peaks(app: &mut PlotxApp) {
@@ -283,8 +324,10 @@ fn reveal_group(app: &mut PlotxApp, group: ToolGroup) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use plotx_core::actions::Action;
     use plotx_core::properties::{AggregateValue, PropertyAddress, PropertyValue, app_preferences};
     use plotx_core::settings::Settings;
+    use plotx_core::state::DEFAULT_CANVAS_SIZE_MM;
 
     fn catalog_snap(app: &mut PlotxApp, enabled: bool) {
         let commit = app
@@ -337,5 +380,65 @@ mod tests {
             AggregateValue::Uniform(PropertyValue::Bool(false))
         );
         assert!(!app.settings.general.snap_enabled);
+    }
+
+    #[test]
+    fn symmetry_command_opens_its_review_surface_and_toggles_cleanly() {
+        let mut app = PlotxApp::new_with_settings(Settings::default());
+        let action = Action::insert_dataset_with_default_canvas(
+            &app,
+            crate::ui::properties::fixture::homonuclear_frequency_2d(),
+            "COSY review".to_owned(),
+            DEFAULT_CANVAS_SIZE_MM,
+        );
+        app.execute_action(action);
+        app.session.secondary_sidebar_visible = false;
+        let mut clipboard = ClipboardTablePaste::default();
+        let ctx = egui::Context::default();
+
+        execute(
+            CommandId::Tool(Tool::Symmetry),
+            &mut app,
+            &mut clipboard,
+            &ctx,
+        );
+        assert_eq!(app.session.tool, Tool::Symmetry);
+        assert!(app.session.secondary_sidebar_visible);
+        assert!(app.session.ui.requested_tool_group == Some(ToolGroup::Nmr2dExperiment));
+
+        execute(
+            CommandId::Tool(Tool::Symmetry),
+            &mut app,
+            &mut clipboard,
+            &ctx,
+        );
+        assert_eq!(app.session.tool, Tool::BrowseZoom);
+    }
+
+    #[test]
+    fn cursor_command_has_a_stable_three_press_cycle_on_eligible_2d_data() {
+        let mut app = PlotxApp::new_with_settings(Settings::default());
+        let action = Action::insert_dataset_with_default_canvas(
+            &app,
+            crate::ui::properties::fixture::homonuclear_frequency_2d(),
+            "COSY cursors".to_owned(),
+            DEFAULT_CANVAS_SIZE_MM,
+        );
+        app.execute_action(action);
+        let mut clipboard = ClipboardTablePaste::default();
+        let ctx = egui::Context::default();
+
+        for expected in [
+            Tool::InspectCursor,
+            Tool::DeltaCursor,
+            Tool::Symmetry,
+            Tool::InspectCursor,
+        ] {
+            execute(CommandId::CycleCursor, &mut app, &mut clipboard, &ctx);
+            assert_eq!(app.session.tool, expected);
+        }
+        assert!(app.session.status.contains("Cursor 1/3"));
+        assert!(app.session.secondary_sidebar_visible);
+        assert!(app.session.ui.requested_tool_group == Some(ToolGroup::Nmr2dExperiment));
     }
 }

@@ -22,6 +22,10 @@ hidden files beside the project, so an accidental overwrite can be recovered.
 Automatic crash-recovery checkpoints are separate internal files. They are
 updated only after new edits and are not portable project copies.
 
+For homonuclear 2D review, the project stores cross-peak marks, reciprocal
+pair links, and each mark's review state. The pinned cursor position and
+symmetry audit results are not stored.
+
 For pseudo-2D DOSY, a project also holds the per-column and ILT maps
 themselves, the ILT settings each was built with, your **Show** and **DOSY
 method** choices, and enough about how each map was produced for PlotX to warn
