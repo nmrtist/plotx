@@ -1,3 +1,12 @@
 {
-   "signedContributors": []
+  "signedContributors": [
+    {
+      "name": "Limdongcheng",
+      "id": 256920284,
+      "comment_id": 5125408873,
+      "created_at": "2026-07-30T01:48:40Z",
+      "repoId": 1307896119,
+      "pullRequestNo": 26
+    }
+  ]
 }
