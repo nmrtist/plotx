@@ -9,10 +9,13 @@ use super::{
     ValueCopies, ValueSchema, definition,
 };
 use crate::state::PlotxApp;
+use plotx_figure::Color;
 
 pub const TICK_PT: PropertyId = PropertyId("document.figure.typography.tick_pt");
 pub const LABEL_PT: PropertyId = PropertyId("document.figure.typography.label_pt");
 pub const TITLE_PT: PropertyId = PropertyId("document.figure.typography.title_pt");
+pub const LEGEND_PT: PropertyId = PropertyId("document.figure.typography.legend_pt");
+pub const LEGEND_COLOR: PropertyId = PropertyId("document.figure.typography.legend_color");
 
 const POINT_BOUNDS: FloatBounds = FloatBounds::inclusive(1.0, 72.0);
 /// A quarter point per drag notch: point sizes are chosen to a half point, and
@@ -63,6 +66,24 @@ pub(crate) const DEFINITIONS: &[PropertyDefinition] = &[
         "Figure title size",
         &["title size", "figure heading", "figure typography"],
     ),
+    typography_definition(
+        LEGEND_PT,
+        7.0,
+        "Figure legend size",
+        &["legend font size", "key size", "figure typography"],
+    ),
+    PropertyDefinition {
+        id: LEGEND_COLOR,
+        scope_kind: ScopeKind::Document,
+        value_schema: ValueSchema::Color,
+        access: PropertyAccess::ReadWrite,
+        applicability: Applicability::component(ComponentKind::None),
+        default_policy: DefaultPolicy::Fixed(PropertyValue::Color(Color::AXIS)),
+        tier: Tier::Advanced,
+        copies: ValueCopies::PerTarget,
+        canonical_label: "Figure legend text color",
+        canonical_aliases: &["legend colour", "key text color", "figure typography"],
+    },
 ];
 
 pub(crate) struct TypographyProvider;
@@ -84,15 +105,45 @@ impl PropertyProvider for TypographyProvider {
         })?;
         require_document_target(&address.target, definition)?;
         let typography = app.doc.style_library.figure_typography;
+        let (value, schema) = match definition.id {
+            TICK_PT => (
+                PropertyValue::Float(f64::from(typography.tick_pt)),
+                ResolvedSchema::Float {
+                    bounds: POINT_BOUNDS,
+                    display: FloatDisplay::Linear("pt"),
+                },
+            ),
+            LABEL_PT => (
+                PropertyValue::Float(f64::from(typography.label_pt)),
+                ResolvedSchema::Float {
+                    bounds: POINT_BOUNDS,
+                    display: FloatDisplay::Linear("pt"),
+                },
+            ),
+            TITLE_PT => (
+                PropertyValue::Float(f64::from(typography.title_pt)),
+                ResolvedSchema::Float {
+                    bounds: POINT_BOUNDS,
+                    display: FloatDisplay::Linear("pt"),
+                },
+            ),
+            LEGEND_PT => (
+                PropertyValue::Float(f64::from(typography.legend_pt)),
+                ResolvedSchema::Float {
+                    bounds: POINT_BOUNDS,
+                    display: FloatDisplay::Linear("pt"),
+                },
+            ),
+            LEGEND_COLOR => (
+                PropertyValue::Color(typography.legend_color),
+                ResolvedSchema::Color,
+            ),
+            _ => return Err(PropertyError::UnknownProperty(definition.id.to_string())),
+        };
         Ok(ResolvedProperty {
             address: address.clone(),
             modified: None,
-            value: AggregateValue::Uniform(PropertyValue::Float(f64::from(match definition.id {
-                TICK_PT => typography.tick_pt,
-                LABEL_PT => typography.label_pt,
-                TITLE_PT => typography.title_pt,
-                _ => return Err(PropertyError::UnknownProperty(definition.id.to_string())),
-            }))),
+            value: AggregateValue::Uniform(value),
             default_value: match &definition.default_policy {
                 DefaultPolicy::Fixed(value) => Some(value.clone()),
                 DefaultPolicy::EncodingFactory
@@ -101,10 +152,7 @@ impl PropertyProvider for TypographyProvider {
                 | DefaultPolicy::None => None,
             },
             availability: Availability::Editable,
-            schema: ResolvedSchema::Float {
-                bounds: POINT_BOUNDS,
-                display: FloatDisplay::Linear("pt"),
-            },
+            schema,
         })
     }
 
@@ -119,6 +167,26 @@ impl PropertyProvider for TypographyProvider {
             PropertyError::UnknownProperty(address.definition.as_str().to_owned())
         })?;
         require_document_target(&address.target, definition)?;
+        if definition.id == LEGEND_COLOR {
+            let value = match operation {
+                EditOp::Set(PropertyValue::Color(value)) => *value,
+                EditOp::Reset => Color::AXIS,
+                EditOp::Set(value) => {
+                    return Err(PropertyError::InvalidValue {
+                        property: definition.id,
+                        message: format!("expected a color, got {}", value.kind()),
+                    });
+                }
+                EditOp::Step(_) => {
+                    return Err(PropertyError::InvalidValue {
+                        property: definition.id,
+                        message: "this setting has no step gesture".to_owned(),
+                    });
+                }
+            };
+            transaction.figure_typography(app).legend_color = value;
+            return Ok(());
+        }
         let value = match operation {
             EditOp::Set(PropertyValue::Float(value)) => {
                 POINT_BOUNDS.check(definition.id, definition.canonical_label, *value)?
@@ -154,6 +222,7 @@ impl PropertyProvider for TypographyProvider {
             TICK_PT => typography.tick_pt = value as f32,
             LABEL_PT => typography.label_pt = value as f32,
             TITLE_PT => typography.title_pt = value as f32,
+            LEGEND_PT => typography.legend_pt = value as f32,
             _ => return Err(PropertyError::UnknownProperty(definition.id.to_string())),
         }
         Ok(())

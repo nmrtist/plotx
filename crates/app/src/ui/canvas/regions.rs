@@ -3,8 +3,8 @@ use super::*;
 const REGION_EDGE_PX: f32 = 5.0;
 
 enum RegionHit {
-    Edge { id: u64, lo_edge: bool },
-    Inside { id: u64 },
+    Edge { id: RegionId, lo_edge: bool },
+    Inside { id: RegionId },
 }
 
 /// Which region band (if any) the screen x `px` lands on, edges taking priority.
@@ -56,9 +56,7 @@ pub(crate) fn handle_region_drag(
         .doc
         .datasets
         .get(dataset)
-        .and_then(Dataset::as_nmr2d)
-        .map(|n| n.is_pseudo())
-        .unwrap_or(false);
+        .is_some_and(Dataset::supports_region_analysis);
     if !is_series {
         return;
     }
@@ -113,7 +111,10 @@ pub(crate) fn handle_region_drag(
     }
 
     let hit = {
-        let regions = &app.doc.datasets[dataset].as_nmr2d().unwrap().regions;
+        let regions = &app.doc.datasets[dataset]
+            .region_analysis()
+            .expect("the capability gate guarantees region state")
+            .regions;
         region_hit(regions, plot, xmin, xspan, xrev, p.x)
     };
     match hit {
@@ -127,14 +128,14 @@ pub(crate) fn handle_region_drag(
     if primary_pressed {
         let ppm = screen_to_x(p.x, plot, xmin, xspan, xrev);
         let before = app.doc.datasets[dataset]
-            .as_nmr2d()
-            .unwrap()
+            .region_analysis()
+            .expect("the capability gate guarantees region state")
             .regions
             .clone();
         let mut drag = RegionDrag {
             canvas: ci,
             object: object_id,
-            dataset,
+            dataset: app.doc.datasets[dataset].resource_id(),
             kind: RegionDragKind::NewBand,
             region_id: None,
             before,
@@ -151,7 +152,7 @@ pub(crate) fn handle_region_drag(
                     RegionDragKind::EdgeHi
                 };
                 drag.region_id = Some(id);
-                app.session.ui.selected_region = Some(id);
+                app.session.ui.selected_region = Some(RegionSelection::new(drag.dataset, id));
             }
             Some(RegionHit::Inside { id }) => {
                 if let Some(r) = drag.before.iter().find(|r| r.id == id) {
@@ -160,7 +161,7 @@ pub(crate) fn handle_region_drag(
                 }
                 drag.kind = RegionDragKind::Move;
                 drag.region_id = Some(id);
-                app.session.ui.selected_region = Some(id);
+                app.session.ui.selected_region = Some(RegionSelection::new(drag.dataset, id));
             }
             None => {
                 app.session.ui.selected_region = None;
@@ -187,15 +188,15 @@ fn apply_region_drag_live(app: &mut PlotxApp, dataset: usize, ppm: f64) {
     let Some(id) = id else {
         return;
     };
-    let Some(d2) = app
+    let Some(state) = app
         .doc
         .datasets
         .get_mut(dataset)
-        .and_then(Dataset::as_nmr2d_mut)
+        .and_then(Dataset::region_analysis_mut)
     else {
         return;
     };
-    let Some(r) = d2.regions.iter_mut().find(|r| r.id == id) else {
+    let Some(r) = state.regions.iter_mut().find(|r| r.id == id) else {
         return;
     };
     match kind {
@@ -224,30 +225,33 @@ fn finish_region_drag(app: &mut PlotxApp, dataset: usize, xspan: f64) {
         if (hi - lo) <= min_w {
             return;
         }
-        let Some(d2) = app
+        let Some(state) = app
             .doc
             .datasets
             .get_mut(dataset)
-            .and_then(Dataset::as_nmr2d_mut)
+            .and_then(Dataset::region_analysis_mut)
         else {
             return;
         };
-        let id = d2.next_region_id;
-        d2.next_region_id += 1;
-        let idx = d2.regions.len();
-        d2.regions.push(Region {
+        let Some(id) = state.allocate_region_id() else {
+            app.session.status = "No more region identifiers are available.".to_owned();
+            return;
+        };
+        let idx = state.regions.len();
+        state.regions.push(Region {
             id,
             lo,
             hi,
             name: String::new(),
+            label_position: None,
             color: region_color(idx),
             metric: None,
         });
-        app.session.ui.selected_region = Some(id);
+        app.session.ui.selected_region = Some(RegionSelection::new(drag.dataset, id));
     }
     let after = app.doc.datasets[dataset]
-        .as_nmr2d()
-        .unwrap()
+        .region_analysis()
+        .expect("the capability gate guarantees region state")
         .regions
         .clone();
     app.execute_action(Action::set_regions(

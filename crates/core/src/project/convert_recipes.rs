@@ -85,28 +85,23 @@ fn legacy_peaks(analysis: &serde_json::Value) -> PeakSet {
     peaks
 }
 
-pub(super) fn read_regions(dataset: &mut Nmr2DDataset, recipe: &RecipeObject) {
-    let Some(ext) = recipe.extensions.get("plotx.regions") else {
-        return;
-    };
-    if let Some(regions) = ext
-        .get("regions")
-        .cloned()
-        .and_then(|v| serde_json::from_value::<Vec<Region>>(v).ok())
-    {
-        dataset.regions = regions;
-    }
-    if let Some(metric) = ext
-        .get("metric")
-        .cloned()
-        .and_then(|v| serde_json::from_value::<RegionMetric>(v).ok())
-    {
-        dataset.region_metric = metric;
-    }
-    dataset.next_region_id = ext
-        .get("next_id")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or_else(|| dataset.regions.iter().map(|r| r.id + 1).max().unwrap_or(0));
+pub(super) fn read_region_analysis(
+    dataset: &mut Nmr2DDataset,
+    recipe: &RecipeObject,
+) -> Result<()> {
+    let extension = recipe
+        .extensions
+        .get("plotx.region_analysis")
+        .ok_or_else(|| {
+            ProjectError::Invalid("2D NMR recipe is missing region analysis state".to_owned())
+        })?;
+    dataset.region_analysis = serde_json::from_value(extension.clone()).map_err(|error| {
+        ProjectError::Invalid(format!("invalid region analysis state: {error}"))
+    })?;
+    dataset.region_analysis.validate().map_err(|error| {
+        ProjectError::Invalid(format!("invalid region analysis state: {error}"))
+    })?;
+    Ok(())
 }
 
 pub(super) fn nmr2d_recipe_extensions(
@@ -118,16 +113,10 @@ pub(super) fn nmr2d_recipe_extensions(
         "plotx.step_allocator".to_owned(),
         serde_json::json!({ "next_id": dataset.next_step_id }),
     );
-    if !dataset.regions.is_empty() {
-        extensions.insert(
-            "plotx.regions".to_owned(),
-            serde_json::json!({
-                "regions": &dataset.regions,
-                "metric": &dataset.region_metric,
-                "next_id": dataset.next_region_id,
-            }),
-        );
-    }
+    extensions.insert(
+        "plotx.region_analysis".to_owned(),
+        serde_json::json!(&dataset.region_analysis),
+    );
     let mut analysis = serde_json::Map::new();
     if !dataset.integrals.is_empty() {
         analysis.insert(

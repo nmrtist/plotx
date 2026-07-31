@@ -43,13 +43,30 @@ spectrum recalculates both.
 
 Regions measure the same x-axis interval across every member of a series. This
 is useful whenever you want to follow a signal through an ordered series,
-including DOSY, relaxation, and other series data.
+including DOSY, relaxation, and patch-clamp sweeps. The **Regions** group is
+available for pseudo-2D series and electrophysiology recordings.
 
 Open the **Analyze** tab and choose **Draw Regions** in the **Regions** group,
 then drag across each signal of interest. A Regions task card opens at the
 upper-right of the canvas with the drawing instructions, measurement choice,
 and region list. Drag the handle at the lower-right corner of the card to
 adjust its height. The regions remain on the plot and can be moved or resized.
+Choose Height, Area, Max, Min, or Mean as the default measurement;
+an individual region can override that choice. Enter a descriptive **Label**
+in a region card to replace its automatic axis-midpoint label everywhere,
+including the source figure, series table, fitted plot, and export.
+With **Select** or **Regions** active, drag a region label to place it where it
+does not cover the trace. Its position is saved and used by figure exports.
+Double-click the label to return it to automatic placement.
+
+Each region has a stable color. The same color identifies its band on the
+source figure, its scatter series in the generated table, and any fit drawn for
+that series. A fitted point series and its curve share one legend entry with a
+combined point-and-line symbol. **Show regions on figure and export** is
+enabled by default. Turn it off to export the source figure without region
+annotations. SVG, PDF, bitmap, EMF, and vector clipboard output preserve the
+colored bands, boundaries, and labels; editing handles and drag previews are
+not exported.
 
 When the regions are ready, choose **Continue to Series Table** in the task
 card. Each region becomes a column in a live table that stays synchronized with
@@ -61,7 +78,9 @@ To export either the linked table or a frozen Series in full, select that table
 and use **Export Data…** → **Complete typed table / series**.
 
 For pseudo-2D analysis, each region becomes one decay curve — see
-[Pseudo-2D analysis](/guides/pseudo-2d/).
+[Pseudo-2D analysis](/guides/pseudo-2d/). For patch-clamp recordings, each
+region measures the same time window in every selected sweep — see
+[Electrophysiology](/guides/electrophysiology/).
 
 ## Peak fitting
 

@@ -10,7 +10,7 @@ what you want to measure:
 | --- | --- | --- | --- |
 | Locate and list the peaks in a spectrum | **Peaks** (`P`) | 1D spectra | Peak list |
 | Read one position or compare two positions | **Inspect / Delta cursors** (`C`) | Frequency-domain 1D and true-2D NMR spectra | Coordinates, intensity, and two-point differences |
-| Follow a signal's intensity through an ordered series | **Regions** | Pseudo-2D and stacked series | Live series table, one column per region |
+| Follow a signal through an ordered series or sweep collection | **Regions** | Pseudo-2D/stacked series and electrophysiology recordings | Color-linked live series table, one column per region |
 | Measure cross-peak volumes in a 2D spectrum | **Integrate** (`I`) | True 2D spectra (COSY, HSQC, …) | Integral table with normalized volumes |
 | Compare a cross peak with its reflected partner | **Symmetry review** (third `C` cursor) | Homonuclear true-2D spectra | Paired cross-peak marks and review states |
 | Separate overlapping spectral peaks into components | **Peak Fit** (`D`) | Any 1D trace | Per-peak position, height, width, area |
@@ -27,7 +27,8 @@ Rules of thumb when two tools seem to apply:
 - **Regions vs Integrate** — Regions measures the *same 1D interval* across
   every member of a series; Integrate measures a *rectangle* in a single true
   2D spectrum. A DOSY or relaxation dataset is a series → Regions; an HSQC is
-  a true 2D spectrum → Integrate.
+  a true 2D spectrum → Integrate. To compare the same patch-clamp response
+  window across sweeps, use Regions.
 - **Peak Fit vs Fit Curves** — Peak Fit works on a spectrum's line shapes;
   Fit Curves works on tabulated x-y values (a decay, a titration, an IV
   curve). A pseudo-2D analysis uses both stages: Regions extracts the decay

@@ -4,7 +4,7 @@
 //! absolutely from the grab state every frame so nothing accumulates drift, and
 //! `before` snapshots the dataset so the gesture commits as one undoable step.
 
-use super::{ObjectId, Region};
+use super::{AxisOverrides, DatasetId, ObjectId, Region, RegionId};
 use crate::{Integral2D, IntegralResult};
 
 /// An in-progress region-band edit on a series plot. `region_id` names the band
@@ -13,9 +13,9 @@ use crate::{Integral2D, IntegralResult};
 pub struct RegionDrag {
     pub canvas: usize,
     pub object: ObjectId,
-    pub dataset: usize,
+    pub dataset: DatasetId,
     pub kind: RegionDragKind,
-    pub region_id: Option<u64>,
+    pub region_id: Option<RegionId>,
     pub before: Vec<Region>,
     /// Pointer ppm at grab time (for `Move`) or the fixed anchor (for `NewBand`).
     pub anchor_ppm: f64,
@@ -32,6 +32,27 @@ pub enum RegionDragKind {
     EdgeLo,
     EdgeHi,
     Move,
+}
+
+#[derive(Clone, Debug)]
+pub struct FurnitureDrag {
+    pub canvas: usize,
+    pub object: ObjectId,
+    pub target: FurnitureTarget,
+}
+
+#[derive(Clone, Debug)]
+pub enum FurnitureTarget {
+    Legend {
+        before: AxisOverrides,
+        grab_offset: [f32; 2],
+    },
+    RegionLabel {
+        dataset: DatasetId,
+        region: RegionId,
+        before: Vec<Region>,
+        grab_offset: [f32; 2],
+    },
 }
 
 /// An in-progress integral-band edit on a 1D spectrum — the direct analogue of

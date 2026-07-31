@@ -59,8 +59,8 @@ pub struct PageMetrics {
 }
 
 /// Scan a page for the smallest authored (user-controlled) font and line width.
-/// Since figure typography became a document style, tick and axis-title sizes
-/// count too; only truly fixed renderer chrome (the axis frame line) stays out.
+/// Since figure typography became a document style, tick, axis-title, and
+/// visible legend sizes count too; only fixed renderer chrome stays out.
 pub fn page_metrics(canvas: &CanvasDocument) -> PageMetrics {
     let mut fonts: Vec<f32> = Vec::new();
     let mut lines: Vec<f32> = Vec::new();
@@ -83,8 +83,14 @@ pub fn page_metrics(canvas: &CanvasDocument) -> PageMetrics {
                 if plot.figure().axis_frame != AxisFrame::Hidden {
                     fonts.extend([typography.tick_pt, typography.label_pt]);
                 }
+                if !plot.figure().range_annotations.is_empty() {
+                    fonts.push(typography.tick_pt);
+                }
                 if !plot.figure().title.trim().is_empty() {
                     fonts.push(typography.title_pt);
+                }
+                if plotx_render::renders_legend(plot.figure()) {
+                    fonts.push(typography.legend_pt);
                 }
                 for annotation in &plot.figure().annotations {
                     fonts.push(annotation.size);
@@ -201,7 +207,7 @@ mod tests {
         AxisOverrides, AxisProjections, CanvasObject, CanvasObjectKind, CanvasViewport, ChartSpec,
         DataBinding, ObjectFrame, ObjectId, PanelMeta, PlotObject, StackSpec,
     };
-    use plotx_figure::{Axis, Figure};
+    use plotx_figure::{Axis, Color, Figure, RangeAnnotation, Series};
 
     fn thresholds() -> ComplianceThresholds {
         ComplianceThresholds {
@@ -292,5 +298,84 @@ mod tests {
             .unwrap()
             .set_axis_frame(AxisFrame::Open);
         assert_eq!(page_metrics(&canvas).min_font_pt, Some(3.0));
+    }
+
+    #[test]
+    fn visible_legend_contributes_its_authored_font_size() {
+        let mut figure = Figure::new("", Axis::new("x", 0.0, 1.0), Axis::new("y", 0.0, 1.0));
+        figure.axis_frame = AxisFrame::Hidden;
+        figure.show_legend = true;
+        figure.typography.legend_pt = 5.5;
+        figure.series = vec![
+            Series::line("A", vec![[0.0, 0.0]]),
+            Series::line("B", vec![[1.0, 1.0]]).colored(Color::rgb(200, 0, 0)),
+        ];
+        let viewport = CanvasViewport::from_figure(&figure);
+        let mut panel = PanelMeta::new(String::new(), 100.0);
+        panel.visible = false;
+        let mut canvas = CanvasDocument::new("Legend".to_owned(), [200.0, 100.0]);
+        canvas.objects.push(CanvasObject {
+            id: ObjectId::new(1),
+            name: "Plot".to_owned(),
+            frame: ObjectFrame::new(0.0, 0.0, 100.0, 100.0),
+            locked: false,
+            visible: true,
+            group: None,
+            kind: CanvasObjectKind::Plot(Box::new(PlotObject::new(
+                crate::state::SeriesId::new(1),
+                DataBinding { series: Vec::new() },
+                ChartSpec::default(),
+                StackSpec::default(),
+                AxisProjections::default(),
+                AxisOverrides::default(),
+                figure,
+                viewport,
+                panel,
+            ))),
+        });
+
+        assert_eq!(page_metrics(&canvas).min_font_pt, Some(5.5));
+    }
+
+    #[test]
+    fn range_label_counts_even_when_the_axis_frame_is_hidden() {
+        let mut figure = Figure::new("", Axis::new("x", 0.0, 1.0), Axis::new("y", 0.0, 1.0));
+        figure.axis_frame = AxisFrame::Hidden;
+        figure.typography.tick_pt = 4.5;
+        figure.range_annotations.push(RangeAnnotation {
+            source_id: 1,
+            x0: 0.2,
+            x1: 0.4,
+            label: "window".to_owned(),
+            label_position: None,
+            color: Color::AXIS,
+            fill_opacity: 0.1,
+            width: 1.0,
+        });
+        let viewport = CanvasViewport::from_figure(&figure);
+        let mut panel = PanelMeta::new(String::new(), 100.0);
+        panel.visible = false;
+        let mut canvas = CanvasDocument::new("Ranges".to_owned(), [200.0, 100.0]);
+        canvas.objects.push(CanvasObject {
+            id: ObjectId::new(1),
+            name: "Plot".to_owned(),
+            frame: ObjectFrame::new(0.0, 0.0, 100.0, 100.0),
+            locked: false,
+            visible: true,
+            group: None,
+            kind: CanvasObjectKind::Plot(Box::new(PlotObject::new(
+                crate::state::SeriesId::new(1),
+                DataBinding { series: Vec::new() },
+                ChartSpec::default(),
+                StackSpec::default(),
+                AxisProjections::default(),
+                AxisOverrides::default(),
+                figure,
+                viewport,
+                panel,
+            ))),
+        });
+
+        assert_eq!(page_metrics(&canvas).min_font_pt, Some(4.5));
     }
 }

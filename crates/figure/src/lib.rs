@@ -47,6 +47,10 @@ pub struct FigureTypography {
     pub label_pt: f32,
     /// Figure title above the plot.
     pub title_pt: f32,
+    /// Legend labels.
+    pub legend_pt: f32,
+    /// Legend-label text color.
+    pub legend_color: Color,
 }
 
 impl Default for FigureTypography {
@@ -55,6 +59,8 @@ impl Default for FigureTypography {
             tick_pt: 7.0,
             label_pt: 8.0,
             title_pt: 8.0,
+            legend_pt: 7.0,
+            legend_color: Color::AXIS,
         }
     }
 }
@@ -238,6 +244,22 @@ pub struct Annotation {
     pub size: f32,
 }
 
+/// A semantic x-range that spans the data area. Unlike editor selection chrome,
+/// range annotations are figure content and are exported by every renderer.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RangeAnnotation {
+    /// Stable source-region identity for direct manipulation.
+    pub source_id: u64,
+    pub x0: f64,
+    pub x1: f64,
+    pub label: String,
+    /// Manually placed label center as fractions of the plot rectangle.
+    pub label_position: Option<[f32; 2]>,
+    pub color: Color,
+    pub fill_opacity: f32,
+    pub width: f32,
+}
+
 /// A 2D contour overlay as pre-computed data-space line segments (each
 /// `[[x0,y0],[x1,y1]]`). The heavy marching-squares pass runs once when the
 /// figure is built, so both renderers only project and stroke.
@@ -391,6 +413,7 @@ pub struct Figure {
     #[serde(default)]
     pub error_bars: Vec<ErrorBar>,
     pub annotations: Vec<Annotation>,
+    pub range_annotations: Vec<RangeAnnotation>,
     /// Zero, one, or many contour overlays painted on the shared axes (e.g. one
     /// per dataset in a 2D color-overlay stack), each with its own colour/width.
     #[serde(default)]
@@ -412,13 +435,19 @@ pub struct Figure {
     /// multi-series overlays; defaults off so single-trace figures are unchanged.
     #[serde(default)]
     pub show_legend: bool,
+    /// Manually placed legend origin within its available plot area.
+    pub legend_position: Option<[f32; 2]>,
+    /// The figure's logical child series own their colours. A parent field
+    /// binding may still apply scale and width, but must not collapse a
+    /// categorical or repeated-series palette to one colour.
+    pub series_colors_are_semantic: bool,
     /// Render the data area with equal data-units-per-pixel on both axes,
     /// letterboxed within the frame. Set for homonuclear 2D (square COSY/NOESY).
     #[serde(default)]
     pub lock_aspect: bool,
     #[serde(default)]
     pub axis_frame: AxisFrame,
-    /// Text sizes (pt) of the axis furniture; see [`FigureTypography`].
+    /// Text sizes and legend text color; see [`FigureTypography`].
     #[serde(default)]
     pub typography: FigureTypography,
 }
@@ -435,6 +464,7 @@ impl Figure {
             heatmap: None,
             error_bars: Vec::new(),
             annotations: Vec::new(),
+            range_annotations: Vec::new(),
             contours: Vec::new(),
             top_projection: None,
             left_projection: None,
@@ -443,6 +473,8 @@ impl Figure {
             background: Color::rgb(255, 255, 255),
             show_grid: false,
             show_legend: false,
+            legend_position: None,
+            series_colors_are_semantic: false,
             lock_aspect: false,
             axis_frame: AxisFrame::Open,
             typography: FigureTypography::default(),

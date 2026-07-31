@@ -1,6 +1,9 @@
 use super::*;
 use num_complex::Complex64;
-use plotx_io::{AxisSource, Dim, NmrData2D, PseudoAxis, PseudoKind, QuadMode};
+use plotx_io::{
+    AxisSource, Dim, ElectricalUnit, ElectrophysiologyData, NmrData2D, PseudoAxis, PseudoKind,
+    QuadMode, RecordedChannel, Sweep,
+};
 
 #[test]
 fn live_and_frozen_region_tables_record_lineage() {
@@ -33,19 +36,47 @@ fn live_and_frozen_region_tables_record_lineage() {
         source: "series".to_owned(),
     };
     let mut source = Nmr2DDataset::load(data);
-    source.regions.push(Region {
-        id: 0,
+    source.region_analysis.regions.push(Region {
+        id: RegionId::new(0),
         lo: 4.0,
         hi: 6.0,
         name: "signal".to_owned(),
+        label_position: Some([0.25, 0.75]),
         color: region_color(0),
         metric: None,
     });
+    source.region_analysis.regions.push(Region {
+        id: RegionId::new(1),
+        lo: 4.5,
+        hi: 5.5,
+        name: "reference".to_owned(),
+        label_position: None,
+        color: region_color(1),
+        metric: Some(RegionMetric::Area),
+    });
+    source.region_analysis.next_region_id = RegionId::new(2);
     let mut app = PlotxApp::new();
     app.doc.datasets.push(Dataset::Nmr2D(Box::new(source)));
 
+    let source_figure = app.build_full_canvas_figure(
+        0,
+        &ChartSpec::default_for(app.doc.datasets[0].domain()),
+        [120.0, 80.0],
+    );
+    assert_eq!(source_figure.range_annotations.len(), 2);
+    assert_eq!(source_figure.range_annotations[0].label, "signal");
+    assert_eq!(
+        source_figure.range_annotations[0].label_position,
+        Some([0.25, 0.75])
+    );
+    assert_eq!(
+        source_figure.range_annotations[0].color,
+        plotx_figure::Color::rgb(region_color(0)[0], region_color(0)[1], region_color(0)[2])
+    );
+
     app.create_region_table(0);
     app.freeze_region_table(0);
+    assert_eq!(app.doc.datasets.len(), 3, "{}", app.session.status);
 
     assert_eq!(
         app.doc.datasets[1].lineage(),
@@ -63,6 +94,190 @@ fn live_and_frozen_region_tables_record_lineage() {
     );
     assert!(app.doc.datasets[1].as_table().unwrap().provenance.is_some());
     assert!(app.doc.datasets[2].as_table().unwrap().provenance.is_none());
+
+    let table_figure = app.doc.datasets[1].as_table().unwrap().figure();
+    assert!(table_figure.series_colors_are_semantic);
+    assert_eq!(table_figure.series.len(), 2);
+    assert_eq!(table_figure.series[0].name, "signal");
+    assert_eq!(table_figure.series[1].name, "reference");
+    assert_ne!(table_figure.series[0].color, table_figure.series[1].color);
+    for (series, expected) in table_figure
+        .series
+        .iter()
+        .zip([region_color(0), region_color(1)])
+    {
+        assert_eq!(
+            series.color,
+            plotx_figure::Color::rgb(expected[0], expected[1], expected[2])
+        );
+    }
+}
+
+#[test]
+fn electrophysiology_edits_keep_the_live_region_table_synchronized() {
+    let data = ElectrophysiologyData {
+        abf_version: "test".to_owned(),
+        sample_rate_hz: 10.0,
+        channels: vec![
+            RecordedChannel {
+                name: "A".to_owned(),
+                unit: ElectricalUnit::from_symbol("pA"),
+            },
+            RecordedChannel {
+                name: "B".to_owned(),
+                unit: ElectricalUnit::from_symbol("pA"),
+            },
+        ],
+        sweeps: vec![
+            Sweep {
+                start_time_s: 0.0,
+                channels: vec![vec![0.0, -10.0, 0.0, 0.0], vec![0.0, -100.0, 0.0, 0.0]],
+                commands: Vec::new(),
+            },
+            Sweep {
+                start_time_s: 1.0,
+                channels: vec![vec![0.0, -20.0, 0.0, 0.0], vec![0.0, -200.0, 0.0, 0.0]],
+                commands: Vec::new(),
+            },
+        ],
+        protocol: None,
+        source: "synthetic.abf".to_owned(),
+        import_warnings: Vec::new(),
+    };
+    let mut recording = ElectrophysiologyDataset::load(data);
+    recording.processing.gaussian_lowpass_enabled = false;
+    recording.region_analysis.regions.push(Region {
+        id: RegionId::new(0),
+        lo: 0.0,
+        hi: 0.4,
+        name: "response".to_owned(),
+        label_position: None,
+        color: region_color(0),
+        metric: Some(RegionMetric::Height),
+    });
+    recording.region_analysis.next_region_id = RegionId::new(1);
+    let mut app = PlotxApp::new();
+    app.doc
+        .datasets
+        .push(Dataset::Electrophysiology(Box::new(recording)));
+    app.create_region_table(0);
+
+    let values = |app: &PlotxApp| {
+        app.doc.datasets[1].as_table().unwrap().figure().series[0]
+            .points
+            .iter()
+            .map(|point| point[1])
+            .collect::<Vec<_>>()
+    };
+    let channel_a = values(&app);
+    app.doc.datasets[0]
+        .as_electrophysiology_mut()
+        .unwrap()
+        .selected_channel = 1;
+    app.apply_dataset_edit(0);
+    let channel_b = values(&app);
+    assert_ne!(channel_a, channel_b);
+
+    app.doc.datasets[0]
+        .as_electrophysiology_mut()
+        .unwrap()
+        .selected_sweeps[0] = false;
+    app.apply_dataset_edit(0);
+    assert_eq!(values(&app).len(), 1);
+
+    let raw = values(&app);
+    let recording = app.doc.datasets[0].as_electrophysiology_mut().unwrap();
+    recording.processing.gaussian_lowpass_enabled = true;
+    recording.processing.cutoff_hz = 1.0;
+    app.apply_dataset_edit(0);
+    assert_ne!(values(&app), raw);
+
+    app.doc.datasets[0]
+        .as_electrophysiology_mut()
+        .unwrap()
+        .selected_sweeps
+        .fill(false);
+    app.apply_dataset_edit(0);
+    assert!(values(&app).is_empty());
+}
+
+fn electrophysiology_region_app(samples: Vec<f64>, metric: RegionMetric) -> PlotxApp {
+    let sample_count = samples.len();
+    let data = ElectrophysiologyData {
+        abf_version: "test".to_owned(),
+        sample_rate_hz: 10.0,
+        channels: vec![RecordedChannel {
+            name: "A".to_owned(),
+            unit: ElectricalUnit::from_symbol("pA"),
+        }],
+        sweeps: vec![Sweep {
+            start_time_s: 0.0,
+            channels: vec![samples],
+            commands: Vec::new(),
+        }],
+        protocol: None,
+        source: "synthetic.abf".to_owned(),
+        import_warnings: Vec::new(),
+    };
+    let mut recording = ElectrophysiologyDataset::load(data);
+    recording.processing.gaussian_lowpass_enabled = false;
+    recording.region_analysis.default_metric = metric;
+    recording.region_analysis.regions.push(Region {
+        id: RegionId::new(0),
+        lo: 0.0,
+        hi: sample_count as f64 / 10.0,
+        name: "window".to_owned(),
+        label_position: None,
+        color: region_color(0),
+        metric: None,
+    });
+    recording.region_analysis.next_region_id = RegionId::new(1);
+    let mut app = PlotxApp::new();
+    app.doc
+        .datasets
+        .push(Dataset::Electrophysiology(Box::new(recording)));
+    app
+}
+
+fn first_region_table_value(app: &PlotxApp) -> f64 {
+    app.doc.datasets[1].as_table().unwrap().figure().series[0].points[0][1]
+}
+
+#[test]
+fn electrophysiology_region_metrics_reject_non_finite_windows() {
+    for samples in [
+        vec![f64::NAN, f64::INFINITY, f64::NEG_INFINITY],
+        vec![1.0, f64::NAN, 3.0],
+    ] {
+        let mut app = electrophysiology_region_app(samples, RegionMetric::Area);
+
+        app.create_region_table(0);
+
+        assert_eq!(app.doc.datasets.len(), 1);
+        assert!(app.session.status.contains("non-finite samples"));
+    }
+}
+
+#[test]
+fn changing_default_region_metric_dirties_and_resynchronizes_the_document() {
+    let mut app = electrophysiology_region_app(vec![-1.0, -2.0, -3.0, -4.0], RegionMetric::Height);
+    app.create_region_table(0);
+    let height = first_region_table_value(&app);
+    app.doc.dirty = false;
+    let generation = app.doc.edit_generation;
+
+    app.set_region_default_metric(0, RegionMetric::Area);
+
+    assert!(app.doc.dirty);
+    assert_eq!(app.doc.edit_generation, generation + 1);
+    assert_eq!(
+        app.doc.datasets[0]
+            .region_analysis()
+            .unwrap()
+            .default_metric,
+        RegionMetric::Area
+    );
+    assert_ne!(first_region_table_value(&app), height);
 }
 
 fn fit_table(meta: Option<DiffusionConstants>) -> TableDataset {

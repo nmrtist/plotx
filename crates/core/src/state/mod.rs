@@ -32,6 +32,7 @@ mod app_impl_compute;
 #[cfg(test)]
 mod app_impl_compute_tests;
 mod app_impl_figures;
+mod app_impl_interaction;
 mod app_impl_io;
 mod app_impl_linefit;
 mod app_impl_multiplet;

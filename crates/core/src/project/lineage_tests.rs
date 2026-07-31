@@ -1,7 +1,8 @@
 use super::tests::{synthetic_1d, temp_project};
 use super::*;
 use crate::state::{
-    FloatSeries, TableImportSource, TableMetric, TableProvenance, materialized_float_series_table,
+    FloatSeries, RegionColumnProvenance, RegionId, RegionMetric, TableImportSource,
+    TableProvenance, materialized_float_series_table,
 };
 
 #[test]
@@ -44,26 +45,42 @@ fn project_roundtrip_maps_multi_source_lineage_by_data_id() {
 }
 
 #[test]
-fn provenance_without_explicit_v1_lineage_stays_unlinked() {
+fn region_provenance_without_lineage_stays_unlinked() {
     let mut app = PlotxApp::new();
     app.doc
         .datasets
         .push(Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()))));
     let source_resource = app.doc.datasets[0].resource_id().to_string();
+    let source_field = app.doc.datasets[0].default_field_id().unwrap();
     let mut table = materialized_float_series_table(
         ("x".into(), "".into(), vec![Some(0.0)]),
-        Vec::new(),
-        "plotx.test.provenance-table.v1",
+        vec![FloatSeries {
+            name: "Region 1".into(),
+            unit: "a.u.".into(),
+            values: vec![Some(1.0)],
+            uncertainty: None,
+            fit: None,
+        }],
+        "plotx.test.region-provenance-table",
     )
     .unwrap();
+    let column = table.series_bindings[0].value_column;
     table.provenance = Some(TableProvenance {
         source_resource,
-        regions: vec![(1.0, 2.0)],
-        metric: TableMetric::PeakHeight,
+        source_field,
+        regions: vec![RegionColumnProvenance {
+            region: RegionId::new(1),
+            column,
+            bounds: [1.0, 2.0],
+            metric: RegionMetric::Height,
+            label: "Region 1".into(),
+            unit: "ppm".into(),
+            color: [220, 80, 80],
+        }],
     });
     app.doc.datasets.push(Dataset::Table(Box::new(table)));
 
-    let path = temp_project("legacy_region_lineage");
+    let path = temp_project("region_provenance_lineage");
     let _ = std::fs::remove_file(&path);
     save_project(&app, &path, false).unwrap();
     let loaded = load_project(&path).unwrap();

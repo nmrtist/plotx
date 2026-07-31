@@ -18,6 +18,7 @@ pub const X_SHOW_TICK_LABELS: PropertyId = PropertyId("object.axes.x_show_tick_l
 pub const X_SHOW_LABEL: PropertyId = PropertyId("object.axes.x_show_label");
 pub const Y_SHOW_TICK_LABELS: PropertyId = PropertyId("object.axes.y_show_tick_labels");
 pub const Y_SHOW_LABEL: PropertyId = PropertyId("object.axes.y_show_label");
+pub const SHOW_LEGEND: PropertyId = PropertyId("object.figure.show_legend");
 
 const OBJECT: Applicability = Applicability::component(ComponentKind::None);
 
@@ -96,6 +97,13 @@ pub(crate) const DEFINITIONS: &[PropertyDefinition] = &[
         "Show y-axis title",
         &["y title visibility"],
         Tier::Advanced,
+    ),
+    axis_definition(
+        SHOW_LEGEND,
+        ValueSchema::Bool,
+        "Show legend",
+        &["legend visibility", "hide legend", "show key"],
+        Tier::Essential,
     ),
 ];
 
@@ -196,6 +204,9 @@ impl PropertyProvider for AxisProvider {
             (Y_SHOW_LABEL, EditOp::Set(PropertyValue::Bool(value))) => {
                 overrides.y_show_label = Some(*value)
             }
+            (SHOW_LEGEND, EditOp::Set(PropertyValue::Bool(value))) => {
+                overrides.show_legend = Some(*value)
+            }
             (EQUAL_F1_F2_SCALE, EditOp::Reset) => overrides.lock_aspect = None,
             (X_LABEL, EditOp::Reset) => overrides.x_label = None,
             (Y_LABEL, EditOp::Reset) => overrides.y_label = None,
@@ -203,6 +214,7 @@ impl PropertyProvider for AxisProvider {
             (X_SHOW_LABEL, EditOp::Reset) => overrides.x_show_label = None,
             (Y_SHOW_TICK_LABELS, EditOp::Reset) => overrides.y_show_tick_labels = None,
             (Y_SHOW_LABEL, EditOp::Reset) => overrides.y_show_label = None,
+            (SHOW_LEGEND, EditOp::Reset) => overrides.show_legend = None,
             (_, EditOp::Step(_)) => {
                 return Err(PropertyError::InvalidValue {
                     property: definition.id,
@@ -242,6 +254,7 @@ fn value_of(id: PropertyId, plot: &PlotObject) -> Result<PropertyValue, Property
         X_SHOW_LABEL => Ok(PropertyValue::Bool(plot.figure().x.show_label)),
         Y_SHOW_TICK_LABELS => Ok(PropertyValue::Bool(plot.figure().y.show_tick_labels)),
         Y_SHOW_LABEL => Ok(PropertyValue::Bool(plot.figure().y.show_label)),
+        SHOW_LEGEND => Ok(PropertyValue::Bool(plot.figure().show_legend)),
         _ => Err(PropertyError::UnknownProperty(id.as_str().to_owned())),
     }
 }
@@ -275,6 +288,7 @@ fn default_value(id: PropertyId, plot: &PlotObject) -> Result<PropertyValue, Pro
         X_SHOW_LABEL => Ok(PropertyValue::Bool(plot.derived_axes().x_show_label)),
         Y_SHOW_TICK_LABELS => Ok(PropertyValue::Bool(plot.derived_axes().y_show_tick_labels)),
         Y_SHOW_LABEL => Ok(PropertyValue::Bool(plot.derived_axes().y_show_label)),
+        SHOW_LEGEND => Ok(PropertyValue::Bool(plot.derived_axes().show_legend)),
         _ => Err(PropertyError::UnknownProperty(id.as_str().to_owned())),
     }
 }
@@ -287,6 +301,7 @@ fn has_override(id: PropertyId, plot: &PlotObject) -> Result<bool, PropertyError
         X_SHOW_LABEL => Ok(plot.axis_overrides.x_show_label.is_some()),
         Y_SHOW_TICK_LABELS => Ok(plot.axis_overrides.y_show_tick_labels.is_some()),
         Y_SHOW_LABEL => Ok(plot.axis_overrides.y_show_label.is_some()),
+        SHOW_LEGEND => Ok(plot.axis_overrides.show_legend.is_some()),
         _ => Err(PropertyError::UnknownProperty(id.as_str().to_owned())),
     }
 }

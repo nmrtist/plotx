@@ -1,5 +1,5 @@
 use super::*;
-use crate::state::{AfmDataset, Dataset, ElectrophysiologyDataset, Nmr2DDataset};
+use crate::state::{AfmDataset, Dataset, ElectrophysiologyDataset, Nmr2DDataset, ToolGroup};
 use std::sync::Arc;
 
 /// Every field of every dataset variant must derive the same capabilities from
@@ -537,11 +537,17 @@ fn electrophysiology_keys_include_the_channel_quantity() {
         source: "quantity test".to_owned(),
         import_warnings: Vec::new(),
     };
-    let dataset = Dataset::Electrophysiology(Box::new(ElectrophysiologyDataset::load(data)));
+    let mut recording = ElectrophysiologyDataset::load(data);
+    recording.selected_channel = 1;
+    let dataset = Dataset::Electrophysiology(Box::new(recording));
     let fields = dataset.field_descriptors();
     assert_eq!(fields.len(), 2);
     assert_ne!(fields[0].local_id, fields[1].local_id);
     dataset.validate_field_catalog().unwrap();
+    assert!(dataset.supports_region_analysis());
+    assert!(dataset.tool_groups().contains(&ToolGroup::RegionAnalysis));
+    assert_eq!(dataset.region_axis_unit(), Some("s"));
+    assert_eq!(dataset.region_source_field(), Some(fields[1].id));
 }
 
 fn afm_channel(

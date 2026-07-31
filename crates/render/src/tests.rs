@@ -1,6 +1,6 @@
 use super::*;
 use crate::ticks::estimated_text_width;
-use plotx_figure::{Axis, Figure};
+use plotx_figure::{Axis, Figure, Series};
 
 #[test]
 fn ticks_are_nice_and_bounded() {
@@ -435,6 +435,37 @@ fn legend_merges_series_and_named_polygons_once() {
     assert_eq!(entries[0].0, "trace");
     assert_eq!(entries[1].0, "bars");
     assert!(matches!(entries[1].2, LegendMark::Rect));
+}
+
+#[test]
+fn legend_merges_same_name_points_and_line_into_one_semantic_entry() {
+    let color = Color::rgb(20, 80, 160);
+    let figure = Figure::new("", Axis::new("x", 0.0, 1.0), Axis::new("y", 0.0, 1.0))
+        .with_series(Series::points("Region A", vec![[0.0, 0.0]]).colored(color))
+        .with_series(Series::line("Region A", vec![[0.0, 0.0], [1.0, 1.0]]).colored(color))
+        .with_series(Series::points("Region B", vec![[0.0, 1.0]]).colored(Color::rgb(160, 80, 20)));
+
+    let entries = legend_entries(&figure);
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].0, "Region A");
+    assert!(matches!(entries[0].2, LegendMark::LinePoints));
+}
+
+#[test]
+fn manual_legend_position_maps_to_the_available_plot_area() {
+    let mut figure = Figure::new("", Axis::new("x", 0.0, 1.0), Axis::new("y", 0.0, 1.0))
+        .with_series(Series::line("A", vec![[0.0, 0.0], [1.0, 1.0]]))
+        .with_series(Series::line("B", vec![[0.0, 1.0], [1.0, 0.0]]));
+    figure.show_legend = true;
+    figure.legend_position = Some([0.0, 1.0]);
+    let plot = Rect::new(10.0, 20.0, 300.0, 200.0);
+    let legend = legend_rect(&figure, plot, 1.0).unwrap();
+    assert_eq!(legend.left, plot.left);
+    assert_eq!(legend.bottom(), plot.bottom());
+
+    let position =
+        legend_position_for_origin(&figure, plot, 1.0, [plot.right(), plot.top]).unwrap();
+    assert_eq!(position, [1.0, 0.0]);
 }
 
 #[test]

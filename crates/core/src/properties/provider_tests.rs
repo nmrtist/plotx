@@ -49,6 +49,7 @@ fn every_document_typography_property_resets_to_its_declared_default() {
         (typography::TICK_PT, 12.0),
         (typography::LABEL_PT, 13.0),
         (typography::TITLE_PT, 14.0),
+        (typography::LEGEND_PT, 6.0),
     ] {
         let commit = app
             .plan_property_write(
@@ -71,11 +72,12 @@ fn every_document_typography_property_resets_to_its_declared_default() {
 }
 
 #[test]
-fn all_three_typography_sizes_share_the_declared_point_schema() {
+fn all_typography_sizes_share_the_declared_point_schema() {
     for property in [
         typography::TICK_PT,
         typography::LABEL_PT,
         typography::TITLE_PT,
+        typography::LEGEND_PT,
     ] {
         let definition = definition(property).expect("typography is registered");
         assert_eq!(
@@ -88,6 +90,27 @@ fn all_three_typography_sizes_share_the_declared_point_schema() {
         );
         assert_eq!(definition.tier, Tier::Essential);
     }
+}
+
+#[test]
+fn legend_text_color_uses_the_document_typography_action() {
+    let mut app = PlotxApp::new();
+    let target = app.document_target();
+    let color = plotx_figure::Color::rgb(12, 34, 56);
+    let commit = app
+        .plan_property_write(
+            typography::LEGEND_COLOR,
+            std::slice::from_ref(&target),
+            &PropertyValue::Color(color),
+        )
+        .expect("legend color plans");
+    app.commit_property(commit);
+    assert_eq!(app.doc.style_library.figure_typography.legend_color, color);
+    app.undo();
+    assert_eq!(
+        app.doc.style_library.figure_typography.legend_color,
+        plotx_figure::Color::AXIS
+    );
 }
 
 #[test]

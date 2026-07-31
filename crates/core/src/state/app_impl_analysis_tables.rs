@@ -4,6 +4,60 @@ use super::app_impl_analysis::{
 };
 use super::*;
 
+fn reduce_electrophysiology_region(
+    recording: &ElectrophysiologyDataset,
+    sweep: usize,
+    channel: usize,
+    region: &Region,
+    metric: RegionMetric,
+) -> Result<f64, String> {
+    let values = recording
+        .processed_trace(sweep, channel)
+        .map_err(|error| error.to_string())?;
+    let rate = recording.data.sample_rate_hz;
+    if !rate.is_finite() || rate <= 0.0 {
+        return Err("The recording has an invalid sample rate.".to_owned());
+    }
+    let lo = region.lo_min().max(0.0);
+    let hi = region.hi_max().max(lo);
+    let start = (lo * rate).floor().max(0.0) as usize;
+    let end = ((hi * rate).ceil() as usize).min(values.len());
+    let slice = values
+        .get(start..end)
+        .filter(|slice| !slice.is_empty())
+        .ok_or_else(|| "A region does not overlap the selected sweep.".to_owned())?;
+    if slice.iter().any(|value| !value.is_finite()) {
+        return Err("A region contains non-finite samples.".to_owned());
+    }
+    let value = match metric {
+        RegionMetric::Height => {
+            plotx_analysis::electrophysiology::window_statistics(
+                &values,
+                rate,
+                0.0,
+                plotx_analysis::electrophysiology::TimeWindow {
+                    start_s: lo,
+                    end_s: hi,
+                },
+                recording.peak_mode,
+            )
+            .map_err(|error| error.to_string())?
+            .peak
+        }
+        RegionMetric::Area => slice
+            .windows(2)
+            .map(|pair| 0.5 * (pair[0] + pair[1]) / rate)
+            .sum(),
+        RegionMetric::Mean => slice.iter().sum::<f64>() / slice.len() as f64,
+        RegionMetric::Max => slice.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+        RegionMetric::Min => slice.iter().copied().fold(f64::INFINITY, f64::min),
+    };
+    value
+        .is_finite()
+        .then_some(value)
+        .ok_or_else(|| "A region contains no finite samples.".to_owned())
+}
+
 impl PlotxApp {
     /// Create an empty editable data table from scratch: a small starter grid,
     /// placed as a board sheet frame (right of the page grid), selected, with its
@@ -83,43 +137,129 @@ impl PlotxApp {
         dataset_index
     }
 
-    /// Build a fresh series table from a pseudo-2D dataset's regions: one column
-    /// per region (x = the raw indirect ruler, y = the region reduced by its
-    /// metric). `None` when the dataset is not a series or has no regions.
-    fn build_region_table(&self, dataset: usize) -> Option<TableDataset> {
-        let source_resource = self.doc.datasets.get(dataset)?.resource_id().to_string();
-        let d2 = self.doc.datasets.get(dataset).and_then(Dataset::as_nmr2d)?;
-        let (Processed2D::Stack(stack), Some(axis)) = (&d2.processed, &d2.data.pseudo_axis) else {
-            return None;
-        };
-        if d2.regions.is_empty() {
-            return None;
+    /// Build a fresh series table from any field that exposes ordered 1D
+    /// members. Rows follow the member ruler; every region becomes one column.
+    fn build_region_table(&self, dataset: usize) -> Result<TableDataset, String> {
+        let source = self
+            .doc
+            .datasets
+            .get(dataset)
+            .ok_or_else(|| "The region source is no longer available.".to_owned())?;
+        let source_resource = source.resource_id().to_string();
+        let source_field = source
+            .region_source_field()
+            .ok_or_else(|| "Plot a region-analyzable field before building a table.".to_owned())?;
+        let state = source
+            .region_analysis()
+            .ok_or_else(|| "The selected field does not support region analysis.".to_owned())?;
+        if state.regions.is_empty() {
+            return Err("Add at least one region before creating a table.".to_owned());
         }
-        let x_label = match axis.kind {
-            plotx_io::PseudoKind::Gradient => "Gradient".to_owned(),
-            plotx_io::PseudoKind::Delay => "Delay".to_owned(),
-            plotx_io::PseudoKind::Generic if !axis.name.is_empty() => axis.name.clone(),
-            plotx_io::PseudoKind::Generic => "Ruler".to_owned(),
+
+        let (x_label, x_unit, x, values, value_units) = match source {
+            Dataset::Nmr2D(d2) => {
+                let (Processed2D::Stack(stack), Some(axis)) = (&d2.processed, &d2.data.pseudo_axis)
+                else {
+                    return Err("The selected NMR field is not an ordered series.".to_owned());
+                };
+                let x_label = match axis.kind {
+                    plotx_io::PseudoKind::Gradient => "Gradient".to_owned(),
+                    plotx_io::PseudoKind::Delay => "Delay".to_owned(),
+                    plotx_io::PseudoKind::Generic if !axis.name.is_empty() => axis.name.clone(),
+                    plotx_io::PseudoKind::Generic => "Ruler".to_owned(),
+                };
+                let values = state
+                    .regions
+                    .iter()
+                    .map(|region| {
+                        let op = region.metric.unwrap_or(state.default_metric).into();
+                        extract_region_series(stack, axis, (region.lo, region.hi), op).y
+                    })
+                    .collect::<Vec<_>>();
+                (
+                    x_label,
+                    axis.unit.clone(),
+                    axis.values.clone(),
+                    values,
+                    vec!["".to_owned(); state.regions.len()],
+                )
+            }
+            Dataset::Electrophysiology(recording) => {
+                let selected = recording
+                    .selected_sweeps
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, selected)| (*selected).then_some(index))
+                    .collect::<Vec<_>>();
+                let signal_unit = recording
+                    .data
+                    .channels
+                    .get(recording.selected_channel)
+                    .map(|channel| channel.unit.symbol.clone())
+                    .unwrap_or_default();
+                let mut values = Vec::with_capacity(state.regions.len());
+                let mut units = Vec::with_capacity(state.regions.len());
+                for region in &state.regions {
+                    let metric = region.metric.unwrap_or(state.default_metric);
+                    let mut column = Vec::with_capacity(selected.len());
+                    for &sweep in &selected {
+                        column.push(reduce_electrophysiology_region(
+                            recording,
+                            sweep,
+                            recording.selected_channel,
+                            region,
+                            metric,
+                        )?);
+                    }
+                    units.push(if metric == RegionMetric::Area && !signal_unit.is_empty() {
+                        format!("{signal_unit}·s")
+                    } else {
+                        signal_unit.clone()
+                    });
+                    values.push(column);
+                }
+                (
+                    "Sweep".to_owned(),
+                    "".to_owned(),
+                    selected.iter().map(|index| (*index + 1) as f64).collect(),
+                    values,
+                    units,
+                )
+            }
+            Dataset::Nmr(_) | Dataset::Table(_) | Dataset::Afm(_) => {
+                return Err("The selected field does not contain an ordered series.".to_owned());
+            }
         };
+
         let (mut x_schema, x_values) =
-            materialized_float_column(x_label, &axis.unit, axis.values.iter().copied().map(Some));
+            materialized_float_column(x_label, &x_unit, x.into_iter().map(Some));
         x_schema.role = plotx_data::SemanticRole::Custom("space.nmrtist.plotx.axis.x".into());
         let x_binding = x_schema.id;
         let mut columns = vec![(x_schema, x_values)];
-        let mut series_bindings = Vec::with_capacity(d2.regions.len());
-        let mut windows = Vec::with_capacity(d2.regions.len());
-        for region in &d2.regions {
-            let op = region.metric.unwrap_or(d2.region_metric).into();
-            let series = extract_region_series(stack, axis, (region.lo, region.hi), op);
+        let mut series_bindings = Vec::with_capacity(state.regions.len());
+        let mut region_provenance = Vec::with_capacity(state.regions.len());
+        let axis_unit = source.region_axis_unit().unwrap_or("");
+        for ((region, series), unit) in state.regions.iter().zip(values).zip(value_units) {
+            let metric = region.metric.unwrap_or(state.default_metric);
+            let label = region.column_name(axis_unit);
             let (schema, values) =
-                materialized_float_column(region.column_name(), "", series.y.into_iter().map(Some));
+                materialized_float_column(&label, &unit, series.into_iter().map(Some));
+            let column = schema.id;
             series_bindings.push(TableSeriesBinding {
-                value_column: schema.id,
+                value_column: column,
                 uncertainty_column: None,
                 fit: None,
             });
+            region_provenance.push(RegionColumnProvenance {
+                region: region.id,
+                column,
+                bounds: [region.lo_min(), region.hi_max()],
+                metric,
+                label,
+                unit,
+                color: region.color,
+            });
             columns.push((schema, values));
-            windows.push((region.lo_min(), region.hi_max()));
         }
         let mut table = TableDataset::from_materialized(
             columns,
@@ -128,21 +268,20 @@ impl PlotxApp {
             series_bindings,
             "plotx.analysis.region-table.v1",
         )
-        .ok()?;
-        table.meta.diffusion = d2
-            .data
-            .diffusion
-            .as_ref()
-            .map(DiffusionConstants::from_meta);
+        .map_err(|error| error.to_string())?;
+        if let Dataset::Nmr2D(d2) = source {
+            table.meta.diffusion = d2
+                .data
+                .diffusion
+                .as_ref()
+                .map(DiffusionConstants::from_meta);
+        }
         table.provenance = Some(TableProvenance {
             source_resource,
-            regions: windows,
-            metric: match d2.region_metric {
-                RegionMetric::Area => TableMetric::Integral,
-                _ => TableMetric::PeakHeight,
-            },
+            source_field,
+            regions: region_provenance,
         });
-        Some(table)
+        Ok(table)
     }
 
     /// The `Dataset::Table` linked to `source` (its provenance points back), if any.
@@ -162,8 +301,12 @@ impl PlotxApp {
         let Some(tj) = self.region_table_index(source) else {
             return;
         };
-        let Some(table) = self.build_region_table(source) else {
-            return;
+        let table = match self.build_region_table(source) {
+            Ok(table) => table,
+            Err(error) => {
+                self.session.status = error;
+                return;
+            }
         };
         if let Some(t) = self.doc.datasets[tj].as_table_mut() {
             t.typed_state = table.typed_state;
@@ -182,9 +325,20 @@ impl PlotxApp {
             self.session.status = "This dataset already has a linked series table.".into();
             return;
         }
-        let Some(table) = self.build_region_table(dataset) else {
-            self.session.status = "Add at least one region before creating a table.".into();
+        if self.doc.datasets[dataset]
+            .as_electrophysiology()
+            .is_some_and(|recording| !recording.selected_sweeps.iter().any(|selected| *selected))
+        {
+            self.session.status =
+                "Select at least one sweep before building a region table.".to_owned();
             return;
+        }
+        let table = match self.build_region_table(dataset) {
+            Ok(table) => table,
+            Err(error) => {
+                self.session.status = error;
+                return;
+            }
         };
         let count = table.series_bindings.len();
         let mut tds = table;
@@ -212,9 +366,12 @@ impl PlotxApp {
     /// Place an independent, unlinked snapshot of the current region values as a
     /// new table (no provenance), so later region edits leave it untouched.
     pub fn freeze_region_table(&mut self, dataset: usize) {
-        let Some(mut tds) = self.build_region_table(dataset) else {
-            self.session.status = "Add at least one region before freezing a copy.".into();
-            return;
+        let mut tds = match self.build_region_table(dataset) {
+            Ok(table) => table,
+            Err(error) => {
+                self.session.status = error;
+                return;
+            }
         };
         tds.provenance = None;
         tds.lineage = Some(DatasetLineage::new(

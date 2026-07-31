@@ -13,6 +13,8 @@ pub use ticks::{AxisLayout, AxisTicks, axis_layout, axis_ticks, axis_ticks_for, 
 
 #[cfg(feature = "screen")]
 pub mod screen;
+#[cfg(feature = "screen")]
+mod screen_annotations;
 
 #[cfg(all(windows, feature = "emf"))]
 pub mod emf;
@@ -351,24 +353,46 @@ pub(crate) fn heatmap_cells(proj: &Projector<'_>, grid: &HeatmapGrid) -> Vec<(Re
 pub(crate) enum LegendMark {
     Line,
     Points,
+    LinePoints,
     Rect,
 }
 
-/// Legend entries across series and named polygons (deduplicated by name, in
-/// first-appearance order), shared by every backend so legends stay identical.
+impl LegendMark {
+    fn merged(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Line, Self::Points)
+            | (Self::Points, Self::Line)
+            | (Self::LinePoints, Self::Line)
+            | (Self::LinePoints, Self::Points)
+            | (Self::Line, Self::LinePoints)
+            | (Self::Points, Self::LinePoints) => Self::LinePoints,
+            _ => self,
+        }
+    }
+}
+
+/// Legend entries across series and named polygons. Series with the same name
+/// and color merge into one semantic entry, including a combined point+line
+/// swatch for measured samples with a fitted curve.
 pub(crate) fn legend_entries(fig: &Figure) -> Vec<(&str, Color, LegendMark)> {
-    let mut entries: Vec<(&str, Color, LegendMark)> = fig
-        .series
-        .iter()
-        .filter(|s| !s.points.is_empty() && !s.name.is_empty())
-        .map(|s| {
-            let mark = match s.kind {
-                plotx_figure::SeriesKind::Line => LegendMark::Line,
-                plotx_figure::SeriesKind::Points => LegendMark::Points,
-            };
-            (s.name.as_str(), s.color, mark)
-        })
-        .collect();
+    let mut entries: Vec<(&str, Color, LegendMark)> = Vec::new();
+    for series in &fig.series {
+        if series.points.is_empty() || series.name.is_empty() {
+            continue;
+        }
+        let mark = match series.kind {
+            plotx_figure::SeriesKind::Line => LegendMark::Line,
+            plotx_figure::SeriesKind::Points => LegendMark::Points,
+        };
+        if let Some((_, _, existing)) = entries
+            .iter_mut()
+            .find(|(name, color, _)| *name == series.name && *color == series.color)
+        {
+            *existing = existing.merged(mark);
+        } else {
+            entries.push((series.name.as_str(), series.color, mark));
+        }
+    }
     for poly in &fig.polygons {
         if poly.name.is_empty() || entries.iter().any(|(n, _, _)| *n == poly.name) {
             continue;
@@ -376,6 +400,181 @@ pub(crate) fn legend_entries(fig: &Figure) -> Vec<(&str, Color, LegendMark)> {
         entries.push((poly.name.as_str(), poly.fill, LegendMark::Rect));
     }
     entries
+}
+
+/// Whether the renderer will emit a legend for this figure.
+pub fn renders_legend(fig: &Figure) -> bool {
+    fig.show_legend && legend_entries(fig).len() >= 2
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct LegendLayout {
+    pub row: f32,
+    pub swatch: f32,
+    pub padding: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+/// Keep legend geometry identical across screen, SVG, and EMF output.
+pub(crate) fn legend_layout(entries: &[(&str, Color, LegendMark)], font: f32) -> LegendLayout {
+    let row = (font * 1.4).max(9.0);
+    let swatch = (font * 1.8).max(10.0);
+    let padding = (font * 0.6).max(3.0);
+    let chars = entries
+        .iter()
+        .map(|(name, _, _)| name.chars().count())
+        .max()
+        .unwrap_or(0);
+    LegendLayout {
+        row,
+        swatch,
+        padding,
+        width: swatch + 5.0 + chars as f32 * font * 0.6 + padding * 2.0,
+        height: entries.len() as f32 * row + padding * 2.0,
+    }
+}
+
+/// Legend box in output coordinates. Manual coordinates are fractions of the
+/// space in which the complete box can move, so resizing keeps it inside.
+pub fn legend_rect(fig: &Figure, plot: Rect, scale: f32) -> Option<Rect> {
+    let entries = legend_entries(fig);
+    if !fig.show_legend || entries.len() < 2 {
+        return None;
+    }
+    let layout = legend_layout(&entries, fig.typography.legend_pt);
+    let width = layout.width * scale;
+    let height = layout.height * scale;
+    let available_x = (plot.width - width).max(0.0);
+    let available_y = (plot.height - height).max(0.0);
+    let (left, top) = fig.legend_position.map_or_else(
+        || {
+            (
+                (plot.right() - width - 8.0 * scale).max(plot.left + 2.0 * scale),
+                plot.top + 8.0 * scale,
+            )
+        },
+        |[x, y]| {
+            (
+                plot.left + x.clamp(0.0, 1.0) * available_x,
+                plot.top + y.clamp(0.0, 1.0) * available_y,
+            )
+        },
+    );
+    Some(Rect::new(left, top, width, height))
+}
+
+pub fn legend_position_for_origin(
+    fig: &Figure,
+    plot: Rect,
+    scale: f32,
+    origin: [f32; 2],
+) -> Option<[f32; 2]> {
+    let rect = legend_rect(fig, plot, scale)?;
+    let available_x = plot.width - rect.width;
+    let available_y = plot.height - rect.height;
+    Some([
+        if available_x > 0.0 {
+            ((origin[0] - plot.left) / available_x).clamp(0.0, 1.0)
+        } else {
+            0.0
+        },
+        if available_y > 0.0 {
+            ((origin[1] - plot.top) / available_y).clamp(0.0, 1.0)
+        } else {
+            0.0
+        },
+    ])
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextAnchor {
+    Left,
+    Center,
+    Right,
+}
+
+pub struct RangeLabelLayout {
+    pub text: String,
+    pub x: f32,
+    pub top: f32,
+    pub anchor: TextAnchor,
+    width: f32,
+}
+
+impl RangeLabelLayout {
+    pub fn rect(&self, font: f32) -> Rect {
+        let left = match self.anchor {
+            TextAnchor::Left => self.x,
+            TextAnchor::Center => self.x - self.width * 0.5,
+            TextAnchor::Right => self.x - self.width,
+        };
+        Rect::new(left, self.top, self.width, font)
+    }
+}
+
+/// Fit a visible region label inside the plot, or omit an off-screen region.
+pub fn range_label_layout(
+    plot: Rect,
+    region_left: f32,
+    region_right: f32,
+    font: f32,
+    text: &str,
+    manual_position: Option<[f32; 2]>,
+) -> Option<RangeLabelLayout> {
+    if region_right <= plot.left || region_left >= plot.right() {
+        return None;
+    }
+    let inset = font.max(f32::MIN_POSITIVE) * (3.0 / 7.0);
+    // One em per scalar is conservative for the proportional fonts used by
+    // each backend and prevents wide glyphs from leaking through the clip.
+    let char_width = font.max(f32::MIN_POSITIVE);
+    let max_chars = ((plot.width - inset * 2.0).max(char_width) / char_width).floor() as usize;
+    let count = text.chars().count();
+    let displayed = if count > max_chars {
+        let keep = max_chars.saturating_sub(1);
+        format!("{}…", text.chars().take(keep).collect::<String>())
+    } else {
+        text.to_owned()
+    };
+    let width = displayed.chars().count() as f32 * char_width;
+    if let Some([x, y]) = manual_position {
+        let half_width = (width * 0.5).min(plot.width * 0.5);
+        let center_x = (plot.left + x.clamp(0.0, 1.0) * plot.width)
+            .clamp(plot.left + half_width, plot.right() - half_width);
+        let center_y = plot.top + y.clamp(0.0, 1.0) * plot.height;
+        return Some(RangeLabelLayout {
+            text: displayed,
+            x: center_x,
+            top: (center_y - font * 0.5).clamp(plot.top, (plot.bottom() - font).max(plot.top)),
+            anchor: TextAnchor::Center,
+            width,
+        });
+    }
+    let left = (region_left + inset).clamp(plot.left + inset, plot.right() - inset);
+    if left + width <= plot.right() - inset {
+        Some(RangeLabelLayout {
+            text: displayed,
+            x: left,
+            top: plot.top + 2.0,
+            anchor: TextAnchor::Left,
+            width,
+        })
+    } else {
+        let region_anchor = (region_right - inset).clamp(plot.left + inset, plot.right() - inset);
+        let x = if region_anchor - width >= plot.left + inset {
+            region_anchor
+        } else {
+            plot.right() - inset
+        };
+        Some(RangeLabelLayout {
+            text: displayed,
+            x,
+            top: plot.top + 2.0,
+            anchor: TextAnchor::Right,
+            width,
+        })
+    }
 }
 
 /// Lay a marginal projection `trace` into its `band` as output-space points,

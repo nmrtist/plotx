@@ -131,7 +131,8 @@ What you control directly:
 
 - Select one plot and use **Axes** in the Object inspector to override its X
   and Y titles or numeric ranges, or to hide either axis's tick labels and
-  title. For a true 2D NMR spectrum, **F1/F2 equal scale (1:1)** uses the same
+  title. **Show legend** controls that plot's legend independently. For a true
+  2D NMR spectrum, **F1/F2 equal scale (1:1)** uses the same
   data units per screen unit on both axes. PlotX sets its initial value when
   the spectrum is imported; you can change it afterward without changing the
   import preference. Leave a title blank, or keep a range on **Auto**, to use
@@ -139,16 +140,20 @@ What you control directly:
   range: zooming and panning stay inside it, and a double-click on the plot
   returns to it. Charts without visible axes offer no axis settings, and
   categorical axes have no range controls.
-- **Figure Typography…** on the Figure Ribbon tab sets the axis text sizes
-  (tick labels, axis titles, and the figure title) for every plot at once, in
-  absolute points — a document-level style, so resizing a panel never changes
-  its type size. Tick labels accept 1 to 72 pt; axis titles and the figure title
-  accept 4 to 24 pt.
+- With **Select** active, drag a visible legend to a clearer part of its plot.
+  The position belongs to that plot, survives resizing, and is used by every
+  export format. Double-click the legend to restore automatic top-right
+  placement.
+- **Figure Typography…** on the Figure Ribbon tab sets the text sizes (tick
+  labels, axis titles, the figure title, and legends) for every plot at once,
+  in absolute points — a document-level style, so resizing a panel never
+  changes its type size. These sizes accept 1 to 72 pt. Legends default to
+  7 pt.
 - **Figure typography** in the Object inspector holds the same tick-label size
-  as **Tick-label size**, over the same 1 to 72 pt range, and changing it in
-  either place changes the one document-wide value. Because it belongs to the
-  document rather than to a plot, the section is shown whatever is selected —
-  including when nothing is.
+  as **Tick-label size**, plus **Legend size** and **Legend text color**.
+  Changing a value in either surface changes the one document-wide value.
+  Because it belongs to the document rather than to a plot, the section is
+  shown whatever is selected — including when nothing is.
 - **Line** in the Object inspector sets the **Stroke width** of the selected
   plot's line series, in points. New line series are 0.5 pt; drag or type any
   value from 0.05 to 10 pt, or take one from **Presets** — *Fine* 0.50 pt,

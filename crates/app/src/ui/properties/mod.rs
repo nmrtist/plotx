@@ -121,6 +121,14 @@ pub const PRESENTATIONS: &[PropertyPresentation] = &[
         uses_canvas_length_unit: false,
     },
     PropertyPresentation {
+        id: axis::SHOW_LEGEND,
+        localized_label: LocalizedText("Show legend"),
+        localized_aliases: &[LocalizedText("legend visibility")],
+        home_route: AXIS_HOME,
+        canvas_step: false,
+        uses_canvas_length_unit: false,
+    },
+    PropertyPresentation {
         id: contour::BASE_MAGNITUDE,
         localized_label: LocalizedText("Lowest level"),
         localized_aliases: &[
@@ -241,6 +249,22 @@ pub const PRESENTATIONS: &[PropertyPresentation] = &[
         id: typography::TITLE_PT,
         localized_label: LocalizedText("Figure title"),
         localized_aliases: &[LocalizedText("figure title size")],
+        home_route: TYPOGRAPHY_HOME,
+        canvas_step: false,
+        uses_canvas_length_unit: false,
+    },
+    PropertyPresentation {
+        id: typography::LEGEND_PT,
+        localized_label: LocalizedText("Legend size"),
+        localized_aliases: &[LocalizedText("legend font size")],
+        home_route: TYPOGRAPHY_HOME,
+        canvas_step: false,
+        uses_canvas_length_unit: false,
+    },
+    PropertyPresentation {
+        id: typography::LEGEND_COLOR,
+        localized_label: LocalizedText("Legend text color"),
+        localized_aliases: &[LocalizedText("legend text colour")],
         home_route: TYPOGRAPHY_HOME,
         canvas_step: false,
         uses_canvas_length_unit: false,

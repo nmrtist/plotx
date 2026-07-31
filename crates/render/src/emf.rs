@@ -5,8 +5,9 @@
 use crate::{
     AXIS_LINE_WIDTH, Document, DocumentItem, DocumentObject, DocumentOverlay, LegendMark,
     OUTER_PAD, OverlayAlign, OverlayKind, OverlayShapeKind, Projector, Rect, TICK_LABEL_PAD,
-    TICK_LENGTH, arrow_head, axis_layout, error_bar_segments, heatmap_cells, integral,
-    legend_entries, polygon_outline, projection_points,
+    TICK_LENGTH, TextAnchor, arrow_head, axis_layout, error_bar_segments, heatmap_cells, integral,
+    legend_entries, legend_layout, legend_rect, polygon_outline, projection_points,
+    range_label_layout,
 };
 use plotx_figure::{AxisFrame, AxisTrace, Color, Figure, SeriesKind};
 use std::collections::HashMap;
@@ -343,6 +344,40 @@ fn write_figure(dc: &mut Dc, fig: &Figure, outer: Rect) {
             let fill = blend(poly.fill, poly.opacity.clamp(0.0, 1.0), fig.background);
             dc.polygon(&outline, Some(fill), poly.stroke);
         }
+        for annotation in &fig.range_annotations {
+            let (x0, _) = proj.project([annotation.x0, fig.y.min]);
+            let (x1, _) = proj.project([annotation.x1, fig.y.min]);
+            let rect = Rect::new(x0.min(x1), plot.top, (x1 - x0).abs(), plot.height);
+            let fill = blend(
+                annotation.color,
+                annotation.fill_opacity.clamp(0.0, 1.0),
+                fig.background,
+            );
+            dc.rect(rect, Some(fill), Some((annotation.color, annotation.width)));
+            let Some(label) = range_label_layout(
+                plot,
+                rect.left,
+                rect.right(),
+                fig.typography.tick_pt,
+                &annotation.label,
+                annotation.label_position,
+            ) else {
+                continue;
+            };
+            dc.text(
+                &label.text,
+                (label.x, label.top + fig.typography.tick_pt),
+                TextStyle::new(
+                    fig.typography.tick_pt,
+                    annotation.color,
+                    match label.anchor {
+                        TextAnchor::Left => TA_LEFT,
+                        TextAnchor::Center => TA_CENTER,
+                        TextAnchor::Right => TA_RIGHT,
+                    },
+                ),
+            );
+        }
         for contour in &fig.contours {
             let segs: Vec<[(f32, f32); 2]> = contour
                 .segments
@@ -444,16 +479,18 @@ fn write_legend(dc: &mut Dc, fig: &Figure, plot: Rect) {
     if !fig.show_legend || entries.len() < 2 {
         return;
     }
-    let (row, sw, pad, font) = (15.0f32, 16.0f32, 6.0f32, 11.0f32);
-    let chars = entries
-        .iter()
-        .map(|(n, _, _)| n.chars().count())
-        .max()
-        .unwrap_or(0);
-    let box_w = sw + 5.0 + chars as f32 * font * 0.6 + pad * 2.0;
-    let box_h = entries.len() as f32 * row + pad * 2.0;
-    let bx = (plot.right() - box_w - 8.0).max(plot.left + 2.0);
-    let by = plot.top + 8.0;
+    let font = fig.typography.legend_pt;
+    let layout = legend_layout(&entries, font);
+    let (row, sw, pad) = (layout.row, layout.swatch, layout.padding);
+    let Some(box_geometry) = legend_rect(fig, plot, 1.0) else {
+        return;
+    };
+    let (bx, by, box_w, box_h) = (
+        box_geometry.left,
+        box_geometry.top,
+        box_geometry.width,
+        box_geometry.height,
+    );
     let box_fill = blend(Color::rgb(255, 255, 255), 0.85, fig.background);
     dc.round_rect(
         Rect::new(bx, by, box_w, box_h),
@@ -471,12 +508,20 @@ fn write_legend(dc: &mut Dc, fig: &Figure, plot: Rect) {
                 Some(*color),
                 None,
             ),
+            LegendMark::LinePoints => {
+                dc.line((lx, ly), (lx + sw, ly), *color, 2.0);
+                dc.ellipse(
+                    Rect::new(lx + sw * 0.5 - 3.0, ly - 3.0, 6.0, 6.0),
+                    Some(*color),
+                    None,
+                );
+            }
             LegendMark::Rect => dc.rect(Rect::new(lx, ly - 4.0, sw, 8.0), Some(*color), None),
         }
         dc.text(
             name,
             (lx + sw + 5.0, ly),
-            TextStyle::new(font, Color::AXIS, TA_LEFT).middle(),
+            TextStyle::new(font, fig.typography.legend_color, TA_LEFT).middle(),
         );
     }
 }

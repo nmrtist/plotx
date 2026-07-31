@@ -6,6 +6,12 @@ use plotx_core::state::{
 };
 
 pub(super) fn electrophysiology_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) -> bool {
+    let selected_region = app.doc.datasets.get(di).and_then(|dataset| {
+        app.session
+            .ui
+            .selected_region
+            .and_then(|selection| selection.in_dataset(dataset.resource_id()))
+    });
     let Some(recording) = app
         .doc
         .datasets
@@ -131,17 +137,25 @@ pub(super) fn electrophysiology_group(app: &mut PlotxApp, di: usize, ui: &mut Ui
     );
 
     ui.separator();
-    ui.strong("Time-window statistics");
-    ui.horizontal(|ui| {
-        ui.label("Start (s)");
-        dirty |= ui
-            .add(DragValue::new(&mut recording.analysis_window.start_s).speed(0.01))
-            .changed();
-        ui.label("End (s)");
-        dirty |= ui
-            .add(DragValue::new(&mut recording.analysis_window.end_s).speed(0.01))
-            .changed();
-    });
+    ui.strong("Region statistics");
+    let region = selected_region
+        .and_then(|id| {
+            recording
+                .region_analysis
+                .regions
+                .iter()
+                .find(|region| region.id == id)
+        })
+        .or_else(|| recording.region_analysis.regions.first());
+    if let Some(region) = region {
+        ui.label(format!(
+            "Window: {:.4}–{:.4} s",
+            region.lo_min(),
+            region.hi_max()
+        ));
+    } else {
+        ui.weak("Draw and select a region on the trace to choose the analysis window.");
+    }
     ComboBox::from_label("Peak mode")
         .selected_text(format!("{:?}", recording.peak_mode))
         .show_ui(ui, |ui| {
@@ -171,14 +185,25 @@ pub(super) fn electrophysiology_group(app: &mut PlotxApp, di: usize, ui: &mut Ui
     }
 
     let snapshot = recording.clone();
+    let analysis_window = region.map(|region| plotx_analysis::electrophysiology::TimeWindow {
+        start_s: region.lo_min(),
+        end_s: region.hi_max(),
+    });
     let mut create = None;
     ui.horizontal(|ui| {
-        if ui.button("Create statistics table").clicked() {
+        if ui
+            .add_enabled(
+                analysis_window.is_some(),
+                egui::Button::new("Create statistics table"),
+            )
+            .on_disabled_hover_text("Draw a region before creating a statistics table.")
+            .clicked()
+        {
             create = Some(
                 build_window_statistics_table(
                     &snapshot,
                     snapshot.selected_channel,
-                    snapshot.analysis_window,
+                    analysis_window.expect("the button is enabled only with a region"),
                     snapshot.peak_mode,
                 )
                 .map(|table| {
@@ -190,12 +215,19 @@ pub(super) fn electrophysiology_group(app: &mut PlotxApp, di: usize, ui: &mut Ui
                 }),
             );
         }
-        if ui.button("Create IV table").clicked() {
+        if ui
+            .add_enabled(
+                analysis_window.is_some(),
+                egui::Button::new("Create IV table"),
+            )
+            .on_disabled_hover_text("Draw a region before creating an IV table.")
+            .clicked()
+        {
             create = Some(
                 build_iv_table(
                     &snapshot,
                     snapshot.selected_channel,
-                    snapshot.analysis_window,
+                    analysis_window.expect("the button is enabled only with a region"),
                     snapshot.peak_mode,
                 )
                 .map(|table| (table, "IV analysis", DerivationKind::IvTable)),

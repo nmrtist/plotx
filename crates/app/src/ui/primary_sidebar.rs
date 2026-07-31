@@ -3,7 +3,8 @@ use egui::Ui;
 use egui_phosphor::regular as icon;
 use plotx_core::actions::{Action, ZOrder};
 use plotx_core::state::{
-    CanvasObjectKind, FrameRef, ObjectId, PlotxApp, PrimaryView, RenameState, RenameTarget,
+    CanvasObjectKind, FrameRef, ObjectId, PlotxApp, PrimaryView, RegionSelection, RenameState,
+    RenameTarget,
 };
 
 mod board_views;
@@ -688,7 +689,8 @@ fn select_analysis(app: &mut PlotxApp, ui: &Ui, di: usize, item: &AnalysisItem, 
             }
         }
         AnalysisKind::Region(id) => {
-            app.session.ui.selected_region = Some(id);
+            app.session.ui.selected_region =
+                Some(RegionSelection::new(app.doc.datasets[di].resource_id(), id));
             if open {
                 app.set_tool(plotx_core::state::Tool::Regions);
                 crate::ui::tools::open_region_task(app, di);

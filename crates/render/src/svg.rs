@@ -1,8 +1,9 @@
 use crate::{
     AXIS_LINE_WIDTH, Document, DocumentItem, DocumentObject, DocumentOverlay, LegendMark,
     OUTER_PAD, OverlayAlign, OverlayKind, OverlayShapeKind, Projector, Rect, TICK_LABEL_PAD,
-    TICK_LENGTH, arrow_head, axis_layout, error_bar_segments, heatmap_cells, integral,
-    legend_entries, polygon_outline, projection_points,
+    TICK_LENGTH, TextAnchor, arrow_head, axis_layout, error_bar_segments, heatmap_cells, integral,
+    legend_entries, legend_layout, legend_rect, polygon_outline, projection_points,
+    range_label_layout,
 };
 use plotx_figure::{AxisFrame, AxisTrace, Figure, SeriesKind};
 use std::fmt::Write as _;
@@ -10,7 +11,6 @@ use std::fmt::Write as _;
 mod document;
 pub use document::{export_document, export_document_for_bounds, export_document_page};
 
-/// Render a [`Figure`] to a standalone SVG document string.
 pub fn export(fig: &Figure) -> String {
     let w = fig.width;
     let h = fig.height;
@@ -344,7 +344,6 @@ fn write_figure(
     );
     let _ = write!(s, r#"<g clip-path="url(#{clip_id})">"#);
     if let Some(grid) = &fig.heatmap {
-        // crispEdges keeps abutting cells seam-free in SVG viewers.
         let _ = write!(s, r#"<g shape-rendering="crispEdges">"#);
         for (cell, color) in heatmap_cells(&proj, grid) {
             let _ = write!(
@@ -380,6 +379,46 @@ fn write_figure(
             s,
             r#"<polygon points="{pts}" fill="{col}"{opacity}{stroke}/>"#,
             col = poly.fill.to_hex(),
+        );
+    }
+    for annotation in &fig.range_annotations {
+        let (x0, _) = proj.project([annotation.x0, fig.y.min]);
+        let (x1, _) = proj.project([annotation.x1, fig.y.min]);
+        let left = x0.min(x1);
+        let right = x0.max(x1);
+        let width = (x1 - x0).abs();
+        let _ = write!(
+            s,
+            r#"<rect class="range-annotation" x="{left:.2}" y="{top:.2}" width="{width:.2}" height="{height:.2}" fill="{color}" fill-opacity="{opacity:.3}" stroke="{color}" stroke-width="{stroke:.2}"/>"#,
+            top = plot.top,
+            height = plot.height,
+            color = annotation.color.to_hex(),
+            opacity = annotation.fill_opacity.clamp(0.0, 1.0),
+            stroke = annotation.width,
+        );
+        let Some(label) = range_label_layout(
+            plot,
+            left,
+            right,
+            fig.typography.tick_pt,
+            &annotation.label,
+            annotation.label_position,
+        ) else {
+            continue;
+        };
+        let _ = write!(
+            s,
+            r#"<text class="range-annotation-label" x="{x:.2}" y="{y:.2}" text-anchor="{anchor}" font-size="{font:.2}" fill="{color}">{label}</text>"#,
+            x = label.x,
+            y = label.top + fig.typography.tick_pt,
+            anchor = match label.anchor {
+                TextAnchor::Left => "start",
+                TextAnchor::Center => "middle",
+                TextAnchor::Right => "end",
+            },
+            font = fig.typography.tick_pt,
+            color = annotation.color.to_hex(),
+            label = escape(&label.text),
         );
     }
     for contour in &fig.contours {
@@ -547,16 +586,18 @@ fn write_legend(s: &mut String, fig: &Figure, plot: Rect) {
     if !fig.show_legend || entries.len() < 2 {
         return;
     }
-    let (row, sw, pad, font) = (15.0f32, 16.0f32, 6.0f32, 11.0f32);
-    let chars = entries
-        .iter()
-        .map(|(n, _, _)| n.chars().count())
-        .max()
-        .unwrap_or(0);
-    let box_w = sw + 5.0 + chars as f32 * font * 0.6 + pad * 2.0;
-    let box_h = entries.len() as f32 * row + pad * 2.0;
-    let bx = (plot.right() - box_w - 8.0).max(plot.left + 2.0);
-    let by = plot.top + 8.0;
+    let font = fig.typography.legend_pt;
+    let layout = legend_layout(&entries, font);
+    let (row, sw, pad) = (layout.row, layout.swatch, layout.padding);
+    let Some(box_geometry) = legend_rect(fig, plot, 1.0) else {
+        return;
+    };
+    let (bx, by, box_w, box_h) = (
+        box_geometry.left,
+        box_geometry.top,
+        box_geometry.width,
+        box_geometry.height,
+    );
     let _ = write!(
         s,
         r#"<rect x="{bx:.2}" y="{by:.2}" width="{box_w:.2}" height="{box_h:.2}" rx="3" fill="white" fill-opacity="0.85" stroke="{axis}" stroke-width="0.75"/>"#,
@@ -582,6 +623,15 @@ fn write_legend(s: &mut String, fig: &Figure, plot: Rect) {
                     col = color.to_hex(),
                 );
             }
+            LegendMark::LinePoints => {
+                let _ = write!(
+                    s,
+                    r#"<line x1="{lx:.2}" y1="{ly:.2}" x2="{x2:.2}" y2="{ly:.2}" stroke="{col}" stroke-width="2"/><circle cx="{cx:.2}" cy="{ly:.2}" r="3" fill="{col}"/>"#,
+                    x2 = lx + sw,
+                    cx = lx + sw * 0.5,
+                    col = color.to_hex(),
+                );
+            }
             LegendMark::Rect => {
                 let _ = write!(
                     s,
@@ -595,7 +645,7 @@ fn write_legend(s: &mut String, fig: &Figure, plot: Rect) {
             s,
             r#"<text x="{tx:.2}" y="{ly:.2}" font-size="{font}" fill="{axis}" dominant-baseline="middle">{txt}</text>"#,
             tx = lx + sw + 5.0,
-            axis = plotx_figure::Color::AXIS.to_hex(),
+            axis = fig.typography.legend_color.to_hex(),
             txt = escape(name),
         );
     }
@@ -639,24 +689,6 @@ mod tests {
     use plotx_figure::{Axis, AxisFrame, Color, ErrorBar, Figure, IntegralCurve, Series};
 
     #[test]
-    fn exports_wellformed_ish_svg_with_polyline() {
-        let fig = Figure::new(
-            "Demo",
-            Axis::new("ppm", 0.0, 10.0).reversed(true),
-            Axis::new("intensity", 0.0, 1.0),
-        )
-        .with_series(Series::line(
-            "trace",
-            vec![[0.0, 0.0], [5.0, 1.0], [10.0, 0.0]],
-        ));
-        let out = export(&fig);
-        assert!(out.starts_with("<svg"));
-        assert!(out.trim_end().ends_with("</svg>"));
-        assert!(out.contains("<polyline"));
-        assert!(out.contains("Demo"));
-    }
-
-    #[test]
     fn exports_integral_result_curve_and_label() {
         let mut fig = Figure::new(
             "",
@@ -683,32 +715,6 @@ mod tests {
         assert!(!out.contains("(ref)"));
         assert!(out.contains("rotate(-90"));
         assert!(!out.contains("integral-selection"));
-    }
-
-    #[test]
-    fn escapes_xml_special_chars() {
-        let fig = Figure::new(
-            "A & B <test>",
-            Axis::categorical("x", vec!["A & B".into(), "<ctrl>".into()]),
-            Axis::categorical("y", vec!["north & south".into(), "<root>".into()]),
-        );
-        let out = export(&fig);
-        assert!(out.contains("A &amp; B &lt;test&gt;"));
-        assert!(out.contains("A &amp; B"));
-        assert!(out.contains("&lt;ctrl&gt;"));
-        assert!(out.contains("north &amp; south"));
-        assert!(out.contains("&lt;root&gt;"));
-        assert!(!out.contains(">A & B<"));
-        assert!(!out.contains("><ctrl><"));
-    }
-
-    #[test]
-    fn exports_error_bar_stem_and_caps_inside_the_plot_clip() {
-        let fig = Figure::new("", Axis::new("x", 0.0, 1.0), Axis::new("y", 0.0, 2.0))
-            .with_error_bar(ErrorBar::symmetric([0.5, 1.0], 0.25));
-        let out = export(&fig);
-        assert_eq!(out.matches("class=\"error-bar\"").count(), 1);
-        assert!(out.contains("clip-path=\"url(#plot)\""));
     }
 
     #[test]
@@ -775,3 +781,7 @@ mod tests {
         assert_eq!(svg.matches("stroke=\"#272727\"").count(), 1);
     }
 }
+
+#[cfg(test)]
+#[path = "svg_annotation_tests.rs"]
+mod annotation_tests;

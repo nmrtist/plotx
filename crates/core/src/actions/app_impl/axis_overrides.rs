@@ -105,7 +105,9 @@ impl PlotxApp {
             || cleared(&before.x_show_tick_labels, &after.x_show_tick_labels)
             || cleared(&before.x_show_label, &after.x_show_label)
             || cleared(&before.y_show_tick_labels, &after.y_show_tick_labels)
-            || cleared(&before.y_show_label, &after.y_show_label);
+            || cleared(&before.y_show_label, &after.y_show_label)
+            || cleared(&before.show_legend, &after.show_legend)
+            || cleared(&before.legend_position, &after.legend_position);
 
         let rebuilt = needs_automatic_rebuild.then(|| {
             let size = [

@@ -78,6 +78,36 @@ fn app_with_nmr() -> PlotxApp {
     app
 }
 
+fn app_with_electrophysiology() -> PlotxApp {
+    let mut app = app();
+    let recording = plotx_io::ElectrophysiologyData {
+        abf_version: "2.9.0.0".to_owned(),
+        sample_rate_hz: 10_000.0,
+        channels: vec![plotx_io::RecordedChannel {
+            name: "Current".to_owned(),
+            unit: plotx_io::ElectricalUnit::from_symbol("pA"),
+        }],
+        sweeps: vec![plotx_io::Sweep {
+            start_time_s: 0.0,
+            channels: vec![vec![0.0, -1.0, -2.0, 0.0]],
+            commands: Vec::new(),
+        }],
+        protocol: None,
+        source: "synthetic.abf".to_owned(),
+        import_warnings: Vec::new(),
+    };
+    let action = Action::insert_dataset_with_default_canvas(
+        &app,
+        Dataset::Electrophysiology(Box::new(plotx_core::state::ElectrophysiologyDataset::load(
+            recording,
+        ))),
+        "Canvas — patch clamp".to_owned(),
+        DEFAULT_CANVAS_SIZE_MM,
+    );
+    app.execute_action(action);
+    app
+}
+
 #[test]
 fn time_domain_nmr_hides_frequency_analysis_and_disables_spectral_commands() {
     let mut app = app_with_nmr();
@@ -602,6 +632,22 @@ fn ribbon_separates_peak_and_curve_fit_tasks() {
             priority: 1,
             applicability: Applicability::Homonuclear2dOnly,
         })
+    );
+}
+
+#[test]
+fn electrophysiology_exposes_enabled_region_commands_in_the_ribbon() {
+    let app = app_with_electrophysiology();
+    let regions = describe(&app, CommandId::Regions);
+    assert!(regions.enabled);
+    assert_eq!(regions.ribbon.unwrap().group, "Regions");
+
+    let table = describe(&app, CommandId::SeriesTable);
+    assert!(!table.enabled);
+    assert_eq!(table.ribbon.unwrap().group, "Regions");
+    assert_eq!(
+        table.disabled_reason,
+        Some("Add at least one region before building a series table.")
     );
 }
 

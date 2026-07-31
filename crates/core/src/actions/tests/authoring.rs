@@ -115,6 +115,8 @@ fn set_figure_typography_restamps_plots_and_is_undoable() {
         tick_pt: 9.0,
         label_pt: 10.5,
         title_pt: 11.0,
+        legend_pt: 6.0,
+        legend_color: plotx_figure::Color::rgb(10, 20, 30),
     };
 
     app.execute_action(Action::set_figure_typography(before, after));
@@ -143,6 +145,7 @@ fn axis_overrides_survive_rebuild_and_roundtrip_through_undo() {
         y_label: Some("Response".to_owned()),
         x_range: Some(AxisRange::new(1.0, 8.0)),
         y_range: Some(AxisRange::new(-2.0, 12.0)),
+        legend_position: Some([0.2, 0.8]),
         ..AxisOverrides::default()
     };
 
@@ -155,6 +158,7 @@ fn axis_overrides_survive_rebuild_and_roundtrip_through_undo() {
     assert_eq!(first_plot(&app).axis_overrides, after);
     assert_eq!(first_plot(&app).figure().x.label, "Chemical shift");
     assert_eq!(first_plot(&app).figure().y.label, "Response");
+    assert_eq!(first_plot(&app).figure().legend_position, Some([0.2, 0.8]));
     assert_eq!(first_plot(&app).viewport.full_x, AxisRange::new(1.0, 8.0));
     assert_eq!(first_plot(&app).viewport.full_y, AxisRange::new(-2.0, 12.0));
     assert!(!first_plot(&app).viewport.auto_y);

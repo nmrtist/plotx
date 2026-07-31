@@ -297,7 +297,7 @@ fn migrated_canvas_and_typography_controls_keep_their_visibility_and_section_den
         ),
         (
             panel::TYPOGRAPHY_SECTION,
-            3,
+            4,
             "a document with all typography controls",
         ),
     ] {
@@ -365,11 +365,18 @@ fn equal_scale_is_directly_visible_and_title_visibility_is_advanced() {
             axis::Y_LABEL,
             axis::X_SHOW_TICK_LABELS,
             axis::Y_SHOW_TICK_LABELS,
+            axis::SHOW_LEGEND,
         ]
     );
     assert_eq!(
         presentation(axis::X_SHOW_LABEL)
             .expect("x-title visibility presentation")
+            .tier(),
+        Some(Tier::Advanced)
+    );
+    assert_eq!(
+        presentation(typography::LEGEND_COLOR)
+            .expect("legend color presentation")
             .tier(),
         Some(Tier::Advanced)
     );

@@ -482,8 +482,8 @@ pub fn describe(app: &PlotxApp, id: CommandId) -> CommandDescriptor {
         .and_then(|()| {
             requires(
                 dataset()
-                    .and_then(Dataset::as_nmr2d)
-                    .is_some_and(|series| !series.regions.is_empty()),
+                    .and_then(Dataset::region_analysis)
+                    .is_some_and(|state| !state.regions.is_empty()),
                 "Add at least one region before building a series table.",
             )
         }),

@@ -105,15 +105,16 @@ fn ordered_series_supports_region_analysis() {
 fn region_support_matches_what_the_table_builder_accepts() {
     let mut app = crate::state::PlotxApp::new_with_settings(crate::settings::Settings::default());
     let mut series = Nmr2DDataset::load(synthetic_dosy(1.2e-9));
-    series.regions = vec![Region {
-        id: 0,
+    series.region_analysis.regions = vec![Region {
+        id: RegionId::new(0),
         lo: 0.9,
         hi: 1.1,
         name: "peak".to_owned(),
+        label_position: None,
         color: [200, 80, 80],
         metric: None,
     }];
-    series.next_region_id = 1;
+    series.region_analysis.next_region_id = RegionId::new(1);
     app.doc.datasets.push(Dataset::Nmr2D(Box::new(series)));
     assert!(app.doc.datasets[0].supports_region_analysis());
     app.create_region_table(0);
@@ -128,11 +129,12 @@ fn region_support_matches_what_the_table_builder_accepts() {
     let mut ruler_less = synthetic_dosy(1.2e-9);
     ruler_less.pseudo_axis = None;
     let mut stale = Nmr2DDataset::load(ruler_less);
-    stale.regions = vec![Region {
-        id: 0,
+    stale.region_analysis.regions = vec![Region {
+        id: RegionId::new(0),
         lo: 0.9,
         hi: 1.1,
         name: "peak".to_owned(),
+        label_position: None,
         color: [200, 80, 80],
         metric: None,
     }];

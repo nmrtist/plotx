@@ -9,17 +9,9 @@ pub(crate) fn paint_zoom_drag(
     painter: &egui::Painter,
     chrome: ChromeStyle,
 ) {
-    let drag = match &app.session.ui.interaction {
-        Interaction::Zoom(d) if d.axis == ZoomAxis::Box => *d,
-        _ => return,
+    let Some(r) = active_box_zoom_rect(app, ci, object_id, plot) else {
+        return;
     };
-    if drag.canvas != ci || drag.object != object_id {
-        return;
-    }
-    let r = EguiRect::from_two_pos(pos(drag.start), pos(drag.current)).intersect(plot_rect(plot));
-    if r.width() < 1.0 || r.height() < 1.0 {
-        return;
-    }
     painter.rect_filled(r, 0.0, chrome.selection_fill);
     painter.rect_stroke(
         r,
@@ -27,6 +19,26 @@ pub(crate) fn paint_zoom_drag(
         Stroke::new(1.0_f32, chrome.selection_stroke),
         StrokeKind::Inside,
     );
+}
+
+fn active_box_zoom_rect(
+    app: &PlotxApp,
+    ci: usize,
+    object_id: ObjectId,
+    plot: PlotRect,
+) -> Option<EguiRect> {
+    let drag = match &app.session.ui.interaction {
+        Interaction::Zoom(d) if d.axis == ZoomAxis::Box => *d,
+        _ => return None,
+    };
+    if drag.canvas != ci || drag.object != object_id {
+        return None;
+    }
+    let r = EguiRect::from_two_pos(pos(drag.start), pos(drag.current)).intersect(plot_rect(plot));
+    if r.width() < 1.0 || r.height() < 1.0 {
+        return None;
+    }
+    Some(r)
 }
 
 /// Recomputes the plot rect from the drag's own object so it paints under any
@@ -125,8 +137,8 @@ pub(crate) fn paint_analysis_selection(
     );
 }
 
-/// Bands show whenever the plotted dataset has regions, so they stay visible
-/// outside the Regions tool too.
+/// The figure owns persistent region bands; this overlay only adds editing
+/// handles and the new-band preview while the Regions tool is active.
 pub(crate) fn paint_regions(
     app: &PlotxApp,
     ci: usize,
@@ -136,6 +148,9 @@ pub(crate) fn paint_regions(
     painter: &egui::Painter,
     chrome: ChromeStyle,
 ) {
+    if app.session.tool != Tool::Regions {
+        return;
+    }
     let Some(fig) = app.doc.canvases[ci]
         .object(object_id)
         .and_then(|object| object.plot())
@@ -143,11 +158,23 @@ pub(crate) fn paint_regions(
     else {
         return;
     };
-    let Some(d2) = app.doc.datasets.get(dataset).and_then(Dataset::as_nmr2d) else {
+    let Some(state) = app
+        .doc
+        .datasets
+        .get(dataset)
+        .and_then(Dataset::region_analysis)
+    else {
         return;
     };
-    let selected = app.session.ui.selected_region;
-    for region in &d2.regions {
+    let selected = app
+        .session
+        .ui
+        .selected_region
+        .and_then(|selection| selection.in_dataset(app.doc.datasets[dataset].resource_id()));
+    for region in &state.regions {
+        if selected != Some(region.id) {
+            continue;
+        }
         let x0 = x_to_screen(region.lo, plot, fig.x.min, fig.x.span(), fig.x.reversed);
         let x1 = x_to_screen(region.hi, plot, fig.x.min, fig.x.span(), fig.x.reversed);
         let r = EguiRect::from_min_max(
@@ -160,20 +187,12 @@ pub(crate) fn paint_regions(
         }
         let [cr, cg, cb] = region.color;
         let stroke_col = Color32::from_rgb(cr, cg, cb);
-        painter.rect_filled(r, 0.0, Color32::from_rgba_unmultiplied(cr, cg, cb, 30));
-        let is_sel = selected == Some(region.id);
+        let is_sel = true;
         painter.rect_stroke(
             r,
             0.0,
             Stroke::new(if is_sel { 2.0_f32 } else { 1.0_f32 }, stroke_col),
             StrokeKind::Inside,
-        );
-        painter.text(
-            Pos2::new(r.left() + 3.0, r.top() + 2.0),
-            egui::Align2::LEFT_TOP,
-            region.column_name(),
-            egui::FontId::proportional(11.0),
-            stroke_col,
         );
         if is_sel {
             for ex in [r.left(), r.right()] {
@@ -186,7 +205,7 @@ pub(crate) fn paint_regions(
     }
 
     if let Interaction::Region(drag) = &app.session.ui.interaction
-        && drag.dataset == dataset
+        && drag.dataset == app.doc.datasets[dataset].resource_id()
         && drag.canvas == ci
         && drag.kind == RegionDragKind::NewBand
     {
@@ -719,4 +738,37 @@ pub(crate) fn paint_marquee(
         Stroke::new(1.0_f32, chrome.selection_stroke),
         StrokeKind::Inside,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn browse_zoom_box_interaction_has_a_preview_rect() {
+        let mut app = PlotxApp::new();
+        app.session.tool = Tool::BrowseZoom;
+        app.session.ui.interaction = Interaction::Zoom(ZoomDrag {
+            canvas: 2,
+            object: ObjectId::new(7),
+            start: [10.0, 20.0],
+            current: [40.0, 60.0],
+            axis: ZoomAxis::Box,
+        });
+
+        let rect = active_box_zoom_rect(
+            &app,
+            2,
+            ObjectId::new(7),
+            PlotRect::new(0.0, 0.0, 100.0, 100.0),
+        );
+
+        assert_eq!(
+            rect,
+            Some(EguiRect::from_min_max(
+                Pos2::new(10.0, 20.0),
+                Pos2::new(40.0, 60.0)
+            ))
+        );
+    }
 }

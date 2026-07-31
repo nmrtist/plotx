@@ -74,7 +74,6 @@ impl Default for ElectrophysiologyProcessing {
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ElectrophysiologyDataset {
-    #[serde(default = "new_resource_id")]
     pub resource_id: DatasetId,
     /// Persisted mapping from stable channel keys to dataset-local field ids.
     pub field_catalog: FieldCatalog,
@@ -89,7 +88,7 @@ pub struct ElectrophysiologyDataset {
     pub selected_channel: usize,
     pub stimulus: Option<StimulusDefinition>,
     pub lineage: Option<DatasetLineage>,
-    pub analysis_window: TimeWindow,
+    pub region_analysis: RegionAnalysisState,
     pub peak_mode: PeakMode,
 }
 
@@ -114,12 +113,6 @@ impl ElectrophysiologyDataset {
             cell_id,
             ..RecordingMetadata::default()
         };
-        let end_s = data
-            .sweeps
-            .iter()
-            .filter_map(|s| s.channels.first())
-            .map(|v| v.len() as f64 / data.sample_rate_hz)
-            .fold(0.0, f64::max);
         let stimulus = stimulus.or_else(|| data.protocol.as_deref().and_then(suggested_stimulus));
         let field_keys = crate::state::electrophysiology_channel_keys(&data);
         let mut field_catalog = crate::state::electrophysiology_field_catalog_for_keys(&field_keys);
@@ -136,10 +129,7 @@ impl ElectrophysiologyDataset {
             selected_channel: 0,
             stimulus,
             lineage: None,
-            analysis_window: TimeWindow {
-                start_s: 0.0,
-                end_s,
-            },
+            region_analysis: RegionAnalysisState::default(),
             peak_mode: PeakMode::Negative,
         }
     }
@@ -239,6 +229,8 @@ impl ElectrophysiologyDataset {
                     .colored(colors[index % colors.len()]),
             );
         }
+        figure.show_legend = figure.series.len() >= 2;
+        figure.series_colors_are_semantic = figure.series.len() >= 2;
         figure
     }
 

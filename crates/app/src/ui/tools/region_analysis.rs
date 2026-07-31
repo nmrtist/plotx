@@ -1,7 +1,9 @@
 use egui::{Area, Button, Order, Ui};
 use egui_phosphor::regular as icon;
 use plotx_core::actions::Action;
-use plotx_core::state::{Dataset, PlotxApp, RegionMetric, TaskDockTab, Tool};
+use plotx_core::state::{
+    Dataset, PlotxApp, RegionId, RegionMetric, RegionSelection, TaskDockTab, Tool,
+};
 
 use super::task_card::{self, TaskCardGeometry};
 
@@ -11,8 +13,8 @@ pub(super) fn region_analysis_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) 
         .doc
         .datasets
         .get(di)
-        .and_then(|dataset| dataset.as_nmr2d())
-        .map_or(0, |series| series.regions.len());
+        .and_then(Dataset::region_analysis)
+        .map_or(0, |state| state.regions.len());
     ui.small(format!("{count} regions · tools open over the canvas"));
     if ui.button("Show region tools").clicked() {
         open_task(app, di);
@@ -30,15 +32,19 @@ pub(crate) fn open_task(app: &mut PlotxApp, di: usize) {
     {
         return;
     }
-    app.session.ui.region_task_dataset = Some(di);
+    app.session.ui.region_task_dataset = app.doc.datasets.get(di).map(Dataset::resource_id);
     app.session.ui.open_task_tab(TaskDockTab::Regions);
 }
 
 pub(crate) fn render_task(app: &mut PlotxApp, host: &mut Ui) {
+    finish_detached_label_edit(app);
     if !task_card::is_active(app, TaskDockTab::Regions) {
         return;
     }
-    let Some(di) = app.session.ui.region_task_dataset else {
+    let Some(dataset_id) = app.session.ui.region_task_dataset else {
+        return;
+    };
+    let Some(di) = app.doc.dataset_index(dataset_id) else {
         return;
     };
     if app.active_dataset() != Some(di)
@@ -73,7 +79,9 @@ pub(crate) fn render_task(app: &mut PlotxApp, host: &mut Ui) {
                 if task_card::tab_bar(app, TaskDockTab::Regions, ui) {
                     ui.separator();
                 }
-                let count = app.doc.datasets[di].as_nmr2d().unwrap().regions.len();
+                let count = app.doc.datasets[di]
+                    .region_analysis()
+                    .map_or(0, |state| state.regions.len());
                 ui.horizontal(|ui| {
                     ui.strong("Regions");
                     let state = if app.session.tool == Tool::Regions {
@@ -154,6 +162,7 @@ pub(crate) fn render_task(app: &mut PlotxApp, host: &mut Ui) {
 }
 
 fn region_task_body(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
+    let dataset_id = app.doc.datasets[di].resource_id();
     let drawing = app.session.tool == Tool::Regions;
     if drawing {
         ui.label("Drag across a signal to add a region.");
@@ -164,7 +173,9 @@ fn region_task_body(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
 
     ui.horizontal(|ui| {
         ui.label("Measure");
-        let mut metric = app.doc.datasets[di].as_nmr2d().unwrap().region_metric;
+        let mut metric = app.doc.datasets[di]
+            .region_analysis()
+            .map_or(RegionMetric::Height, |state| state.default_metric);
         let mut changed = false;
         egui::ComboBox::from_id_salt((di, "region_metric"))
             .selected_text(metric.label())
@@ -174,17 +185,31 @@ fn region_task_body(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
                 }
             });
         if changed {
-            if let Some(d2) = app.doc.datasets[di].as_nmr2d_mut() {
-                d2.region_metric = metric;
-            }
-            app.sync_region_table(di);
+            app.set_region_default_metric(di, metric);
         }
     });
+    let mut show_annotations = app.doc.datasets[di]
+        .region_analysis()
+        .is_some_and(|state| state.show_annotations);
+    if ui
+        .checkbox(&mut show_annotations, "Show regions on figure and export")
+        .changed()
+    {
+        if let Some(state) = app.doc.datasets[di].region_analysis_mut() {
+            state.show_annotations = show_annotations;
+        }
+        app.rebuild_canvases_for(di);
+        app.mark_document_dirty();
+    }
 
-    let selected = app.session.ui.selected_region;
-    let mut delete_id: Option<u64> = None;
-    let mut metric_change: Option<(u64, Option<RegionMetric>)> = None;
-    let mut select_id: Option<u64> = None;
+    let selected = app
+        .session
+        .ui
+        .selected_region
+        .and_then(|selection| selection.in_dataset(dataset_id));
+    let mut delete_id: Option<RegionId> = None;
+    let mut metric_change: Option<(RegionId, Option<RegionMetric>)> = None;
+    let mut select_id: Option<RegionId> = None;
     let mut name_gained = false;
     let mut name_lost = false;
     let table_exists = app.region_table_index(di).is_some();
@@ -201,92 +226,96 @@ fn region_task_body(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
             46.0 + mirror.len() as f32 * 16.0
         };
     let list_height = (ui.available_height() - footer_height).max(72.0);
+    let axis_unit = app.doc.datasets[di].region_axis_unit().unwrap_or("");
 
     egui::ScrollArea::vertical()
         .max_height(list_height)
         .min_scrolled_height(list_height)
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            let d2 = app.doc.datasets[di].as_nmr2d_mut().unwrap();
-            if d2.regions.is_empty() {
+            let Some(state) = app.doc.datasets[di].region_analysis_mut() else {
+                return;
+            };
+            if state.regions.is_empty() {
                 ui.weak("No regions yet — turn on Draw regions and drag across a signal.");
             }
-            for region in d2.regions.iter_mut() {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 4.0;
-                    let [cr, cg, cb] = region.color;
-                    let (rect, _) =
-                        ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
-                    ui.painter()
-                        .rect_filled(rect, 2.0, egui::Color32::from_rgb(cr, cg, cb));
-
-                    let is_sel = selected == Some(region.id);
-                    if ui
-                        .add_sized(
-                            [104.0, ui.spacing().interact_size.y],
-                            Button::selectable(
-                                is_sel,
-                                format!("{:.2}–{:.2}", region.lo_min(), region.hi_max()),
-                            ),
-                        )
-                        .clicked()
-                    {
-                        select_id = Some(region.id);
-                    }
-
-                    let resp = ui.add(
-                        egui::TextEdit::singleline(&mut region.name)
-                            .hint_text("name")
-                            .desired_width(60.0),
-                    );
-                    if resp.gained_focus() {
-                        name_gained = true;
-                    }
-                    if resp.lost_focus() {
-                        name_lost = true;
-                    }
-
-                    let mut m = region.metric;
-                    egui::ComboBox::from_id_salt((region.id, "rm"))
-                        .selected_text(m.map(RegionMetric::label).unwrap_or("default"))
-                        .width(68.0)
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut m, None, "default");
-                            for &opt in RegionMetric::all() {
-                                ui.selectable_value(&mut m, Some(opt), opt.label());
+            for region in state.regions.iter_mut() {
+                ui.group(|ui| {
+                    ui.set_min_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        let [cr, cg, cb] = region.color;
+                        let (rect, _) =
+                            ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
+                        ui.painter()
+                            .rect_filled(rect, 2.0, egui::Color32::from_rgb(cr, cg, cb));
+                        let interval = if axis_unit.is_empty() {
+                            format!("{:.3}–{:.3}", region.lo_min(), region.hi_max())
+                        } else {
+                            format!("{:.3}–{:.3} {axis_unit}", region.lo_min(), region.hi_max())
+                        };
+                        if ui
+                            .add(Button::selectable(selected == Some(region.id), interval))
+                            .clicked()
+                        {
+                            select_id = Some(region.id);
+                        }
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui
+                                .add_sized(
+                                    [18.0, ui.spacing().interact_size.y],
+                                    Button::new(icon::X).small(),
+                                )
+                                .on_hover_text("Delete region")
+                                .clicked()
+                            {
+                                delete_id = Some(region.id);
                             }
                         });
-                    if m != region.metric {
-                        metric_change = Some((region.id, m));
-                    }
-
-                    if ui
-                        .add_sized(
-                            [18.0, ui.spacing().interact_size.y],
-                            Button::new(icon::X).small(),
-                        )
-                        .clicked()
-                    {
-                        delete_id = Some(region.id);
-                    }
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Label");
+                        let response = ui.add(
+                            egui::TextEdit::singleline(&mut region.name)
+                                .hint_text("Use axis midpoint")
+                                .desired_width(ui.available_width()),
+                        );
+                        if response.gained_focus() {
+                            name_gained = true;
+                        }
+                        if response.lost_focus() {
+                            name_lost = true;
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Measure");
+                        let mut metric = region.metric;
+                        egui::ComboBox::from_id_salt((region.id, "rm"))
+                            .selected_text(metric.map(RegionMetric::label).unwrap_or("Default"))
+                            .width(92.0)
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut metric, None, "Default");
+                                for &option in RegionMetric::all() {
+                                    ui.selectable_value(&mut metric, Some(option), option.label());
+                                }
+                            });
+                        if metric != region.metric {
+                            metric_change = Some((region.id, metric));
+                        }
+                    });
                 });
             }
         });
 
     if let Some(id) = select_id {
-        app.session.ui.selected_region = Some(id);
+        app.session.ui.selected_region = Some(RegionSelection::new(dataset_id, id));
+    }
+    if name_lost {
+        finish_label_edit(app, dataset_id);
     }
     if name_gained && app.session.ui.region_edit_before.is_none() {
-        app.session.ui.region_edit_before =
-            Some(app.doc.datasets[di].as_nmr2d().unwrap().regions.clone());
-    }
-    if name_lost && let Some(before) = app.session.ui.region_edit_before.take() {
-        let after = app.doc.datasets[di].as_nmr2d().unwrap().regions.clone();
-        app.execute_action(Action::set_regions(
-            app.doc.datasets[di].resource_id(),
-            before,
-            after,
-        ));
+        app.session.ui.region_edit_before = app.doc.datasets[di]
+            .region_analysis()
+            .map(|state| (dataset_id, state.regions.clone()));
     }
     if let Some((id, m)) = metric_change {
         app.edit_regions(di, |regions, _| {
@@ -297,13 +326,20 @@ fn region_task_body(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
     }
     if let Some(id) = delete_id {
         app.edit_regions(di, |regions, _| regions.retain(|r| r.id != id));
-        if app.session.ui.selected_region == Some(id) {
+        if app
+            .session
+            .ui
+            .selected_region
+            .is_some_and(|selection| selection.dataset == dataset_id && selection.region == id)
+        {
             app.session.ui.selected_region = None;
         }
     }
 
     ui.separator();
-    let count = app.doc.datasets[di].as_nmr2d().unwrap().regions.len();
+    let count = app.doc.datasets[di]
+        .region_analysis()
+        .map_or(0, |state| state.regions.len());
     let table = app.region_table_index(di);
     if table.is_some() {
         ui.small(format!("{} Live series table · Synced", icon::CHECK));
@@ -345,6 +381,38 @@ fn region_task_body(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
 
     fit_mirror(app, di, &mirror, ui);
     ui.add_space(12.0);
+}
+
+fn finish_detached_label_edit(app: &mut PlotxApp) {
+    let Some((dataset, _)) = app.session.ui.region_edit_before.as_ref() else {
+        return;
+    };
+    let remains_attached = task_card::is_active(app, TaskDockTab::Regions)
+        && app.session.ui.region_task_dataset == Some(*dataset)
+        && app
+            .doc
+            .dataset_index(*dataset)
+            .is_some_and(|index| app.active_dataset() == Some(index));
+    if !remains_attached {
+        finish_label_edit(app, *dataset);
+    }
+}
+
+fn finish_label_edit(app: &mut PlotxApp, dataset: plotx_core::state::DatasetId) {
+    let Some((snapshot_dataset, before)) = app.session.ui.region_edit_before.take() else {
+        return;
+    };
+    if snapshot_dataset != dataset {
+        app.session.ui.region_edit_before = Some((snapshot_dataset, before));
+        return;
+    }
+    let Some(index) = app.doc.dataset_index(dataset) else {
+        return;
+    };
+    let after = app.doc.datasets[index]
+        .region_analysis()
+        .map_or_else(Vec::new, |state| state.regions.clone());
+    app.execute_action(Action::set_regions(dataset, before, after));
 }
 
 pub(crate) fn open_region_table(app: &mut PlotxApp, di: usize) {

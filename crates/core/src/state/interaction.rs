@@ -35,6 +35,7 @@ pub enum Interaction {
     Selection(SelectionDrag),
     Pan(PanDrag),
     Phase(PhaseDrag),
+    Furniture(FurnitureDrag),
     Region(RegionDrag),
     Integral(IntegralDrag),
     Integral2D(Integral2DDrag),
@@ -69,6 +70,7 @@ impl Interaction {
             | Interaction::Selection(_)
             | Interaction::Pan(_)
             | Interaction::Phase(_)
+            | Interaction::Furniture(_)
             | Interaction::Region(_)
             | Interaction::Integral(_)
             | Interaction::Integral2D(_)
@@ -88,6 +90,7 @@ impl Interaction {
             Interaction::Zoom(d) => Some(d.canvas),
             Interaction::Selection(d) => Some(d.canvas),
             Interaction::Pan(d) => Some(d.canvas),
+            Interaction::Furniture(d) => Some(d.canvas),
             Interaction::Region(d) => Some(d.canvas),
             Interaction::Integral(d) => Some(d.canvas),
             Interaction::Integral2D(d) => Some(d.canvas),
@@ -106,6 +109,10 @@ impl Interaction {
             || matches!(self, Interaction::Zoom(z) if z.axis != ZoomAxis::Box)
         {
             return active_canvas.is_none_or(|c| self.canvas() == Some(c));
+        }
+        if matches!(self, Interaction::Furniture(_)) {
+            return matches!(tool, Tool::Select | Tool::Regions)
+                && active_canvas.is_none_or(|c| self.canvas() == Some(c));
         }
         let family_ok = match self.family() {
             GestureFamily::Idle => true,

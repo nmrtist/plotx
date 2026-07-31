@@ -210,10 +210,8 @@ pub struct Nmr2DDataset {
     pub dosy_figure: Option<Arc<Figure>>,
     /// Cached contour geometry for `ilt_map`.
     pub ilt_figure: Option<Arc<Figure>>,
-    /// Persistent series-analysis windows, their default reducer, and an id source.
-    pub regions: Vec<Region>,
-    pub region_metric: RegionMetric,
-    pub next_region_id: u64,
+    /// Persistent analysis windows for the pseudo-series field.
+    pub region_analysis: RegionAnalysisState,
     /// Rectangular volumes on true-2D contour spectra. Independent of pseudo-2D
     /// Regions windows, so both collections survive layout/project round-trips.
     pub integrals: Vec<Integral2D>,
@@ -281,9 +279,7 @@ impl Nmr2DDataset {
             ilt_provenance: None,
             dosy_figure: None,
             ilt_figure: None,
-            regions: Vec::new(),
-            region_metric: RegionMetric::Height,
-            next_region_id: 0,
+            region_analysis: RegionAnalysisState::default(),
             integrals: Vec::new(),
             peaks: Peak2DSet::default(),
             next_integral_id: 0,

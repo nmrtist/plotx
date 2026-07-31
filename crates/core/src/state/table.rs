@@ -1,5 +1,4 @@
-use super::{TableImportSource, TypedTableState};
-use plotx_analysis::series::IntensityMode;
+use super::{FieldId, RegionId, RegionMetric, TableImportSource, TypedTableState};
 use plotx_data::{ColumnId, RevisionId, RowId};
 use plotx_figure::{Axis, Color, ErrorBar, Figure, Series};
 use plotx_io::DiffusionMeta;
@@ -101,34 +100,19 @@ pub struct ModelInstanceBinding {
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct TableProvenance {
     pub source_resource: String,
-    pub regions: Vec<(f64, f64)>,
-    pub metric: TableMetric,
+    pub source_field: FieldId,
+    pub regions: Vec<RegionColumnProvenance>,
 }
 
-/// Serialisable mirror of the extraction `IntensityMode`, so the table owns its
-/// provenance without depending on the processing layer's non-serde enum.
-#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum TableMetric {
-    PeakHeight,
-    Integral,
-}
-
-impl From<IntensityMode> for TableMetric {
-    fn from(mode: IntensityMode) -> Self {
-        match mode {
-            IntensityMode::PeakHeight => TableMetric::PeakHeight,
-            IntensityMode::Integral => TableMetric::Integral,
-        }
-    }
-}
-
-impl From<TableMetric> for IntensityMode {
-    fn from(metric: TableMetric) -> Self {
-        match metric {
-            TableMetric::PeakHeight => IntensityMode::PeakHeight,
-            TableMetric::Integral => IntensityMode::Integral,
-        }
-    }
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+pub struct RegionColumnProvenance {
+    pub region: RegionId,
+    pub column: ColumnId,
+    pub bounds: [f64; 2],
+    pub metric: RegionMetric,
+    pub label: String,
+    pub unit: String,
+    pub color: [u8; 3],
 }
 
 /// Model constants a fit preset may need, copied from the source acquisition.
@@ -395,7 +379,17 @@ impl TableDataset {
         let title = self.name.clone().unwrap_or_else(|| "Data table".to_owned());
         let mut fig = Figure::new(title, x, y);
         for (i, series) in plot.series.iter().enumerate() {
-            let color = series_color(i);
+            let color = self
+                .provenance
+                .as_ref()
+                .and_then(|provenance| {
+                    provenance
+                        .regions
+                        .iter()
+                        .find(|region| region.column == series.binding.value_column)
+                        .map(|region| Color::rgb(region.color[0], region.color[1], region.color[2]))
+                })
+                .unwrap_or_else(|| series_color(i));
             let mut points = Vec::with_capacity(plot.x.len().min(series.y.len()));
             for (row, (&px, &py)) in plot.x.iter().zip(&series.y).enumerate() {
                 points.push([px, py]);
@@ -416,9 +410,12 @@ impl TableDataset {
                 .push(Series::points(series.name.clone(), points).colored(color));
         }
         for (i, curve) in fit_curves {
-            let name = format!("{} fit", plot.series[i].name);
-            fig = fig.with_series(Series::line(name, curve).colored(series_color(i)));
+            let name = plot.series[i].name.clone();
+            let color = fig.series[i].color;
+            fig = fig.with_series(Series::line(name, curve).colored(color));
         }
+        fig.show_legend = plot.series.len() >= 2;
+        fig.series_colors_are_semantic = plot.series.len() >= 2;
         fig
     }
 }

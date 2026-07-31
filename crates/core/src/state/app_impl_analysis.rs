@@ -170,34 +170,65 @@ impl PlotxApp {
     /// Worker behind `SetRegions`: install the regions and re-derive the linked
     /// table so apply and undo both land in a consistent state.
     pub fn set_regions(&mut self, dataset: usize, regions: &[Region]) {
-        if let Some(d2) = self
+        if let Some(state) = self
             .doc
             .datasets
             .get_mut(dataset)
-            .and_then(Dataset::as_nmr2d_mut)
+            .and_then(Dataset::region_analysis_mut)
         {
-            d2.regions = regions.to_vec();
+            state.regions = regions.to_vec();
         }
         self.sync_region_table(dataset);
+        self.rebuild_canvases_for(dataset);
+    }
+
+    /// Change the persisted fallback metric and keep any linked table in sync.
+    pub fn set_region_default_metric(&mut self, dataset: usize, metric: RegionMetric) {
+        let changed = self
+            .doc
+            .datasets
+            .get_mut(dataset)
+            .and_then(Dataset::region_analysis_mut)
+            .is_some_and(|state| {
+                if state.default_metric == metric {
+                    false
+                } else {
+                    state.default_metric = metric;
+                    true
+                }
+            });
+        if changed {
+            self.sync_region_table(dataset);
+            self.mark_document_dirty();
+        }
     }
 
     /// Snapshot the regions, let `edit` mutate a working copy (and hand out fresh
     /// ids), then commit the change as one undoable step.
-    pub fn edit_regions(&mut self, dataset: usize, edit: impl FnOnce(&mut Vec<Region>, &mut u64)) {
-        let Some(d2) = self.doc.datasets.get(dataset).and_then(Dataset::as_nmr2d) else {
+    pub fn edit_regions(
+        &mut self,
+        dataset: usize,
+        edit: impl FnOnce(&mut Vec<Region>, &mut RegionId),
+    ) {
+        let Some(state) = self
+            .doc
+            .datasets
+            .get(dataset)
+            .and_then(Dataset::region_analysis)
+        else {
             return;
         };
-        let before = d2.regions.clone();
+        let before = state.regions.clone();
         let mut after = before.clone();
-        let mut next_id = d2.next_region_id;
+        let mut next_id = state.next_region_id;
         edit(&mut after, &mut next_id);
-        if let Some(d2) = self
+        if let Some(state) = self
             .doc
             .datasets
             .get_mut(dataset)
-            .and_then(Dataset::as_nmr2d_mut)
+            .and_then(Dataset::region_analysis_mut)
         {
-            d2.next_region_id = next_id;
+            state.next_region_id = next_id;
         }
         self.execute_action(Action::set_regions(
             self.doc.datasets[dataset].resource_id(),

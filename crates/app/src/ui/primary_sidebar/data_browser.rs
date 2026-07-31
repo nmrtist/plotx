@@ -26,7 +26,7 @@ pub(super) struct AnalysisItem {
 pub(super) enum AnalysisKind {
     Peak(u64),
     Integral(u64),
-    Region(u64),
+    Region(plotx_core::state::RegionId),
     LineFit(u64),
     Multiplet(u64),
     CurveFitResponse(ColumnId),
@@ -211,9 +211,12 @@ fn analysis_items(dataset: &Dataset) -> Vec<AnalysisItem> {
                 integral.name.clone()
             },
         }));
-        result.extend(nmr2d.regions.iter().map(|region| AnalysisItem {
+    }
+    if let Some(state) = dataset.region_analysis() {
+        let unit = dataset.region_axis_unit().unwrap_or("");
+        result.extend(state.regions.iter().map(|region| AnalysisItem {
             kind: AnalysisKind::Region(region.id),
-            label: region.column_name(),
+            label: region.column_name(unit),
         }));
     }
     if !time_nmr {

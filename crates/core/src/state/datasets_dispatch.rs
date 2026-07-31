@@ -216,16 +216,64 @@ impl Dataset {
     }
 
     pub fn supports_region_analysis(&self) -> bool {
-        matches!(
-            self,
-            Dataset::Nmr2D(dataset)
-                if dataset.is_pseudo()
+        self.field_descriptors().iter().any(|field| {
+            field
+                .capabilities
+                .contains(crate::automation::CAP_FIELD_REGION_SERIES)
+        }) && match self {
+            Dataset::Nmr2D(dataset) => {
+                dataset.is_pseudo()
                     && matches!(
                         &dataset.processed,
                         Processed2D::Stack(stack)
                             if stack.direct_domain == plotx_io::Domain::Frequency
                     )
-        )
+            }
+            Dataset::Electrophysiology(dataset) => {
+                !dataset.data.channels.is_empty() && !dataset.data.sweeps.is_empty()
+            }
+            Dataset::Nmr(_) | Dataset::Table(_) | Dataset::Afm(_) => false,
+        }
+    }
+
+    pub fn region_analysis(&self) -> Option<&RegionAnalysisState> {
+        match self {
+            Dataset::Nmr2D(dataset) if self.supports_region_analysis() => {
+                Some(&dataset.region_analysis)
+            }
+            Dataset::Electrophysiology(dataset) if self.supports_region_analysis() => {
+                Some(&dataset.region_analysis)
+            }
+            _ => None,
+        }
+    }
+
+    pub fn region_analysis_mut(&mut self) -> Option<&mut RegionAnalysisState> {
+        let supported = self.supports_region_analysis();
+        match self {
+            Dataset::Nmr2D(dataset) if supported => Some(&mut dataset.region_analysis),
+            Dataset::Electrophysiology(dataset) if supported => Some(&mut dataset.region_analysis),
+            _ => None,
+        }
+    }
+
+    pub fn region_axis_unit(&self) -> Option<&'static str> {
+        match self {
+            Dataset::Nmr2D(_) if self.supports_region_analysis() => Some("ppm"),
+            Dataset::Electrophysiology(_) if self.supports_region_analysis() => Some("s"),
+            _ => None,
+        }
+    }
+
+    pub fn region_source_field(&self) -> Option<FieldId> {
+        match self {
+            Dataset::Nmr2D(_) if self.supports_region_analysis() => self.default_field_id(),
+            Dataset::Electrophysiology(recording) if self.supports_region_analysis() => self
+                .field_descriptors()
+                .get(recording.selected_channel)
+                .map(|field| field.id),
+            _ => None,
+        }
     }
 
     pub fn tool_groups(&self) -> &'static [ToolGroup] {
@@ -249,6 +297,9 @@ impl Dataset {
                 ToolGroup::LineFit,
                 ToolGroup::Statistics,
             ],
+            Dataset::Electrophysiology(_) if self.supports_region_analysis() => {
+                &[ToolGroup::Electrophysiology, ToolGroup::RegionAnalysis]
+            }
             Dataset::Electrophysiology(_) => &[ToolGroup::Electrophysiology],
             Dataset::Afm(_) => &[],
         }

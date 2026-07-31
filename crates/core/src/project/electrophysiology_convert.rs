@@ -3,11 +3,8 @@ use crate::state::ElectrophysiologyDataset;
 
 /// Binary payload tag: bulk samples live in `payload.blob` as length-prefixed
 /// little-endian `f64`, while the light structure and metadata are JSON in the
-/// object's extensions. Superseded the earlier all-JSON `-json-v1` layout, whose
-/// numeric arrays made large recordings slow to parse and many times larger on
-/// disk. Loading of the legacy tag is retained below.
+/// object's extensions.
 const STORAGE_ELECTROPHYSIOLOGY_BIN: &str = "electrophysiology-bin-v1";
-const STORAGE_ELECTROPHYSIOLOGY_JSON: &str = "electrophysiology-json-v1";
 pub(super) const VALUES_PER_CHUNK: usize = 4096;
 
 pub(super) fn electrophysiology_to_objects(
@@ -130,16 +127,15 @@ pub(super) fn electrophysiology_from_object(
             }
             recording
         }
-        // Legacy layout: the blob is the whole dataset serialized as JSON.
-        STORAGE_ELECTROPHYSIOLOGY_JSON => serde_json::from_slice(&blob).map_err(|error| {
-            ProjectError::Invalid(format!("invalid electrophysiology payload: {error}"))
-        })?,
         other => {
             return Err(ProjectError::Unsupported(format!(
                 "electrophysiology payload storage {other}"
             )));
         }
     };
+    recording.region_analysis.validate().map_err(|error| {
+        ProjectError::Invalid(format!("invalid region analysis state: {error}"))
+    })?;
     let dataset = Dataset::Electrophysiology(Box::new(recording));
     dataset
         .validate_field_catalog()

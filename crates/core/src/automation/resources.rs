@@ -49,6 +49,7 @@ pub const CAP_FIELD_NMR_STACK: &str = "field.nmr.stack";
 pub const CAP_FIELD_SWEEP_COLLECTION: &str = "field.sweep_collection";
 pub const CAP_FIELD_FORCE_CURVE: &str = "field.force_curve";
 pub const CAP_FIELD_AFM_MAP: &str = "field.afm.map";
+pub const CAP_FIELD_REGION_SERIES: &str = "field.region_series";
 
 /// Capability-oriented resource access. New resource types can participate by
 /// implementing this trait; query and tool orchestration do not dispatch on a

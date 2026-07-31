@@ -2,8 +2,8 @@ use crate::layout::PageLayout;
 use crate::state::{
     AnalysisSelection, AxisRange, CanvasDocument, CanvasObject, CanvasObjectKind, CanvasViewport,
     DataBinding, Dataset, DatasetLineage, DerivationKind, Nmr2DDataset, NmrDataset, ObjectFrame,
-    ObjectId, PanelMeta, PlotObject, PlotxApp, PrimaryView, Region, RegionMetric, SeriesBinding,
-    ShapeKind, ShapeObject, StackMode, StackSpec, TextAlign, TextBox, Tool,
+    ObjectId, PanelMeta, PlotObject, PlotxApp, PrimaryView, SeriesBinding, ShapeKind, ShapeObject,
+    StackMode, StackSpec, TextAlign, TextBox, Tool,
 };
 use num_complex::Complex64;
 use plotx_figure::Color;

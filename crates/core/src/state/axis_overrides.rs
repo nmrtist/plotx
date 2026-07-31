@@ -164,6 +164,8 @@ pub struct AxisOverrides {
     pub x_show_label: Option<bool>,
     pub y_show_tick_labels: Option<bool>,
     pub y_show_label: Option<bool>,
+    pub show_legend: Option<bool>,
+    pub legend_position: Option<[f32; 2]>,
 }
 
 impl AxisOverrides {
@@ -201,6 +203,10 @@ impl AxisOverrides {
         if let Some(show) = self.y_show_label {
             figure.y.show_label = show;
         }
+        if let Some(show) = self.show_legend {
+            figure.show_legend = show;
+        }
+        figure.legend_position = self.legend_position;
     }
 
     pub fn normalized(mut self) -> Self {
@@ -208,6 +214,9 @@ impl AxisOverrides {
         self.y_label = normalize_label(self.y_label);
         self.x_range = self.x_range.filter(|range| range.is_valid());
         self.y_range = self.y_range.filter(|range| range.is_valid());
+        self.legend_position = self.legend_position.and_then(|[x, y]| {
+            (x.is_finite() && y.is_finite()).then(|| [x.clamp(0.0, 1.0), y.clamp(0.0, 1.0)])
+        });
         self
     }
 }
@@ -272,5 +281,22 @@ mod tests {
         .apply_to(&mut figure);
 
         assert_eq!(AxisRange::from_axis(&figure.x), AxisRange::new(-0.5, 2.5));
+    }
+
+    #[test]
+    fn legend_position_normalizes_to_the_plot_area() {
+        let clamped = AxisOverrides {
+            legend_position: Some([-0.5, 1.5]),
+            ..AxisOverrides::default()
+        }
+        .normalized();
+        assert_eq!(clamped.legend_position, Some([0.0, 1.0]));
+
+        let invalid = AxisOverrides {
+            legend_position: Some([f32::NAN, 0.5]),
+            ..AxisOverrides::default()
+        }
+        .normalized();
+        assert_eq!(invalid.legend_position, None);
     }
 }

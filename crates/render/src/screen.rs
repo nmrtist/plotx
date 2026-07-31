@@ -4,7 +4,8 @@ use crate::{
     AXIS_LINE_WIDTH, Document, DocumentItem, DocumentObject, DocumentOverlay, DocumentViewport,
     LegendMark, OUTER_PAD, OverlayAlign, OverlayKind, OverlayShape, OverlayShapeKind, OverlayText,
     Projector, Rect, TICK_LABEL_PAD, TICK_LENGTH, arrow_head, axis_layout, error_bar_segments,
-    heatmap_cells, integral, legend_entries, polygon_outline, projection_points,
+    heatmap_cells, integral, legend_entries, legend_layout, legend_rect, polygon_outline,
+    projection_points,
 };
 use egui::{Align2, Color32, FontId, Pos2, Sense, Shape, Stroke, StrokeKind, Ui, Vec2};
 use plotx_figure::{AxisFrame, AxisTrace, Color, Figure, SeriesKind};
@@ -28,10 +29,7 @@ pub fn show(ui: &mut Ui, fig: &Figure) {
     paint(&painter, outer, fig, 1.0);
 }
 
-/// Paint a figure into an explicit rectangle of an existing painter. `scale` is
-/// the single page→screen factor: `outer` is already scaled, and every intrinsic
-/// size (margins, fonts, strokes, offsets) is a page-unit constant multiplied by
-/// it here, so the whole figure stays proportional at any zoom.
+/// Paint a figure into an existing painter at the supplied page-to-screen scale.
 pub fn paint(painter: &egui::Painter, outer: Rect, fig: &Figure, scale: f32) {
     paint_with_stats(painter, outer, fig, scale, None);
 }
@@ -152,8 +150,7 @@ pub fn paint_with_stats(
             );
         }
     }
-    // A left projection band sits between the contour and its ppm scale, so nudge
-    // the F1 tick numbers out past the band to keep them clear of the trace.
+    // Keep F1 tick numbers outside a left projection band.
     let y_tick_x = y_axis_x - (TICK_LENGTH + TICK_LABEL_PAD) * scale;
     for (&yt, label) in y_ticks.values.iter().zip(&y_ticks.labels) {
         let (_, py) = proj.project([fig.x.min, yt]);
@@ -273,6 +270,8 @@ pub fn paint_with_stats(
             .unwrap_or(Stroke::NONE);
         clipped.add(Shape::convex_polygon(pts, fill, stroke));
     }
+
+    crate::screen_annotations::paint(&clipped, fig, &proj, plot, scale);
 
     for contour in &fig.contours {
         let stroke = Stroke::new(contour.width * scale, col(contour.color));
@@ -413,10 +412,7 @@ fn line_columns(plot_width: f32, pixels_per_point: f32) -> usize {
         .clamp(MIN_LINE_COLUMNS, MAX_LINE_COLUMNS)
 }
 
-/// Clip a line to the viewport, then pool it to `columns` min/max buckets when
-/// the visible samples exceed the screen-space output budget. The envelope
-/// preserves each bucket's extrema in source order; it is visually equivalent
-/// at this sub-pixel density while avoiding tessellating invisible detail.
+/// Clip to the viewport, then pool dense lines into min/max envelope buckets.
 fn screen_line_points(
     points: &[[f64; 2]],
     x_min: f64,
@@ -539,17 +535,21 @@ fn paint_legend(painter: &egui::Painter, plot: Rect, fig: &Figure, scale: f32) {
     if !fig.show_legend || entries.len() < 2 {
         return;
     }
-    let (row, sw, pad, font) = (15.0 * scale, 16.0 * scale, 6.0 * scale, 11.0 * scale);
-    let chars = entries
-        .iter()
-        .map(|(n, _, _)| n.chars().count())
-        .max()
-        .unwrap_or(0);
-    let box_w = sw + 5.0 * scale + chars as f32 * font * 0.6 + pad * 2.0;
-    let box_h = entries.len() as f32 * row + pad * 2.0;
-    let bx = (plot.right() - box_w - 8.0 * scale).max(plot.left + 2.0 * scale);
-    let by = plot.top + 8.0 * scale;
-    let box_rect = egui::Rect::from_min_size(Pos2::new(bx, by), Vec2::new(box_w, box_h));
+    let layout = legend_layout(&entries, fig.typography.legend_pt);
+    let font = fig.typography.legend_pt * scale;
+    let (row, sw, pad) = (
+        layout.row * scale,
+        layout.swatch * scale,
+        layout.padding * scale,
+    );
+    let Some(box_geometry) = legend_rect(fig, plot, scale) else {
+        return;
+    };
+    let (bx, by) = (box_geometry.left, box_geometry.top);
+    let box_rect = egui::Rect::from_min_size(
+        Pos2::new(bx, by),
+        Vec2::new(box_geometry.width, box_geometry.height),
+    );
     painter.rect_filled(box_rect, 3.0 * scale, Color32::from_white_alpha(217));
     painter.rect_stroke(
         box_rect,
@@ -571,6 +571,13 @@ fn paint_legend(painter: &egui::Painter, plot: Rect, fig: &Figure, scale: f32) {
             LegendMark::Points => {
                 painter.circle_filled(Pos2::new(lx + sw * 0.5, ly), 3.0 * scale, col(*color));
             }
+            LegendMark::LinePoints => {
+                painter.line_segment(
+                    [Pos2::new(lx, ly), Pos2::new(lx + sw, ly)],
+                    Stroke::new(2.0 * scale, col(*color)),
+                );
+                painter.circle_filled(Pos2::new(lx + sw * 0.5, ly), 3.0 * scale, col(*color));
+            }
             LegendMark::Rect => {
                 painter.rect_filled(
                     egui::Rect::from_min_size(
@@ -587,13 +594,12 @@ fn paint_legend(painter: &egui::Painter, plot: Rect, fig: &Figure, scale: f32) {
             Align2::LEFT_CENTER,
             name,
             font_id.clone(),
-            col(Color::AXIS),
+            col(fig.typography.legend_color),
         );
     }
 }
 
-/// Paint a fixed-size page document through a screen viewport. Page geometry is
-/// left untouched; zoom/pan only affect the screen projection.
+/// Paint a fixed-size page document through a zoomable screen viewport.
 pub fn paint_document(
     painter: &egui::Painter,
     screen: Rect,
@@ -623,9 +629,7 @@ pub fn paint_document_with_stats(
         Pos2::new(page.left, page.top),
         Vec2::new(page.width, page.height),
     );
-    // Screen documents are page-clipped. Besides matching physical-page
-    // semantics, this makes the page body the complete culling bound used by
-    // the board; SVG and EMF paths are intentionally unaffected.
+    // Page clipping also supplies the board's complete culling bound.
     let painter = painter.with_clip_rect(page_rect);
     painter.rect_filled(page_rect, 0.0, col(document.background));
 

@@ -111,7 +111,7 @@ fn gesture_active_covers_only_the_board_freezing_drags() {
             Interaction::Region(RegionDrag {
                 canvas: 0,
                 object,
-                dataset: 0,
+                dataset: app.doc.datasets[0].resource_id(),
                 kind: RegionDragKind::NewBand,
                 region_id: None,
                 before: Vec::new(),

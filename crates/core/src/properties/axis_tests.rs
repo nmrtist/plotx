@@ -39,6 +39,7 @@ fn every_axis_property_reset_clears_its_stored_override() {
             x_show_label: Some(false),
             y_show_tick_labels: Some(false),
             y_show_label: Some(false),
+            show_legend: Some(false),
             ..AxisOverrides::default()
         },
     );
@@ -65,6 +66,9 @@ fn every_axis_property_reset_clears_its_stored_override() {
         (axis::Y_SHOW_LABEL, |value: &AxisOverrides| {
             value.y_show_label.is_none()
         }),
+        (axis::SHOW_LEGEND, |value: &AxisOverrides| {
+            value.show_legend.is_none()
+        }),
     ];
     for &(property, cleared) in cases {
         let commit = app
@@ -73,6 +77,45 @@ fn every_axis_property_reset_clears_its_stored_override() {
         app.commit_property(commit);
         assert!(cleared(overrides(&app, object)), "{property} did not clear");
     }
+}
+
+#[test]
+fn legend_visibility_is_a_persistent_undoable_plot_override() {
+    let (mut app, target, object) = axis_app();
+    let before = app.doc.canvases[0]
+        .object(object)
+        .and_then(|object| object.plot())
+        .unwrap()
+        .figure()
+        .show_legend;
+    let commit = app
+        .plan_property_write(
+            axis::SHOW_LEGEND,
+            std::slice::from_ref(&target),
+            &PropertyValue::Bool(!before),
+        )
+        .expect("legend visibility write plans");
+    app.commit_property(commit);
+    assert_eq!(overrides(&app, object).show_legend, Some(!before));
+    assert_eq!(
+        app.doc.canvases[0]
+            .object(object)
+            .and_then(|object| object.plot())
+            .unwrap()
+            .figure()
+            .show_legend,
+        !before
+    );
+    app.undo();
+    assert_eq!(
+        app.doc.canvases[0]
+            .object(object)
+            .and_then(|object| object.plot())
+            .unwrap()
+            .figure()
+            .show_legend,
+        before
+    );
 }
 
 #[test]

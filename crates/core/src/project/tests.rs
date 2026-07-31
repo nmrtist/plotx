@@ -262,6 +262,8 @@ fn project_roundtrip_preserves_data_recipe_and_view() {
         y_label: Some("Response".to_owned()),
         x_range: Some(AxisRange::new(1.0, 8.0)),
         y_range: Some(AxisRange::new(-2.0, 12.0)),
+        show_legend: Some(false),
+        legend_position: Some([0.25, 0.75]),
         ..AxisOverrides::default()
     };
     let plot_id = app.doc.canvases[0].objects[0].id;
@@ -270,6 +272,8 @@ fn project_roundtrip_preserves_data_recipe_and_view() {
         tick_pt: 9.5,
         label_pt: 10.0,
         title_pt: 11.0,
+        legend_pt: 6.25,
+        legend_color: plotx_figure::Color::rgb(12, 34, 56),
     };
     app.set_figure_typography_value(custom_typography);
     let path = temp_project("roundtrip");

@@ -372,7 +372,7 @@ pub struct UiState {
     /// state, so it is deliberately absent from the property catalog itself.
     pub property_focus: Option<PropertyFocus>,
     /// Source dataset whose Regions workflow is shown in the canvas task card.
-    pub region_task_dataset: Option<usize>,
+    pub region_task_dataset: Option<DatasetId>,
     /// Whether the Regions task card is reduced to its one-line summary.
     pub region_task_collapsed: bool,
     /// Data table whose Curve Fit workflow is shown in the canvas task card.
@@ -395,8 +395,8 @@ pub struct UiState {
     /// Snap guide previews painted during an `Interaction::Object` drag; cleared
     /// alongside it.
     pub snap_guides: Vec<crate::layout::SnapGuide>,
-    /// The selected region band's id (shows handles + drives the panel row).
-    pub selected_region: Option<u64>,
+    /// The selected region band and its owning dataset.
+    pub selected_region: Option<RegionSelection>,
     /// The selected 1D integral band's id (shows handles + the context menu target).
     pub selected_integral: Option<u64>,
     /// The selected hand-placed peak's mark id (drives Delete and the label editor).
@@ -419,9 +419,9 @@ pub struct UiState {
     /// Whether cursor positions snap without holding Shift.
     pub symmetry_snap: bool,
     pub symmetry_filter: SymmetryAuditFilter,
-    /// Pre-edit region snapshot for an in-progress panel rename, so a typing run
-    /// commits as one undo step on focus loss.
-    pub region_edit_before: Option<Vec<Region>>,
+    /// Dataset-bound pre-edit snapshot for an in-progress region rename, so a
+    /// typing run commits as one undo step without crossing dataset switches.
+    pub region_edit_before: Option<(DatasetId, Vec<Region>)>,
     /// Curve-fit tool state for a `Dataset::Table`: chosen preset id (empty =
     /// pick a default from the table's meta), whether to fit all columns or one,
     /// and the selected column index. Scoped to `fit_dataset`.

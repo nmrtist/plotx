@@ -63,7 +63,10 @@ pub(super) fn tab_bar(app: &mut PlotxApp, current: TaskDockTab, ui: &mut Ui) -> 
             TaskDockTab::Regions,
             icon::SELECTION,
             "Regions",
-            app.session.ui.region_task_dataset,
+            app.session
+                .ui
+                .region_task_dataset
+                .and_then(|id| app.doc.dataset_index(id)),
         ),
         (
             TaskDockTab::CurveFit,

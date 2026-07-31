@@ -1,4 +1,4 @@
-use super::convert_recipes::{nmr2d_recipe_extensions, read_regions};
+use super::convert_recipes::{nmr2d_recipe_extensions, read_region_analysis};
 use super::electrophysiology_convert::{
     electrophysiology_from_object, electrophysiology_to_objects,
 };
@@ -372,7 +372,7 @@ pub fn object_to_dataset(
             });
             dataset.field_catalog = read_field_catalog(data)?;
             apply_2d_recipe(&mut dataset, recipe)?;
-            read_regions(&mut dataset, recipe);
+            read_region_analysis(&mut dataset, recipe)?;
             read_integrals_2d(&mut dataset, recipe)?;
             read_peaks_2d(&mut dataset, recipe)?;
             dataset.name = data.label.clone();

@@ -16,13 +16,30 @@ choose the recorded channel. The optional zero-phase Gaussian low-pass is
 enabled at 1 kHz by default. It affects charts and analysis consistently; raw
 samples remain unchanged and the setting is saved in the project.
 
-## Window statistics
+Sweep names share the plot legend. To recover plot area, select the plot and
+turn off **Show legend** under **Axes** in the Object inspector. **Legend size**
+and **Legend text color** under **Figure typography** style legends throughout
+the document. With **Select** active, drag the legend to a clear part of the
+plot; double-click it to restore automatic placement.
 
-Enter the start and end time in seconds and choose Positive, Negative, or
-Absolute peak mode. **Create statistics table** creates a normal PlotX data
-table containing signed peak, average, and peak time for every selected sweep.
-An empty window or non-finite sample produces an error instead of a fabricated
-zero. Use the normal Data Sheet and **Export Data…** to inspect or export results.
+## Regions and window statistics
+
+Select the recording, then choose **Analyze** → **Draw Regions**. Drag across
+the trace to mark one or more time windows. Each window is measured in every
+selected sweep. Choose Height, Area, Max, Min, or Mean, then select
+**Continue to Series Table** to create a live table and a color-matched point
+series for each region.
+
+For peak, average, and peak-time values, open **Patch clamp**. PlotX uses the
+selected region, or the first region in the list when none is selected. Choose
+Positive, Negative, or Absolute under **Peak mode**, then select **Create
+statistics table**. The button is disabled until you draw a region. If the
+window does not overlap a sweep or contains a non-finite sample, PlotX reports
+an error instead of inserting zero. Inspect the result in Data Sheet or export
+it with **Export Data…**.
+
+**Show regions on figure and export** is enabled by default. With it enabled,
+figure exports include each region's colored band, boundary, and label.
 
 For the recording itself, **Export Data…** writes every selected sweep from the
 current channel after the active filter. Time is the first column and each
@@ -35,13 +52,14 @@ file does not contain a waveform, PlotX may suggest a Voltage Step, Current
 Step, or Ramp from the protocol name. Suggested values are placeholders: edit
 them and explicitly confirm the template before IV analysis is enabled.
 
-**Create IV table** combines the stimulus value with peak and average response.
-Voltage stimuli require a current response; current stimuli require a voltage
-response. A unit mismatch is reported and calculation is stopped. Ramp protocols
-do not support IV analysis: the stimulus varies continuously within a sweep, so
-there is no single stimulus value to plot against. In the data browser the
-table stays listed under the recording it came from, and its stimulus source
-remains part of the saved dataset.
+**Create IV table** uses the same selected region and combines the stimulus
+value with the peak and average response. Voltage stimuli require a current
+response; current stimuli require a voltage response. A unit mismatch is
+reported and calculation is stopped. Ramp protocols do not support IV
+analysis: the stimulus varies continuously within a sweep, so there is no
+single stimulus value to plot against. In the data browser the table stays
+listed under the recording it came from, and its stimulus source remains part
+of the saved dataset.
 
 ## Recording metadata
 

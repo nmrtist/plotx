@@ -81,14 +81,19 @@ fn project_roundtrip_preserves_raw_data_and_settings() {
     let mut recording = crate::state::ElectrophysiologyDataset::load(data);
     recording.metadata.cell_id = "cell-42".to_owned();
     recording.processing.cutoff_hz = 750.0;
-    let mut legacy_metadata = serde_json::to_value(&recording).unwrap();
-    legacy_metadata
-        .as_object_mut()
-        .unwrap()
-        .remove("resource_id");
-    let legacy_recording: crate::state::ElectrophysiologyDataset =
-        serde_json::from_value(legacy_metadata).unwrap();
-    assert!(!legacy_recording.resource_id.to_string().is_empty());
+    recording
+        .region_analysis
+        .regions
+        .push(crate::state::Region {
+            id: crate::state::RegionId::new(0),
+            lo: 0.0001,
+            hi: 0.0003,
+            name: "transient".to_owned(),
+            label_position: Some([0.2, 0.8]),
+            color: crate::state::region_color(0),
+            metric: Some(crate::state::RegionMetric::Area),
+        });
+    recording.region_analysis.next_region_id = crate::state::RegionId::new(1);
     let mut app = PlotxApp::new();
     app.doc
         .datasets
@@ -104,5 +109,15 @@ fn project_roundtrip_preserves_raw_data_and_settings() {
     assert_eq!(recording.data.sweeps[0].commands[0].samples[1], -90.0);
     assert_eq!(recording.metadata.cell_id, "cell-42");
     assert_eq!(recording.processing.cutoff_hz, 750.0);
+    assert_eq!(recording.region_analysis.regions.len(), 1);
+    assert_eq!(recording.region_analysis.regions[0].name, "transient");
+    assert_eq!(
+        recording.region_analysis.regions[0].label_position,
+        Some([0.2, 0.8])
+    );
+    assert_eq!(
+        recording.region_analysis.default_metric,
+        crate::state::RegionMetric::Height
+    );
     std::fs::remove_file(path).unwrap();
 }

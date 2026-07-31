@@ -268,92 +268,6 @@ impl PlotxApp {
         }
     }
 
-    pub fn interaction(&self) -> &Interaction {
-        &self.session.ui.interaction
-    }
-
-    pub fn set_interaction(&mut self, interaction: Interaction) {
-        self.session.ui.interaction = interaction;
-    }
-
-    /// Take the current gesture, leaving `Idle`. Unlike [`Self::reset_interaction`]
-    /// this preserves the derived `tile_drop`/`snap_guides` previews, so a handler
-    /// can consume the drag and still read the preview it produced.
-    pub fn take_interaction(&mut self) -> Interaction {
-        std::mem::replace(&mut self.session.ui.interaction, Interaction::Idle)
-    }
-
-    /// The single "drop any in-flight gesture" transition: clears the interaction
-    /// and its derived object-drag previews.
-    pub fn reset_interaction(&mut self) {
-        self.session.ui.interaction = Interaction::Idle;
-        self.session.ui.tile_drop = None;
-        self.session.ui.snap_guides.clear();
-    }
-
-    /// Start a gesture, dropping any prior one first. The debug assert is a cheap
-    /// sanity check that the gesture matches the active tool and canvas.
-    pub fn begin_interaction(&mut self, interaction: Interaction) {
-        debug_assert!(
-            interaction.belongs_to(self.session.tool, self.session.active_canvas),
-            "gesture started under a tool/canvas it does not belong to"
-        );
-        self.reset_interaction();
-        self.session.ui.interaction = interaction;
-    }
-
-    /// Cancel the in-flight gesture (Esc), restoring the pre-gesture state for the
-    /// gestures that mutate the document live: a phase drag restores the dataset's
-    /// processing state and a region drag its bands. All others just drop.
-    pub fn cancel_interaction(&mut self) {
-        match self.take_interaction() {
-            Interaction::Phase(drag) => {
-                self.set_dataset_processing_state(drag.dataset, &drag.gesture_before);
-            }
-            Interaction::Region(drag) => {
-                if let Some(d2) = self
-                    .doc
-                    .datasets
-                    .get_mut(drag.dataset)
-                    .and_then(Dataset::as_nmr2d_mut)
-                {
-                    d2.regions = drag.before;
-                }
-            }
-            Interaction::Integral(drag) => {
-                let dataset = drag.dataset;
-                if let Some(n) = self
-                    .doc
-                    .datasets
-                    .get_mut(dataset)
-                    .and_then(Dataset::as_nmr_mut)
-                {
-                    n.integrals = drag.before;
-                }
-                self.sync_integral_curves_for(dataset);
-            }
-            Interaction::Integral2D(drag) => {
-                if let Some(n) = self
-                    .doc
-                    .datasets
-                    .get_mut(drag.dataset)
-                    .and_then(Dataset::as_nmr2d_mut)
-                {
-                    n.integrals = drag.before;
-                }
-            }
-            Interaction::Object(drag) => {
-                self.set_object_frame(drag.canvas, drag.object, drag.before);
-                for (id, frame) in drag.others {
-                    self.set_object_frame(drag.canvas, id, frame);
-                }
-            }
-            _ => {}
-        }
-        self.session.ui.tile_drop = None;
-        self.session.ui.snap_guides.clear();
-    }
-
     pub fn set_tool(&mut self, tool: Tool) {
         if self.session.tool == tool {
             return;
@@ -672,6 +586,7 @@ impl PlotxApp {
             return;
         }
         self.rebuild_canvases_for(dataset);
+        self.sync_region_table(dataset);
         self.mark_document_dirty();
     }
 
@@ -687,6 +602,7 @@ impl PlotxApp {
             return;
         }
         self.rebuild_canvases_for(dataset);
+        self.sync_region_table(dataset);
         self.mark_document_dirty();
     }
 

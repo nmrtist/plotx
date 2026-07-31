@@ -1,5 +1,5 @@
 use super::*;
-use plotx_figure::Figure;
+use plotx_figure::{Color, Figure, RangeAnnotation};
 use std::sync::Arc;
 
 impl PlotxApp {
@@ -17,6 +17,27 @@ impl PlotxApp {
             crate::workflow::build_dataset_figure(&self.doc.datasets[dataset], chart, size_mm);
         if let Some(nmr) = self.doc.datasets[dataset].as_nmr() {
             figure.integral_curves = nmr.integral_curves();
+        }
+        if let Some(state) = self.doc.datasets[dataset]
+            .region_analysis()
+            .filter(|state| state.show_annotations)
+        {
+            let unit = self.doc.datasets[dataset].region_axis_unit().unwrap_or("");
+            figure
+                .range_annotations
+                .extend(state.regions.iter().map(|region| {
+                    let [r, g, b] = region.color;
+                    RangeAnnotation {
+                        source_id: region.id.get(),
+                        x0: region.lo,
+                        x1: region.hi,
+                        label: region.column_name(unit),
+                        label_position: region.label_position,
+                        color: Color::rgb(r, g, b),
+                        fill_opacity: 0.12,
+                        width: 1.0,
+                    }
+                }));
         }
         // Every figure build stamps the document's typography, so a doc-level
         // edit reaches each plot on its next rebuild without per-plot state.
@@ -76,15 +97,20 @@ impl PlotxApp {
                 })
             {
                 let color = line.color.resolve();
+                let semantic_colors = fig.series_colors_are_semantic;
                 for series in &mut fig.series {
-                    series.color = color;
+                    if !semantic_colors {
+                        series.color = color;
+                    }
                     series.width = line.width.get();
                     for point in &mut series.points {
                         point[1] *= line.scale;
                     }
                 }
                 for error_bar in &mut fig.error_bars {
-                    error_bar.color = color;
+                    if !semantic_colors {
+                        error_bar.color = color;
+                    }
                     error_bar.center[1] *= line.scale;
                     error_bar.negative *= line.scale.abs();
                     error_bar.positive *= line.scale.abs();
@@ -93,7 +119,10 @@ impl PlotxApp {
                 // Value-mapped figures (heatmap cells, colormap surfaces, pie
                 // wedges) keep their own colours — one override would erase the
                 // encoding they carry.
-                if fig.heatmap.is_none() && fig.axis_frame != plotx_figure::AxisFrame::Hidden {
+                if !semantic_colors
+                    && fig.heatmap.is_none()
+                    && fig.axis_frame != plotx_figure::AxisFrame::Hidden
+                {
                     let background = fig.background;
                     for polygon in &mut fig.polygons {
                         polygon.fill = color;

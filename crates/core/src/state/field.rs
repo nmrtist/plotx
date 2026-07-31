@@ -3,8 +3,9 @@ use super::{FieldCatalog, FieldId, electrophysiology_channel_key};
 use crate::automation::{
     CAP_FIELD_AFM_MAP, CAP_FIELD_BOUNDED, CAP_FIELD_COLORED_RASTER_2D, CAP_FIELD_CURVE_1D,
     CAP_FIELD_FORCE_CURVE, CAP_FIELD_LOCATION_SCALE, CAP_FIELD_NMR_CONTOUR, CAP_FIELD_NMR_SIGNAL,
-    CAP_FIELD_NMR_STACK, CAP_FIELD_NOISE_SCALE, CAP_FIELD_SCALAR_GRID_2D_REGULAR, CAP_FIELD_SIGNED,
-    CAP_FIELD_SWEEP_COLLECTION, CAP_FIELD_TABLE, CapabilityId,
+    CAP_FIELD_NMR_STACK, CAP_FIELD_NOISE_SCALE, CAP_FIELD_REGION_SERIES,
+    CAP_FIELD_SCALAR_GRID_2D_REGULAR, CAP_FIELD_SIGNED, CAP_FIELD_SWEEP_COLLECTION,
+    CAP_FIELD_TABLE, CapabilityId,
 };
 use plotx_figure::{
     ColorSource, ContourBasePolicy, ContourLevelSpec, ContourSpec, ContourStyle,
@@ -128,7 +129,7 @@ impl super::Dataset {
                         id,
                         "nmr.stack",
                         "Stack",
-                        capabilities(id, &[CAP_FIELD_NMR_STACK]),
+                        capabilities(id, &[CAP_FIELD_NMR_STACK, CAP_FIELD_REGION_SERIES]),
                         vec![nmr.data.cols],
                         vec![match &nmr.processed {
                             plotx_processing::Processed2D::Stack(spectrum) => {
@@ -177,7 +178,7 @@ impl super::Dataset {
                         id,
                         &key,
                         &channel.name,
-                        capabilities(id, &[CAP_FIELD_SWEEP_COLLECTION]),
+                        capabilities(id, &[CAP_FIELD_SWEEP_COLLECTION, CAP_FIELD_REGION_SERIES]),
                         vec![recording.data.sweeps.len()],
                         vec![channel.unit.symbol.clone()],
                         "line",

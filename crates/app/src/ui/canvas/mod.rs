@@ -4,13 +4,14 @@ use plotx_core::layout::{self, MovableEdges, SnapGuide, SnapTargets};
 use plotx_core::state::region_color;
 use plotx_core::state::{
     AnalysisSelection, AuthorDrag, AxisRange, BOARD_GUTTER_PT, BoardFitTarget, BoardViewport,
-    CanvasDocument, CanvasObject, CanvasObjectKind, Dataset, FrameDrag, FrameRef, Integral2DDrag,
-    Integral2DDragKind, IntegralDrag, Interaction, MarqueeDrag, ObjectDrag, ObjectDragKind,
-    ObjectFrame, ObjectId, PanDrag, PanelLabelDrag, PanelNoteEditState, PhaseDrag, PhaseDragKind,
-    PhaseOrient, PlotxApp, Region, RegionDrag, RegionDragKind, ResizeHandle, SHEET_COL_W_PT,
-    SHEET_HEADER_H_PT, SHEET_MAX_ROWS, SHEET_ROW_H_PT, Selection, SelectionDrag, TableDataset,
-    TextEditState, TileDropCacheKey, TileDropPreview, Tool, ZoomAxis, ZoomDrag, board_frames,
-    frame_board_pos, frame_board_rect, set_frame_board_pos, toggle_frame_selection_synced,
+    CanvasDocument, CanvasObject, CanvasObjectKind, Dataset, FrameDrag, FrameRef, FurnitureDrag,
+    FurnitureTarget, Integral2DDrag, Integral2DDragKind, IntegralDrag, Interaction, MarqueeDrag,
+    ObjectDrag, ObjectDragKind, ObjectFrame, ObjectId, PanDrag, PanelLabelDrag, PanelNoteEditState,
+    PhaseDrag, PhaseDragKind, PhaseOrient, PlotxApp, Region, RegionDrag, RegionDragKind, RegionId,
+    RegionSelection, ResizeHandle, SHEET_COL_W_PT, SHEET_HEADER_H_PT, SHEET_MAX_ROWS,
+    SHEET_ROW_H_PT, Selection, SelectionDrag, TableDataset, TextEditState, TileDropCacheKey,
+    TileDropPreview, Tool, ZoomAxis, ZoomDrag, board_frames, frame_board_pos, frame_board_rect,
+    set_frame_board_pos, toggle_frame_selection_synced,
 };
 use plotx_core::{Integral2D, IntegralResult};
 use plotx_render::Rect as PlotRect;
@@ -31,6 +32,7 @@ mod board;
 mod board_notes;
 mod chrome;
 mod cursors;
+mod furniture;
 mod geometry;
 mod integrals;
 mod integrals2d;
@@ -52,6 +54,7 @@ pub(crate) use board::*;
 pub(crate) use board_notes::*;
 pub(crate) use chrome::*;
 pub(crate) use cursors::*;
+pub(crate) use furniture::*;
 pub(crate) use geometry::*;
 pub(crate) use integrals::*;
 pub(crate) use integrals2d::*;
@@ -124,9 +127,7 @@ pub fn render_central(app: &mut PlotxApp, ui: &mut Ui) {
     ensure_board_view(app, rect);
     drive_board_fit(app, ui, rect);
 
-    // Gesture handlers below read the raw pointer, so nothing else stops them from
-    // acting on board content that lies (clipped) under a side bar, a popup or a
-    // window. A live drag keeps the pointer wherever it wanders.
+    // Raw-pointer gestures must not start through UI layered over the canvas.
     let pointer_hits_canvas_layer = ui
         .input(|input| input.pointer.hover_pos())
         .is_none_or(|pos| {
@@ -139,9 +140,7 @@ pub fn render_central(app: &mut PlotxApp, ui: &mut Ui) {
 
     let view_consumed = pointer_owned && handle_navigation(app, ci, rect, ui);
 
-    // Suppressed only while a non-frame gesture is mid-drag, so a live data/object
-    // drag isn't interrupted by a frame switch — a fresh click still activates
-    // another figure.
+    // A live non-frame gesture cannot be interrupted by a frame switch.
     let frame_consumed = if pointer_owned
         && !view_consumed
         && matches!(
@@ -176,12 +175,24 @@ pub fn render_central(app: &mut PlotxApp, ui: &mut Ui) {
         } else {
             handle_frame_caption_interactions(app, rect, ui)
         };
+    let furniture_consumed = if !pointer_owned
+        || view_consumed
+        || frame_consumed
+        || author_active
+        || label_consumed
+        || caption_consumed
+    {
+        false
+    } else {
+        handle_furniture_interactions(app, ci, rect, ui)
+    };
     if pointer_owned
         && !view_consumed
         && !frame_consumed
         && !author_active
         && !label_consumed
         && !caption_consumed
+        && !furniture_consumed
     {
         if app.session.tool.is_layout_tool() {
             handle_object_interactions(app, ci, rect, ui, &resp);
@@ -277,7 +288,8 @@ pub fn render_central(app: &mut PlotxApp, ui: &mut Ui) {
         proj.plot
     };
 
-    if data_edit_target(app, ci) == Some(object_id)
+    if !furniture_consumed
+        && data_edit_target(app, ci) == Some(object_id)
         && !matches!(app.session.ui.interaction, Interaction::Pan(_))
     {
         match app.session.tool {
@@ -541,11 +553,19 @@ fn canvas_cursor(app: &PlotxApp, ci: usize, rect: egui::Rect, ui: &Ui) {
     };
     // Ambient pan reads on top of the tool cursor: an active data-pan grabs, and
     // holding Space arms the hand anywhere on the board.
+    if matches!(app.session.ui.interaction, Interaction::Furniture(_)) {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+        return;
+    }
     if matches!(app.session.ui.interaction, Interaction::Pan(_)) {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
         return;
     }
     if ui.input(|i| i.key_down(egui::Key::Space)) {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+        return;
+    }
+    if furniture_hovered(app, ci, rect, p) {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
         return;
     }
