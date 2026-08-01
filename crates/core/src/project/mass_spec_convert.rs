@@ -718,4 +718,29 @@ mod tests {
         );
         assert_eq!(loaded.field_catalog, expected_catalog);
     }
+
+    #[test]
+    fn imported_mzml_run_survives_project_round_trip() {
+        let xml = r#"<mzML><run id="r"><spectrumList count="1"><spectrum id="scan=1" defaultArrayLength="1"><cvParam accession="MS:1000511" value="1"/><cvParam accession="MS:1000130"/><scanList><scan><cvParam accession="MS:1000016" value="30" unitAccession="UO:0000010"/></scan></scanList><binaryDataArrayList count="2"><binaryDataArray><cvParam accession="MS:1000514"/><cvParam accession="MS:1000523"/><cvParam accession="MS:1000576"/><binary>AAAAAAAA8D8=</binary></binaryDataArray><binaryDataArray><cvParam accession="MS:1000515"/><cvParam accession="MS:1000523"/><cvParam accession="MS:1000576"/><binary>AAAAAAAAAEA=</binary></binaryDataArray></binaryDataArrayList></spectrum></spectrumList></run></mzML>"#;
+        let run = plotx_io::mzml::parse(std::io::Cursor::new(xml), "roundtrip.mzML".into())
+            .expect("synthetic repository-owned mzML should import");
+        let mut app = crate::state::PlotxApp::new();
+        app.doc
+            .datasets
+            .push(crate::state::Dataset::MassSpec(Box::new(
+                crate::state::MassSpecDataset::load(run),
+            )));
+        let path = std::env::temp_dir().join(format!(
+            "plotx-mzml-round-trip-{}.plotx",
+            std::process::id()
+        ));
+        crate::project::save_project(&app, &path, false).unwrap();
+        let loaded = crate::project::load_project(&path).unwrap();
+        std::fs::remove_file(path).unwrap();
+        let spectrum = &loaded.doc.datasets[0].as_mass_spec().unwrap().run.streams[0].spectra[0];
+        assert_eq!(spectrum.source_native_id.as_deref(), Some("scan=1"));
+        assert_eq!(spectrum.retention_time_min, 0.5);
+        assert_eq!(spectrum.mz, [1.0]);
+        assert_eq!(spectrum.intensity, [2.0]);
+    }
 }

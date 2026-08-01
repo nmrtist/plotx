@@ -13,6 +13,7 @@ no conversion step is needed.
 | JEOL Delta | `.jdf` | 1D, 2D, and pseudo-2D (DOSY / T1 / T2) |
 | Bruker TopSpin | `fid` / `ser` directories | 1D and 2D |
 | Waters MassLynx RAW | `.raw` directory | Validated low-resolution runs, including SQD2 data |
+| mzML | `.mzML` | Centroided or profile LC–MS spectra with 32-bit or 64-bit arrays, uncompressed or zlib-compressed |
 | Bruker NanoScope AFM | `.spm` / `.pfc` | Images, force curves, force-volume and PeakForce Capture cubes |
 | JCAMP-DX | `.dx` / `.jdx` / `.jcamp` | 1D frequency-domain NMR spectra |
 | Axon Binary Format 2 | `.abf` | int16/float32, multiple channels and sweeps, embedded DAC/epoch stimuli |
@@ -33,6 +34,17 @@ imports every `.abf`, `.spm`, `.pfc`, and recognized `.raw` bundle below it.
 A `.raw` directory is imported once as a complete run; its internal files are
 not treated as separate datasets. For ABF files, each immediate parent folder
 becomes the initial, editable cell ID.
+
+## mzML
+
+Open or drop a `.mzML` file. PlotX imports the spectra into the same LC–MS
+dataset and chart workflow used for Waters runs. Spectra are grouped by MS
+level and polarity; scan times recorded in seconds or minutes are displayed in
+minutes. File-supplied chromatograms are not imported.
+
+The importer accepts little-endian 32-bit and 64-bit floating-point m/z and
+intensity arrays with no compression or zlib compression. Numpress, big-endian
+arrays, and spectra without both required arrays stop the import with an error.
 
 ## Waters MassLynx RAW
 

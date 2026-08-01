@@ -7,6 +7,7 @@ pub mod delimited;
 pub mod jcamp_dx;
 pub mod jeol;
 mod mass_spec;
+pub mod mzml;
 pub mod nanoscope;
 pub mod origin;
 pub mod waters;
@@ -30,6 +31,7 @@ pub enum DataFormat {
     BrukerNanoScopeSpm,
     BrukerPeakForceCapture,
     WatersMassLynxRaw,
+    MzMl,
 }
 
 impl DataFormat {
@@ -44,6 +46,7 @@ impl DataFormat {
             Self::BrukerNanoScopeSpm => "bruker-nanoscope-spm",
             Self::BrukerPeakForceCapture => "bruker-peakforce-capture",
             Self::WatersMassLynxRaw => "waters-masslynx-raw",
+            Self::MzMl => "mzml",
         }
     }
 }
@@ -519,6 +522,9 @@ pub enum IoError {
         pair_width: usize,
         instrument: String,
     },
+
+    #[error("invalid or unsupported mzML: {0}")]
+    InvalidMzMl(String),
 }
 
 /// Load a dataset, auto-detecting the format from the path. A Bruker
@@ -546,12 +552,13 @@ pub fn detect_format(path: impl AsRef<Path>) -> Result<DataFormat, IoError> {
         "abf" if abf2::is_abf2(path) => Ok(DataFormat::Abf2),
         "jdf" => Ok(DataFormat::JeolDelta),
         "dx" | "jdx" | "jcamp" => Ok(DataFormat::JcampDx1D),
+        "mzml" => Ok(DataFormat::MzMl),
         // Fall back to a content sniff so extensionless or mislabelled files
         // are still recognised by their magic bytes.
         _ if abf2::is_abf2(path) => Ok(DataFormat::Abf2),
         _ if jeol::is_jdf(path) => Ok(DataFormat::JeolDelta),
         _ => Err(IoError::Unsupported(format!(
-            "unrecognised path {}: expected a Waters .raw directory, NanoScope .spm/.pfc, ABF2 .abf, JEOL .jdf, JCAMP-DX .dx/.jdx/.jcamp, Bruker fid/ser, or Bruker pdata",
+            "unrecognised path {}: expected mzML, a Waters .raw directory, NanoScope .spm/.pfc, ABF2 .abf, JEOL .jdf, JCAMP-DX .dx/.jdx/.jcamp, Bruker fid/ser, or Bruker pdata",
             path.display()
         ))),
     }
@@ -581,5 +588,6 @@ pub fn load_path(path: impl AsRef<Path>) -> Result<LoadResult, IoError> {
             nanoscope::load(path)
         }
         DataFormat::WatersMassLynxRaw => waters::load(path),
+        DataFormat::MzMl => mzml::load(path),
     }
 }

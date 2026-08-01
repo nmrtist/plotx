@@ -20,8 +20,9 @@ pub(super) const IMPORT_TABLE_FILTER_EXTENSIONS: &[&str] = &["csv", "tsv", "txt"
 pub(super) const ORIGIN_PROJECT_FILTER_LABEL: &str =
     "Origin projects (experimental: OPJ import; OPJU recognition only)";
 pub(super) const ORIGIN_PROJECT_FILTER_EXTENSIONS: &[&str] = &["opj", "opju"];
-pub(super) const OPEN_FILE_FILTER_EXTENSIONS: &[&str] =
-    &["spm", "pfc", "abf", "jdf", "fid", "ser", "zip", "opj"];
+pub(super) const OPEN_FILE_FILTER_EXTENSIONS: &[&str] = &[
+    "mzML", "spm", "pfc", "abf", "jdf", "fid", "ser", "zip", "opj",
+];
 
 const ORIGIN_MEDIA_TYPE: &str = "application/x-origin-project";
 const ORIGIN_READ_CHUNK_BYTES: usize = 16 * 1024;

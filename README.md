@@ -10,8 +10,9 @@ preparation.
 ## Highlights
 
 - **Bring scientific data together.** Current import support includes Axon
-  ABF2 patch-clamp recordings, Waters MassLynx LC–MS runs, JEOL Delta and
-  Bruker TopSpin experiments, JCAMP-DX spectra, archives, and delimited tables.
+  ABF2 patch-clamp recordings, mzML and Waters MassLynx LC–MS runs, JEOL Delta
+  and Bruker TopSpin experiments, JCAMP-DX spectra, archives, and delimited
+  tables.
 - **Process and analyze interactively.** Build ordered processing pipelines,
   then pick peaks, integrate regions, and fit data. NMR workflows also include
   DOSY and relaxation analysis, plus sweep statistics and IV analysis for

@@ -4151,8 +4151,11 @@ dependencies = [
 name = "plotx-io"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "calamine",
+ "flate2",
  "num-complex",
+ "quick-xml 0.41.0",
  "rust_xlsxwriter",
  "serde",
  "serde_json",

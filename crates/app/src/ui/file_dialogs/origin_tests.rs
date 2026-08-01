@@ -117,6 +117,7 @@ fn origin_import_filter_retains_tables_and_adds_experimental_projects() {
 #[test]
 fn origin_supported_file_filter_excludes_recognition_only_opju() {
     assert!(OPEN_FILE_FILTER_EXTENSIONS.contains(&"opj"));
+    assert!(OPEN_FILE_FILTER_EXTENSIONS.contains(&"mzML"));
     assert!(!OPEN_FILE_FILTER_EXTENSIONS.contains(&"opju"));
 }
 
