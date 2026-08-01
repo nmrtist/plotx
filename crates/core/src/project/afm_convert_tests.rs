@@ -44,7 +44,7 @@ fn fixture() -> AfmData {
 fn binary_afm_round_trip_preserves_arrays_and_metadata() {
     let original = fixture();
     let encoded = encode_afm(&original).unwrap();
-    let decoded = decode_afm(&encoded).unwrap();
+    let decoded = decode_afm_bytes(&encoded).unwrap();
 
     assert_eq!(decoded.images[0].raw.as_ref(), [1, 2, 3, 4]);
     assert_eq!(decoded.images[0].name, "Height");
@@ -58,10 +58,10 @@ fn binary_afm_round_trip_preserves_arrays_and_metadata() {
 #[test]
 fn binary_afm_rejects_truncation_and_trailing_bytes() {
     let encoded = encode_afm(&fixture()).unwrap();
-    assert!(decode_afm(&encoded[..encoded.len() - 1]).is_err());
+    assert!(decode_afm_bytes(&encoded[..encoded.len() - 1]).is_err());
     let mut trailing = encoded;
     trailing.push(0);
-    assert!(decode_afm(&trailing).is_err());
+    assert!(decode_afm_bytes(&trailing).is_err());
 }
 
 #[test]

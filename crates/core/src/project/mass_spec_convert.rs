@@ -1,11 +1,11 @@
-use super::{ProjectError, Result};
+use super::{EntryReader, ProjectError, ProjectLoadLimits, Result};
 use plotx_io::{
     AcquisitionStream, AcquisitionStreamId, ChromatogramChannel, ChromatogramChannelId,
     ChromatogramKind, MassSpecRun, MassSpectrum, Polarity, Precursor, SpectrumId,
     SpectrumRepresentation, StreamRole,
 };
 use std::collections::BTreeMap;
-use std::io::Write;
+use std::io::{Read, Write};
 
 const MAGIC: &[u8; 8] = b"PLOTXMS\0";
 const VERSION: u16 = 1;
@@ -120,9 +120,9 @@ fn write_channel(output: &mut impl Write, channel: &ChromatogramChannel) -> Resu
     write_f64s(output, &channel.values)
 }
 
-pub(super) fn decode(bytes: &[u8]) -> Result<MassSpecRun> {
-    let mut reader = Reader::new(bytes);
-    if reader.take(MAGIC.len())? != MAGIC {
+pub(super) fn decode<R: Read>(input: &mut EntryReader<'_, R>) -> Result<MassSpecRun> {
+    let mut reader = Reader::new(input);
+    if reader.read_array::<8>()? != *MAGIC {
         return Err(ProjectError::Invalid(
             "LC–MS payload has an invalid signature".to_owned(),
         ));
@@ -136,6 +136,7 @@ pub(super) fn decode(bytes: &[u8]) -> Result<MassSpecRun> {
     let source = reader.read_string()?;
     let instrument = reader.read_optional_string()?;
     let metadata_count = reader.read_len()?;
+    reader.require_collection(metadata_count, "metadata count")?;
     let mut metadata = BTreeMap::new();
     for _ in 0..metadata_count {
         let key = reader.read_string()?;
@@ -147,24 +148,22 @@ pub(super) fn decode(bytes: &[u8]) -> Result<MassSpecRun> {
         }
     }
     let warning_count = reader.read_len()?;
+    reader.require_collection(warning_count, "warning count")?;
     let mut import_warnings = Vec::new();
     for _ in 0..warning_count {
         import_warnings.push(reader.read_string()?);
     }
     let stream_count = reader.read_len()?;
+    reader.require_collection(stream_count, "stream count")?;
     let mut streams = Vec::new();
     for _ in 0..stream_count {
         streams.push(reader.read_stream()?);
     }
     let channel_count = reader.read_len()?;
+    reader.require_collection(channel_count, "chromatogram count")?;
     let mut chromatograms = Vec::new();
     for _ in 0..channel_count {
         chromatograms.push(reader.read_channel()?);
-    }
-    if !reader.is_empty() {
-        return Err(ProjectError::Invalid(
-            "LC–MS payload contains trailing data".to_owned(),
-        ));
     }
     let run = MassSpecRun {
         source,
@@ -280,55 +279,43 @@ fn write_f64s(output: &mut impl Write, values: &[f64]) -> Result<()> {
     Ok(())
 }
 
-struct Reader<'a> {
-    bytes: &'a [u8],
-    offset: usize,
+struct Reader<'a, 'p, R: Read> {
+    input: &'a mut EntryReader<'p, R>,
 }
 
-impl<'a> Reader<'a> {
-    fn new(bytes: &'a [u8]) -> Self {
-        Self { bytes, offset: 0 }
+impl<'a, 'p, R: Read> Reader<'a, 'p, R> {
+    fn new(input: &'a mut EntryReader<'p, R>) -> Self {
+        Self { input }
     }
 
-    fn take(&mut self, len: usize) -> Result<&'a [u8]> {
-        let end = self
-            .offset
-            .checked_add(len)
-            .ok_or_else(|| ProjectError::Invalid("LC–MS payload offset overflow".to_owned()))?;
-        let result = self
-            .bytes
-            .get(self.offset..end)
-            .ok_or_else(|| ProjectError::Invalid("LC–MS payload is truncated".to_owned()))?;
-        self.offset = end;
-        Ok(result)
+    fn read_array<const N: usize>(&mut self) -> Result<[u8; N]> {
+        self.input.require_bytes(N, "LC–MS field")?;
+        let mut bytes = [0_u8; N];
+        self.input.read_exact(&mut bytes).map_err(|error| {
+            self.input
+                .invalid(format!("LC–MS payload is truncated: {error}"))
+        })?;
+        Ok(bytes)
     }
 
     fn read_u8(&mut self) -> Result<u8> {
-        Ok(self.take(1)?[0])
+        Ok(self.read_array::<1>()?[0])
     }
 
     fn read_u16(&mut self) -> Result<u16> {
-        Ok(u16::from_le_bytes(self.take(2)?.try_into().map_err(
-            |_| ProjectError::Invalid("invalid LC–MS u16".to_owned()),
-        )?))
+        Ok(u16::from_le_bytes(self.read_array()?))
     }
 
     fn read_u64(&mut self) -> Result<u64> {
-        Ok(u64::from_le_bytes(self.take(8)?.try_into().map_err(
-            |_| ProjectError::Invalid("invalid LC–MS u64".to_owned()),
-        )?))
+        Ok(u64::from_le_bytes(self.read_array()?))
     }
 
     fn read_i32(&mut self) -> Result<i32> {
-        Ok(i32::from_le_bytes(self.take(4)?.try_into().map_err(
-            |_| ProjectError::Invalid("invalid LC–MS i32".to_owned()),
-        )?))
+        Ok(i32::from_le_bytes(self.read_array()?))
     }
 
     fn read_f64(&mut self) -> Result<f64> {
-        Ok(f64::from_le_bytes(self.take(8)?.try_into().map_err(
-            |_| ProjectError::Invalid("invalid LC–MS f64".to_owned()),
-        )?))
+        Ok(f64::from_le_bytes(self.read_array()?))
     }
 
     fn read_len(&mut self) -> Result<usize> {
@@ -338,7 +325,22 @@ impl<'a> Reader<'a> {
 
     fn read_string(&mut self) -> Result<String> {
         let len = self.read_len()?;
-        String::from_utf8(self.take(len)?.to_vec())
+        if len > ProjectLoadLimits::default().max_string_bytes {
+            return Err(self
+                .input
+                .invalid("LC–MS string exceeds the configured limit"));
+        }
+        self.input.require_bytes(len, "LC–MS string")?;
+        let mut bytes = Vec::new();
+        bytes
+            .try_reserve_exact(len)
+            .map_err(|_| self.input.invalid("could not reserve LC–MS string"))?;
+        bytes.resize(len, 0);
+        self.input.read_exact(&mut bytes).map_err(|error| {
+            self.input
+                .invalid(format!("LC–MS payload is truncated: {error}"))
+        })?;
+        String::from_utf8(bytes)
             .map_err(|_| ProjectError::Invalid("LC–MS payload contains invalid UTF-8".to_owned()))
     }
 
@@ -396,6 +398,7 @@ impl<'a> Reader<'a> {
             None
         };
         let count = self.read_len()?;
+        self.require_collection(count, "spectrum count")?;
         let mut spectra = Vec::new();
         for _ in 0..count {
             spectra.push(self.read_spectrum()?);
@@ -496,15 +499,29 @@ impl<'a> Reader<'a> {
         let byte_len = len
             .checked_mul(8)
             .ok_or_else(|| ProjectError::Invalid("LC–MS array size overflow".to_owned()))?;
-        Ok(self
-            .take(byte_len)?
-            .chunks_exact(8)
-            .map(|chunk| f64::from_le_bytes(chunk.try_into().expect("eight-byte chunk")))
-            .collect())
+        self.input.require_bytes(byte_len, "LC–MS numeric array")?;
+        let mut values = Vec::new();
+        values
+            .try_reserve_exact(len)
+            .map_err(|_| self.input.invalid("could not reserve LC–MS numeric array"))?;
+        for _ in 0..len {
+            values.push(self.read_f64()?);
+        }
+        Ok(values)
     }
 
-    fn is_empty(&self) -> bool {
-        self.offset == self.bytes.len()
+    fn require_collection(&self, count: usize, label: &str) -> Result<()> {
+        if count > ProjectLoadLimits::default().max_collection_items {
+            Err(self
+                .input
+                .invalid(format!("LC–MS {label} exceeds the configured limit")))
+        } else if (count as u64) > self.input.remaining() {
+            Err(self
+                .input
+                .invalid(format!("LC–MS {label} exceeds remaining payload bytes")))
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -520,15 +537,103 @@ fn encode(run: &MassSpecRun) -> Result<Vec<u8>> {
 }
 
 #[cfg(test)]
+fn decode_bytes(bytes: &[u8]) -> Result<MassSpecRun> {
+    let cursor = std::io::Cursor::new(bytes);
+    let mut reader = EntryReader::new(
+        cursor,
+        "test.bin",
+        "LC–MS",
+        bytes.len() as u64,
+        bytes.len() as u64,
+    )?;
+    let value = decode(&mut reader)?;
+    reader.finish()?;
+    Ok(value)
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    fn minimal_run_prefix() -> Vec<u8> {
+        let mut bytes = MAGIC.to_vec();
+        bytes.extend_from_slice(&VERSION.to_le_bytes());
+        bytes.extend_from_slice(&0_u64.to_le_bytes()); // source
+        bytes.push(0); // instrument
+        bytes.extend_from_slice(&0_u64.to_le_bytes()); // metadata
+        bytes
+    }
+
+    fn assert_count_rejected_without_payload(bytes: &[u8], label: &str) {
+        let message = decode_bytes(bytes).unwrap_err().to_string();
+        assert!(
+            message.contains(label)
+                && (message.contains("remaining") || message.contains("truncated")),
+            "{message}"
+        );
+    }
 
     #[test]
     fn rejects_unknown_future_version_precisely() {
         let mut bytes = MAGIC.to_vec();
         bytes.extend_from_slice(&2_u16.to_le_bytes());
-        let error = decode(&bytes).unwrap_err();
+        let error = decode_bytes(&bytes).unwrap_err();
         assert!(error.to_string().contains("LC–MS payload version 2"));
+    }
+
+    #[test]
+    fn rejects_truncated_header_invalid_tag_and_huge_length_before_allocation() {
+        assert!(
+            decode_bytes(MAGIC)
+                .unwrap_err()
+                .to_string()
+                .contains("truncated")
+        );
+
+        let mut invalid_tag = MAGIC.to_vec();
+        invalid_tag.extend_from_slice(&VERSION.to_le_bytes());
+        invalid_tag.extend_from_slice(&0_u64.to_le_bytes());
+        invalid_tag.push(2);
+        assert!(
+            decode_bytes(&invalid_tag)
+                .unwrap_err()
+                .to_string()
+                .contains("invalid option tag 2")
+        );
+
+        let mut huge = MAGIC.to_vec();
+        huge.extend_from_slice(&VERSION.to_le_bytes());
+        huge.extend_from_slice(&u64::MAX.to_le_bytes());
+        let message = decode_bytes(&huge).unwrap_err().to_string();
+        assert!(
+            message.contains("string exceeds") || message.contains("length exceeds"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn rejects_large_structural_counts_without_reserving_the_claimed_collection() {
+        const LARGE_COUNT: u64 = 10_000_000;
+
+        let mut warnings = minimal_run_prefix();
+        warnings.extend_from_slice(&LARGE_COUNT.to_le_bytes());
+        assert_count_rejected_without_payload(&warnings, "warning count");
+
+        let mut streams = minimal_run_prefix();
+        streams.extend_from_slice(&0_u64.to_le_bytes()); // warnings
+        streams.extend_from_slice(&LARGE_COUNT.to_le_bytes());
+        assert_count_rejected_without_payload(&streams, "stream count");
+
+        let mut spectra = minimal_run_prefix();
+        spectra.extend_from_slice(&0_u64.to_le_bytes()); // warnings
+        spectra.extend_from_slice(&1_u64.to_le_bytes()); // streams
+        spectra.extend_from_slice(&7_u64.to_le_bytes()); // stream id
+        spectra.push(0); // source native id
+        spectra.push(0); // source label
+        spectra.push(0); // primary role
+        spectra.push(0); // acquisition range
+        spectra.extend_from_slice(&LARGE_COUNT.to_le_bytes());
+        assert_count_rejected_without_payload(&spectra, "spectrum count");
     }
 
     #[test]
@@ -543,7 +648,7 @@ mod tests {
             collision_energy: Some(20.0),
             activation_method: Some("CID".to_owned()),
         });
-        let decoded = decode(&encode(&run).unwrap()).unwrap();
+        let decoded = decode_bytes(&encode(&run).unwrap()).unwrap();
         assert_eq!(decoded.source, run.source);
         assert_eq!(decoded.instrument, run.instrument);
         assert_eq!(decoded.metadata, run.metadata);
@@ -566,7 +671,7 @@ mod tests {
     fn rejects_truncated_and_trailing_payloads() {
         let bytes = encode(&crate::state::sample_mass_spec_run()).unwrap();
         assert!(
-            decode(&bytes[..bytes.len() - 1])
+            decode_bytes(&bytes[..bytes.len() - 1])
                 .unwrap_err()
                 .to_string()
                 .contains("truncated")
@@ -574,7 +679,7 @@ mod tests {
         let mut trailing = bytes;
         trailing.push(0);
         assert!(
-            decode(&trailing)
+            decode_bytes(&trailing)
                 .unwrap_err()
                 .to_string()
                 .contains("trailing data")

@@ -100,7 +100,6 @@ pub(super) fn electrophysiology_from_object(
     zip: &mut zip::ZipArchive<File>,
     data: &DataObject,
 ) -> Result<Dataset> {
-    let blob = read_bytes(zip, &data.payload.blob)?;
     let recording = match data.payload.storage.as_str() {
         STORAGE_ELECTROPHYSIOLOGY_BIN => {
             let value = data
@@ -116,15 +115,18 @@ pub(super) fn electrophysiology_from_object(
                 .map_err(|error| {
                     ProjectError::Invalid(format!("invalid electrophysiology metadata: {error}"))
                 })?;
-            let mut cursor = 0usize;
-            for samples in sample_vectors_mut(&mut recording.data) {
-                *samples = read_f64_vec(&blob, &mut cursor)?;
-            }
-            if cursor != blob.len() {
-                return Err(ProjectError::Invalid(
-                    "electrophysiology sample blob has trailing bytes".to_owned(),
-                ));
-            }
+            read_entry(
+                zip,
+                &data.payload.blob,
+                "electrophysiology sample payload",
+                ProjectLoadLimits::default().max_entry_bytes,
+                |reader| {
+                    for samples in sample_vectors_mut(&mut recording.data) {
+                        *samples = read_f64_vec(reader)?;
+                    }
+                    Ok(())
+                },
+            )?;
             recording
         }
         other => {
@@ -168,27 +170,32 @@ fn sample_vectors_mut(
     })
 }
 
-fn read_f64_vec(blob: &[u8], cursor: &mut usize) -> Result<Vec<f64>> {
-    let len_end = cursor.checked_add(8).ok_or_else(|| {
-        ProjectError::Invalid("electrophysiology blob length overflow".to_owned())
+fn read_f64_vec<R: std::io::Read>(reader: &mut EntryReader<'_, R>) -> Result<Vec<f64>> {
+    reader.require_bytes(8, "electrophysiology vector length")?;
+    let mut len_bytes = [0_u8; 8];
+    reader.read_exact(&mut len_bytes).map_err(|error| {
+        reader.invalid(format!(
+            "electrophysiology blob truncated before a length: {error}"
+        ))
     })?;
-    let len_bytes = blob.get(*cursor..len_end).ok_or_else(|| {
-        ProjectError::Invalid("electrophysiology blob truncated before a length".to_owned())
-    })?;
-    let len = usize::try_from(u64::from_le_bytes(len_bytes.try_into().unwrap()))
+    let len = usize::try_from(u64::from_le_bytes(len_bytes))
         .map_err(|_| ProjectError::Invalid("electrophysiology vector is too large".to_owned()))?;
     let byte_len = len.checked_mul(8).ok_or_else(|| {
         ProjectError::Invalid("electrophysiology sample count overflows".to_owned())
     })?;
-    let data_end = len_end.checked_add(byte_len).ok_or_else(|| {
-        ProjectError::Invalid("electrophysiology blob length overflow".to_owned())
-    })?;
-    let data = blob.get(len_end..data_end).ok_or_else(|| {
-        ProjectError::Invalid("electrophysiology blob truncated inside a vector".to_owned())
-    })?;
-    *cursor = data_end;
-    Ok(data
-        .chunks_exact(8)
-        .map(|chunk| f64::from_le_bytes(chunk.try_into().unwrap()))
-        .collect())
+    reader.require_bytes(byte_len, "electrophysiology sample vector")?;
+    let mut values = Vec::new();
+    values
+        .try_reserve_exact(len)
+        .map_err(|_| reader.invalid("could not reserve electrophysiology samples"))?;
+    let mut bytes = [0_u8; 8];
+    for _ in 0..len {
+        reader.read_exact(&mut bytes).map_err(|error| {
+            reader.invalid(format!(
+                "electrophysiology blob truncated inside a vector: {error}"
+            ))
+        })?;
+        values.push(f64::from_le_bytes(bytes));
+    }
+    Ok(values)
 }

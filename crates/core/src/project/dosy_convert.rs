@@ -1,8 +1,9 @@
-use super::{ProjectError, Result, STORAGE_DOSY_V1};
+use super::{EntryReader, ProjectError, ProjectLoadLimits, Result, STORAGE_DOSY_V1};
 use crate::{DosyMethod, DosyResultProvenance, PseudoDisplay};
 use plotx_analysis::diffusion::DiffusionMap;
 use plotx_analysis::ilt::IltResult;
 use serde::{Deserialize, Serialize};
+use std::io::Read;
 
 const MAGIC: &[u8; 8] = b"PXDOSY1\0";
 
@@ -112,15 +113,24 @@ pub(super) fn encode_dosy(
     Ok((output, shapes))
 }
 
-pub(super) fn decode_dosy(bytes: &[u8], expected_shapes: &DosyShapes) -> Result<DecodedDosy> {
-    let mut reader = Reader::new(bytes);
-    if reader.take(MAGIC.len())? != MAGIC {
+pub(super) fn decode_dosy<R: Read>(
+    input: &mut EntryReader<'_, R>,
+    expected_shapes: &DosyShapes,
+) -> Result<DecodedDosy> {
+    let mut reader = Reader::new(input);
+    if reader.read_array::<8>()? != *MAGIC {
         return Err(ProjectError::Invalid(
             "DOSY payload has an invalid signature".to_owned(),
         ));
     }
     let metadata_len = reader.read_len()?;
-    let header: DosyBlobHeader = serde_json::from_slice(reader.take(metadata_len)?)?;
+    if metadata_len > ProjectLoadLimits::default().max_metadata_bytes as usize {
+        return Err(reader
+            .input
+            .invalid("DOSY metadata exceeds the configured limit"));
+    }
+    let metadata = reader.read_bytes(metadata_len, "DOSY metadata")?;
+    let header: DosyBlobHeader = serde_json::from_slice(&metadata)?;
     if &header.shapes != expected_shapes {
         return Err(ProjectError::Invalid(format!(
             "DOSY payload shapes {:?} do not match expected shapes {:?}",
@@ -130,22 +140,17 @@ pub(super) fn decode_dosy(bytes: &[u8], expected_shapes: &DosyShapes) -> Result<
 
     let dosy_map = match &header.shapes.diffusion {
         Some(shape) => {
-            let ppm = reader.read_f64s()?;
-            require_len("DOSY ppm", ppm.len(), shape.len)?;
-            let d = reader.read_f64s()?;
-            require_len("DOSY diffusion", d.len(), shape.len)?;
-            let amp = reader.read_f64s()?;
-            require_len("DOSY amplitude", amp.len(), shape.len)?;
+            let ppm = reader.read_f64s(shape.len, "DOSY ppm")?;
+            let d = reader.read_f64s(shape.len, "DOSY diffusion")?;
+            let amp = reader.read_f64s(shape.len, "DOSY amplitude")?;
             Some(DiffusionMap { ppm, d, amp })
         }
         None => None,
     };
     let ilt_map = match &header.shapes.ilt {
         Some(shape) => {
-            let ppm = reader.read_f64s()?;
-            require_len("ILT ppm", ppm.len(), shape.ppm_len)?;
-            let d_grid = reader.read_f64s()?;
-            require_len("ILT diffusion grid", d_grid.len(), shape.d_grid_len)?;
+            let ppm = reader.read_f64s(shape.ppm_len, "ILT ppm")?;
+            let d_grid = reader.read_f64s(shape.d_grid_len, "ILT diffusion grid")?;
             // Deliberately not `with_capacity(shape.ppm_len)`: the row count comes
             // from the file and nothing has yet proven the payload holds that many
             // rows, so reserving up front lets a corrupt header abort the process
@@ -154,23 +159,14 @@ pub(super) fn decode_dosy(bytes: &[u8], expected_shapes: &DosyShapes) -> Result<
             // extent first.
             let mut amp: Vec<Vec<f64>> = Vec::new();
             for row in 0..shape.ppm_len {
-                let values = reader.read_f64s()?;
-                require_len(
-                    &format!("ILT amplitude row {row}"),
-                    values.len(),
-                    shape.d_grid_len,
-                )?;
+                let values =
+                    reader.read_f64s(shape.d_grid_len, &format!("ILT amplitude row {row}"))?;
                 amp.push(values);
             }
             Some(IltResult { ppm, d_grid, amp })
         }
         None => None,
     };
-    if !reader.is_empty() {
-        return Err(ProjectError::Invalid(
-            "DOSY payload contains trailing data".to_owned(),
-        ));
-    }
     Ok(DecodedDosy { dosy_map, ilt_map })
 }
 
@@ -219,57 +215,75 @@ fn write_f64s(output: &mut Vec<u8>, values: &[f64]) -> Result<()> {
     Ok(())
 }
 
-struct Reader<'a> {
-    bytes: &'a [u8],
-    offset: usize,
+struct Reader<'a, 'p, R: Read> {
+    input: &'a mut EntryReader<'p, R>,
 }
 
-impl<'a> Reader<'a> {
-    fn new(bytes: &'a [u8]) -> Self {
-        Self { bytes, offset: 0 }
+impl<'a, 'p, R: Read> Reader<'a, 'p, R> {
+    fn new(input: &'a mut EntryReader<'p, R>) -> Self {
+        Self { input }
     }
 
-    fn take(&mut self, len: usize) -> Result<&'a [u8]> {
-        let end = self
-            .offset
-            .checked_add(len)
-            .ok_or_else(|| ProjectError::Invalid("DOSY payload offset overflow".to_owned()))?;
-        let result = self
-            .bytes
-            .get(self.offset..end)
-            .ok_or_else(|| ProjectError::Invalid("DOSY payload is truncated".to_owned()))?;
-        self.offset = end;
-        Ok(result)
+    fn read_array<const N: usize>(&mut self) -> Result<[u8; N]> {
+        self.input.require_bytes(N, "DOSY field")?;
+        let mut bytes = [0_u8; N];
+        self.input.read_exact(&mut bytes).map_err(|error| {
+            self.input
+                .invalid(format!("DOSY payload is truncated: {error}"))
+        })?;
+        Ok(bytes)
+    }
+
+    fn read_bytes(&mut self, len: usize, label: &str) -> Result<Vec<u8>> {
+        self.input.require_bytes(len, label)?;
+        let mut bytes = Vec::new();
+        bytes
+            .try_reserve_exact(len)
+            .map_err(|_| self.input.invalid(format!("could not reserve {label}")))?;
+        bytes.resize(len, 0);
+        self.input.read_exact(&mut bytes).map_err(|error| {
+            self.input
+                .invalid(format!("DOSY payload is truncated: {error}"))
+        })?;
+        Ok(bytes)
     }
 
     fn read_len(&mut self) -> Result<usize> {
-        let bytes: [u8; 8] = self
-            .take(8)?
-            .try_into()
-            .map_err(|_| ProjectError::Invalid("invalid DOSY length".to_owned()))?;
+        let bytes = self.read_array::<8>()?;
         usize::try_from(u64::from_le_bytes(bytes))
             .map_err(|_| ProjectError::Invalid("DOSY length exceeds usize".to_owned()))
     }
 
-    fn read_f64s(&mut self) -> Result<Vec<f64>> {
+    fn read_f64s(&mut self, expected: usize, label: &str) -> Result<Vec<f64>> {
         let len = self.read_len()?;
+        require_len(label, len, expected)?;
         let byte_len = len
             .checked_mul(8)
             .ok_or_else(|| ProjectError::Invalid("DOSY f64 array size overflow".to_owned()))?;
-        let bytes = self.take(byte_len)?;
-        Ok(bytes
-            .chunks_exact(8)
-            .map(|chunk| {
-                f64::from_bits(u64::from_le_bytes(
-                    chunk.try_into().expect("eight-byte chunk"),
-                ))
-            })
-            .collect())
+        self.input.require_bytes(byte_len, "DOSY f64 array")?;
+        let mut values = Vec::new();
+        values
+            .try_reserve_exact(len)
+            .map_err(|_| self.input.invalid("could not reserve DOSY f64 array"))?;
+        for _ in 0..len {
+            values.push(f64::from_bits(u64::from_le_bytes(self.read_array()?)));
+        }
+        Ok(values)
     }
+}
 
-    fn is_empty(&self) -> bool {
-        self.offset == self.bytes.len()
-    }
+#[cfg(test)]
+fn decode_dosy_bytes(bytes: &[u8], expected_shapes: &DosyShapes) -> Result<DecodedDosy> {
+    let mut reader = EntryReader::new(
+        std::io::Cursor::new(bytes),
+        "test.bin",
+        "DOSY",
+        bytes.len() as u64,
+        bytes.len() as u64,
+    )?;
+    let value = decode_dosy(&mut reader, expected_shapes)?;
+    reader.finish()?;
+    Ok(value)
 }
 
 #[cfg(test)]

@@ -1,5 +1,6 @@
-use super::{ProjectError, Result};
+use super::{EntryReader, ProjectError, ProjectLoadLimits, Result};
 use plotx_io::AfmData;
+use std::io::Read;
 use std::sync::Arc;
 
 const MAGIC: &[u8; 8] = b"PXAFM1\0\0";
@@ -42,40 +43,40 @@ pub(super) fn encode_afm(data: &AfmData) -> Result<Vec<u8>> {
     Ok(output)
 }
 
-pub(super) fn decode_afm(bytes: &[u8]) -> Result<AfmData> {
-    let mut reader = Reader::new(bytes);
-    if reader.take(MAGIC.len())? != MAGIC {
+pub(super) fn decode_afm<R: Read>(input: &mut EntryReader<'_, R>) -> Result<AfmData> {
+    let mut reader = Reader::new(input);
+    if reader.read_array::<8>()? != *MAGIC {
         return Err(ProjectError::Invalid(
             "AFM payload has an invalid signature".to_owned(),
         ));
     }
     let metadata_len = reader.read_len()?;
-    let mut data: AfmData = serde_json::from_slice(reader.take(metadata_len)?)?;
+    if metadata_len > ProjectLoadLimits::default().max_metadata_bytes as usize {
+        return Err(reader
+            .input
+            .invalid("AFM metadata exceeds the configured limit"));
+    }
+    let metadata = reader.read_bytes(metadata_len, "AFM metadata")?;
+    let mut data: AfmData = serde_json::from_slice(&metadata)?;
     for image in &mut data.images {
-        image.raw = reader.read_i32s()?;
         let expected = image
             .width
             .checked_mul(image.height)
             .ok_or_else(|| ProjectError::Invalid("AFM image dimensions overflow".to_owned()))?;
-        require_len("AFM image", image.raw.len(), expected)?;
+        image.raw = reader.read_i32s(expected, "AFM image")?;
     }
     if let Some(forces) = &mut data.forces {
-        forces.raw = reader.read_i32s()?;
-        forces.display_order = reader.read_usizes()?;
-        if forces.z_positions.is_some() {
-            forces.z_positions = Some(reader.read_f64s()?);
-        }
         let curves = forces
             .grid_width
             .checked_mul(forces.grid_height)
             .and_then(|value| value.checked_mul(forces.samples_per_curve))
             .ok_or_else(|| ProjectError::Invalid("AFM force dimensions overflow".to_owned()))?;
-        require_len("AFM force data", forces.raw.len(), curves)?;
-        require_len(
-            "AFM display order",
-            forces.display_order.len(),
-            forces.samples_per_curve,
-        )?;
+        forces.raw = reader.read_i32s(curves, "AFM force data")?;
+        forces.display_order = reader.read_usizes(forces.samples_per_curve, "AFM display order")?;
+        if forces.z_positions.is_some() {
+            forces.z_positions =
+                Some(reader.read_f64s(forces.samples_per_curve, "AFM Z positions")?);
+        }
         if forces
             .display_order
             .iter()
@@ -89,12 +90,21 @@ pub(super) fn decode_afm(bytes: &[u8]) -> Result<AfmData> {
             require_len("AFM Z positions", z.len(), forces.samples_per_curve)?;
         }
     }
-    if !reader.is_empty() {
-        return Err(ProjectError::Invalid(
-            "AFM payload contains trailing data".to_owned(),
-        ));
-    }
     Ok(data)
+}
+
+#[cfg(test)]
+fn decode_afm_bytes(bytes: &[u8]) -> Result<AfmData> {
+    let mut reader = EntryReader::new(
+        std::io::Cursor::new(bytes),
+        "test.bin",
+        "AFM",
+        bytes.len() as u64,
+        bytes.len() as u64,
+    )?;
+    let value = decode_afm(&mut reader)?;
+    reader.finish()?;
+    Ok(value)
 }
 
 fn require_len(label: &str, actual: usize, expected: usize) -> Result<()> {
@@ -146,60 +156,75 @@ fn write_scalars<T, const WIDTH: usize>(
     Ok(())
 }
 
-struct Reader<'a> {
-    bytes: &'a [u8],
-    offset: usize,
+struct Reader<'a, 'p, R: Read> {
+    input: &'a mut EntryReader<'p, R>,
 }
 
-impl<'a> Reader<'a> {
-    fn new(bytes: &'a [u8]) -> Self {
-        Self { bytes, offset: 0 }
+impl<'a, 'p, R: Read> Reader<'a, 'p, R> {
+    fn new(input: &'a mut EntryReader<'p, R>) -> Self {
+        Self { input }
     }
 
-    fn take(&mut self, len: usize) -> Result<&'a [u8]> {
-        let end = self
-            .offset
-            .checked_add(len)
-            .ok_or_else(|| ProjectError::Invalid("AFM payload offset overflow".to_owned()))?;
-        let result = self
-            .bytes
-            .get(self.offset..end)
-            .ok_or_else(|| ProjectError::Invalid("AFM payload is truncated".to_owned()))?;
-        self.offset = end;
-        Ok(result)
+    fn read_array<const N: usize>(&mut self) -> Result<[u8; N]> {
+        self.input.require_bytes(N, "AFM field")?;
+        let mut bytes = [0_u8; N];
+        self.input.read_exact(&mut bytes).map_err(|error| {
+            self.input
+                .invalid(format!("AFM payload is truncated: {error}"))
+        })?;
+        Ok(bytes)
+    }
+
+    fn read_bytes(&mut self, len: usize, label: &str) -> Result<Vec<u8>> {
+        self.input.require_bytes(len, label)?;
+        let mut bytes = Vec::new();
+        bytes
+            .try_reserve_exact(len)
+            .map_err(|_| self.input.invalid(format!("could not reserve {label}")))?;
+        bytes.resize(len, 0);
+        self.input.read_exact(&mut bytes).map_err(|error| {
+            self.input
+                .invalid(format!("AFM payload is truncated: {error}"))
+        })?;
+        Ok(bytes)
     }
 
     fn read_len(&mut self) -> Result<usize> {
-        let bytes: [u8; 8] = self
-            .take(8)?
-            .try_into()
-            .map_err(|_| ProjectError::Invalid("invalid AFM length".to_owned()))?;
+        let bytes = self.read_array::<8>()?;
         usize::try_from(u64::from_le_bytes(bytes))
             .map_err(|_| ProjectError::Invalid("AFM length exceeds usize".to_owned()))
     }
 
-    fn read_i32s(&mut self) -> Result<Arc<[i32]>> {
+    fn read_i32s(&mut self, expected: usize, label: &str) -> Result<Arc<[i32]>> {
         let len = self.read_len()?;
+        require_len(label, len, expected)?;
         let byte_len = len
             .checked_mul(4)
             .ok_or_else(|| ProjectError::Invalid("AFM i32 array size overflow".to_owned()))?;
-        let bytes = self.take(byte_len)?;
-        Ok(bytes
-            .chunks_exact(4)
-            .map(|chunk| i32::from_le_bytes(chunk.try_into().expect("four-byte chunk")))
-            .collect::<Vec<_>>()
-            .into())
+        self.input.require_bytes(byte_len, "AFM i32 array")?;
+        let mut values = Vec::new();
+        values
+            .try_reserve_exact(len)
+            .map_err(|_| self.input.invalid("could not reserve AFM i32 array"))?;
+        for _ in 0..len {
+            values.push(i32::from_le_bytes(self.read_array()?));
+        }
+        Ok(values.into())
     }
 
-    fn read_usizes(&mut self) -> Result<Arc<[usize]>> {
+    fn read_usizes(&mut self, expected: usize, label: &str) -> Result<Arc<[usize]>> {
         let len = self.read_len()?;
+        require_len(label, len, expected)?;
         let byte_len = len
             .checked_mul(8)
             .ok_or_else(|| ProjectError::Invalid("AFM index array size overflow".to_owned()))?;
-        let bytes = self.take(byte_len)?;
-        let mut values = Vec::with_capacity(len);
-        for chunk in bytes.chunks_exact(8) {
-            let value = u64::from_le_bytes(chunk.try_into().expect("eight-byte chunk"));
+        self.input.require_bytes(byte_len, "AFM index array")?;
+        let mut values = Vec::new();
+        values
+            .try_reserve_exact(len)
+            .map_err(|_| self.input.invalid("could not reserve AFM index array"))?;
+        for _ in 0..len {
+            let value = u64::from_le_bytes(self.read_array()?);
             values.push(
                 usize::try_from(value).map_err(|_| {
                     ProjectError::Invalid("AFM sample index exceeds usize".to_owned())
@@ -209,21 +234,21 @@ impl<'a> Reader<'a> {
         Ok(values.into())
     }
 
-    fn read_f64s(&mut self) -> Result<Arc<[f64]>> {
+    fn read_f64s(&mut self, expected: usize, label: &str) -> Result<Arc<[f64]>> {
         let len = self.read_len()?;
+        require_len(label, len, expected)?;
         let byte_len = len
             .checked_mul(8)
             .ok_or_else(|| ProjectError::Invalid("AFM f64 array size overflow".to_owned()))?;
-        let bytes = self.take(byte_len)?;
-        Ok(bytes
-            .chunks_exact(8)
-            .map(|chunk| f64::from_le_bytes(chunk.try_into().expect("eight-byte chunk")))
-            .collect::<Vec<_>>()
-            .into())
-    }
-
-    fn is_empty(&self) -> bool {
-        self.offset == self.bytes.len()
+        self.input.require_bytes(byte_len, "AFM f64 array")?;
+        let mut values = Vec::new();
+        values
+            .try_reserve_exact(len)
+            .map_err(|_| self.input.invalid("could not reserve AFM f64 array"))?;
+        for _ in 0..len {
+            values.push(f64::from_le_bytes(self.read_array()?));
+        }
+        Ok(values.into())
     }
 }
 

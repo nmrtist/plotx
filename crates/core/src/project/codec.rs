@@ -1,4 +1,183 @@
 use super::*;
+use std::io::{self, Read};
+
+/// Centralized bounds for untrusted project archives. The large-entry ceiling
+/// accommodates scientific acquisitions while the smaller metadata ceiling
+/// prevents JSON and other control data from driving disproportionate memory.
+#[derive(Clone, Copy, Debug)]
+pub struct ProjectLoadLimits {
+    pub max_entry_bytes: u64,
+    pub max_metadata_bytes: u64,
+    pub max_materialized_bytes: u64,
+    pub max_project_bytes: u64,
+    pub max_string_bytes: usize,
+    pub max_collection_items: usize,
+}
+
+impl Default for ProjectLoadLimits {
+    fn default() -> Self {
+        Self {
+            max_entry_bytes: 8 * 1024 * 1024 * 1024,
+            max_metadata_bytes: 64 * 1024 * 1024,
+            max_materialized_bytes: 512 * 1024 * 1024,
+            max_project_bytes: 32 * 1024 * 1024 * 1024,
+            max_string_bytes: 16 * 1024 * 1024,
+            max_collection_items: 100_000_000,
+        }
+    }
+}
+
+pub fn validate_archive_limits(
+    zip: &mut zip::ZipArchive<File>,
+    limits: ProjectLoadLimits,
+) -> Result<()> {
+    let mut total = 0_u64;
+    for index in 0..zip.len() {
+        let size = zip.by_index_raw(index).map_err(ProjectError::Zip)?.size();
+        if size > limits.max_entry_bytes {
+            return Err(ProjectError::Invalid(format!(
+                "ZIP entry {index} declares {size} uncompressed bytes, exceeding the {}-byte limit",
+                limits.max_entry_bytes
+            )));
+        }
+        total = total.checked_add(size).ok_or_else(|| {
+            ProjectError::Invalid("project uncompressed size overflows u64".to_owned())
+        })?;
+        if total > limits.max_project_bytes {
+            return Err(ProjectError::Invalid(format!(
+                "project declares {total} uncompressed bytes, exceeding the {}-byte limit",
+                limits.max_project_bytes
+            )));
+        }
+    }
+    Ok(())
+}
+
+pub struct EntryReader<'a, R: Read> {
+    inner: R,
+    path: &'a str,
+    kind: &'a str,
+    declared: u64,
+    limit: u64,
+    read: u64,
+}
+
+impl<'a, R: Read> EntryReader<'a, R> {
+    pub(crate) fn new(
+        inner: R,
+        path: &'a str,
+        kind: &'a str,
+        declared: u64,
+        limit: u64,
+    ) -> Result<Self> {
+        if declared > limit {
+            return Err(ProjectError::Invalid(format!(
+                "{kind} entry {path:?} declares {declared} uncompressed bytes, exceeding the {limit}-byte limit"
+            )));
+        }
+        Ok(Self {
+            inner,
+            path,
+            kind,
+            declared,
+            limit,
+            read: 0,
+        })
+    }
+
+    pub fn remaining(&self) -> u64 {
+        self.declared.min(self.limit).saturating_sub(self.read)
+    }
+
+    pub fn require_bytes(&self, bytes: usize, label: &str) -> Result<()> {
+        let bytes =
+            u64::try_from(bytes).map_err(|_| self.invalid(format!("{label} size exceeds u64")))?;
+        if bytes > self.remaining() {
+            return Err(self.invalid(format!(
+                "payload is truncated: {label} requires {bytes} bytes but only {} remain",
+                self.remaining()
+            )));
+        }
+        Ok(())
+    }
+
+    pub fn invalid(&self, message: impl std::fmt::Display) -> ProjectError {
+        ProjectError::Invalid(format!("{} entry {:?}: {message}", self.kind, self.path))
+    }
+
+    pub(crate) fn finish(mut self) -> Result<()> {
+        let mut byte = [0_u8; 1];
+        match self.read(&mut byte) {
+            Ok(0) => Ok(()),
+            Ok(_) => Err(self.invalid("contains trailing data")),
+            Err(error) => Err(ProjectError::Invalid(format!(
+                "{} entry {:?}: could not verify EOF: {error}",
+                self.kind, self.path
+            ))),
+        }
+    }
+}
+
+impl<R: Read> Read for EntryReader<'_, R> {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        let allowed = self.limit.saturating_sub(self.read);
+        if allowed == 0 && !buffer.is_empty() {
+            let mut probe = [0_u8; 1];
+            return match self.inner.read(&mut probe)? {
+                0 => Ok(0),
+                _ => Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "entry exceeds its read budget",
+                )),
+            };
+        }
+        let max = usize::try_from(allowed.min(buffer.len() as u64)).unwrap_or(buffer.len());
+        let count = self.inner.read(&mut buffer[..max])?;
+        self.read = self.read.checked_add(count as u64).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, "entry byte count overflow")
+        })?;
+        if self.read > self.declared {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "entry exceeds its declared size",
+            ));
+        }
+        Ok(count)
+    }
+}
+
+pub fn read_entry<T>(
+    zip: &mut zip::ZipArchive<File>,
+    path: &str,
+    kind: &str,
+    limit: u64,
+    decode: impl FnOnce(&mut EntryReader<'_, zip::read::ZipFile<'_, File>>) -> Result<T>,
+) -> Result<T> {
+    let entry = zip
+        .by_name(path)
+        .map_err(|error| contextual_zip(path, kind, error))?;
+    let declared = entry.size();
+    let mut reader = EntryReader::new(entry, path, kind, declared, limit)?;
+    let value = decode(&mut reader).map_err(|error| contextual_error(path, kind, error))?;
+    reader.finish()?;
+    Ok(value)
+}
+
+fn contextual_zip(path: &str, kind: &str, error: zip::result::ZipError) -> ProjectError {
+    ProjectError::Invalid(format!("{kind} entry {path:?}: {error}"))
+}
+
+fn contextual_error(path: &str, kind: &str, error: ProjectError) -> ProjectError {
+    let text = error.to_string();
+    if text.contains(path) {
+        return error;
+    }
+    let context = format!("{kind} entry {path:?}: {text}");
+    match error {
+        ProjectError::Unsupported(_) => ProjectError::Unsupported(context),
+        _ => ProjectError::Invalid(context),
+    }
+}
 
 pub fn nmr_acquisition_classification() -> Classification {
     Classification {
@@ -86,17 +265,39 @@ pub fn read_json<T: for<'de> Deserialize<'de>>(
     zip: &mut zip::ZipArchive<File>,
     path: &str,
 ) -> Result<T> {
-    let mut f = zip.by_name(path)?;
-    let mut data = Vec::new();
-    f.read_to_end(&mut data)?;
-    Ok(serde_json::from_slice(&data)?)
+    read_entry(
+        zip,
+        path,
+        "JSON",
+        ProjectLoadLimits::default().max_metadata_bytes,
+        |reader| {
+            let capacity = usize::try_from(reader.remaining())
+                .map_err(|_| reader.invalid("declared size exceeds usize"))?;
+            let mut data = Vec::new();
+            data.try_reserve_exact(capacity)
+                .map_err(|_| reader.invalid("could not reserve metadata buffer"))?;
+            reader.read_to_end(&mut data)?;
+            Ok(serde_json::from_slice(&data)?)
+        },
+    )
 }
 
 pub fn read_bytes(zip: &mut zip::ZipArchive<File>, path: &str) -> Result<Vec<u8>> {
-    let mut f = zip.by_name(path)?;
-    let mut data = Vec::new();
-    f.read_to_end(&mut data)?;
-    Ok(data)
+    read_entry(
+        zip,
+        path,
+        "materialized binary",
+        ProjectLoadLimits::default().max_materialized_bytes,
+        |reader| {
+            let capacity = usize::try_from(reader.remaining())
+                .map_err(|_| reader.invalid("declared size exceeds usize"))?;
+            let mut data = Vec::new();
+            data.try_reserve_exact(capacity)
+                .map_err(|_| reader.invalid("could not reserve entry buffer"))?;
+            reader.read_to_end(&mut data)?;
+            Ok(data)
+        },
+    )
 }
 
 pub fn validate_manifest(manifest: &Manifest) -> Result<()> {
@@ -141,6 +342,31 @@ pub fn complex_from_bytes(raw: &[u8]) -> Result<Vec<Complex64>> {
             Complex64::new(f64::from_le_bytes(re), f64::from_le_bytes(im))
         })
         .collect())
+}
+
+pub fn complex_from_reader<R: Read>(reader: &mut EntryReader<'_, R>) -> Result<Vec<Complex64>> {
+    if !reader.remaining().is_multiple_of(16) {
+        return Err(reader.invalid(format!(
+            "complex blob length {} is not divisible by 16",
+            reader.remaining()
+        )));
+    }
+    let count = usize::try_from(reader.remaining() / 16)
+        .map_err(|_| reader.invalid("complex element count exceeds usize"))?;
+    let mut values = Vec::new();
+    values
+        .try_reserve_exact(count)
+        .map_err(|_| reader.invalid("could not reserve complex data"))?;
+    let mut bytes = [0_u8; 16];
+    for _ in 0..count {
+        reader
+            .read_exact(&mut bytes)
+            .map_err(|error| reader.invalid(format!("complex blob is truncated: {error}")))?;
+        let re = f64::from_le_bytes(bytes[..8].try_into().expect("fixed eight-byte half"));
+        let im = f64::from_le_bytes(bytes[8..].try_into().expect("fixed eight-byte half"));
+        values.push(Complex64::new(re, im));
+    }
+    Ok(values)
 }
 
 pub fn required(value: Option<f64>, name: &str) -> Result<f64> {
@@ -402,3 +628,7 @@ pub fn tool_from_str(v: &str) -> Tool {
         _ => Tool::Select,
     }
 }
+
+#[cfg(test)]
+#[path = "codec_tests.rs"]
+mod limited_reader_tests;

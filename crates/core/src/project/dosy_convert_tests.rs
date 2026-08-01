@@ -19,7 +19,7 @@ fn maps() -> (DiffusionMap, IltResult) {
 fn dosy_binary_round_trip_validates_shapes_truncation_and_trailing_data() {
     let (dosy, ilt) = maps();
     let (encoded, shapes) = encode_dosy(Some(&dosy), Some(&ilt)).unwrap();
-    let decoded = decode_dosy(&encoded, &shapes).unwrap();
+    let decoded = decode_dosy_bytes(&encoded, &shapes).unwrap();
     let decoded_dosy = decoded.dosy_map.unwrap();
     assert_eq!(decoded_dosy.ppm, dosy.ppm);
     assert_eq!(decoded_dosy.d, dosy.d);
@@ -29,14 +29,14 @@ fn dosy_binary_round_trip_validates_shapes_truncation_and_trailing_data() {
     assert_eq!(decoded_ilt.d_grid, ilt.d_grid);
     assert_eq!(decoded_ilt.amp, ilt.amp);
 
-    let truncated = decode_dosy(&encoded[..encoded.len() - 1], &shapes)
+    let truncated = decode_dosy_bytes(&encoded[..encoded.len() - 1], &shapes)
         .expect_err("a truncated final ILT row must be rejected")
         .to_string();
     assert!(truncated.contains("truncated"), "{truncated}");
 
     let mut trailing = encoded.clone();
     trailing.push(0);
-    let trailing = decode_dosy(&trailing, &shapes)
+    let trailing = decode_dosy_bytes(&trailing, &shapes)
         .expect_err("trailing data must be rejected")
         .to_string();
     assert!(trailing.contains("trailing data"), "{trailing}");
@@ -75,11 +75,11 @@ fn dosy_binary_round_trip_validates_shapes_truncation_and_trailing_data() {
 fn decoding_rejects_a_payload_that_disagrees_with_itself() {
     let (dosy, ilt) = maps();
     let (bytes, shapes) = encode_dosy(Some(&dosy), Some(&ilt)).expect("encode");
-    assert!(decode_dosy(&bytes, &shapes).is_ok());
+    assert!(decode_dosy_bytes(&bytes, &shapes).is_ok());
 
     let mut wrong_magic = bytes.clone();
     wrong_magic[0] ^= 0xff;
-    let error = decode_dosy(&wrong_magic, &shapes)
+    let error = decode_dosy_bytes(&wrong_magic, &shapes)
         .expect_err("a payload with a foreign signature must be rejected")
         .to_string();
     assert!(error.contains("invalid signature"), "{error}");
@@ -89,7 +89,7 @@ fn decoding_rejects_a_payload_that_disagrees_with_itself() {
     // decode into whichever one happens to be read second.
     let mut claimed = shapes.clone();
     claimed.diffusion = Some(DiffusionMapShape { len: 3 });
-    let error = decode_dosy(&bytes, &claimed)
+    let error = decode_dosy_bytes(&bytes, &claimed)
         .expect_err("declared shapes that disagree with the blob must be rejected")
         .to_string();
     assert!(error.contains("do not match expected shapes"), "{error}");
@@ -103,7 +103,7 @@ fn decoding_rejects_a_payload_that_disagrees_with_itself() {
             d_grid_len: 3,
         }),
     };
-    assert!(decode_dosy(&bytes, &huge).is_err());
+    assert!(decode_dosy_bytes(&bytes, &huge).is_err());
 }
 
 #[test]
@@ -111,7 +111,7 @@ fn decoding_rejects_a_truncated_array_inside_a_well_formed_header() {
     let (dosy, _) = maps();
     let (bytes, shapes) = encode_dosy(Some(&dosy), None).expect("encode");
     let truncated = &bytes[..bytes.len() - 8];
-    let error = decode_dosy(truncated, &shapes)
+    let error = decode_dosy_bytes(truncated, &shapes)
         .expect_err("a truncated array must be rejected")
         .to_string();
     assert!(error.contains("truncated"), "{error}");

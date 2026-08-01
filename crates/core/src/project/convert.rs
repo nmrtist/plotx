@@ -290,6 +290,9 @@ pub fn object_to_dataset(
     data: &DataObject,
     recipe: &RecipeObject,
 ) -> Result<Dataset> {
+    // Named generic decoder functions do not satisfy the higher-ranked lifetime
+    // required by `ZipFile`; closures let the compiler reborrow each entry.
+    #[allow(clippy::redundant_closure)]
     if data.classification.domain == "mass_spectrometry" {
         if data.payload.storage != STORAGE_MASS_SPEC_V1 {
             return Err(ProjectError::Unsupported(format!(
@@ -297,8 +300,13 @@ pub fn object_to_dataset(
                 data.payload.storage
             )));
         }
-        let raw = read_bytes(zip, &data.payload.blob)?;
-        let run = super::mass_spec_convert::decode(&raw)?;
+        let run = read_entry(
+            zip,
+            &data.payload.blob,
+            "LC–MS payload",
+            ProjectLoadLimits::default().max_entry_bytes,
+            |reader| super::mass_spec_convert::decode(reader),
+        )?;
         let mut dataset = crate::state::MassSpecDataset::load(run);
         dataset.field_catalog = read_field_catalog(data)?;
         dataset.name = data.label.clone();
@@ -332,8 +340,14 @@ pub fn object_to_dataset(
         return Ok(dataset);
     }
     if data.classification.domain == "afm" && data.payload.storage == STORAGE_AFM_V1 {
-        let raw = read_bytes(zip, &data.payload.blob)?;
-        let decoded = super::afm_convert::decode_afm(&raw)?;
+        #[allow(clippy::redundant_closure)]
+        let decoded = read_entry(
+            zip,
+            &data.payload.blob,
+            "AFM payload",
+            ProjectLoadLimits::default().max_entry_bytes,
+            |reader| super::afm_convert::decode_afm(reader),
+        )?;
         let mut dataset = crate::state::AfmDataset::load(decoded);
         dataset.field_catalog = read_field_catalog(data)?;
         dataset.name = data.label.clone();
@@ -382,8 +396,47 @@ pub fn object_to_dataset(
             data.payload.storage
         )));
     }
-    let raw = read_bytes(zip, &data.payload.blob)?;
-    let values = complex_from_bytes(&raw)?;
+    let expected_values = match data.dimensions.len() {
+        1 => data
+            .payload
+            .shape
+            .first()
+            .copied()
+            .unwrap_or(data.dimensions[0].size),
+        2 => data
+            .payload
+            .shape
+            .first()
+            .copied()
+            .zip(data.payload.shape.get(1).copied())
+            .ok_or_else(|| ProjectError::Invalid("2D payload shape is incomplete".to_owned()))?
+            .0
+            .checked_mul(data.payload.shape[1])
+            .ok_or_else(|| ProjectError::Invalid("2D NMR shape overflows usize".to_owned()))?,
+        n => {
+            return Err(ProjectError::Unsupported(format!(
+                "NMR acquisitions with {n} dimensions"
+            )));
+        }
+    };
+    let expected_bytes = expected_values.checked_mul(16).ok_or_else(|| {
+        ProjectError::Invalid("NMR payload byte length overflows usize".to_owned())
+    })?;
+    let values = read_entry(
+        zip,
+        &data.payload.blob,
+        "NMR complex-f64 payload",
+        ProjectLoadLimits::default().max_entry_bytes,
+        |reader| {
+            if reader.remaining() != expected_bytes as u64 {
+                return Err(reader.invalid(format!(
+                    "complex payload has {} bytes but shape requires {expected_bytes}",
+                    reader.remaining()
+                )));
+            }
+            complex_from_reader(reader)
+        },
+    )?;
     match data.dimensions.len() {
         1 => {
             let dim = data.dimensions.first().unwrap();
@@ -425,7 +478,10 @@ pub fn object_to_dataset(
                 .shape
                 .get(1)
                 .ok_or_else(|| ProjectError::Invalid("2D payload missing cols".to_owned()))?;
-            if values.len() != rows * cols {
+            let expected_len = rows
+                .checked_mul(cols)
+                .ok_or_else(|| ProjectError::Invalid("2D NMR shape overflows usize".to_owned()))?;
+            if values.len() != expected_len {
                 return Err(ProjectError::Invalid(format!(
                     "2D data length {} does not match shape {}x{}",
                     values.len(),
@@ -520,8 +576,13 @@ fn restore_dosy(
             extension.storage
         )))
     } else {
-        read_bytes(zip, &extension.blob)
-            .and_then(|bytes| super::dosy_convert::decode_dosy(&bytes, &extension.shapes))
+        read_entry(
+            zip,
+            &extension.blob,
+            "DOSY payload",
+            ProjectLoadLimits::default().max_entry_bytes,
+            |reader| super::dosy_convert::decode_dosy(reader, &extension.shapes),
+        )
     };
     match decoded {
         Ok(decoded) => {

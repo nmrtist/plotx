@@ -436,6 +436,7 @@ fn save_project_impl(
 pub fn load_project(path: &Path) -> Result<PlotxApp> {
     let file = File::open(path)?;
     let mut zip = zip::ZipArchive::new(file)?;
+    validate_archive_limits(&mut zip, ProjectLoadLimits::default())?;
     let manifest: Manifest = read_json(&mut zip, "manifest.json")?;
     validate_manifest(&manifest)?;
 

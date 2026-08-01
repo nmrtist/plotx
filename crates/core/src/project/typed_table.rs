@@ -67,12 +67,7 @@ pub fn read_table_envelope_v1(
     }
     let store = MemoryBlockStore::default();
     for hash in envelope.referenced_blocks() {
-        let bytes = read_bytes(zip, &block_path(hash)).map_err(|error| match error {
-            ProjectError::Zip(zip::result::ZipError::FileNotFound) => {
-                ProjectError::Invalid(format!("typed table block {hash} is missing"))
-            }
-            other => other,
-        })?;
+        let bytes = read_bytes(zip, &block_path(hash))?;
         if ContentHash::of(&bytes) != hash {
             return Err(ProjectError::Invalid(format!(
                 "typed table block {hash} is corrupt"
@@ -371,6 +366,52 @@ mod tests {
         assert_eq!(loaded.history.len(), 1);
         assert_eq!(loaded.history[0].id, loaded.revision.parents[0]);
         assert!(loaded.extensions.contains_key("space.vendor.instrument"));
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn missing_table_block_error_contains_its_hash_and_path() {
+        let store = MemoryBlockStore::default();
+        let codecs = CodecRegistry::with_arrow_ipc();
+        let value = ColumnSchema::new("value", LogicalType::Float64);
+        let schema = TableSchema::new(vec![value]).unwrap();
+        let mut builder = SnapshotBuilder::new(TableId::new(), schema, &store, &codecs).unwrap();
+        builder
+            .push_batch(
+                &[RowId::new()],
+                &[ColumnChunk::all_valid(ColumnValues::Float64(vec![1.0]))],
+            )
+            .unwrap();
+        let revision = TableRevision::initial(
+            builder.finish().unwrap(),
+            RevisionReason::Import,
+            "import.delimited.v1",
+            "test",
+        )
+        .unwrap();
+        let envelope = TableEnvelopeV1::new(revision);
+        let missing_hash = envelope.referenced_blocks().into_iter().next().unwrap();
+        let envelope_path = "objects/table-1/table-envelope-v1.json";
+        let path = std::env::temp_dir().join(format!(
+            "plotx-missing-table-block-{}.zip",
+            uuid::Uuid::new_v4()
+        ));
+        let file = File::create(&path).unwrap();
+        let mut writer = zip::ZipWriter::new(file);
+        let options =
+            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        write_json(&mut writer, options, envelope_path, &envelope).unwrap();
+        writer.finish().unwrap();
+
+        let mut archive = zip::ZipArchive::new(File::open(&path).unwrap()).unwrap();
+        let result = read_table_envelope_v1(&mut archive, envelope_path, &BTreeSet::new(), &codecs);
+        let message = match result {
+            Ok(_) => panic!("missing table block was accepted"),
+            Err(error) => error.to_string(),
+        };
+        let missing_path = block_path(missing_hash);
+        assert!(message.contains(&missing_hash.to_string()), "{message}");
+        assert!(message.contains(&missing_path), "{message}");
         std::fs::remove_file(path).unwrap();
     }
 
