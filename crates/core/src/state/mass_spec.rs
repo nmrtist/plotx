@@ -1,6 +1,8 @@
 use super::{DatasetId, DatasetLineage, FieldCatalog, FieldId};
 use plotx_figure::{Axis, Figure, Series, SeriesKind};
-use plotx_io::{ChromatogramKind, FunctionId, FunctionKind, MassScan, MassSpecRun, ScanId};
+use plotx_io::{
+    AcquisitionStreamId, ChromatogramKind, MassSpecRun, MassSpectrum, SpectrumId, StreamRole,
+};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -51,7 +53,7 @@ impl MassSpectrumExtractionMethod {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ExtractedMassSpectrum {
     pub id: ExtractionId,
-    pub function: FunctionId,
+    pub stream: AcquisitionStreamId,
     pub start_time_min: f64,
     pub end_time_min: f64,
     pub method: MassSpectrumExtractionMethod,
@@ -64,18 +66,18 @@ pub struct MassSpecDataset {
     pub run: MassSpecRun,
     pub name: Option<String>,
     pub lineage: Option<DatasetLineage>,
-    pub active_function: FunctionId,
+    pub active_stream: AcquisitionStreamId,
     /// A transient cursor preview. Extracted spectra are stored separately and
     /// remain fixed when this cursor moves.
-    pub selected_scan: Option<ScanId>,
+    pub selected_spectrum: Option<SpectrumId>,
     pub extracted_spectra: Vec<ExtractedMassSpectrum>,
     pub next_extraction_id: ExtractionId,
 }
 
 impl MassSpecDataset {
     pub fn load(run: MassSpecRun) -> Self {
-        let active_function =
-            first_ms_function(&run).expect("the Waters reader guarantees a readable MS function");
+        let active_stream =
+            first_ms_stream(&run).expect("a validated LC–MS run has a readable primary stream");
         let mut field_catalog = mass_spec_field_catalog(&run);
         field_catalog.attach_provenance(&run.source, None);
         Self {
@@ -84,8 +86,8 @@ impl MassSpecDataset {
             run,
             name: None,
             lineage: None,
-            active_function,
-            selected_scan: None,
+            active_stream,
+            selected_spectrum: None,
             extracted_spectra: Vec::new(),
             next_extraction_id: ExtractionId::new(1),
         }
@@ -94,52 +96,56 @@ impl MassSpecDataset {
     pub fn repair_selection(&mut self) -> Result<(), String> {
         let active_valid = self
             .run
-            .function(self.active_function)
-            .is_some_and(readable_ms_function);
+            .stream(self.active_stream)
+            .is_some_and(readable_ms_stream);
         if !active_valid {
-            self.active_function = first_ms_function(&self.run)
-                .ok_or_else(|| "LC–MS run has no readable non-reference MS function".to_owned())?;
+            self.active_stream = first_ms_stream(&self.run)
+                .ok_or_else(|| "LC–MS run has no readable non-reference MS stream".to_owned())?;
         }
-        if self.selected_scan.is_some_and(|selected| {
+        if self.selected_spectrum.is_some_and(|selected| {
             self.run
-                .function(self.active_function)
-                .is_none_or(|function| function.scans.iter().all(|scan| scan.id != selected))
+                .stream(self.active_stream)
+                .is_none_or(|stream| stream.spectra.iter().all(|scan| scan.id != selected))
         }) {
-            self.selected_scan = None;
+            self.selected_spectrum = None;
         }
         self.validate_extractions()?;
         self.rebuild_field_catalog();
         Ok(())
     }
 
-    pub fn supported_ms_functions(&self) -> impl Iterator<Item = FunctionId> + '_ {
+    pub fn supported_ms_streams(&self) -> impl Iterator<Item = AcquisitionStreamId> + '_ {
         self.run
-            .functions
+            .streams
             .iter()
-            .filter(|function| readable_ms_function(function))
-            .map(|function| function.id)
+            .filter(|stream| readable_ms_stream(stream))
+            .map(|stream| stream.id)
     }
 
-    pub fn select_function(&mut self, id: FunctionId) -> bool {
+    pub fn select_stream(&mut self, id: AcquisitionStreamId) -> bool {
         if self
             .run
-            .function(id)
-            .is_none_or(|function| !readable_ms_function(function))
+            .stream(id)
+            .is_none_or(|stream| !readable_ms_stream(stream))
         {
             return false;
         }
-        self.active_function = id;
-        self.selected_scan = None;
+        self.active_stream = id;
+        self.selected_spectrum = None;
         true
     }
 
-    pub fn select_nearest_scan(&mut self, function: FunctionId, retention_time_min: f64) -> bool {
+    pub fn select_nearest_spectrum(
+        &mut self,
+        stream: AcquisitionStreamId,
+        retention_time_min: f64,
+    ) -> bool {
         if !retention_time_min.is_finite() {
             return false;
         }
-        let Some(scan) = self.run.function(function).and_then(|candidate| {
-            readable_ms_function(candidate).then(|| {
-                candidate.scans.iter().min_by(|left, right| {
+        let Some(scan) = self.run.stream(stream).and_then(|candidate| {
+            readable_ms_stream(candidate).then(|| {
+                candidate.spectra.iter().min_by(|left, right| {
                     (left.retention_time_min - retention_time_min)
                         .abs()
                         .total_cmp(&(right.retention_time_min - retention_time_min).abs())
@@ -149,39 +155,43 @@ impl MassSpecDataset {
         }) else {
             return false;
         };
-        self.active_function = function;
-        self.selected_scan = Some(scan.id);
+        self.active_stream = stream;
+        self.selected_spectrum = Some(scan.id);
         true
     }
 
-    pub fn selected_scan(&self) -> Option<&MassScan> {
+    pub fn selected_spectrum(&self) -> Option<&MassSpectrum> {
         self.run
-            .function(self.active_function)?
-            .scans
+            .stream(self.active_stream)?
+            .spectra
             .iter()
-            .find(|scan| Some(scan.id) == self.selected_scan)
+            .find(|scan| Some(scan.id) == self.selected_spectrum)
     }
 
     pub(crate) fn field_representation(&self, id: FieldId) -> Option<super::FieldRepresentation> {
-        for function in self
+        for stream in self
             .run
-            .functions
+            .streams
             .iter()
-            .filter(|function| readable_ms_function(function))
+            .filter(|stream| readable_ms_stream(stream))
         {
-            if self.field_catalog.id_for_key(&tic_key(function.id)) == Some(id)
-                || self.field_catalog.id_for_key(&bpi_key(function.id)) == Some(id)
+            if self.field_catalog.id_for_key(&stream_tic_key(stream.id)) == Some(id)
+                || self.field_catalog.id_for_key(&stream_bpi_key(stream.id)) == Some(id)
             {
                 return Some(super::FieldRepresentation::Curve1D);
             }
-            if self.field_catalog.id_for_key(&spectrum_key(function.id)) == Some(id) {
-                return (function.id == self.active_function && self.selected_scan().is_some())
+            if self
+                .field_catalog
+                .id_for_key(&stream_spectrum_key(stream.id))
+                == Some(id)
+            {
+                return (stream.id == self.active_stream && self.selected_spectrum().is_some())
                     .then_some(super::FieldRepresentation::Curve1D);
             }
         }
         if self.extracted_spectra.iter().any(|extraction| {
             self.field_catalog
-                .id_for_key(&extracted_spectrum_key(extraction.id))
+                .id_for_key(&extracted_stream_spectrum_key(extraction.id))
                 == Some(id)
         }) || self
             .run
@@ -197,12 +207,12 @@ impl MassSpecDataset {
 
     pub fn add_extraction(
         &mut self,
-        function: FunctionId,
+        stream: AcquisitionStreamId,
         start_time_min: f64,
         end_time_min: f64,
         method: MassSpectrumExtractionMethod,
     ) -> Result<(ExtractionId, FieldId), String> {
-        let extraction = self.plan_extraction(function, start_time_min, end_time_min, method)?;
+        let extraction = self.plan_extraction(stream, start_time_min, end_time_min, method)?;
         let id = extraction.id;
         self.next_extraction_id = id
             .checked_advance()
@@ -211,14 +221,14 @@ impl MassSpecDataset {
         self.rebuild_field_catalog();
         let field = self
             .field_catalog
-            .id_for_key(&extracted_spectrum_key(id))
+            .id_for_key(&extracted_stream_spectrum_key(id))
             .ok_or_else(|| "LC–MS extraction field was not registered".to_owned())?;
         Ok((id, field))
     }
 
     pub(crate) fn plan_extraction(
         &self,
-        function: FunctionId,
+        stream: AcquisitionStreamId,
         start_time_min: f64,
         end_time_min: f64,
         method: MassSpectrumExtractionMethod,
@@ -231,12 +241,17 @@ impl MassSpecDataset {
         } else {
             (end_time_min, start_time_min)
         };
-        let function_data = self
+        let stream_data = self
             .run
-            .function(function)
-            .filter(|function| readable_ms_function(function))
-            .ok_or_else(|| format!("Function {function} has no readable MS scans."))?;
-        if !function_data.scans.iter().any(|scan| {
+            .stream(stream)
+            .filter(|stream| readable_ms_stream(stream))
+            .ok_or_else(|| {
+                format!(
+                    "{} has no readable MS scans.",
+                    stream_display_label_for_id(&self.run, stream)
+                )
+            })?;
+        if !stream_data.spectra.iter().any(|scan| {
             scan.retention_time_min >= start_time_min && scan.retention_time_min <= end_time_min
         }) {
             return Err(format!(
@@ -245,7 +260,7 @@ impl MassSpecDataset {
         }
         Ok(ExtractedMassSpectrum {
             id: self.next_extraction_id,
-            function,
+            stream,
             start_time_min,
             end_time_min,
             method,
@@ -277,16 +292,16 @@ impl MassSpecDataset {
     pub fn tic_panel_note(&self) -> String {
         let polarity = self
             .run
-            .function(self.active_function)
-            .map(|function| match function.polarity {
+            .stream(self.active_stream)
+            .map(|stream| match stream.polarity() {
                 plotx_io::Polarity::Positive => "positive polarity",
                 plotx_io::Polarity::Negative => "negative polarity",
                 plotx_io::Polarity::Unknown => "polarity unknown",
             })
             .unwrap_or("polarity unknown");
         format!(
-            "Total ion chromatogram — Function {}, {polarity}",
-            self.active_function
+            "Total ion chromatogram — {}, {polarity}",
+            stream_display_label_for_id(&self.run, self.active_stream)
         )
     }
 
@@ -322,16 +337,16 @@ impl MassSpecDataset {
                     extraction.id
                 ));
             }
-            let Some(function) = run
-                .function(extraction.function)
-                .filter(|function| readable_ms_function(function))
+            let Some(stream) = run
+                .stream(extraction.stream)
+                .filter(|stream| readable_ms_stream(stream))
             else {
                 return Err(format!(
-                    "LC–MS extraction {} references missing function {}",
-                    extraction.id, extraction.function
+                    "LC–MS extraction {} references missing stream {}",
+                    extraction.id, extraction.stream
                 ));
             };
-            if !function.scans.iter().any(|scan| {
+            if !stream.spectra.iter().any(|scan| {
                 scan.retention_time_min >= extraction.start_time_min
                     && scan.retention_time_min <= extraction.end_time_min
             }) {
@@ -376,33 +391,34 @@ impl MassSpecDataset {
     }
 
     pub(crate) fn field_values(&self, id: FieldId) -> Option<MassSpecFieldValues> {
-        for function in self
+        for stream in self
             .run
-            .functions
+            .streams
             .iter()
-            .filter(|function| readable_ms_function(function))
+            .filter(|stream| readable_ms_stream(stream))
         {
-            let function_id = function.id;
-            if self.field_catalog.id_for_key(&tic_key(function_id)) == Some(id) {
+            let stream_id = stream.id;
+            let stream_label = stream_display_label(stream);
+            if self.field_catalog.id_for_key(&stream_tic_key(stream_id)) == Some(id) {
                 return Some((
-                    format!("Function {function_id} TIC"),
+                    format!("{stream_label} TIC"),
                     "Retention time (min)",
                     "Total ion current".to_owned(),
-                    function
-                        .scans
+                    stream
+                        .spectra
                         .iter()
                         .map(|scan| [scan.retention_time_min, scan.tic])
                         .collect(),
                     false,
                 ));
             }
-            if self.field_catalog.id_for_key(&bpi_key(function_id)) == Some(id) {
+            if self.field_catalog.id_for_key(&stream_bpi_key(stream_id)) == Some(id) {
                 return Some((
-                    format!("Function {function_id} BPI"),
+                    format!("{stream_label} BPI"),
                     "Retention time (min)",
                     "Base-peak intensity".to_owned(),
-                    function
-                        .scans
+                    stream
+                        .spectra
                         .iter()
                         .map(|scan| {
                             [
@@ -414,14 +430,19 @@ impl MassSpecDataset {
                     false,
                 ));
             }
-            if self.field_catalog.id_for_key(&spectrum_key(function_id)) == Some(id) {
-                let scan = (function_id == self.active_function)
-                    .then(|| self.selected_scan())
+            if self
+                .field_catalog
+                .id_for_key(&stream_spectrum_key(stream_id))
+                == Some(id)
+            {
+                let scan = (stream_id == self.active_stream)
+                    .then(|| self.selected_spectrum())
                     .flatten()?;
                 return Some((
                     format!(
-                        "MS — {:.3} min — scan {} — Function {function_id}",
-                        scan.retention_time_min, scan.id
+                        "MS — {:.3} min — scan {} — {stream_label}",
+                        scan.retention_time_min,
+                        spectrum_display_label(scan)
                     ),
                     "m/z",
                     "Intensity".to_owned(),
@@ -438,14 +459,14 @@ impl MassSpecDataset {
         for extraction in &self.extracted_spectra {
             if self
                 .field_catalog
-                .id_for_key(&extracted_spectrum_key(extraction.id))
+                .id_for_key(&extracted_stream_spectrum_key(extraction.id))
                 != Some(id)
             {
                 continue;
             }
             let points = extracted_points(&self.run, extraction)?;
             return Some((
-                extraction_title(extraction),
+                extraction_title(&self.run, extraction),
                 "m/z",
                 "Intensity".to_owned(),
                 points,
@@ -473,14 +494,14 @@ impl MassSpecDataset {
 }
 
 pub(crate) fn mass_spec_field_keys(run: &MassSpecRun) -> Vec<String> {
-    run.functions
+    run.streams
         .iter()
-        .filter(|function| readable_ms_function(function))
-        .flat_map(|function| {
+        .filter(|stream| readable_ms_stream(stream))
+        .flat_map(|stream| {
             [
-                tic_key(function.id),
-                bpi_key(function.id),
-                spectrum_key(function.id),
+                stream_tic_key(stream.id),
+                stream_bpi_key(stream.id),
+                stream_spectrum_key(stream.id),
             ]
         })
         .chain(
@@ -499,7 +520,7 @@ pub(crate) fn mass_spec_dataset_field_keys(dataset: &MassSpecDataset) -> Vec<Str
             dataset
                 .extracted_spectra
                 .iter()
-                .map(|item| extracted_spectrum_key(item.id)),
+                .map(|item| extracted_stream_spectrum_key(item.id)),
         )
         .collect()
 }
@@ -508,40 +529,64 @@ pub(crate) fn mass_spec_field_catalog(run: &MassSpecRun) -> FieldCatalog {
     FieldCatalog::for_keys(mass_spec_field_keys(run))
 }
 
-pub fn tic_key(id: FunctionId) -> String {
-    format!("mass_spec.function.{}.tic", id.get())
+pub fn stream_tic_key(id: AcquisitionStreamId) -> String {
+    format!("mass_spec.stream.{}.tic", id.get())
 }
-pub fn bpi_key(id: FunctionId) -> String {
-    format!("mass_spec.function.{}.bpi", id.get())
+pub fn stream_bpi_key(id: AcquisitionStreamId) -> String {
+    format!("mass_spec.stream.{}.bpi", id.get())
 }
-pub fn spectrum_key(id: FunctionId) -> String {
-    format!("mass_spec.function.{}.spectrum", id.get())
+pub fn stream_spectrum_key(id: AcquisitionStreamId) -> String {
+    format!("mass_spec.stream.{}.spectrum", id.get())
 }
-pub fn extracted_spectrum_key(id: ExtractionId) -> String {
+pub fn extracted_stream_spectrum_key(id: ExtractionId) -> String {
     format!("mass_spec.extraction.{id}.spectrum")
 }
 pub fn channel_key(id: &str) -> String {
     format!("mass_spec.channel.{id}")
 }
 
-fn readable_ms_function(function: &plotx_io::AcquisitionFunction) -> bool {
-    function.kind == FunctionKind::MassSpectrum && !function.scans.is_empty()
+fn readable_ms_stream(stream: &plotx_io::AcquisitionStream) -> bool {
+    stream.role == StreamRole::Primary && !stream.spectra.is_empty()
 }
 
-fn first_ms_function(run: &MassSpecRun) -> Option<FunctionId> {
-    run.functions
+fn first_ms_stream(run: &MassSpecRun) -> Option<AcquisitionStreamId> {
+    run.streams
         .iter()
-        .find(|function| readable_ms_function(function))
-        .map(|function| function.id)
+        .find(|stream| readable_ms_stream(stream))
+        .map(|stream| stream.id)
 }
 
-pub fn extraction_title(extraction: &ExtractedMassSpectrum) -> String {
+pub fn stream_display_label(stream: &plotx_io::AcquisitionStream) -> String {
+    stream
+        .source_label
+        .as_deref()
+        .filter(|label| !label.trim().is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("Stream {}", stream.id))
+}
+
+pub(crate) fn stream_display_label_for_id(run: &MassSpecRun, id: AcquisitionStreamId) -> String {
+    run.stream(id)
+        .map(stream_display_label)
+        .unwrap_or_else(|| format!("Stream {id}"))
+}
+
+pub fn spectrum_display_label(spectrum: &MassSpectrum) -> String {
+    spectrum
+        .source_native_id
+        .as_deref()
+        .filter(|label| !label.trim().is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| spectrum.id.to_string())
+}
+
+pub fn extraction_title(run: &MassSpecRun, extraction: &ExtractedMassSpectrum) -> String {
     format!(
-        "{} — {:.3}–{:.3} min — Function {}",
+        "{} — {:.3}–{:.3} min — {}",
         extraction.method.label(),
         extraction.start_time_min,
         extraction.end_time_min,
-        extraction.function
+        stream_display_label_for_id(run, extraction.stream)
     )
 }
 
@@ -549,7 +594,7 @@ fn extracted_points(
     run: &MassSpecRun,
     extraction: &ExtractedMassSpectrum,
 ) -> Option<Vec<[f64; 2]>> {
-    let function = run.function(extraction.function)?;
+    let stream = run.stream(extraction.stream)?;
     let aggregation = match extraction.method {
         MassSpectrumExtractionMethod::NearestScan => {
             plotx_analysis::mass_spec::SpectrumAggregation::NearestScan
@@ -561,7 +606,7 @@ fn extracted_points(
         MassSpectrumExtractionMethod::Sum => plotx_analysis::mass_spec::SpectrumAggregation::Sum,
     };
     plotx_analysis::mass_spec::extract_spectrum(
-        &function.scans,
+        &stream.spectra,
         [extraction.start_time_min, extraction.end_time_min],
         aggregation,
     )
@@ -598,22 +643,22 @@ fn point_ranges(points: &[[f64; 2]], include_zero: bool) -> ([f64; 2], [f64; 2])
 #[cfg(test)]
 pub(crate) fn sample_mass_spec_run() -> MassSpecRun {
     use plotx_io::{
-        AcquisitionFunction, ChromatogramChannel, ChromatogramChannelId, Polarity, ScanEncoding,
-        WatersDecoder,
+        AcquisitionStream, ChromatogramChannel, ChromatogramChannelId, Polarity,
+        SpectrumRepresentation,
     };
-    let scan = |id, time, tic, mz: &[f64], intensity: &[f64]| MassScan {
-        id: ScanId::new(id),
+    let scan = |id, time, tic, polarity, mz: &[f64], intensity: &[f64]| MassSpectrum {
+        id: SpectrumId::new(id),
+        source_native_id: Some(id.to_string()),
         retention_time_min: time,
+        ms_level: 1,
+        polarity,
+        representation: SpectrumRepresentation::Profile,
         mz: mz.to_vec(),
         intensity: intensity.to_vec(),
         tic,
         base_peak_mz: mz.first().copied(),
         base_peak_intensity: intensity.first().copied(),
-    };
-    let encoding = ScanEncoding {
-        idx_stride: 22,
-        pair_width: 6,
-        decoder: WatersDecoder::LowResolution6,
+        precursor: None,
     };
     MassSpecRun {
         source: "synthetic.raw".to_owned(),
@@ -621,43 +666,43 @@ pub(crate) fn sample_mass_spec_run() -> MassSpecRun {
             .into_iter()
             .collect(),
         instrument: Some("SQD2".to_owned()),
-        functions: vec![
-            AcquisitionFunction {
-                id: FunctionId::new(3),
-                kind: FunctionKind::MassSpectrum,
-                polarity: Polarity::Positive,
+        streams: vec![
+            AcquisitionStream {
+                id: AcquisitionStreamId::new(3),
+                source_native_id: Some("3".to_owned()),
+                source_label: Some("Function 3".to_owned()),
+                role: StreamRole::Primary,
                 acquisition_range: Some([10.0, 500.0]),
-                encoding,
-                scans: vec![
-                    scan(11, 0.5, 2.0, &[10.0], &[2.0]),
-                    scan(12, 1.0, 9.0, &[20.0, 30.0], &[9.0, 1.0]),
+                spectra: vec![
+                    scan(11, 0.5, 2.0, Polarity::Positive, &[10.0], &[2.0]),
+                    scan(12, 1.0, 9.0, Polarity::Positive, &[20.0, 30.0], &[9.0, 1.0]),
                 ],
             },
-            AcquisitionFunction {
-                id: FunctionId::new(5),
-                kind: FunctionKind::ReferenceLockMass,
-                polarity: Polarity::Positive,
+            AcquisitionStream {
+                id: AcquisitionStreamId::new(5),
+                source_native_id: Some("5".to_owned()),
+                source_label: Some("Function 5".to_owned()),
+                role: StreamRole::Reference,
                 acquisition_range: None,
-                encoding,
-                scans: vec![],
+                spectra: vec![],
             },
-            AcquisitionFunction {
-                id: FunctionId::new(7),
-                kind: FunctionKind::MassSpectrum,
-                polarity: Polarity::Negative,
+            AcquisitionStream {
+                id: AcquisitionStreamId::new(7),
+                source_native_id: Some("7".to_owned()),
+                source_label: Some("Function 7".to_owned()),
+                role: StreamRole::Primary,
                 acquisition_range: Some([20.0, 800.0]),
-                encoding,
-                scans: vec![
-                    scan(101, 0.4, 4.0, &[40.0], &[4.0]),
-                    scan(105, 1.4, 3.0, &[50.0], &[3.0]),
+                spectra: vec![
+                    scan(101, 0.4, 4.0, Polarity::Negative, &[40.0], &[4.0]),
+                    scan(105, 1.4, 3.0, Polarity::Negative, &[50.0], &[3.0]),
                 ],
             },
         ],
         chromatograms: vec![
             ChromatogramChannel {
-                id: ChromatogramChannelId("function:9:coordinate:217.5".to_owned()),
+                id: ChromatogramChannelId("stream:9:coordinate:217.5".to_owned()),
                 kind: ChromatogramKind::Optical,
-                source_function: Some(FunctionId::new(9)),
+                source_stream: None,
                 coordinate: Some(217.5),
                 description: "PDA 217.5 nm".to_owned(),
                 unit: "AU".to_owned(),
@@ -665,9 +710,9 @@ pub(crate) fn sample_mass_spec_run() -> MassSpecRun {
                 values: vec![-1.0, 2.0],
             },
             ChromatogramChannel {
-                id: ChromatogramChannelId("function:9:coordinate:280".to_owned()),
+                id: ChromatogramChannelId("stream:9:coordinate:280".to_owned()),
                 kind: ChromatogramKind::Optical,
-                source_function: Some(FunctionId::new(9)),
+                source_stream: None,
                 coordinate: Some(280.0),
                 description: "PDA 280 nm".to_owned(),
                 unit: "AU".to_owned(),
@@ -677,7 +722,7 @@ pub(crate) fn sample_mass_spec_run() -> MassSpecRun {
             ChromatogramChannel {
                 id: ChromatogramChannelId("auxiliary:1".to_owned()),
                 kind: ChromatogramKind::Temperature,
-                source_function: None,
+                source_stream: None,
                 coordinate: None,
                 description: "Sample temperature".to_owned(),
                 unit: "°C".to_owned(),

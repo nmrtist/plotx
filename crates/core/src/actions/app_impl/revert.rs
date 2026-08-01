@@ -192,10 +192,10 @@ impl PlotxApp {
                     d.set_name(before.clone());
                 }
             }
-            Action::SetMassSpecFunction {
+            Action::SetMassSpecStream {
                 dataset, before, ..
             } => {
-                self.set_mass_spec_function_value(dataset_index!(*dataset), *before);
+                self.set_mass_spec_stream_value(dataset_index!(*dataset), *before);
             }
             Action::SetMassSpectrumExtractions {
                 dataset, before, ..

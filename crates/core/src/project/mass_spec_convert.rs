@@ -1,548 +1,522 @@
 use super::{ProjectError, Result};
 use plotx_io::{
-    AcquisitionFunction, ChromatogramChannel, ChromatogramChannelId, ChromatogramKind, FunctionId,
-    FunctionKind, MassScan, MassSpecRun, Polarity, ScanEncoding, ScanId, WatersDecoder,
+    AcquisitionStream, AcquisitionStreamId, ChromatogramChannel, ChromatogramChannelId,
+    ChromatogramKind, MassSpecRun, MassSpectrum, Polarity, Precursor, SpectrumId,
+    SpectrumRepresentation, StreamRole,
 };
 use std::collections::BTreeMap;
+use std::io::Write;
 
 const MAGIC: &[u8; 8] = b"PLOTXMS\0";
 const VERSION: u16 = 1;
+const VALUES_PER_CHUNK: usize = 4096;
 
-pub(super) fn encode(run: &MassSpecRun) -> Result<Vec<u8>> {
-    validate_run(run)?;
-    let mut writer = Writer(Vec::new());
-    writer.0.extend_from_slice(MAGIC);
-    writer.u16(VERSION);
-    writer.string(&run.source)?;
-    writer.optional_string(run.instrument.as_deref())?;
-    writer.usize(run.metadata.len())?;
+pub(super) fn write(output: &mut impl Write, run: &MassSpecRun) -> Result<()> {
+    run.validate()
+        .map_err(|error| ProjectError::Invalid(format!("invalid LC–MS run: {error}")))?;
+    output.write_all(MAGIC)?;
+    write_u16(output, VERSION)?;
+    write_string(output, &run.source)?;
+    write_optional_string(output, run.instrument.as_deref())?;
+    write_len(output, run.metadata.len())?;
     for (key, value) in &run.metadata {
-        writer.string(key)?;
-        writer.string(value)?;
+        write_string(output, key)?;
+        write_string(output, value)?;
     }
-    writer.usize(run.import_warnings.len())?;
+    write_len(output, run.import_warnings.len())?;
     for warning in &run.import_warnings {
-        writer.string(warning)?
+        write_string(output, warning)?;
     }
-
-    let mut points = Vec::<(f64, f64)>::new();
-    writer.usize(run.functions.len())?;
-    for function in &run.functions {
-        writer.u16(function.id.get());
-        writer.u8(kind_to_u8(function.kind));
-        writer.u8(polarity_to_u8(function.polarity));
-        writer.optional_range(function.acquisition_range);
-        writer.u16(function.encoding.idx_stride);
-        writer.u8(function.encoding.pair_width);
-        writer.u8(decoder_to_u8(function.encoding.decoder));
-        writer.usize(function.scans.len())?;
-        for scan in &function.scans {
-            writer.u32(scan.id.get());
-            writer.f64(scan.retention_time_min);
-            writer.f64(scan.tic);
-            writer.optional_f64(scan.base_peak_mz);
-            writer.optional_f64(scan.base_peak_intensity);
-            writer.usize(points.len())?;
-            writer.usize(scan.mz.len())?;
-            points.extend(scan.mz.iter().copied().zip(scan.intensity.iter().copied()));
-        }
+    write_len(output, run.streams.len())?;
+    for stream in &run.streams {
+        write_stream(output, stream)?;
     }
-    writer.usize(points.len())?;
-    for (coordinate, value) in points {
-        writer.f64(coordinate);
-        writer.f64(value)
-    }
-
-    let mut channel_points = Vec::<(f64, f64)>::new();
-    writer.usize(run.chromatograms.len())?;
+    write_len(output, run.chromatograms.len())?;
     for channel in &run.chromatograms {
-        writer.string(&channel.id.0)?;
-        writer.u8(channel_kind_to_u8(channel.kind));
-        writer.optional_u16(channel.source_function.map(FunctionId::get));
-        writer.optional_f64(channel.coordinate);
-        writer.string(&channel.description)?;
-        writer.string(&channel.unit)?;
-        writer.usize(channel_points.len())?;
-        writer.usize(channel.time_min.len())?;
-        channel_points.extend(
-            channel
-                .time_min
-                .iter()
-                .copied()
-                .zip(channel.values.iter().copied()),
-        );
+        write_channel(output, channel)?;
     }
-    writer.usize(channel_points.len())?;
-    for (time, value) in channel_points {
-        writer.f64(time);
-        writer.f64(value)
+    Ok(())
+}
+
+fn write_stream(output: &mut impl Write, stream: &AcquisitionStream) -> Result<()> {
+    write_u64(output, stream.id.get())?;
+    write_optional_string(output, stream.source_native_id.as_deref())?;
+    write_optional_string(output, stream.source_label.as_deref())?;
+    write_u8(
+        output,
+        match stream.role {
+            StreamRole::Primary => 0,
+            StreamRole::Reference => 1,
+            StreamRole::Unknown => 2,
+        },
+    )?;
+    write_optional_range(output, stream.acquisition_range)?;
+    write_len(output, stream.spectra.len())?;
+    for spectrum in &stream.spectra {
+        write_spectrum(output, spectrum)?;
     }
-    Ok(writer.0)
+    Ok(())
+}
+
+fn write_spectrum(output: &mut impl Write, spectrum: &MassSpectrum) -> Result<()> {
+    write_u64(output, spectrum.id.get())?;
+    write_optional_string(output, spectrum.source_native_id.as_deref())?;
+    write_f64(output, spectrum.retention_time_min)?;
+    write_u8(output, spectrum.ms_level)?;
+    write_u8(
+        output,
+        match spectrum.polarity {
+            Polarity::Positive => 0,
+            Polarity::Negative => 1,
+            Polarity::Unknown => 2,
+        },
+    )?;
+    write_u8(
+        output,
+        match spectrum.representation {
+            SpectrumRepresentation::Profile => 0,
+            SpectrumRepresentation::Centroid => 1,
+            SpectrumRepresentation::Unknown => 2,
+        },
+    )?;
+    write_f64(output, spectrum.tic)?;
+    write_optional_f64(output, spectrum.base_peak_mz)?;
+    write_optional_f64(output, spectrum.base_peak_intensity)?;
+    write_optional_precursor(output, spectrum.precursor.as_ref())?;
+    write_f64s(output, &spectrum.mz)?;
+    write_f64s(output, &spectrum.intensity)
+}
+
+fn write_optional_precursor(output: &mut impl Write, precursor: Option<&Precursor>) -> Result<()> {
+    let Some(precursor) = precursor else {
+        return write_u8(output, 0);
+    };
+    write_u8(output, 1)?;
+    write_f64(output, precursor.selected_mz)?;
+    write_optional_i32(output, precursor.charge)?;
+    write_optional_f64(output, precursor.isolation_window_lower_offset)?;
+    write_optional_f64(output, precursor.isolation_window_upper_offset)?;
+    write_optional_f64(output, precursor.collision_energy)?;
+    write_optional_string(output, precursor.activation_method.as_deref())
+}
+
+fn write_channel(output: &mut impl Write, channel: &ChromatogramChannel) -> Result<()> {
+    write_string(output, &channel.id.0)?;
+    write_u8(
+        output,
+        match channel.kind {
+            ChromatogramKind::Optical => 0,
+            ChromatogramKind::Temperature => 1,
+            ChromatogramKind::Pressure => 2,
+            ChromatogramKind::Housekeeping => 3,
+            ChromatogramKind::Unknown => 4,
+        },
+    )?;
+    write_optional_u64(output, channel.source_stream.map(AcquisitionStreamId::get))?;
+    write_optional_f64(output, channel.coordinate)?;
+    write_string(output, &channel.description)?;
+    write_string(output, &channel.unit)?;
+    write_f64s(output, &channel.time_min)?;
+    write_f64s(output, &channel.values)
 }
 
 pub(super) fn decode(bytes: &[u8]) -> Result<MassSpecRun> {
     let mut reader = Reader::new(bytes);
-    if reader.take(8)? != MAGIC {
+    if reader.take(MAGIC.len())? != MAGIC {
         return Err(ProjectError::Invalid(
             "LC–MS payload has an invalid signature".to_owned(),
         ));
     }
-    let version = reader.u16()?;
+    let version = reader.read_u16()?;
     if version != VERSION {
         return Err(ProjectError::Unsupported(format!(
             "LC–MS payload version {version}; this PlotX build supports version {VERSION}"
         )));
     }
-    let source = reader.string()?;
-    let instrument = reader.optional_string()?;
+    let source = reader.read_string()?;
+    let instrument = reader.read_optional_string()?;
+    let metadata_count = reader.read_len()?;
     let mut metadata = BTreeMap::new();
-    for _ in 0..reader.usize()? {
-        let key = reader.string()?;
-        if metadata.insert(key, reader.string()?).is_some() {
-            return Err(ProjectError::Invalid(
-                "LC–MS metadata contains a duplicate key".to_owned(),
-            ));
+    for _ in 0..metadata_count {
+        let key = reader.read_string()?;
+        let value = reader.read_string()?;
+        if metadata.insert(key.clone(), value).is_some() {
+            return Err(ProjectError::Invalid(format!(
+                "LC–MS payload contains duplicate metadata key {key:?}"
+            )));
         }
     }
+    let warning_count = reader.read_len()?;
     let mut import_warnings = Vec::new();
-    for _ in 0..reader.usize()? {
-        import_warnings.push(reader.string()?)
+    for _ in 0..warning_count {
+        import_warnings.push(reader.read_string()?);
     }
-
-    struct PendingScan {
-        id: ScanId,
-        retention_time_min: f64,
-        tic: f64,
-        base_peak_mz: Option<f64>,
-        base_peak_intensity: Option<f64>,
-        offset: usize,
-        count: usize,
+    let stream_count = reader.read_len()?;
+    let mut streams = Vec::new();
+    for _ in 0..stream_count {
+        streams.push(reader.read_stream()?);
     }
-    struct PendingFunction {
-        id: FunctionId,
-        kind: FunctionKind,
-        polarity: Polarity,
-        acquisition_range: Option<[f64; 2]>,
-        encoding: ScanEncoding,
-        scans: Vec<PendingScan>,
-    }
-    let mut pending_functions = Vec::new();
-    for _ in 0..reader.usize()? {
-        let id = FunctionId::new(reader.u16()?);
-        let kind = kind_from_u8(reader.u8()?)?;
-        let polarity = polarity_from_u8(reader.u8()?)?;
-        let acquisition_range = reader.optional_range()?;
-        let encoding = ScanEncoding {
-            idx_stride: reader.u16()?,
-            pair_width: reader.u8()?,
-            decoder: decoder_from_u8(reader.u8()?)?,
-        };
-        let mut scans = Vec::new();
-        for _ in 0..reader.usize()? {
-            scans.push(PendingScan {
-                id: ScanId::new(reader.u32()?),
-                retention_time_min: reader.f64()?,
-                tic: reader.f64()?,
-                base_peak_mz: reader.optional_f64()?,
-                base_peak_intensity: reader.optional_f64()?,
-                offset: reader.usize()?,
-                count: reader.usize()?,
-            });
-        }
-        pending_functions.push(PendingFunction {
-            id,
-            kind,
-            polarity,
-            acquisition_range,
-            encoding,
-            scans,
-        });
-    }
-    let point_count = reader.usize()?;
-    reader.ensure_items_fit(point_count, 16, "LC–MS point")?;
-    let mut points = Vec::with_capacity(point_count);
-    for _ in 0..point_count {
-        points.push((reader.f64()?, reader.f64()?))
-    }
-    let mut functions = Vec::with_capacity(pending_functions.len());
-    for function in pending_functions {
-        let mut scans = Vec::with_capacity(function.scans.len());
-        for scan in function.scans {
-            let slice = checked_slice(&points, scan.offset, scan.count, "scan")?;
-            scans.push(MassScan {
-                id: scan.id,
-                retention_time_min: scan.retention_time_min,
-                mz: slice.iter().map(|point| point.0).collect(),
-                intensity: slice.iter().map(|point| point.1).collect(),
-                tic: scan.tic,
-                base_peak_mz: scan.base_peak_mz,
-                base_peak_intensity: scan.base_peak_intensity,
-            });
-        }
-        functions.push(AcquisitionFunction {
-            id: function.id,
-            kind: function.kind,
-            polarity: function.polarity,
-            acquisition_range: function.acquisition_range,
-            encoding: function.encoding,
-            scans,
-        });
-    }
-
-    struct PendingChannel {
-        id: ChromatogramChannelId,
-        kind: ChromatogramKind,
-        source_function: Option<FunctionId>,
-        coordinate: Option<f64>,
-        description: String,
-        unit: String,
-        offset: usize,
-        count: usize,
-    }
-    let mut pending_channels = Vec::new();
-    for _ in 0..reader.usize()? {
-        pending_channels.push(PendingChannel {
-            id: ChromatogramChannelId(reader.string()?),
-            kind: channel_kind_from_u8(reader.u8()?)?,
-            source_function: reader.optional_u16()?.map(FunctionId::new),
-            coordinate: reader.optional_f64()?,
-            description: reader.string()?,
-            unit: reader.string()?,
-            offset: reader.usize()?,
-            count: reader.usize()?,
-        });
-    }
-    let channel_point_count = reader.usize()?;
-    reader.ensure_items_fit(channel_point_count, 16, "LC–MS channel point")?;
-    let mut channel_points = Vec::with_capacity(channel_point_count);
-    for _ in 0..channel_point_count {
-        channel_points.push((reader.f64()?, reader.f64()?))
+    let channel_count = reader.read_len()?;
+    let mut chromatograms = Vec::new();
+    for _ in 0..channel_count {
+        chromatograms.push(reader.read_channel()?);
     }
     if !reader.is_empty() {
         return Err(ProjectError::Invalid(
-            "LC–MS payload has trailing bytes".to_owned(),
+            "LC–MS payload contains trailing data".to_owned(),
         ));
-    }
-    let mut chromatograms = Vec::with_capacity(pending_channels.len());
-    for channel in pending_channels {
-        let slice = checked_slice(&channel_points, channel.offset, channel.count, "channel")?;
-        chromatograms.push(ChromatogramChannel {
-            id: channel.id,
-            kind: channel.kind,
-            source_function: channel.source_function,
-            coordinate: channel.coordinate,
-            description: channel.description,
-            unit: channel.unit,
-            time_min: slice.iter().map(|point| point.0).collect(),
-            values: slice.iter().map(|point| point.1).collect(),
-        });
     }
     let run = MassSpecRun {
         source,
         metadata,
         instrument,
-        functions,
+        streams,
         chromatograms,
         import_warnings,
     };
-    validate_run(&run)?;
+    run.validate()
+        .map_err(|error| ProjectError::Invalid(format!("invalid LC–MS run: {error}")))?;
     Ok(run)
 }
 
-fn validate_run(run: &MassSpecRun) -> Result<()> {
-    let finite = |value: &f64| value.is_finite();
-    if !run
-        .functions
-        .iter()
-        .any(|function| function.kind == FunctionKind::MassSpectrum && !function.scans.is_empty())
-    {
-        return Err(ProjectError::Invalid(
-            "LC–MS run has no readable non-reference MS function".to_owned(),
-        ));
+fn write_u8(output: &mut impl Write, value: u8) -> Result<()> {
+    output.write_all(&[value])?;
+    Ok(())
+}
+
+fn write_u16(output: &mut impl Write, value: u16) -> Result<()> {
+    output.write_all(&value.to_le_bytes())?;
+    Ok(())
+}
+
+fn write_u64(output: &mut impl Write, value: u64) -> Result<()> {
+    output.write_all(&value.to_le_bytes())?;
+    Ok(())
+}
+
+fn write_f64(output: &mut impl Write, value: f64) -> Result<()> {
+    output.write_all(&value.to_le_bytes())?;
+    Ok(())
+}
+
+fn write_len(output: &mut impl Write, len: usize) -> Result<()> {
+    write_u64(
+        output,
+        u64::try_from(len)
+            .map_err(|_| ProjectError::Invalid("LC–MS length exceeds u64".to_owned()))?,
+    )
+}
+
+fn write_string(output: &mut impl Write, value: &str) -> Result<()> {
+    write_len(output, value.len())?;
+    output.write_all(value.as_bytes())?;
+    Ok(())
+}
+
+fn write_optional_string(output: &mut impl Write, value: Option<&str>) -> Result<()> {
+    match value {
+        Some(value) => {
+            write_u8(output, 1)?;
+            write_string(output, value)
+        }
+        None => write_u8(output, 0),
     }
-    for function in &run.functions {
-        if let Some([low, high]) = function.acquisition_range
-            && (!low.is_finite() || !high.is_finite() || high < low)
-        {
-            return Err(ProjectError::Invalid(format!(
-                "LC–MS function {} has an invalid range",
-                function.id
-            )));
+}
+
+fn write_optional_f64(output: &mut impl Write, value: Option<f64>) -> Result<()> {
+    match value {
+        Some(value) => {
+            write_u8(output, 1)?;
+            write_f64(output, value)
         }
-        for scan in &function.scans {
-            if !scan.retention_time_min.is_finite()
-                || !scan.tic.is_finite()
-                || scan.mz.len() != scan.intensity.len()
-                || scan
-                    .mz
-                    .iter()
-                    .chain(&scan.intensity)
-                    .any(|value| !finite(value))
-            {
-                return Err(ProjectError::Invalid(format!(
-                    "LC–MS function {} has invalid scan {}",
-                    function.id, scan.id
-                )));
-            }
-        }
+        None => write_u8(output, 0),
     }
-    for channel in &run.chromatograms {
-        if channel.time_min.len() != channel.values.len()
-            || channel
-                .time_min
-                .iter()
-                .chain(&channel.values)
-                .any(|value| !finite(value))
-        {
-            return Err(ProjectError::Invalid(format!(
-                "LC–MS channel {} is invalid",
-                channel.id
-            )));
+}
+
+fn write_optional_i32(output: &mut impl Write, value: Option<i32>) -> Result<()> {
+    match value {
+        Some(value) => {
+            write_u8(output, 1)?;
+            output.write_all(&value.to_le_bytes())?;
+            Ok(())
         }
+        None => write_u8(output, 0),
+    }
+}
+
+fn write_optional_u64(output: &mut impl Write, value: Option<u64>) -> Result<()> {
+    match value {
+        Some(value) => {
+            write_u8(output, 1)?;
+            write_u64(output, value)
+        }
+        None => write_u8(output, 0),
+    }
+}
+
+fn write_optional_range(output: &mut impl Write, value: Option<[f64; 2]>) -> Result<()> {
+    match value {
+        Some([low, high]) => {
+            write_u8(output, 1)?;
+            write_f64(output, low)?;
+            write_f64(output, high)
+        }
+        None => write_u8(output, 0),
+    }
+}
+
+fn write_f64s(output: &mut impl Write, values: &[f64]) -> Result<()> {
+    write_len(output, values.len())?;
+    // Runs contain many small scan arrays, so keep the reusable chunk buffer on
+    // the stack instead of allocating one heap buffer for every m/z and
+    // intensity vector.
+    let mut buffer = [0_u8; VALUES_PER_CHUNK * 8];
+    for chunk in values.chunks(VALUES_PER_CHUNK) {
+        for (slot, value) in buffer.chunks_exact_mut(8).zip(chunk) {
+            slot.copy_from_slice(&value.to_le_bytes());
+        }
+        output.write_all(&buffer[..chunk.len() * 8])?;
     }
     Ok(())
 }
 
-fn checked_slice<'a, T>(
-    values: &'a [T],
-    offset: usize,
-    count: usize,
-    label: &str,
-) -> Result<&'a [T]> {
-    let end = offset
-        .checked_add(count)
-        .ok_or_else(|| ProjectError::Invalid(format!("LC–MS {label} offset overflow")))?;
-    values
-        .get(offset..end)
-        .ok_or_else(|| ProjectError::Invalid(format!("LC–MS {label} points are out of range")))
-}
-
-struct Writer(Vec<u8>);
-impl Writer {
-    fn u8(&mut self, value: u8) {
-        self.0.push(value)
-    }
-    fn u16(&mut self, value: u16) {
-        self.0.extend_from_slice(&value.to_le_bytes())
-    }
-    fn u32(&mut self, value: u32) {
-        self.0.extend_from_slice(&value.to_le_bytes())
-    }
-    fn u64(&mut self, value: u64) {
-        self.0.extend_from_slice(&value.to_le_bytes())
-    }
-    fn f64(&mut self, value: f64) {
-        self.u64(value.to_bits())
-    }
-    fn usize(&mut self, value: usize) -> Result<()> {
-        self.u64(
-            u64::try_from(value)
-                .map_err(|_| ProjectError::Invalid("LC–MS length exceeds u64".to_owned()))?,
-        );
-        Ok(())
-    }
-    fn string(&mut self, value: &str) -> Result<()> {
-        self.usize(value.len())?;
-        self.0.extend_from_slice(value.as_bytes());
-        Ok(())
-    }
-    fn optional_string(&mut self, value: Option<&str>) -> Result<()> {
-        self.u8(u8::from(value.is_some()));
-        if let Some(value) = value {
-            self.string(value)?
-        }
-        Ok(())
-    }
-    fn optional_u16(&mut self, value: Option<u16>) {
-        self.u8(u8::from(value.is_some()));
-        if let Some(value) = value {
-            self.u16(value)
-        }
-    }
-    fn optional_f64(&mut self, value: Option<f64>) {
-        self.u8(u8::from(value.is_some()));
-        if let Some(value) = value {
-            self.f64(value)
-        }
-    }
-    fn optional_range(&mut self, value: Option<[f64; 2]>) {
-        self.u8(u8::from(value.is_some()));
-        if let Some([low, high]) = value {
-            self.f64(low);
-            self.f64(high)
-        }
-    }
-}
-
 struct Reader<'a> {
     bytes: &'a [u8],
-    cursor: usize,
+    offset: usize,
 }
+
 impl<'a> Reader<'a> {
     fn new(bytes: &'a [u8]) -> Self {
-        Self { bytes, cursor: 0 }
+        Self { bytes, offset: 0 }
     }
-    fn take(&mut self, count: usize) -> Result<&'a [u8]> {
+
+    fn take(&mut self, len: usize) -> Result<&'a [u8]> {
         let end = self
-            .cursor
-            .checked_add(count)
+            .offset
+            .checked_add(len)
             .ok_or_else(|| ProjectError::Invalid("LC–MS payload offset overflow".to_owned()))?;
-        let value = self
+        let result = self
             .bytes
-            .get(self.cursor..end)
+            .get(self.offset..end)
             .ok_or_else(|| ProjectError::Invalid("LC–MS payload is truncated".to_owned()))?;
-        self.cursor = end;
-        Ok(value)
+        self.offset = end;
+        Ok(result)
     }
-    fn u8(&mut self) -> Result<u8> {
+
+    fn read_u8(&mut self) -> Result<u8> {
         Ok(self.take(1)?[0])
     }
-    fn u16(&mut self) -> Result<u16> {
-        let b = self.take(2)?;
-        Ok(u16::from_le_bytes([b[0], b[1]]))
+
+    fn read_u16(&mut self) -> Result<u16> {
+        Ok(u16::from_le_bytes(self.take(2)?.try_into().map_err(
+            |_| ProjectError::Invalid("invalid LC–MS u16".to_owned()),
+        )?))
     }
-    fn u32(&mut self) -> Result<u32> {
-        let b = self.take(4)?;
-        Ok(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+
+    fn read_u64(&mut self) -> Result<u64> {
+        Ok(u64::from_le_bytes(self.take(8)?.try_into().map_err(
+            |_| ProjectError::Invalid("invalid LC–MS u64".to_owned()),
+        )?))
     }
-    fn u64(&mut self) -> Result<u64> {
-        let b = self.take(8)?;
-        Ok(u64::from_le_bytes(b.try_into().expect("eight-byte slice")))
+
+    fn read_i32(&mut self) -> Result<i32> {
+        Ok(i32::from_le_bytes(self.take(4)?.try_into().map_err(
+            |_| ProjectError::Invalid("invalid LC–MS i32".to_owned()),
+        )?))
     }
-    fn f64(&mut self) -> Result<f64> {
-        Ok(f64::from_bits(self.u64()?))
+
+    fn read_f64(&mut self) -> Result<f64> {
+        Ok(f64::from_le_bytes(self.take(8)?.try_into().map_err(
+            |_| ProjectError::Invalid("invalid LC–MS f64".to_owned()),
+        )?))
     }
-    fn usize(&mut self) -> Result<usize> {
-        usize::try_from(self.u64()?)
-            .map_err(|_| ProjectError::Invalid("LC–MS length exceeds this platform".to_owned()))
+
+    fn read_len(&mut self) -> Result<usize> {
+        usize::try_from(self.read_u64()?)
+            .map_err(|_| ProjectError::Invalid("LC–MS length exceeds usize".to_owned()))
     }
-    fn string(&mut self) -> Result<String> {
-        let count = self.usize()?;
-        String::from_utf8(self.take(count)?.to_vec())
+
+    fn read_string(&mut self) -> Result<String> {
+        let len = self.read_len()?;
+        String::from_utf8(self.take(len)?.to_vec())
             .map_err(|_| ProjectError::Invalid("LC–MS payload contains invalid UTF-8".to_owned()))
     }
-    fn optional_string(&mut self) -> Result<Option<String>> {
-        match self.u8()? {
-            0 => Ok(None),
-            1 => self.string().map(Some),
-            _ => Err(ProjectError::Invalid(
-                "LC–MS optional-string tag is invalid".to_owned(),
-            )),
+
+    fn read_optional_string(&mut self) -> Result<Option<String>> {
+        match self.read_option_tag()? {
+            false => Ok(None),
+            true => self.read_string().map(Some),
         }
     }
-    fn optional_u16(&mut self) -> Result<Option<u16>> {
-        match self.u8()? {
-            0 => Ok(None),
-            1 => self.u16().map(Some),
-            _ => Err(ProjectError::Invalid(
-                "LC–MS optional-u16 tag is invalid".to_owned(),
-            )),
+
+    fn read_optional_f64(&mut self) -> Result<Option<f64>> {
+        match self.read_option_tag()? {
+            false => Ok(None),
+            true => self.read_f64().map(Some),
         }
     }
-    fn optional_f64(&mut self) -> Result<Option<f64>> {
-        match self.u8()? {
-            0 => Ok(None),
-            1 => self.f64().map(Some),
-            _ => Err(ProjectError::Invalid(
-                "LC–MS optional-f64 tag is invalid".to_owned(),
-            )),
+
+    fn read_optional_i32(&mut self) -> Result<Option<i32>> {
+        match self.read_option_tag()? {
+            false => Ok(None),
+            true => self.read_i32().map(Some),
         }
     }
-    fn optional_range(&mut self) -> Result<Option<[f64; 2]>> {
-        match self.u8()? {
-            0 => Ok(None),
-            1 => Ok(Some([self.f64()?, self.f64()?])),
-            _ => Err(ProjectError::Invalid(
-                "LC–MS range tag is invalid".to_owned(),
-            )),
+
+    fn read_optional_u64(&mut self) -> Result<Option<u64>> {
+        match self.read_option_tag()? {
+            false => Ok(None),
+            true => self.read_u64().map(Some),
         }
     }
+
+    fn read_option_tag(&mut self) -> Result<bool> {
+        match self.read_u8()? {
+            0 => Ok(false),
+            1 => Ok(true),
+            tag => Err(ProjectError::Invalid(format!(
+                "LC–MS payload has invalid option tag {tag}"
+            ))),
+        }
+    }
+
+    fn read_stream(&mut self) -> Result<AcquisitionStream> {
+        let id = AcquisitionStreamId::new(self.read_u64()?);
+        let source_native_id = self.read_optional_string()?;
+        let source_label = self.read_optional_string()?;
+        let role = match self.read_u8()? {
+            0 => StreamRole::Primary,
+            1 => StreamRole::Reference,
+            2 => StreamRole::Unknown,
+            tag => return Err(invalid_tag("stream role", tag)),
+        };
+        let acquisition_range = if self.read_option_tag()? {
+            Some([self.read_f64()?, self.read_f64()?])
+        } else {
+            None
+        };
+        let count = self.read_len()?;
+        let mut spectra = Vec::new();
+        for _ in 0..count {
+            spectra.push(self.read_spectrum()?);
+        }
+        Ok(AcquisitionStream {
+            id,
+            source_native_id,
+            source_label,
+            role,
+            acquisition_range,
+            spectra,
+        })
+    }
+
+    fn read_spectrum(&mut self) -> Result<MassSpectrum> {
+        let id = SpectrumId::new(self.read_u64()?);
+        let source_native_id = self.read_optional_string()?;
+        let retention_time_min = self.read_f64()?;
+        let ms_level = self.read_u8()?;
+        let polarity = match self.read_u8()? {
+            0 => Polarity::Positive,
+            1 => Polarity::Negative,
+            2 => Polarity::Unknown,
+            tag => return Err(invalid_tag("polarity", tag)),
+        };
+        let representation = match self.read_u8()? {
+            0 => SpectrumRepresentation::Profile,
+            1 => SpectrumRepresentation::Centroid,
+            2 => SpectrumRepresentation::Unknown,
+            tag => return Err(invalid_tag("spectrum representation", tag)),
+        };
+        let tic = self.read_f64()?;
+        let base_peak_mz = self.read_optional_f64()?;
+        let base_peak_intensity = self.read_optional_f64()?;
+        let precursor = self.read_precursor()?;
+        let mz = self.read_f64s()?;
+        let intensity = self.read_f64s()?;
+        Ok(MassSpectrum {
+            id,
+            source_native_id,
+            retention_time_min,
+            ms_level,
+            polarity,
+            representation,
+            mz,
+            intensity,
+            tic,
+            base_peak_mz,
+            base_peak_intensity,
+            precursor,
+        })
+    }
+
+    fn read_precursor(&mut self) -> Result<Option<Precursor>> {
+        if !self.read_option_tag()? {
+            return Ok(None);
+        }
+        Ok(Some(Precursor {
+            selected_mz: self.read_f64()?,
+            charge: self.read_optional_i32()?,
+            isolation_window_lower_offset: self.read_optional_f64()?,
+            isolation_window_upper_offset: self.read_optional_f64()?,
+            collision_energy: self.read_optional_f64()?,
+            activation_method: self.read_optional_string()?,
+        }))
+    }
+
+    fn read_channel(&mut self) -> Result<ChromatogramChannel> {
+        let id = ChromatogramChannelId(self.read_string()?);
+        let kind = match self.read_u8()? {
+            0 => ChromatogramKind::Optical,
+            1 => ChromatogramKind::Temperature,
+            2 => ChromatogramKind::Pressure,
+            3 => ChromatogramKind::Housekeeping,
+            4 => ChromatogramKind::Unknown,
+            tag => return Err(invalid_tag("chromatogram kind", tag)),
+        };
+        let source_stream = self.read_optional_u64()?.map(AcquisitionStreamId::new);
+        let coordinate = self.read_optional_f64()?;
+        let description = self.read_string()?;
+        let unit = self.read_string()?;
+        let time_min = self.read_f64s()?;
+        let values = self.read_f64s()?;
+        Ok(ChromatogramChannel {
+            id,
+            kind,
+            source_stream,
+            coordinate,
+            description,
+            unit,
+            time_min,
+            values,
+        })
+    }
+
+    fn read_f64s(&mut self) -> Result<Vec<f64>> {
+        let len = self.read_len()?;
+        let byte_len = len
+            .checked_mul(8)
+            .ok_or_else(|| ProjectError::Invalid("LC–MS array size overflow".to_owned()))?;
+        Ok(self
+            .take(byte_len)?
+            .chunks_exact(8)
+            .map(|chunk| f64::from_le_bytes(chunk.try_into().expect("eight-byte chunk")))
+            .collect())
+    }
+
     fn is_empty(&self) -> bool {
-        self.cursor == self.bytes.len()
-    }
-
-    fn ensure_items_fit(&self, count: usize, bytes_per_item: usize, label: &str) -> Result<()> {
-        let required = count.checked_mul(bytes_per_item).ok_or_else(|| {
-            ProjectError::Invalid(format!("{label} count overflows its byte length"))
-        })?;
-        if required > self.bytes.len().saturating_sub(self.cursor) {
-            return Err(ProjectError::Invalid(format!(
-                "{label} count exceeds the remaining payload"
-            )));
-        }
-        Ok(())
+        self.offset == self.bytes.len()
     }
 }
 
-fn kind_to_u8(value: FunctionKind) -> u8 {
-    match value {
-        FunctionKind::MassSpectrum => 0,
-        FunctionKind::OpticalDetector => 1,
-        FunctionKind::ReferenceLockMass => 2,
-        FunctionKind::Unknown => 3,
-    }
+fn invalid_tag(label: &str, tag: u8) -> ProjectError {
+    ProjectError::Invalid(format!("LC–MS payload has invalid {label} tag {tag}"))
 }
-fn kind_from_u8(value: u8) -> Result<FunctionKind> {
-    match value {
-        0 => Ok(FunctionKind::MassSpectrum),
-        1 => Ok(FunctionKind::OpticalDetector),
-        2 => Ok(FunctionKind::ReferenceLockMass),
-        3 => Ok(FunctionKind::Unknown),
-        _ => Err(ProjectError::Invalid(
-            "LC–MS function kind is invalid".to_owned(),
-        )),
-    }
-}
-fn polarity_to_u8(value: Polarity) -> u8 {
-    match value {
-        Polarity::Positive => 0,
-        Polarity::Negative => 1,
-        Polarity::Unknown => 2,
-    }
-}
-fn polarity_from_u8(value: u8) -> Result<Polarity> {
-    match value {
-        0 => Ok(Polarity::Positive),
-        1 => Ok(Polarity::Negative),
-        2 => Ok(Polarity::Unknown),
-        _ => Err(ProjectError::Invalid(
-            "LC–MS polarity is invalid".to_owned(),
-        )),
-    }
-}
-fn decoder_to_u8(value: WatersDecoder) -> u8 {
-    match value {
-        WatersDecoder::LowResolution6 => 0,
-        WatersDecoder::Unsupported => 1,
-    }
-}
-fn decoder_from_u8(value: u8) -> Result<WatersDecoder> {
-    match value {
-        0 => Ok(WatersDecoder::LowResolution6),
-        1 => Ok(WatersDecoder::Unsupported),
-        _ => Err(ProjectError::Invalid("LC–MS decoder is invalid".to_owned())),
-    }
-}
-fn channel_kind_to_u8(value: ChromatogramKind) -> u8 {
-    match value {
-        ChromatogramKind::Optical => 0,
-        ChromatogramKind::Temperature => 1,
-        ChromatogramKind::Pressure => 2,
-        ChromatogramKind::Housekeeping => 3,
-        ChromatogramKind::Unknown => 4,
-    }
-}
-fn channel_kind_from_u8(value: u8) -> Result<ChromatogramKind> {
-    match value {
-        0 => Ok(ChromatogramKind::Optical),
-        1 => Ok(ChromatogramKind::Temperature),
-        2 => Ok(ChromatogramKind::Pressure),
-        3 => Ok(ChromatogramKind::Housekeeping),
-        4 => Ok(ChromatogramKind::Unknown),
-        _ => Err(ProjectError::Invalid(
-            "LC–MS channel kind is invalid".to_owned(),
-        )),
-    }
+
+#[cfg(test)]
+fn encode(run: &MassSpecRun) -> Result<Vec<u8>> {
+    let mut output = Vec::new();
+    write(&mut output, run)?;
+    Ok(output)
 }
 
 #[cfg(test)]
@@ -558,81 +532,85 @@ mod tests {
     }
 
     #[test]
-    fn binary_payload_round_trips_every_function_scan_and_channel() {
-        let run = crate::state::sample_mass_spec_run();
+    fn payload_round_trips_streams_spectra_channels_and_precursors() {
+        let mut run = crate::state::sample_mass_spec_run();
+        run.instrument = Some("QTOF".to_owned());
+        run.streams[0].spectra[1].precursor = Some(Precursor {
+            selected_mz: 445.2,
+            charge: Some(2),
+            isolation_window_lower_offset: Some(0.5),
+            isolation_window_upper_offset: Some(0.75),
+            collision_energy: Some(20.0),
+            activation_method: Some("CID".to_owned()),
+        });
         let decoded = decode(&encode(&run).unwrap()).unwrap();
+        assert_eq!(decoded.source, run.source);
+        assert_eq!(decoded.instrument, run.instrument);
         assert_eq!(decoded.metadata, run.metadata);
         assert_eq!(decoded.import_warnings, run.import_warnings);
-        assert_eq!(decoded.functions.len(), 3);
-        assert_eq!(decoded.functions[0].scans[1].id, ScanId::new(12));
-        assert_eq!(decoded.functions[0].scans[1].mz, [20.0, 30.0]);
+        assert_eq!(decoded.streams.len(), 3);
+        assert_eq!(decoded.streams[0].role, StreamRole::Primary);
+        assert_eq!(decoded.streams[0].source_label, run.streams[0].source_label);
+        assert_eq!(decoded.streams[0].spectra[1].id, SpectrumId::new(12));
+        assert_eq!(decoded.streams[0].spectra[1].mz, [20.0, 30.0]);
+        let precursor = decoded.streams[0].spectra[1].precursor.as_ref().unwrap();
+        assert_eq!(precursor.selected_mz, 445.2);
+        assert_eq!(precursor.charge, Some(2));
+        assert_eq!(precursor.activation_method.as_deref(), Some("CID"));
         assert_eq!(decoded.chromatograms.len(), 3);
-        assert_eq!(decoded.chromatograms[0].coordinate, Some(217.5));
-        assert_eq!(decoded.chromatograms[0].values, [-1.0, 2.0]);
+        assert_eq!(decoded.chromatograms[0].kind, run.chromatograms[0].kind);
+        assert_eq!(decoded.chromatograms[0].values, run.chromatograms[0].values);
     }
 
     #[test]
-    fn project_round_trip_preserves_extractions_but_not_transient_scan_preview() {
-        let mut app = crate::state::PlotxApp::new();
-        let mut mass_spec =
-            crate::state::MassSpecDataset::load(crate::state::sample_mass_spec_run());
-        assert!(mass_spec.select_nearest_scan(FunctionId::new(7), 1.3));
-        let dataset = crate::state::Dataset::MassSpec(Box::new(mass_spec));
-        app.doc.canvases.push(crate::workflow::build_default_canvas(
-            &dataset,
-            "synthetic.raw",
-        ));
-        app.doc.datasets.push(dataset);
-        let dataset_id = app.doc.datasets[0].resource_id();
-        app.pin_mass_spectrum_extraction(
-            dataset_id,
-            0.4,
-            1.4,
-            crate::state::MassSpectrumExtractionMethod::Mean,
-        )
-        .unwrap();
-        let uv_object = app.doc.canvases[0].objects[0].id;
-        app.set_axis_overrides_value(
-            0,
-            uv_object,
-            &crate::state::AxisOverrides {
-                guide_visibility: Some(plotx_figure::GuideVisibility::Hide),
-                ..crate::state::AxisOverrides::default()
-            },
+    fn rejects_truncated_and_trailing_payloads() {
+        let bytes = encode(&crate::state::sample_mass_spec_run()).unwrap();
+        assert!(
+            decode(&bytes[..bytes.len() - 1])
+                .unwrap_err()
+                .to_string()
+                .contains("truncated")
         );
+        let mut trailing = bytes;
+        trailing.push(0);
+        assert!(
+            decode(&trailing)
+                .unwrap_err()
+                .to_string()
+                .contains("trailing data")
+        );
+    }
+
+    #[test]
+    fn schema_v1_project_round_trip_preserves_stream_bindings_and_extractions() {
+        let mut app = crate::state::PlotxApp::new();
+        let mut dataset = crate::state::MassSpecDataset::load(crate::state::sample_mass_spec_run());
+        assert!(dataset.select_stream(AcquisitionStreamId::new(7)));
+        dataset
+            .add_extraction(
+                AcquisitionStreamId::new(7),
+                0.4,
+                1.4,
+                crate::state::MassSpectrumExtractionMethod::Mean,
+            )
+            .unwrap();
+        let expected_catalog = dataset.field_catalog.clone();
+        app.doc
+            .datasets
+            .push(crate::state::Dataset::MassSpec(Box::new(dataset)));
         let path = std::env::temp_dir().join(format!(
-            "plotx-mass-spec-round-trip-{}.plotx",
+            "plotx-stream-round-trip-{}.plotx",
             std::process::id()
         ));
         crate::project::save_project(&app, &path, false).unwrap();
         let loaded = crate::project::load_project(&path).unwrap();
         std::fs::remove_file(path).unwrap();
-        assert_eq!(loaded.doc.canvases[0].objects.len(), 3);
+        let loaded = loaded.doc.datasets[0].as_mass_spec().unwrap();
+        assert_eq!(loaded.active_stream, AcquisitionStreamId::new(7));
         assert_eq!(
-            loaded.doc.canvases[0].objects[0]
-                .plot()
-                .unwrap()
-                .figure()
-                .guide_visibility,
-            plotx_figure::GuideVisibility::Hide
+            loaded.extracted_spectra[0].stream,
+            AcquisitionStreamId::new(7)
         );
-        let loaded_dataset = loaded.doc.datasets[0].as_mass_spec().unwrap();
-        assert_eq!(loaded_dataset.active_function, FunctionId::new(7));
-        assert_eq!(loaded_dataset.selected_scan, None);
-        assert_eq!(loaded_dataset.extracted_spectra.len(), 1);
-        assert_eq!(
-            loaded_dataset.extracted_spectra[0].method,
-            crate::state::MassSpectrumExtractionMethod::Mean
-        );
-        assert_eq!(loaded_dataset.run.functions.len(), 3);
-        assert_eq!(loaded_dataset.run.chromatograms.len(), 3);
-        assert_eq!(
-            loaded_dataset.run.import_warnings,
-            ["optional reference was unavailable"]
-        );
-        assert_eq!(
-            loaded_dataset.field_catalog,
-            app.doc.datasets[0].as_mass_spec().unwrap().field_catalog
-        );
+        assert_eq!(loaded.field_catalog, expected_catalog);
     }
 }

@@ -287,16 +287,16 @@ pub(crate) fn handle_data_tool_target(
         let series = plot_object.binding.series.first()?;
         let dataset_index = app.doc.dataset_index(series.source.resource)?;
         let mass_spec = app.doc.datasets.get(dataset_index)?.as_mass_spec()?;
-        let function = mass_spec
-            .supported_ms_functions()
-            .find(|function| {
+        let stream = mass_spec
+            .supported_ms_streams()
+            .find(|stream| {
                 mass_spec
                     .field_catalog
-                    .id_for_key(&plotx_core::state::tic_key(*function))
+                    .id_for_key(&plotx_core::state::stream_tic_key(*stream))
                     == Some(series.source.field)
                     || mass_spec
                         .field_catalog
-                        .id_for_key(&plotx_core::state::bpi_key(*function))
+                        .id_for_key(&plotx_core::state::stream_bpi_key(*stream))
                         == Some(series.source.field)
             })
             .or_else(|| {
@@ -311,12 +311,18 @@ pub(crate) fn handle_data_tool_target(
                             .id_for_key(&plotx_core::state::channel_key(&channel.id.0))
                             == Some(series.source.field)
                     })
-                    .then_some(mass_spec.active_function)
+                    .then_some(mass_spec.active_stream)
             })?;
         let inner = plot_inner_rect(app, ci, id, rect)?;
+        let stream_label = mass_spec
+            .run
+            .stream(stream)
+            .map(plotx_core::state::stream_display_label)
+            .unwrap_or_else(|| format!("Stream {stream}"));
         plot_contains(inner, screen_pos).then_some((
             series.source.resource,
-            function,
+            stream,
+            stream_label,
             screen_to_x(
                 screen_pos.x,
                 inner,
@@ -326,11 +332,10 @@ pub(crate) fn handle_data_tool_target(
             ),
         ))
     })();
-    if let Some((dataset, function, retention_time_min)) = mass_spec_target {
-        app.select_mass_spec_scan_near(dataset, function, retention_time_min);
-        app.session.status = format!(
-            "Selected the nearest scan in function {function} at {retention_time_min:.3} min."
-        );
+    if let Some((dataset, stream, stream_label, retention_time_min)) = mass_spec_target {
+        app.select_mass_spec_spectrum_near(dataset, stream, retention_time_min);
+        app.session.status =
+            format!("Selected the nearest scan in {stream_label} at {retention_time_min:.3} min.");
     }
     if app.doc.canvases[ci].selected_object == Some(id) {
         return;

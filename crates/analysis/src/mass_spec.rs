@@ -1,6 +1,6 @@
 //! Numerical extraction of representative spectra from LC–MS scan windows.
 
-use plotx_io::MassScan;
+use plotx_io::MassSpectrum;
 use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -12,7 +12,7 @@ pub enum SpectrumAggregation {
 }
 
 pub fn extract_spectrum(
-    scans: &[MassScan],
+    scans: &[MassSpectrum],
     range_min: [f64; 2],
     aggregation: SpectrumAggregation,
 ) -> Option<Vec<[f64; 2]>> {

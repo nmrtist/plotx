@@ -511,10 +511,10 @@ pub enum IoError {
     InvalidWatersRaw(String),
 
     #[error(
-        "unsupported Waters encoding for function {function_id}: IDX stride {idx_stride}, pair width {pair_width}; instrument {instrument}"
+        "unsupported Waters encoding for function {native_function}: IDX stride {idx_stride}, pair width {pair_width}; instrument {instrument}"
     )]
     UnsupportedWatersEncoding {
-        function_id: FunctionId,
+        native_function: u64,
         idx_stride: usize,
         pair_width: usize,
         instrument: String,

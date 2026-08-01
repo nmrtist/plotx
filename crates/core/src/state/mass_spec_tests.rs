@@ -3,19 +3,19 @@ use crate::actions::Action;
 use crate::state::{Dataset, PlotxApp, ToolGroup};
 
 #[test]
-fn dynamic_catalog_and_stable_selection_follow_function_identity() {
+fn dynamic_catalog_and_stable_selection_follow_stream_identity() {
     let mut dataset = MassSpecDataset::load(sample_mass_spec_run());
-    assert_eq!(dataset.active_function, FunctionId::new(3));
-    assert_eq!(dataset.selected_scan, None);
+    assert_eq!(dataset.active_stream, AcquisitionStreamId::new(3));
+    assert_eq!(dataset.selected_spectrum, None);
     assert_eq!(mass_spec_field_keys(&dataset.run).len(), 8);
     assert!(
         mass_spec_field_keys(&dataset.run)
             .iter()
             .any(|key| key.contains("217.5"))
     );
-    assert!(dataset.select_nearest_scan(FunctionId::new(7), 1.3));
-    assert_eq!(dataset.active_function, FunctionId::new(7));
-    assert_eq!(dataset.selected_scan, Some(ScanId::new(105)));
+    assert!(dataset.select_nearest_spectrum(AcquisitionStreamId::new(7), 1.3));
+    assert_eq!(dataset.active_stream, AcquisitionStreamId::new(7));
+    assert_eq!(dataset.selected_spectrum, Some(SpectrumId::new(105)));
 }
 
 #[test]
@@ -73,7 +73,7 @@ fn mean_extraction_averages_missing_profile_coordinates_as_zero() {
     let mut dataset = MassSpecDataset::load(sample_mass_spec_run());
     let (_, field) = dataset
         .add_extraction(
-            FunctionId::new(3),
+            AcquisitionStreamId::new(3),
             0.5,
             1.0,
             MassSpectrumExtractionMethod::Mean,
@@ -85,7 +85,7 @@ fn mean_extraction_averages_missing_profile_coordinates_as_zero() {
 }
 
 #[test]
-fn function_and_retention_time_selection_retarget_all_linked_plots() {
+fn stream_and_retention_time_selection_retarget_all_linked_plots() {
     let dataset = Dataset::MassSpec(Box::new(MassSpecDataset::load(sample_mass_spec_run())));
     let dataset_id = dataset.resource_id();
     let mut app = PlotxApp::new();
@@ -95,22 +95,36 @@ fn function_and_retention_time_selection_retarget_all_linked_plots() {
     ));
     app.doc.datasets.push(dataset);
 
-    assert!(app.select_mass_spec_scan_near(dataset_id, FunctionId::new(7), 1.3));
+    assert!(app.select_mass_spec_spectrum_near(dataset_id, AcquisitionStreamId::new(7), 1.3));
     let dataset = app.doc.datasets[0].as_mass_spec().unwrap();
-    assert_eq!(dataset.selected_scan, Some(ScanId::new(105)));
+    assert_eq!(dataset.selected_spectrum, Some(SpectrumId::new(105)));
     let bottom = app.doc.canvases[0].objects[1].plot().unwrap();
     assert_eq!(
         bottom.binding.series[0].source.field,
         dataset
             .field_catalog
-            .id_for_key(&tic_key(FunctionId::new(7)))
+            .id_for_key(&stream_tic_key(AcquisitionStreamId::new(7)))
             .unwrap()
     );
     assert!(bottom.panel.user_note.contains("Function 7"));
+    assert!(bottom.panel.user_note.contains("negative polarity"));
+
+    app.undo();
+    let dataset = app.doc.datasets[0].as_mass_spec().unwrap();
+    assert_eq!(dataset.active_stream, AcquisitionStreamId::new(3));
+    assert_eq!(dataset.selected_spectrum, None);
+    let bottom = app.doc.canvases[0].objects[1].plot().unwrap();
+    assert_eq!(
+        bottom.binding.series[0].source.field,
+        dataset
+            .field_catalog
+            .id_for_key(&stream_tic_key(AcquisitionStreamId::new(3)))
+            .unwrap()
+    );
 }
 
 #[test]
-fn function_switch_uses_the_shared_undo_history() {
+fn stream_switch_uses_the_shared_undo_history() {
     let dataset = Dataset::MassSpec(Box::new(MassSpecDataset::load(sample_mass_spec_run())));
     let dataset_id = dataset.resource_id();
     let mut app = PlotxApp::new();
@@ -120,10 +134,10 @@ fn function_switch_uses_the_shared_undo_history() {
     ));
     app.doc.datasets.push(dataset);
 
-    assert!(app.select_mass_spec_function(dataset_id, FunctionId::new(7)));
+    assert!(app.select_mass_spec_stream(dataset_id, AcquisitionStreamId::new(7)));
     assert_eq!(
-        app.doc.datasets[0].as_mass_spec().unwrap().active_function,
-        FunctionId::new(7)
+        app.doc.datasets[0].as_mass_spec().unwrap().active_stream,
+        AcquisitionStreamId::new(7)
     );
     assert!(
         app.doc.canvases[0].objects[1]
@@ -136,8 +150,8 @@ fn function_switch_uses_the_shared_undo_history() {
 
     app.undo();
     assert_eq!(
-        app.doc.datasets[0].as_mass_spec().unwrap().active_function,
-        FunctionId::new(3)
+        app.doc.datasets[0].as_mass_spec().unwrap().active_stream,
+        AcquisitionStreamId::new(3)
     );
     assert!(
         app.doc.canvases[0].objects[1]
@@ -150,28 +164,28 @@ fn function_switch_uses_the_shared_undo_history() {
 
     app.redo();
     assert_eq!(
-        app.doc.datasets[0].as_mass_spec().unwrap().active_function,
-        FunctionId::new(7)
+        app.doc.datasets[0].as_mass_spec().unwrap().active_stream,
+        AcquisitionStreamId::new(7)
     );
 }
 
 #[test]
-fn invalid_function_actions_are_rejected_before_the_document_changes() {
+fn invalid_stream_actions_are_rejected_before_the_document_changes() {
     let dataset = Dataset::MassSpec(Box::new(MassSpecDataset::load(sample_mass_spec_run())));
     let dataset_id = dataset.resource_id();
     let mut app = PlotxApp::new();
     app.doc.datasets.push(dataset);
 
-    let result = app.try_execute_action(Action::SetMassSpecFunction {
+    let result = app.try_execute_action(Action::SetMassSpecStream {
         dataset: dataset_id,
-        before: FunctionId::new(3),
-        after: FunctionId::new(999),
+        before: AcquisitionStreamId::new(3),
+        after: AcquisitionStreamId::new(999),
     });
 
     assert!(result.is_err());
     assert_eq!(
-        app.doc.datasets[0].as_mass_spec().unwrap().active_function,
-        FunctionId::new(3)
+        app.doc.datasets[0].as_mass_spec().unwrap().active_stream,
+        AcquisitionStreamId::new(3)
     );
     assert!(!app.can_undo());
 }
@@ -179,11 +193,11 @@ fn invalid_function_actions_are_rejected_before_the_document_changes() {
 #[test]
 fn missing_persisted_selection_uses_deterministic_fallback() {
     let mut dataset = MassSpecDataset::load(sample_mass_spec_run());
-    dataset.active_function = FunctionId::new(999);
-    dataset.selected_scan = Some(ScanId::new(999));
+    dataset.active_stream = AcquisitionStreamId::new(999);
+    dataset.selected_spectrum = Some(SpectrumId::new(999));
     dataset.repair_selection().unwrap();
-    assert_eq!(dataset.active_function, FunctionId::new(3));
-    assert_eq!(dataset.selected_scan, None);
+    assert_eq!(dataset.active_stream, AcquisitionStreamId::new(3));
+    assert_eq!(dataset.selected_spectrum, None);
 }
 
 #[test]
@@ -212,7 +226,7 @@ fn extracted_spectrum_is_pinned_and_does_not_follow_preview_cursor() {
     assert!(spectrum.panel.user_note.contains("0.400–1.000 min"));
     let before = spectrum.figure().series[0].points.clone();
 
-    assert!(app.select_mass_spec_scan_near(dataset_id, FunctionId::new(3), 0.5));
+    assert!(app.select_mass_spec_spectrum_near(dataset_id, AcquisitionStreamId::new(3), 0.5));
     let spectrum = app.doc.canvases[0].objects[2].plot().unwrap();
     assert_eq!(spectrum.figure().series[0].points, before);
     assert_eq!(
@@ -221,8 +235,8 @@ fn extracted_spectrum_is_pinned_and_does_not_follow_preview_cursor() {
             .unwrap()
             .extraction(extraction)
             .unwrap()
-            .function,
-        FunctionId::new(3)
+            .stream,
+        AcquisitionStreamId::new(3)
     );
 
     app.undo();

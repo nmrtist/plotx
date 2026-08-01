@@ -262,7 +262,7 @@ fn analysis_items(dataset: &Dataset) -> Vec<AnalysisItem> {
                 .iter()
                 .map(|extraction| AnalysisItem {
                     kind: AnalysisKind::MassSpectrum(extraction.id),
-                    label: plotx_core::state::extraction_title(extraction),
+                    label: plotx_core::state::extraction_title(&mass_spec.run, extraction),
                 }),
         );
     }

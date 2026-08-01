@@ -234,15 +234,15 @@ pub fn dataset_to_objects<'a>(
         Dataset::MassSpec(mass_spec) => {
             let scan_count = mass_spec
                 .run
-                .functions
+                .streams
                 .iter()
-                .map(|function| function.scans.len())
+                .map(|stream| stream.spectra.len())
                 .sum();
             let point_count = mass_spec
                 .run
-                .functions
+                .streams
                 .iter()
-                .flat_map(|function| &function.scans)
+                .flat_map(|stream| &stream.spectra)
                 .map(|scan| scan.mz.len())
                 .sum();
             let data = DataObject {
@@ -258,12 +258,12 @@ pub fn dataset_to_objects<'a>(
                 payload: Payload {
                     storage: STORAGE_MASS_SPEC_V1.to_owned(),
                     blob: format!("objects/{data_id}/data.bin"),
-                    shape: vec![mass_spec.run.functions.len(), scan_count, point_count],
+                    shape: vec![mass_spec.run.streams.len(), scan_count, point_count],
                     domain: "mass_spectrometry".to_owned(),
                 },
                 extensions: serde_json::json!({
                     "plotx.mass_spec": {
-                        "active_function": mass_spec.active_function.get(),
+                        "active_stream": mass_spec.active_stream.get(),
                         "extracted_spectra": &mass_spec.extracted_spectra
                     },
                     "plotx.fields": &mass_spec.field_catalog
@@ -304,13 +304,16 @@ pub fn object_to_dataset(
         dataset.name = data.label.clone();
         if let Some(state) = data.extensions.get("plotx.mass_spec") {
             if let Some(value) = state
-                .get("active_function")
+                .get("active_stream")
                 .and_then(serde_json::Value::as_u64)
             {
-                dataset.active_function =
-                    plotx_io::FunctionId::new(u16::try_from(value).map_err(|_| {
-                        ProjectError::Invalid("LC–MS active function id exceeds u16".to_owned())
-                    })?);
+                let active_stream = plotx_io::AcquisitionStreamId::new(value);
+                if !dataset.supported_ms_streams().any(|id| id == active_stream) {
+                    return Err(ProjectError::Invalid(format!(
+                        "LC–MS active stream {active_stream} is missing or unreadable"
+                    )));
+                }
+                dataset.active_stream = active_stream;
             }
             if let Some(value) = state.get("extracted_spectra") {
                 dataset.extracted_spectra =

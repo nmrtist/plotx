@@ -2,8 +2,8 @@ use super::*;
 use plotx_core::actions::Action;
 use plotx_core::state::{DEFAULT_CANVAS_SIZE_MM, MassSpecDataset};
 use plotx_io::{
-    AcquisitionFunction, FunctionId, FunctionKind, MassScan, MassSpecRun, Polarity, ScanEncoding,
-    ScanId, WatersDecoder,
+    AcquisitionStream, AcquisitionStreamId, MassSpecRun, MassSpectrum, Polarity, SpectrumId,
+    SpectrumRepresentation, StreamRole,
 };
 
 fn app_with_mass_spec() -> PlotxApp {
@@ -12,24 +12,25 @@ fn app_with_mass_spec() -> PlotxApp {
         source: "synthetic.raw".to_owned(),
         metadata: std::collections::BTreeMap::new(),
         instrument: Some("Synthetic MS".to_owned()),
-        functions: vec![AcquisitionFunction {
-            id: FunctionId::new(1),
-            kind: FunctionKind::MassSpectrum,
-            polarity: Polarity::Positive,
+        streams: vec![AcquisitionStream {
+            id: AcquisitionStreamId::new(1),
+            source_native_id: Some("1".to_owned()),
+            source_label: Some("Function 1".to_owned()),
+            role: StreamRole::Primary,
             acquisition_range: Some([10.0, 100.0]),
-            encoding: ScanEncoding {
-                idx_stride: 22,
-                pair_width: 6,
-                decoder: WatersDecoder::LowResolution6,
-            },
-            scans: vec![MassScan {
-                id: ScanId::new(1),
+            spectra: vec![MassSpectrum {
+                id: SpectrumId::new(1),
+                source_native_id: Some("1".to_owned()),
                 retention_time_min: 0.5,
+                ms_level: 1,
+                polarity: Polarity::Positive,
+                representation: SpectrumRepresentation::Profile,
                 mz: vec![20.0, 40.0],
                 intensity: vec![2.0, 5.0],
                 tic: 7.0,
                 base_peak_mz: Some(40.0),
                 base_peak_intensity: Some(5.0),
+                precursor: None,
             }],
         }],
         chromatograms: Vec::new(),

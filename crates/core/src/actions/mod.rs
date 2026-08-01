@@ -8,7 +8,7 @@ use crate::state::{
 };
 use crate::theme::ThemeSnapshot;
 use crate::{Integral2D, IntegralResult};
-use plotx_io::FunctionId;
+use plotx_io::AcquisitionStreamId;
 use plotx_processing::{AxisPipeline, Params2D, Preset2D};
 
 mod app_impl;
@@ -310,10 +310,10 @@ pub enum Action {
         before: Option<String>,
         after: Option<String>,
     },
-    SetMassSpecFunction {
+    SetMassSpecStream {
         dataset: DatasetId,
-        before: FunctionId,
-        after: FunctionId,
+        before: AcquisitionStreamId,
+        after: AcquisitionStreamId,
     },
     SetMassSpectrumExtractions {
         dataset: DatasetId,
@@ -490,7 +490,7 @@ impl Action {
                 .map(Self::undo_label)
                 .unwrap_or("edit"),
             Self::SetObjectViewport { .. } => "plot navigation",
-            Self::SetMassSpecFunction { .. } => "mass spectrometry function",
+            Self::SetMassSpecStream { .. } => "mass spectrometry stream",
             Self::SetMassSpectrumExtractions { .. } => "mass spectrum extraction",
             Self::SetSeriesPresentation { .. } => "display setting",
             Self::SetAxisOverrides { .. } => "axis setting",
@@ -511,7 +511,7 @@ impl Action {
             Self::Composite(actions) => actions.iter().all(Self::is_noop),
             Self::UpdateDatasetProcessing { before, after, .. } => before == after,
             Self::SetObjectViewport { before, after, .. } => before == after,
-            Self::SetMassSpecFunction { before, after, .. } => before == after,
+            Self::SetMassSpecStream { before, after, .. } => before == after,
             Self::SetMassSpectrumExtractions { before, after, .. } => before == after,
             Self::MoveResizeObject { before, after, .. } => before == after,
             Self::SetObjectFrames { before, after, .. } => before == after,

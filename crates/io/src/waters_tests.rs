@@ -160,16 +160,22 @@ fn decodes_functions_by_metadata_and_builds_dynamic_optical_channels() {
     assert!(is_masslynx_raw(&fixture.root));
     let result = load(&fixture.root).expect("load synthetic MassLynx bundle");
     let run = loaded_run(&result);
-    assert_eq!(run.functions.len(), 2);
-    assert_eq!(run.functions[0].id, FunctionId::new(1));
-    assert_eq!(run.functions[0].kind, FunctionKind::MassSpectrum);
-    assert_eq!(run.functions[0].polarity, Polarity::Positive);
-    assert_eq!(run.functions[0].scans.len(), 3);
-    assert_eq!(run.functions[0].scans[0].mz, [21.0, 21.0, 41.0]);
-    assert_eq!(run.functions[0].scans[0].intensity, [8.0, -1.0, 3.0]);
-    assert_eq!(run.functions[0].scans[0].tic, 10.0);
-    assert!(run.functions[0].scans[1].mz.is_empty());
-    assert_eq!(run.functions[1].kind, FunctionKind::OpticalDetector);
+    assert_eq!(run.streams.len(), 1);
+    assert!(run.stream(AcquisitionStreamId::new(2)).is_none());
+    assert_eq!(run.streams[0].id, AcquisitionStreamId::new(1));
+    assert_eq!(run.streams[0].source_native_id.as_deref(), Some("1"));
+    assert_eq!(run.streams[0].role, StreamRole::Primary);
+    assert_eq!(run.streams[0].spectra.len(), 3);
+    assert_eq!(run.streams[0].spectra[0].polarity, Polarity::Positive);
+    assert_eq!(run.streams[0].spectra[0].ms_level, 1);
+    assert_eq!(
+        run.streams[0].spectra[0].representation,
+        SpectrumRepresentation::Unknown
+    );
+    assert_eq!(run.streams[0].spectra[0].mz, [21.0, 21.0, 41.0]);
+    assert_eq!(run.streams[0].spectra[0].intensity, [8.0, -1.0, 3.0]);
+    assert_eq!(run.streams[0].spectra[0].tic, 10.0);
+    assert!(run.streams[0].spectra[1].mz.is_empty());
     assert_eq!(run.chromatograms.len(), 2);
     assert_eq!(run.chromatograms[0].coordinate, Some(214.0));
     assert_eq!(run.chromatograms[0].values, [-2.0, 5.0]);
@@ -192,12 +198,35 @@ fn reports_unsupported_required_encoding_with_layout_context() {
     assert!(matches!(
         error,
         IoError::UnsupportedWatersEncoding {
-            function_id,
+            native_function,
             idx_stride: 22,
             pair_width: 4,
             ref instrument,
-        } if function_id == FunctionId::new(1) && instrument == "Synthetic SQD2"
+        } if native_function == 1 && instrument == "Synthetic SQD2"
     ));
+}
+
+#[test]
+fn supported_unknown_function_remains_a_stream_without_optical_channels() {
+    let fixture = Fixture::new(
+        "supported-unknown",
+        &[(0x00, 0x25, 5.0, 100.0), (0x44, 0x00, 1.0, 2.0)],
+    );
+    fixture.write_low_resolution_function(1, &[(0.0, vec![Pair::new(10, 1, 0)])]);
+    fixture.write_low_resolution_function(2, &[(0.5, vec![Pair::new(7, 4, 0)])]);
+
+    let result = load(&fixture.root).expect("supported unknown function must import");
+    let run = loaded_run(&result);
+    assert_eq!(run.streams.len(), 2);
+    let unknown = run
+        .stream(AcquisitionStreamId::new(2))
+        .expect("unknown function remains a stream");
+    assert_eq!(unknown.role, StreamRole::Unknown);
+    assert_eq!(unknown.source_native_id.as_deref(), Some("2"));
+    assert_eq!(unknown.source_label.as_deref(), Some("Function 2"));
+    assert_eq!(unknown.spectra.len(), 1);
+    assert_eq!(unknown.spectra[0].mz, [7.0]);
+    assert!(run.chromatograms.is_empty());
 }
 
 #[test]
@@ -210,9 +239,14 @@ fn preserves_unsupported_optional_function_as_a_warning() {
     fixture.write_unsupported_function(2, 4);
     let result = load(&fixture.root).expect("optional function must not fail import");
     let run = loaded_run(&result);
-    assert_eq!(run.functions[1].kind, FunctionKind::Unknown);
-    assert!(run.functions[1].scans.is_empty());
-    assert_eq!(run.functions[1].encoding.pair_width, 4);
+    assert_eq!(run.streams.len(), 2);
+    let unknown = run
+        .stream(AcquisitionStreamId::new(2))
+        .expect("unsupported unknown function provenance is preserved");
+    assert_eq!(unknown.role, StreamRole::Unknown);
+    assert_eq!(unknown.source_native_id.as_deref(), Some("2"));
+    assert!(unknown.spectra.is_empty());
+    assert!(run.chromatograms.is_empty());
     assert!(result.warnings[0].message.contains("function 2"));
 }
 
@@ -301,13 +335,16 @@ fn validates_local_acceptance_bundles_when_present() {
         let result = load(&path).expect("load local acceptance bundle");
         let run = loaded_run(&result);
         let ms = run
-            .functions
+            .streams
             .iter()
-            .find(|function| function.kind == FunctionKind::MassSpectrum)
-            .expect("MS function");
-        assert_eq!(ms.scans.len(), 596);
+            .find(|stream| stream.role == StreamRole::Primary)
+            .expect("MS stream");
+        assert_eq!(ms.spectra.len(), 596);
         assert_eq!(
-            ms.scans.iter().map(|scan| scan.mz.len()).sum::<usize>(),
+            ms.spectra
+                .iter()
+                .map(|spectrum| spectrum.mz.len())
+                .sum::<usize>(),
             expected_pairs
         );
         let coordinates = run

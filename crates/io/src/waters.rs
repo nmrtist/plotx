@@ -1,9 +1,10 @@
 //! Native reader for the low-resolution Waters MassLynx RAW directory format.
 
 use crate::{
-    Acquisition, AcquisitionFunction, ChromatogramChannel, ChromatogramChannelId, ChromatogramKind,
-    DataFormat, FunctionId, FunctionKind, IoError, LoadResult, LoadWarning, LoadWarningCode,
-    MassScan, MassSpecRun, Polarity, Provenance, ScanEncoding, ScanId, WatersDecoder,
+    Acquisition, AcquisitionStream, AcquisitionStreamId, ChromatogramChannel,
+    ChromatogramChannelId, ChromatogramKind, DataFormat, IoError, LoadResult, LoadWarning,
+    LoadWarningCode, MassSpecRun, MassSpectrum, Polarity, Provenance, SpectrumId,
+    SpectrumRepresentation, StreamRole,
 };
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -19,6 +20,19 @@ const FUNCTION_RECORD_SIZE: usize = 416;
 const IDX22_STRIDE: usize = 22;
 const IDX30_STRIDE: usize = 30;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FunctionKind {
+    MassSpectrum,
+    OpticalDetector,
+    ReferenceLockMass,
+    Unknown,
+}
+
+struct DecodedFunction {
+    kind: FunctionKind,
+    stream: AcquisitionStream,
+}
+
 #[derive(Default)]
 struct FunctionFiles {
     idx: Option<PathBuf>,
@@ -29,7 +43,7 @@ struct FunctionFiles {
 struct Bundle {
     root: PathBuf,
     named: HashMap<String, PathBuf>,
-    functions: BTreeMap<FunctionId, FunctionFiles>,
+    functions: BTreeMap<AcquisitionStreamId, FunctionFiles>,
     chromatograms: BTreeMap<u16, PathBuf>,
 }
 
@@ -39,7 +53,7 @@ impl Bundle {
             return Err(invalid(format!("{} is not a directory", path.display())));
         }
         let mut named = HashMap::new();
-        let mut functions = BTreeMap::<FunctionId, FunctionFiles>::new();
+        let mut functions = BTreeMap::<AcquisitionStreamId, FunctionFiles>::new();
         let mut chromatograms = BTreeMap::new();
         for entry in std::fs::read_dir(path)? {
             let entry = entry?;
@@ -54,7 +68,7 @@ impl Bundle {
                 )));
             }
             if let Some((number, extension)) = numbered_file(&lower, "_func") {
-                let id = FunctionId::new(number);
+                let id = AcquisitionStreamId::new(number.into());
                 let files = functions.entry(id).or_default();
                 match extension {
                     "idx" => files.idx = Some(entry.path()),
@@ -121,9 +135,10 @@ pub fn load(path: &Path) -> Result<LoadResult, IoError> {
     let mut functions = Vec::with_capacity(function_records.len());
     let mut warnings = Vec::new();
     for (record_index, record) in function_records.iter().enumerate() {
-        let id = FunctionId::new(
+        let id = AcquisitionStreamId::new(
             u16::try_from(record_index + 1)
-                .map_err(|_| invalid("too many acquisition functions"))?,
+                .map_err(|_| invalid("too many acquisition functions"))?
+                .into(),
         );
         let files = bundle
             .functions
@@ -184,7 +199,7 @@ pub fn load(path: &Path) -> Result<LoadResult, IoError> {
                 "required MS function {id} has no valid calibration polynomial"
             )));
         }
-        let scans = match decode_low_resolution6(id, kind, &layout, &dat, calibration) {
+        let scans = match decode_low_resolution6(id, kind, polarity, &layout, &dat, calibration) {
             Ok(scans) => scans,
             Err(error) if !required => {
                 push_warning(
@@ -197,27 +212,23 @@ pub fn load(path: &Path) -> Result<LoadResult, IoError> {
             }
             Err(error) => return Err(error),
         };
-        functions.push(AcquisitionFunction {
-            id,
+        functions.push(DecodedFunction {
             kind,
-            polarity,
-            acquisition_range: record.range,
-            encoding: ScanEncoding {
-                idx_stride: IDX22_STRIDE as u16,
-                pair_width: 6,
-                decoder: WatersDecoder::LowResolution6,
-            },
-            scans,
+            stream: acquisition_stream(id, kind, record, scans),
         });
     }
-    if !functions
-        .iter()
-        .any(|function| function.kind == FunctionKind::MassSpectrum && !function.scans.is_empty())
-    {
+    if !functions.iter().any(|function| {
+        function.kind == FunctionKind::MassSpectrum && !function.stream.spectra.is_empty()
+    }) {
         return Err(invalid("the bundle contains no readable MS function"));
     }
 
     let mut chromatograms = optical_channels(&functions)?;
+    let streams = functions
+        .into_iter()
+        .filter(|function| function.kind != FunctionKind::OpticalDetector)
+        .map(|function| function.stream)
+        .collect();
     chromatograms.extend(parse_auxiliary_channels(&bundle, &mut warnings)?);
     let warning_messages = warnings
         .iter()
@@ -228,10 +239,11 @@ pub fn load(path: &Path) -> Result<LoadResult, IoError> {
         source,
         metadata: header.metadata,
         instrument: header.instrument,
-        functions,
+        streams,
         chromatograms,
         import_warnings: warning_messages,
     };
+    run.validate().map_err(invalid)?;
     Ok(LoadResult {
         acquisition: Acquisition::MassSpec(Box::new(run)),
         format: DataFormat::WatersMassLynxRaw,
@@ -241,7 +253,7 @@ pub fn load(path: &Path) -> Result<LoadResult, IoError> {
 }
 
 fn validate_function_files(
-    files: &BTreeMap<FunctionId, FunctionFiles>,
+    files: &BTreeMap<AcquisitionStreamId, FunctionFiles>,
     record_count: usize,
 ) -> Result<(), IoError> {
     if files.len() != record_count {
@@ -251,8 +263,10 @@ fn validate_function_files(
         )));
     }
     for number in 1..=record_count {
-        let id = FunctionId::new(
-            u16::try_from(number).map_err(|_| invalid("too many acquisition functions"))?,
+        let id = AcquisitionStreamId::new(
+            u16::try_from(number)
+                .map_err(|_| invalid("too many acquisition functions"))?
+                .into(),
         );
         let Some(function) = files.get(&id) else {
             return Err(invalid(format!("function table record {id} has no files")));
@@ -267,7 +281,7 @@ fn validate_function_files(
 }
 
 struct ScanIndex {
-    id: ScanId,
+    id: SpectrumId,
     offset: usize,
     count: usize,
     retention_time_min: f64,
@@ -313,7 +327,11 @@ fn parse_idx22(idx: &[u8], dat_len: usize) -> Result<Layout, IoError> {
             )));
         }
         scans.push(ScanIndex {
-            id: ScanId::new(u32::try_from(scan + 1).map_err(|_| invalid("too many scans"))?),
+            id: SpectrumId::new(
+                u32::try_from(scan + 1)
+                    .map_err(|_| invalid("too many scans"))?
+                    .into(),
+            ),
             offset: usize::try_from(read_u32(record, 0)?)
                 .map_err(|_| invalid("DAT offset does not fit this platform"))?,
             count: usize::try_from(read_u32(record, 4)? & 0x3f_ffff)
@@ -341,7 +359,11 @@ fn parse_idx30(idx: &[u8], dat_len: usize) -> Result<Layout, IoError> {
             )));
         }
         scans.push(ScanIndex {
-            id: ScanId::new(u32::try_from(scan + 1).map_err(|_| invalid("too many scans"))?),
+            id: SpectrumId::new(
+                u32::try_from(scan + 1)
+                    .map_err(|_| invalid("too many scans"))?
+                    .into(),
+            ),
             offset: usize::try_from(read_u32(record, 22)?)
                 .map_err(|_| invalid("DAT offset does not fit this platform"))?,
             count: 0,
@@ -439,12 +461,13 @@ fn validate_offsets(scans: &[ScanIndex], dat_len: usize) -> Result<(), IoError> 
 }
 
 fn decode_low_resolution6(
-    function_id: FunctionId,
+    function_id: AcquisitionStreamId,
     kind: FunctionKind,
+    polarity: Polarity,
     layout: &Layout,
     dat: &[u8],
     calibration: Option<&[f64]>,
-) -> Result<Vec<MassScan>, IoError> {
+) -> Result<Vec<MassSpectrum>, IoError> {
     let mut result = Vec::with_capacity(layout.scans.len());
     for scan in &layout.scans {
         let byte_len = scan.count.checked_mul(6).ok_or_else(|| {
@@ -500,28 +523,37 @@ fn decode_low_resolution6(
                 scan.id
             )));
         }
+        // Preserve signed profile samples, but the persisted TIC/BPI summaries
+        // represent non-negative signal magnitudes. A scan whose signed total
+        // falls below zero therefore has zero TIC and no negative base peak.
         let tic = values
             .iter()
             .copied()
             .filter(|value| value.is_finite())
-            .sum();
+            .sum::<f64>()
+            .max(0.0);
         let base_peak = values
             .iter()
             .enumerate()
-            .filter(|(_, value)| value.is_finite())
+            .filter(|(_, value)| value.is_finite() && **value >= 0.0)
             .max_by(|(_, left), (_, right)| left.total_cmp(right));
         let (base_peak_mz, base_peak_intensity) = base_peak
             .map_or((None, None), |(index, value)| {
                 (coordinates.get(index).copied(), Some(*value))
             });
-        result.push(MassScan {
+        result.push(MassSpectrum {
             id: scan.id,
+            source_native_id: Some(scan.id.to_string()),
             retention_time_min: scan.retention_time_min,
+            ms_level: 1,
+            polarity,
+            representation: SpectrumRepresentation::Unknown,
             mz: coordinates,
             intensity: values,
             tic,
             base_peak_mz,
             base_peak_intensity,
+            precursor: None,
         });
     }
     Ok(result)
@@ -540,21 +572,19 @@ fn calibrate(value: f64, coefficients: &[f64]) -> Result<f64, IoError> {
         .ok_or_else(|| invalid("calibration polynomial produced a non-finite value"))
 }
 
-fn optical_channels(
-    functions: &[AcquisitionFunction],
-) -> Result<Vec<ChromatogramChannel>, IoError> {
+fn optical_channels(functions: &[DecodedFunction]) -> Result<Vec<ChromatogramChannel>, IoError> {
     struct Builder {
-        function: FunctionId,
+        function: AcquisitionStreamId,
         coordinate: f64,
         time: Vec<f64>,
         values: Vec<f64>,
     }
-    let mut channels = BTreeMap::<(FunctionId, u64), Builder>::new();
+    let mut channels = BTreeMap::<(AcquisitionStreamId, u64), Builder>::new();
     for function in functions
         .iter()
         .filter(|function| function.kind == FunctionKind::OpticalDetector)
     {
-        for scan in &function.scans {
+        for scan in &function.stream.spectra {
             let mut scan_values = BTreeMap::<u64, (f64, f64)>::new();
             for (&coordinate, &value) in scan.mz.iter().zip(&scan.intensity) {
                 let bits = normalized_bits(coordinate);
@@ -565,9 +595,9 @@ fn optical_channels(
             }
             for (bits, (coordinate, value)) in scan_values {
                 let channel = channels
-                    .entry((function.id, bits))
+                    .entry((function.stream.id, bits))
                     .or_insert_with(|| Builder {
-                        function: function.id,
+                        function: function.stream.id,
                         coordinate,
                         time: Vec::new(),
                         values: Vec::new(),
@@ -581,12 +611,12 @@ fn optical_channels(
         .into_values()
         .map(|channel| ChromatogramChannel {
             id: ChromatogramChannelId(format!(
-                "function:{}:coordinate:{:016x}",
+                "waters:optical:{}:coordinate:{:016x}",
                 channel.function,
                 normalized_bits(channel.coordinate)
             )),
             kind: ChromatogramKind::Optical,
-            source_function: Some(channel.function),
+            source_stream: None,
             coordinate: Some(channel.coordinate),
             description: format!("Optical {} nm", format_coordinate(channel.coordinate)),
             unit: "AU".to_owned(),
@@ -595,13 +625,11 @@ fn optical_channels(
         })
         .collect::<Vec<_>>();
     result.sort_by(|left, right| {
-        left.source_function
-            .cmp(&right.source_function)
-            .then_with(|| {
-                left.coordinate
-                    .unwrap_or(0.0)
-                    .total_cmp(&right.coordinate.unwrap_or(0.0))
-            })
+        left.source_stream.cmp(&right.source_stream).then_with(|| {
+            left.coordinate
+                .unwrap_or(0.0)
+                .total_cmp(&right.coordinate.unwrap_or(0.0))
+        })
     });
     for channel in &result {
         validate_channel(channel)?;
@@ -631,30 +659,42 @@ fn validate_channel(channel: &ChromatogramChannel) -> Result<(), IoError> {
 }
 
 fn empty_function(
-    id: FunctionId,
+    id: AcquisitionStreamId,
     kind: FunctionKind,
-    polarity: Polarity,
+    _polarity: Polarity,
     record: &FunctionRecord,
-    idx_stride: usize,
-    pair_width: usize,
-) -> AcquisitionFunction {
-    AcquisitionFunction {
-        id,
+    _idx_stride: usize,
+    _pair_width: usize,
+) -> DecodedFunction {
+    DecodedFunction {
         kind,
-        polarity,
-        acquisition_range: record.range,
-        encoding: ScanEncoding {
-            idx_stride: u16::try_from(idx_stride).unwrap_or(u16::MAX),
-            pair_width: u8::try_from(pair_width).unwrap_or(u8::MAX),
-            decoder: WatersDecoder::Unsupported,
-        },
-        scans: Vec::new(),
+        stream: acquisition_stream(id, kind, record, Vec::new()),
     }
 }
 
-fn unsupported(id: FunctionId, layout: &Layout, instrument: Option<&str>) -> IoError {
+fn acquisition_stream(
+    id: AcquisitionStreamId,
+    kind: FunctionKind,
+    record: &FunctionRecord,
+    spectra: Vec<MassSpectrum>,
+) -> AcquisitionStream {
+    AcquisitionStream {
+        id,
+        source_native_id: Some(id.to_string()),
+        source_label: Some(format!("Function {id}")),
+        role: match kind {
+            FunctionKind::MassSpectrum => StreamRole::Primary,
+            FunctionKind::ReferenceLockMass => StreamRole::Reference,
+            FunctionKind::OpticalDetector | FunctionKind::Unknown => StreamRole::Unknown,
+        },
+        acquisition_range: record.range,
+        spectra,
+    }
+}
+
+fn unsupported(id: AcquisitionStreamId, layout: &Layout, instrument: Option<&str>) -> IoError {
     IoError::UnsupportedWatersEncoding {
-        function_id: id,
+        native_function: id.get(),
         idx_stride: layout.idx_stride,
         pair_width: layout.pair_width,
         instrument: instrument.unwrap_or("unknown").to_owned(),

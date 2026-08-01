@@ -5,12 +5,12 @@ pub(super) fn descriptor(
 ) -> (Vec<usize>, Vec<String>, Vec<ResourceRef>) {
     (
         vec![
-            dataset.run.functions.len(),
+            dataset.run.streams.len(),
             dataset
                 .run
-                .functions
+                .streams
                 .iter()
-                .map(|function| function.scans.len())
+                .map(|stream| stream.spectra.len())
                 .sum(),
             dataset.run.chromatograms.len(),
         ],
@@ -40,19 +40,19 @@ pub(super) fn preview(
     }
     let scans = dataset
         .run
-        .functions
+        .streams
         .iter()
-        .map(|function| function.scans.len())
+        .map(|stream| stream.spectra.len())
         .sum();
     (
         vec![
-            dataset.run.functions.len(),
+            dataset.run.streams.len(),
             scans,
             dataset.run.chromatograms.len(),
         ],
         serde_json::json!({"summary": format!(
-            "{} MS functions · {scans} scans · {} detector channels",
-            dataset.supported_ms_functions().count(), dataset.run.chromatograms.len()
+            "{} MS streams · {scans} scans · {} detector channels",
+            dataset.supported_ms_streams().count(), dataset.run.chromatograms.len()
         )}),
         scans,
     )

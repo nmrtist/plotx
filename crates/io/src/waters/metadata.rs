@@ -3,7 +3,7 @@ use super::*;
 pub(super) struct Header {
     pub(super) metadata: BTreeMap<String, String>,
     pub(super) instrument: Option<String>,
-    pub(super) calibrations: BTreeMap<FunctionId, Vec<f64>>,
+    pub(super) calibrations: BTreeMap<AcquisitionStreamId, Vec<f64>>,
 }
 
 pub(super) fn parse_header(bytes: &[u8]) -> Result<Header, IoError> {
@@ -23,7 +23,7 @@ pub(super) fn parse_header(bytes: &[u8]) -> Result<Header, IoError> {
         let Some(number) = key.strip_prefix("Cal Function ") else {
             continue;
         };
-        let id = FunctionId::new(
+        let id = AcquisitionStreamId::new(
             number
                 .trim()
                 .parse()
@@ -117,7 +117,7 @@ pub(super) fn classify_function(
     }
 }
 
-pub(super) fn parse_polarities(bytes: &[u8]) -> BTreeMap<FunctionId, Polarity> {
+pub(super) fn parse_polarities(bytes: &[u8]) -> BTreeMap<AcquisitionStreamId, Polarity> {
     let text = String::from_utf8_lossy(bytes);
     let mut result = BTreeMap::new();
     let mut current = None;
@@ -131,7 +131,10 @@ pub(super) fn parse_polarities(bytes: &[u8]) -> BTreeMap<FunctionId, Polarity> {
                 .chars()
                 .take_while(|character| character.is_ascii_digit())
                 .collect::<String>();
-            current = digits.parse::<u16>().ok().map(FunctionId::new);
+            current = digits
+                .parse::<u16>()
+                .ok()
+                .map(|value| AcquisitionStreamId::new(value.into()));
         } else if trimmed.starts_with("Polarity")
             && let Some(id) = current
         {

@@ -11,22 +11,25 @@ pub(super) fn mass_spectrometry_group(app: &mut PlotxApp, di: usize, ui: &mut Ui
         return false;
     };
     let dataset_id = dataset.resource_id;
-    let active_function = dataset.active_function;
-    let functions = dataset
-        .supported_ms_functions()
+    let active_stream = dataset.active_stream;
+    let streams = dataset
+        .supported_ms_streams()
         .filter_map(|id| {
-            dataset.run.function(id).map(|function| {
-                let polarity = match function.polarity {
+            dataset.run.stream(id).map(|stream| {
+                let polarity = match stream.polarity() {
                     plotx_io::Polarity::Positive => "+",
                     plotx_io::Polarity::Negative => "−",
                     plotx_io::Polarity::Unknown => "?",
                 };
+                let source_label = plotx_core::state::stream_display_label(stream);
                 (
                     id,
                     format!(
-                        "Function {id} · {polarity} · {} scans",
-                        function.scans.len()
+                        "{} · {polarity} · {} scans",
+                        source_label,
+                        stream.spectra.len()
                     ),
+                    source_label,
                 )
             })
         })
@@ -38,23 +41,23 @@ pub(super) fn mass_spectrometry_group(app: &mut PlotxApp, di: usize, ui: &mut Ui
         .filter(|channel| channel.kind == plotx_io::ChromatogramKind::Optical)
         .map(|channel| channel.description.clone())
         .collect::<Vec<_>>();
-    let selected_scan = dataset.selected_scan().cloned();
+    let selected_spectrum = dataset.selected_spectrum().cloned();
     let extraction_count = dataset.extracted_spectra.len();
 
     ui.strong("Acquisition");
-    let active_label = functions
+    let active_label = streams
         .iter()
-        .find(|(id, _)| *id == active_function)
-        .map(|(_, label)| label.as_str())
-        .unwrap_or("Unavailable function");
-    let mut function_change = None;
-    if functions.len() > 1 {
-        ComboBox::from_label("MS function")
+        .find(|(id, _, _)| *id == active_stream)
+        .map(|(_, label, _)| label.as_str())
+        .unwrap_or("Unavailable stream");
+    let mut stream_change = None;
+    if streams.len() > 1 {
+        ComboBox::from_label("Acquisition stream")
             .selected_text(active_label)
             .show_ui(ui, |ui| {
-                for (id, label) in &functions {
-                    if ui.selectable_label(*id == active_function, label).clicked() {
-                        function_change = Some(*id);
+                for (id, label, source_label) in &streams {
+                    if ui.selectable_label(*id == active_stream, label).clicked() {
+                        stream_change = Some((*id, source_label.clone()));
                         ui.close();
                     }
                 }
@@ -68,17 +71,21 @@ pub(super) fn mass_spectrometry_group(app: &mut PlotxApp, di: usize, ui: &mut Ui
 
     ui.separator();
     ui.strong("Scan preview");
-    if let Some(scan) = &selected_scan {
+    if let Some(scan) = &selected_spectrum {
         ui.label(format!(
             "{:.3} min · native scan {}",
-            scan.retention_time_min, scan.id
+            scan.retention_time_min,
+            plotx_core::state::spectrum_display_label(scan)
         ));
         mass_spectrum_preview(ui, scan);
     } else {
         ui.weak("Click a TIC or UV chromatogram to preview the nearest scan.");
     }
     let pin_scan = ui
-        .add_enabled(selected_scan.is_some(), Button::new("Extract current scan"))
+        .add_enabled(
+            selected_spectrum.is_some(),
+            Button::new("Extract current scan"),
+        )
         .on_disabled_hover_text("Click a chromatogram to choose a scan first.")
         .clicked();
 
@@ -141,14 +148,14 @@ pub(super) fn mass_spectrometry_group(app: &mut PlotxApp, di: usize, ui: &mut Ui
         ui.weak(format!("{extraction_count} saved extraction(s)"));
     }
 
-    if let Some(function) = function_change
-        && app.select_mass_spec_function(dataset_id, function)
+    if let Some((stream, label)) = stream_change
+        && app.select_mass_spec_stream(dataset_id, stream)
     {
         app.focus_single(di);
-        app.session.status = format!("Selected LC–MS function {function}.");
+        app.session.status = format!("Selected LC–MS {label}.");
     }
     let extraction = if pin_scan {
-        selected_scan.as_ref().map(|scan| {
+        selected_spectrum.as_ref().map(|scan| {
             (
                 scan.retention_time_min,
                 scan.retention_time_min,
@@ -175,7 +182,7 @@ pub(super) fn mass_spectrometry_group(app: &mut PlotxApp, di: usize, ui: &mut Ui
     false
 }
 
-fn mass_spectrum_preview(ui: &mut Ui, scan: &plotx_io::MassScan) {
+fn mass_spectrum_preview(ui: &mut Ui, scan: &plotx_io::MassSpectrum) {
     let width = ui.available_width().max(80.0);
     let (rect, _) = ui.allocate_exact_size(egui::vec2(width, 96.0), egui::Sense::hover());
     let painter = ui.painter_at(rect);

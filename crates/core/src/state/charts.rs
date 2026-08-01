@@ -396,7 +396,7 @@ fn build_mass_chromatogram(dataset: &Dataset, _ctx: &ChartContext) -> Option<Fig
     let dataset = dataset.as_mass_spec()?;
     let id = dataset
         .field_catalog
-        .id_for_key(&tic_key(dataset.active_function))?;
+        .id_for_key(&stream_tic_key(dataset.active_stream))?;
     dataset.field_figure(id)
 }
 
@@ -404,7 +404,7 @@ fn build_mass_spectrum(dataset: &Dataset, _ctx: &ChartContext) -> Option<Figure>
     let dataset = dataset.as_mass_spec()?;
     let id = dataset
         .field_catalog
-        .id_for_key(&spectrum_key(dataset.active_function))?;
+        .id_for_key(&stream_spectrum_key(dataset.active_stream))?;
     dataset.field_figure(id)
 }
 

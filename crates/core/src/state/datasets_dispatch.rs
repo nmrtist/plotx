@@ -115,12 +115,12 @@ impl Dataset {
                 format!("{} channels · {curves} force curves", d.data.images.len())
             }
             Dataset::MassSpec(d) => format!(
-                "{} MS functions · {} scans · {} detector channels",
-                d.supported_ms_functions().count(),
+                "{} MS streams · {} scans · {} detector channels",
+                d.supported_ms_streams().count(),
                 d.run
-                    .functions
+                    .streams
                     .iter()
-                    .map(|function| function.scans.len())
+                    .map(|stream| stream.spectra.len())
                     .sum::<usize>(),
                 d.run.chromatograms.len()
             ),

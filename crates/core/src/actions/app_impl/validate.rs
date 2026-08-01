@@ -49,7 +49,7 @@ pub(super) fn validate_action(
                 return Err(ActionApplyError::StaleTarget(format!("dataset {dataset}")));
             }
         }
-        Action::SetMassSpecFunction {
+        Action::SetMassSpecStream {
             dataset,
             before,
             after,
@@ -63,13 +63,13 @@ pub(super) fn validate_action(
                     "dataset {dataset} is not LC–MS data"
                 )));
             };
-            if [before, after].into_iter().any(|function| {
+            if [before, after].into_iter().any(|stream| {
                 !mass_spec
-                    .supported_ms_functions()
-                    .any(|candidate| candidate == *function)
+                    .supported_ms_streams()
+                    .any(|candidate| candidate == *stream)
             }) {
                 return Err(ActionApplyError::InvalidValue(format!(
-                    "dataset {dataset} does not contain both MS functions"
+                    "dataset {dataset} does not contain both MS streams"
                 )));
             }
         }

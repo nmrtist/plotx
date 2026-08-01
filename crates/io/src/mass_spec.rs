@@ -1,48 +1,34 @@
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-/// Stable Waters acquisition-function identity, derived from the vendor number.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct FunctionId(u16);
+macro_rules! typed_id {
+    ($name:ident) => {
+        #[derive(
+            Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+        )]
+        #[serde(transparent)]
+        pub struct $name(u64);
 
-impl FunctionId {
-    pub const fn new(value: u16) -> Self {
-        Self(value)
-    }
+        impl $name {
+            pub const fn new(value: u64) -> Self {
+                Self(value)
+            }
+            pub const fn get(self) -> u64 {
+                self.0
+            }
+        }
 
-    pub const fn get(self) -> u16 {
-        self.0
-    }
+        impl fmt::Display for $name {
+            fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(formatter, "{}", self.0)
+            }
+        }
+    };
 }
 
-impl fmt::Display for FunctionId {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "{}", self.0)
-    }
-}
-
-/// Stable native scan identity within one acquisition function.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct ScanId(u32);
-
-impl ScanId {
-    pub const fn new(value: u32) -> Self {
-        Self(value)
-    }
-
-    pub const fn get(self) -> u32 {
-        self.0
-    }
-}
-
-impl fmt::Display for ScanId {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "{}", self.0)
-    }
-}
+typed_id!(AcquisitionStreamId);
+typed_id!(SpectrumId);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -56,10 +42,9 @@ impl fmt::Display for ChromatogramChannelId {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum FunctionKind {
-    MassSpectrum,
-    OpticalDetector,
-    ReferenceLockMass,
+pub enum StreamRole {
+    Primary,
+    Reference,
     Unknown,
 }
 
@@ -73,38 +58,65 @@ pub enum Polarity {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum WatersDecoder {
-    LowResolution6,
-    Unsupported,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ScanEncoding {
-    pub idx_stride: u16,
-    pub pair_width: u8,
-    pub decoder: WatersDecoder,
+pub enum SpectrumRepresentation {
+    Profile,
+    Centroid,
+    Unknown,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MassScan {
-    pub id: ScanId,
+pub struct Precursor {
+    pub selected_mz: f64,
+    pub charge: Option<i32>,
+    pub isolation_window_lower_offset: Option<f64>,
+    pub isolation_window_upper_offset: Option<f64>,
+    pub collision_energy: Option<f64>,
+    pub activation_method: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MassSpectrum {
+    pub id: SpectrumId,
+    pub source_native_id: Option<String>,
     pub retention_time_min: f64,
-    /// Calibrated m/z for MS functions; detector coordinate for other functions.
+    pub ms_level: u8,
+    pub polarity: Polarity,
+    pub representation: SpectrumRepresentation,
     pub mz: Vec<f64>,
     pub intensity: Vec<f64>,
     pub tic: f64,
     pub base_peak_mz: Option<f64>,
     pub base_peak_intensity: Option<f64>,
+    pub precursor: Option<Precursor>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AcquisitionFunction {
-    pub id: FunctionId,
-    pub kind: FunctionKind,
-    pub polarity: Polarity,
+pub struct AcquisitionStream {
+    pub id: AcquisitionStreamId,
+    pub source_native_id: Option<String>,
+    pub source_label: Option<String>,
+    pub role: StreamRole,
     pub acquisition_range: Option<[f64; 2]>,
-    pub encoding: ScanEncoding,
-    pub scans: Vec<MassScan>,
+    pub spectra: Vec<MassSpectrum>,
+}
+
+impl AcquisitionStream {
+    /// The stream polarity when every spectrum agrees, otherwise unknown.
+    pub fn polarity(&self) -> Polarity {
+        let Some(first) = self.spectra.first().map(|spectrum| spectrum.polarity) else {
+            return Polarity::Unknown;
+        };
+        if first == Polarity::Unknown
+            || self
+                .spectra
+                .iter()
+                .any(|spectrum| spectrum.polarity != first)
+        {
+            Polarity::Unknown
+        } else {
+            first
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -121,7 +133,7 @@ pub enum ChromatogramKind {
 pub struct ChromatogramChannel {
     pub id: ChromatogramChannelId,
     pub kind: ChromatogramKind,
-    pub source_function: Option<FunctionId>,
+    pub source_stream: Option<AcquisitionStreamId>,
     pub coordinate: Option<f64>,
     pub description: String,
     pub unit: String,
@@ -134,13 +146,230 @@ pub struct MassSpecRun {
     pub source: String,
     pub metadata: BTreeMap<String, String>,
     pub instrument: Option<String>,
-    pub functions: Vec<AcquisitionFunction>,
+    pub streams: Vec<AcquisitionStream>,
     pub chromatograms: Vec<ChromatogramChannel>,
     pub import_warnings: Vec<String>,
 }
 
 impl MassSpecRun {
-    pub fn function(&self, id: FunctionId) -> Option<&AcquisitionFunction> {
-        self.functions.iter().find(|function| function.id == id)
+    pub fn stream(&self, id: AcquisitionStreamId) -> Option<&AcquisitionStream> {
+        self.streams.iter().find(|stream| stream.id == id)
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        let mut stream_ids = BTreeSet::new();
+        for stream in &self.streams {
+            if !stream_ids.insert(stream.id) {
+                return Err(format!("duplicate stream ID {}", stream.id));
+            }
+            if let Some([low, high]) = stream.acquisition_range
+                && (!low.is_finite() || !high.is_finite() || high < low)
+            {
+                return Err(format!(
+                    "stream {} has an invalid acquisition range",
+                    stream.id
+                ));
+            }
+            let mut spectrum_ids = BTreeSet::new();
+            for spectrum in &stream.spectra {
+                if !spectrum_ids.insert(spectrum.id) {
+                    return Err(format!(
+                        "stream {} has duplicate spectrum ID {}",
+                        stream.id, spectrum.id
+                    ));
+                }
+                validate_spectrum(stream.id, spectrum)?;
+            }
+        }
+        if !self
+            .streams
+            .iter()
+            .any(|stream| stream.role == StreamRole::Primary && !stream.spectra.is_empty())
+        {
+            return Err("run has no readable non-reference MS stream".to_owned());
+        }
+        let mut channel_ids = BTreeSet::new();
+        for channel in &self.chromatograms {
+            if !channel_ids.insert(channel.id.0.as_str()) {
+                return Err(format!("duplicate chromatogram channel ID {}", channel.id));
+            }
+            if channel
+                .source_stream
+                .is_some_and(|id| !stream_ids.contains(&id))
+            {
+                return Err(format!(
+                    "channel {} references a missing stream",
+                    channel.id
+                ));
+            }
+            if channel.time_min.len() != channel.values.len()
+                || channel
+                    .time_min
+                    .iter()
+                    .chain(&channel.values)
+                    .any(|value| !value.is_finite())
+            {
+                return Err(format!("channel {} has invalid arrays", channel.id));
+            }
+            if channel.coordinate.is_some_and(|value| !value.is_finite()) {
+                return Err(format!("channel {} has an invalid coordinate", channel.id));
+            }
+        }
+        Ok(())
+    }
+}
+
+fn validate_spectrum(stream: AcquisitionStreamId, spectrum: &MassSpectrum) -> Result<(), String> {
+    if spectrum.ms_level == 0
+        || !spectrum.retention_time_min.is_finite()
+        || spectrum.mz.len() != spectrum.intensity.len()
+        || spectrum
+            .mz
+            .iter()
+            .any(|value| !value.is_finite() || *value < 0.0)
+        || spectrum.intensity.iter().any(|value| !value.is_finite())
+        || !spectrum.tic.is_finite()
+        || spectrum.tic < 0.0
+        || spectrum
+            .base_peak_mz
+            .is_some_and(|value| !value.is_finite() || value < 0.0)
+        || spectrum
+            .base_peak_intensity
+            .is_some_and(|value| !value.is_finite() || value < 0.0)
+        || spectrum.base_peak_mz.is_some() != spectrum.base_peak_intensity.is_some()
+    {
+        return Err(format!(
+            "stream {stream} has invalid spectrum {}",
+            spectrum.id
+        ));
+    }
+    if let Some(precursor) = &spectrum.precursor
+        && (!precursor.selected_mz.is_finite()
+            || precursor.selected_mz <= 0.0
+            || precursor.charge == Some(0)
+            || precursor
+                .isolation_window_lower_offset
+                .is_some_and(|v| !v.is_finite() || v < 0.0)
+            || precursor
+                .isolation_window_upper_offset
+                .is_some_and(|v| !v.is_finite() || v < 0.0)
+            || precursor
+                .collision_energy
+                .is_some_and(|v| !v.is_finite() || v < 0.0))
+    {
+        return Err(format!(
+            "stream {stream} spectrum {} has invalid precursor metadata",
+            spectrum.id
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn spectrum() -> MassSpectrum {
+        MassSpectrum {
+            id: SpectrumId::new(1),
+            source_native_id: Some("scan=1".to_owned()),
+            retention_time_min: 0.5,
+            ms_level: 2,
+            polarity: Polarity::Positive,
+            representation: SpectrumRepresentation::Centroid,
+            mz: vec![100.0],
+            intensity: vec![5.0],
+            tic: 5.0,
+            base_peak_mz: Some(100.0),
+            base_peak_intensity: Some(5.0),
+            precursor: Some(Precursor {
+                selected_mz: 445.2,
+                charge: Some(2),
+                isolation_window_lower_offset: Some(0.5),
+                isolation_window_upper_offset: Some(0.5),
+                collision_energy: Some(20.0),
+                activation_method: Some("CID".to_owned()),
+            }),
+        }
+    }
+
+    fn run(spectra: Vec<MassSpectrum>) -> MassSpecRun {
+        MassSpecRun {
+            source: "test".to_owned(),
+            metadata: BTreeMap::new(),
+            instrument: None,
+            streams: vec![AcquisitionStream {
+                id: AcquisitionStreamId::new(4_294_967_297),
+                source_native_id: Some("controllerType=0 controllerNumber=1".to_owned()),
+                source_label: None,
+                role: StreamRole::Primary,
+                acquisition_range: None,
+                spectra,
+            }],
+            chromatograms: Vec::new(),
+            import_warnings: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn validates_spectrum_metadata_and_wide_stable_ids() {
+        assert!(run(vec![spectrum()]).validate().is_ok());
+    }
+
+    #[test]
+    fn rejects_duplicate_spectra_and_invalid_precursors() {
+        let item = spectrum();
+        assert!(
+            run(vec![item.clone(), item.clone()])
+                .validate()
+                .unwrap_err()
+                .contains("duplicate spectrum")
+        );
+        let mut item = item;
+        item.precursor.as_mut().unwrap().collision_energy = Some(f64::NAN);
+        assert!(
+            run(vec![item])
+                .validate()
+                .unwrap_err()
+                .contains("precursor")
+        );
+    }
+
+    #[test]
+    fn stream_polarity_is_only_specific_when_all_spectra_agree() {
+        let positive = spectrum();
+        let mut negative = spectrum();
+        negative.id = SpectrumId::new(2);
+        negative.polarity = Polarity::Negative;
+        assert_eq!(
+            run(vec![positive.clone()]).streams[0].polarity(),
+            Polarity::Positive
+        );
+        assert_eq!(
+            run(vec![positive, negative]).streams[0].polarity(),
+            Polarity::Unknown
+        );
+        assert_eq!(run(Vec::new()).streams[0].polarity(), Polarity::Unknown);
+    }
+
+    #[test]
+    fn rejects_duplicate_chromatogram_channel_ids() {
+        let mut run = run(vec![spectrum()]);
+        let channel = ChromatogramChannel {
+            id: ChromatogramChannelId("tic".to_owned()),
+            kind: ChromatogramKind::Unknown,
+            source_stream: None,
+            coordinate: None,
+            description: "TIC".to_owned(),
+            unit: "count".to_owned(),
+            time_min: vec![0.5],
+            values: vec![5.0],
+        };
+        run.chromatograms = vec![channel.clone(), channel];
+        assert!(
+            run.validate()
+                .unwrap_err()
+                .contains("duplicate chromatogram")
+        );
     }
 }

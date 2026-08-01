@@ -76,14 +76,14 @@ impl Dataset {
             }
             Self::Afm(_) => None,
             Self::MassSpec(data) => {
-                let function = data.run.function(data.active_function)?;
+                let stream = data.run.stream(data.active_stream)?;
                 Some(Trace1d {
-                    xs: function
-                        .scans
+                    xs: stream
+                        .spectra
                         .iter()
                         .map(|scan| scan.retention_time_min)
                         .collect(),
-                    ys: function.scans.iter().map(|scan| scan.tic).collect(),
+                    ys: stream.spectra.iter().map(|scan| scan.tic).collect(),
                     x_reversed: false,
                 })
             }

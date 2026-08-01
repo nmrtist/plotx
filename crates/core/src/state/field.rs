@@ -1,7 +1,8 @@
 use super::field_runtime::*;
 use super::{
-    FieldCatalog, FieldId, bpi_key, channel_key, electrophysiology_channel_key,
-    extracted_spectrum_key, extraction_title, mass_spec_dataset_field_keys, spectrum_key, tic_key,
+    FieldCatalog, FieldId, channel_key, electrophysiology_channel_key,
+    extracted_stream_spectrum_key, extraction_title, mass_spec_dataset_field_keys, stream_bpi_key,
+    stream_display_label, stream_spectrum_key, stream_tic_key,
 };
 use crate::automation::{
     CAP_FIELD_AFM_MAP, CAP_FIELD_BOUNDED, CAP_FIELD_COLORED_RASTER_2D, CAP_FIELD_CURVE_1D,
@@ -231,29 +232,28 @@ impl super::Dataset {
             }
             Self::MassSpec(dataset) => {
                 let mut fields = Vec::new();
-                for function in dataset.run.functions.iter().filter(|function| {
-                    function.kind == plotx_io::FunctionKind::MassSpectrum
-                        && !function.scans.is_empty()
+                for stream in dataset.run.streams.iter().filter(|stream| {
+                    stream.role == plotx_io::StreamRole::Primary && !stream.spectra.is_empty()
                 }) {
                     let entries = [
                         (
-                            tic_key(function.id),
-                            format!("Function {} TIC", function.id),
+                            stream_tic_key(stream.id),
+                            format!("{} TIC", stream_display_label(stream)),
                             CAP_FIELD_MASS_CHROMATOGRAM,
-                            function.scans.len(),
+                            stream.spectra.len(),
                         ),
                         (
-                            bpi_key(function.id),
-                            format!("Function {} BPI", function.id),
+                            stream_bpi_key(stream.id),
+                            format!("{} BPI", stream_display_label(stream)),
                             CAP_FIELD_MASS_CHROMATOGRAM,
-                            function.scans.len(),
+                            stream.spectra.len(),
                         ),
                         (
-                            spectrum_key(function.id),
-                            format!("Function {} current spectrum", function.id),
+                            stream_spectrum_key(stream.id),
+                            format!("{} current spectrum", stream_display_label(stream)),
                             CAP_FIELD_MASS_SPECTRUM,
-                            function
-                                .scans
+                            stream
+                                .spectra
                                 .iter()
                                 .map(|scan| scan.mz.len())
                                 .max()
@@ -301,12 +301,12 @@ impl super::Dataset {
                     }
                 }
                 for extraction in &dataset.extracted_spectra {
-                    let key = extracted_spectrum_key(extraction.id);
+                    let key = extracted_stream_spectrum_key(extraction.id);
                     if let Some(id) = dataset.field_catalog.id_for_key(&key) {
                         fields.push(descriptor(
                             id,
                             &key,
-                            &extraction_title(extraction),
+                            &extraction_title(&dataset.run, extraction),
                             capabilities(id, &[CAP_FIELD_MASS_SPECTRUM]),
                             // Aggregated spectra are computed lazily; descriptor
                             // discovery must remain a metadata-only operation.

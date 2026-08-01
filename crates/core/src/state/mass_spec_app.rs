@@ -1,6 +1,6 @@
 use super::*;
 use crate::actions::Action;
-use plotx_io::FunctionId;
+use plotx_io::AcquisitionStreamId;
 
 impl PlotxApp {
     pub fn pin_mass_spectrum_extraction(
@@ -17,10 +17,10 @@ impl PlotxApp {
         let canvas_index = self
             .mass_spec_canvas_index(dataset_id)
             .ok_or_else(|| "No canvas currently displays this LC–MS dataset.".to_owned())?;
-        let function = self.doc.datasets[dataset_index]
+        let stream = self.doc.datasets[dataset_index]
             .as_mass_spec()
             .ok_or_else(|| "The selected dataset is not LC–MS data.".to_owned())?
-            .active_function;
+            .active_stream;
         let (before, after, extraction_id, field, title) = {
             let dataset = self.doc.datasets[dataset_index]
                 .as_mass_spec()
@@ -30,11 +30,11 @@ impl PlotxApp {
                 dataset.next_extraction_id,
             );
             let extraction =
-                dataset.plan_extraction(function, start_time_min, end_time_min, method)?;
+                dataset.plan_extraction(stream, start_time_min, end_time_min, method)?;
             let extraction_id = extraction.id;
             let mut planned_catalog = dataset.field_catalog.clone();
-            let field = planned_catalog.ensure_key(extracted_spectrum_key(extraction_id));
-            let title = extraction_title(&extraction);
+            let field = planned_catalog.ensure_key(extracted_stream_spectrum_key(extraction_id));
+            let title = extraction_title(&dataset.run, &extraction);
             let next_id = extraction_id
                 .get()
                 .checked_add(1)
@@ -131,44 +131,44 @@ impl PlotxApp {
         })
     }
 
-    pub fn select_mass_spec_function(
+    pub fn select_mass_spec_stream(
         &mut self,
         dataset_id: DatasetId,
-        function: FunctionId,
+        stream: AcquisitionStreamId,
     ) -> bool {
         let Some(index) = self.doc.dataset_index(dataset_id) else {
             return false;
         };
-        let old_function = match self.doc.datasets.get(index) {
+        let old_stream = match self.doc.datasets.get(index) {
             Some(Dataset::MassSpec(dataset))
-                if dataset.supported_ms_functions().any(|id| id == function) =>
+                if dataset.supported_ms_streams().any(|id| id == stream) =>
             {
-                dataset.active_function
+                dataset.active_stream
             }
             _ => return false,
         };
-        if old_function == function {
+        if old_stream == stream {
             return false;
         }
-        self.execute_action(Action::SetMassSpecFunction {
+        self.execute_action(Action::SetMassSpecStream {
             dataset: dataset_id,
-            before: old_function,
-            after: function,
+            before: old_stream,
+            after: stream,
         });
         true
     }
 
-    pub(crate) fn set_mass_spec_function_value(&mut self, index: usize, function: FunctionId) {
-        let (old_function, changed) = match self.doc.datasets.get_mut(index) {
+    pub(crate) fn set_mass_spec_stream_value(&mut self, index: usize, stream: AcquisitionStreamId) {
+        let (old_stream, changed) = match self.doc.datasets.get_mut(index) {
             Some(Dataset::MassSpec(dataset)) => {
-                let old = dataset.active_function;
-                (old, dataset.select_function(function))
+                let old = dataset.active_stream;
+                (old, dataset.select_stream(stream))
             }
             _ => return,
         };
         if changed {
             let dataset_id = self.doc.datasets[index].resource_id();
-            self.retarget_mass_spec_bindings(dataset_id, old_function, function);
+            self.retarget_mass_spec_bindings(dataset_id, old_stream, stream);
             self.rebuild_canvases_for(index);
         }
     }
@@ -193,27 +193,33 @@ impl PlotxApp {
         self.rebuild_canvases_for(index);
     }
 
-    pub fn select_mass_spec_scan_near(
+    pub fn select_mass_spec_spectrum_near(
         &mut self,
         dataset_id: DatasetId,
-        function: FunctionId,
+        stream: AcquisitionStreamId,
         retention_time_min: f64,
     ) -> bool {
+        if !retention_time_min.is_finite() {
+            return false;
+        }
         let Some(index) = self.doc.dataset_index(dataset_id) else {
             return false;
         };
-        let (old_function, changed) = match self.doc.datasets.get_mut(index) {
-            Some(Dataset::MassSpec(dataset)) => {
-                let old = dataset.active_function;
-                (
-                    old,
-                    dataset.select_nearest_scan(function, retention_time_min),
-                )
+        let active_stream = match self.doc.datasets.get(index) {
+            Some(Dataset::MassSpec(dataset))
+                if dataset.supported_ms_streams().any(|id| id == stream) =>
+            {
+                dataset.active_stream
             }
             _ => return false,
         };
+        if active_stream != stream && !self.select_mass_spec_stream(dataset_id, stream) {
+            return false;
+        }
+        let changed = self.doc.datasets[index]
+            .as_mass_spec_mut()
+            .is_some_and(|dataset| dataset.select_nearest_spectrum(stream, retention_time_min));
         if changed {
-            self.retarget_mass_spec_bindings(dataset_id, old_function, function);
             self.rebuild_canvases_for(index);
         }
         changed
@@ -222,8 +228,8 @@ impl PlotxApp {
     fn retarget_mass_spec_bindings(
         &mut self,
         dataset_id: DatasetId,
-        old_function: FunctionId,
-        new_function: FunctionId,
+        old_stream: AcquisitionStreamId,
+        new_stream: AcquisitionStreamId,
     ) {
         let Some(index) = self.doc.dataset_index(dataset_id) else {
             return;
@@ -232,9 +238,12 @@ impl PlotxApp {
             return;
         };
         let mappings = [
-            (tic_key(old_function), tic_key(new_function)),
-            (bpi_key(old_function), bpi_key(new_function)),
-            (spectrum_key(old_function), spectrum_key(new_function)),
+            (stream_tic_key(old_stream), stream_tic_key(new_stream)),
+            (stream_bpi_key(old_stream), stream_bpi_key(new_stream)),
+            (
+                stream_spectrum_key(old_stream),
+                stream_spectrum_key(new_stream),
+            ),
         ]
         .map(|(old, new)| {
             (
@@ -242,8 +251,12 @@ impl PlotxApp {
                 dataset.field_catalog.id_for_key(&new),
             )
         });
-        let new_tic = dataset.field_catalog.id_for_key(&tic_key(new_function));
-        let new_bpi = dataset.field_catalog.id_for_key(&bpi_key(new_function));
+        let new_tic = dataset
+            .field_catalog
+            .id_for_key(&stream_tic_key(new_stream));
+        let new_bpi = dataset
+            .field_catalog
+            .id_for_key(&stream_bpi_key(new_stream));
         let tic_note = dataset.tic_panel_note();
         for canvas in &mut self.doc.canvases {
             for object in &mut canvas.objects {

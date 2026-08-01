@@ -35,7 +35,7 @@ pub struct InspectionReport {
 #[derive(Clone, Debug, Serialize)]
 pub struct MassSpecReport {
     pub instrument: Option<String>,
-    pub function_count: usize,
+    pub stream_count: usize,
     pub ms_scan_count: usize,
     pub chromatograms: Vec<String>,
 }
@@ -459,7 +459,7 @@ pub fn build_default_canvas_for_dataset(
             if let Some(series) = plot.binding.series.first_mut()
                 && let Some(field) = mass_spec
                     .field_catalog
-                    .id_for_key(&crate::state::tic_key(mass_spec.active_function))
+                    .id_for_key(&crate::state::stream_tic_key(mass_spec.active_stream))
             {
                 series.source.field = field;
                 series.encoding = plotx_figure::SeriesEncoding::default();
@@ -568,10 +568,10 @@ fn inspection_report(
         }
         Acquisition::MassSpec(run) => {
             let ms_scan_count = run
-                .functions
+                .streams
                 .iter()
-                .filter(|function| function.kind == plotx_io::FunctionKind::MassSpectrum)
-                .map(|function| function.scans.len())
+                .filter(|stream| stream.role == plotx_io::StreamRole::Primary)
+                .map(|stream| stream.spectra.len())
                 .sum();
             return InspectionReport {
                 schema: INSPECTION_SCHEMA,
@@ -584,7 +584,7 @@ fn inspection_report(
                 },
                 dimension: DimensionReport {
                     count: 3,
-                    shape: vec![run.functions.len(), ms_scan_count, run.chromatograms.len()],
+                    shape: vec![run.streams.len(), ms_scan_count, run.chromatograms.len()],
                 },
                 domain: "mass_spectrometry".to_owned(),
                 warnings: warnings.iter().map(warning_report).collect(),
@@ -592,7 +592,7 @@ fn inspection_report(
                 afm: None,
                 mass_spectrometry: Some(MassSpecReport {
                     instrument: run.instrument.clone(),
-                    function_count: run.functions.len(),
+                    stream_count: run.streams.len(),
                     ms_scan_count,
                     chromatograms: run
                         .chromatograms
