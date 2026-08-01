@@ -27,7 +27,7 @@ fn stacked_binding_builds_distinctly_coloured_series_with_legend() {
 
     let fig = first_plot(&app).figure();
     assert!(fig.series.len() >= 2, "stack should draw both traces");
-    assert!(fig.show_legend, "stack should show a legend");
+    assert_eq!(fig.guide_visibility, plotx_figure::GuideVisibility::Auto);
     assert_ne!(
         fig.series[0].color, fig.series[1].color,
         "stacked traces must be distinctly coloured"
@@ -35,7 +35,7 @@ fn stacked_binding_builds_distinctly_coloured_series_with_legend() {
 
     app.undo();
     assert_eq!(first_plot(&app).binding.series.len(), 1);
-    assert!(!first_plot(&app).figure().show_legend);
+    assert_eq!(first_plot(&app).figure().series.len(), 1);
 }
 
 #[test]

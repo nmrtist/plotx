@@ -520,7 +520,7 @@ pub(super) fn handle_file_drop(app: &mut PlotxApp, ctx: &egui::Context) {
         painter.text(
             rect.center(),
             egui::Align2::CENTER_CENTER,
-            "Drop a .plotx project, a CSV/TSV table, an .abf/.jdf file, a Bruker TopSpin folder, or a .zip archive",
+            "Drop a .plotx project, a CSV/TSV table, an .abf/.jdf file, a Waters .raw or Bruker folder, or a .zip archive",
             egui::FontId::proportional(24.0),
             Color32::WHITE,
         );

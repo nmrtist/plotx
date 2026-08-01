@@ -5,9 +5,9 @@
 use crate::{
     AXIS_LINE_WIDTH, Document, DocumentItem, DocumentObject, DocumentOverlay, LegendMark,
     OUTER_PAD, OverlayAlign, OverlayKind, OverlayShapeKind, Projector, Rect, TICK_LABEL_PAD,
-    TICK_LENGTH, TextAnchor, arrow_head, axis_layout, error_bar_segments, heatmap_cells, integral,
-    legend_entries, legend_layout, legend_rect, polygon_outline, projection_points,
-    range_label_layout,
+    TICK_LENGTH, TextAnchor, arrow_head, axis_layout, color_scale_rect, error_bar_segments,
+    heatmap_cells, integral, legend_entries, legend_entry_origin, legend_layout, legend_rect,
+    polygon_outline, projection_points, range_label_layout, renders_legend,
 };
 use plotx_figure::{AxisFrame, AxisTrace, Color, Figure, SeriesKind};
 use std::collections::HashMap;
@@ -408,6 +408,14 @@ fn write_figure(dc: &mut Dc, fig: &Figure, outer: Rect) {
                         );
                     }
                 }
+                SeriesKind::Stick => {
+                    let segments = series
+                        .points
+                        .iter()
+                        .map(|point| [proj.project([point[0], 0.0]), proj.project(*point)])
+                        .collect::<Vec<_>>();
+                    dc.segments(&segments, series.color, series.width);
+                }
                 SeriesKind::Line => {}
             }
         }
@@ -440,6 +448,7 @@ fn write_figure(dc: &mut Dc, fig: &Figure, outer: Rect) {
     }
 
     write_legend(dc, fig, plot);
+    write_color_scale(dc, fig, plot);
 }
 
 fn write_error_bars(dc: &mut Dc, fig: &Figure, proj: &Projector<'_>, draw_over_data: bool) {
@@ -476,12 +485,12 @@ fn write_projection(
 
 fn write_legend(dc: &mut Dc, fig: &Figure, plot: Rect) {
     let entries = legend_entries(fig);
-    if !fig.show_legend || entries.len() < 2 {
+    if !renders_legend(fig) {
         return;
     }
     let font = fig.typography.legend_pt;
-    let layout = legend_layout(&entries, font);
-    let (row, sw, pad) = (layout.row, layout.swatch, layout.padding);
+    let layout = legend_layout(fig, &entries);
+    let sw = layout.swatch;
     let Some(box_geometry) = legend_rect(fig, plot, 1.0) else {
         return;
     };
@@ -498,9 +507,17 @@ fn write_legend(dc: &mut Dc, fig: &Figure, plot: Rect) {
         Some(box_fill),
         Some((Color::AXIS, 0.75)),
     );
+    if !fig.guide_title.trim().is_empty() {
+        dc.text(
+            &fig.guide_title,
+            (bx + layout.padding, by + layout.padding + font),
+            TextStyle::new(font, fig.typography.legend_color, TA_LEFT).bold(),
+        );
+    }
     for (i, (name, color, mark)) in entries.iter().enumerate() {
-        let ly = by + pad + row * i as f32 + row * 0.5;
-        let lx = bx + pad;
+        let (ox, oy) = legend_entry_origin(&layout, i);
+        let ly = by + oy;
+        let lx = bx + ox;
         match mark {
             LegendMark::Line => dc.line((lx, ly), (lx + sw, ly), *color, 2.0),
             LegendMark::Points => dc.ellipse(
@@ -523,6 +540,71 @@ fn write_legend(dc: &mut Dc, fig: &Figure, plot: Rect) {
             (lx + sw + 5.0, ly),
             TextStyle::new(font, fig.typography.legend_color, TA_LEFT).middle(),
         );
+    }
+}
+
+fn write_color_scale(dc: &mut Dc, fig: &Figure, plot: Rect) {
+    let (Some(heatmap), Some(rect)) = (&fig.heatmap, color_scale_rect(fig, plot, 1.0)) else {
+        return;
+    };
+    let horizontal = rect.width > rect.height;
+    const STEPS: usize = 64;
+    for step in 0..STEPS {
+        let q0 = step as f32 / STEPS as f32;
+        let q1 = (step + 1) as f32 / STEPS as f32;
+        let cell = if horizontal {
+            Rect::new(
+                rect.left + rect.width * q0,
+                rect.top,
+                rect.width * (q1 - q0) + 0.1,
+                rect.height,
+            )
+        } else {
+            Rect::new(
+                rect.left,
+                rect.top + rect.height * (1.0 - q1),
+                rect.width,
+                rect.height * (q1 - q0) + 0.1,
+            )
+        };
+        dc.rect(cell, Some(heatmap.colormap.sample((q0 + q1) * 0.5)), None);
+    }
+    dc.rect(rect, None, Some((Color::AXIS, 0.75)));
+    let [min, max] = heatmap.value_range;
+    let font = fig.typography.legend_pt;
+    if horizontal {
+        dc.text(
+            &format_guide_value(min),
+            (rect.left, rect.bottom() + font),
+            TextStyle::new(font, fig.typography.legend_color, TA_LEFT),
+        );
+        dc.text(
+            &format_guide_value(max),
+            (rect.right(), rect.bottom() + font),
+            TextStyle::new(font, fig.typography.legend_color, TA_RIGHT),
+        );
+    } else {
+        dc.text(
+            &format_guide_value(max),
+            (rect.right() + 3.0, rect.top + font),
+            TextStyle::new(font, fig.typography.legend_color, TA_LEFT),
+        );
+        dc.text(
+            &format_guide_value(min),
+            (rect.right() + 3.0, rect.bottom()),
+            TextStyle::new(font, fig.typography.legend_color, TA_LEFT),
+        );
+    }
+}
+
+fn format_guide_value(value: f32) -> String {
+    if value.abs() >= 10_000.0 || (value != 0.0 && value.abs() < 0.001) {
+        format!("{value:.2e}")
+    } else {
+        format!("{value:.3}")
+            .trim_end_matches('0')
+            .trim_end_matches('.')
+            .to_owned()
     }
 }
 

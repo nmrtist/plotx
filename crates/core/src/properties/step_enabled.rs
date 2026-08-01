@@ -82,7 +82,8 @@ impl PropertyProvider for StepEnabledProvider {
             crate::state::Dataset::Nmr2D(dataset) => dataset.data.domain,
             crate::state::Dataset::Table(_)
             | crate::state::Dataset::Electrophysiology(_)
-            | crate::state::Dataset::Afm(_) => {
+            | crate::state::Dataset::Afm(_)
+            | crate::state::Dataset::MassSpec(_) => {
                 return Err(PropertyError::NotApplicable(
                     "this dataset has no spectral processing pipeline".to_owned(),
                 ));

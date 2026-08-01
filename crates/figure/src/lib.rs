@@ -53,6 +53,40 @@ pub struct FigureTypography {
     pub legend_color: Color,
 }
 
+/// Whether explanatory guides follow the chart's semantic defaults or an
+/// explicit author choice. Guides currently include categorical legends and
+/// continuous colour scales.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GuideVisibility {
+    #[default]
+    Auto,
+    Show,
+    Hide,
+}
+
+/// Placement shared by categorical legends and continuous colour scales.
+/// A dragged categorical legend additionally records `legend_position` and
+/// therefore becomes a custom inside placement until reset.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GuidePlacement {
+    #[default]
+    Auto,
+    Inside,
+    OutsideRight,
+    OutsideBottom,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GuideLayout {
+    #[default]
+    Auto,
+    Vertical,
+    Horizontal,
+}
+
 impl Default for FigureTypography {
     fn default() -> Self {
         Self {
@@ -207,6 +241,8 @@ pub enum SeriesKind {
     #[default]
     Line,
     Points,
+    /// Independent vertical stems from the zero baseline to each point.
+    Stick,
 }
 
 impl Series {
@@ -227,6 +263,16 @@ impl Series {
             color: Color::TRACE,
             width: 3.0,
             kind: SeriesKind::Points,
+        }
+    }
+
+    pub fn sticks(name: impl Into<String>, points: Vec<[f64; 2]>) -> Self {
+        Self {
+            name: name.into(),
+            points,
+            color: Color::TRACE,
+            width: DEFAULT_DATA_LINE_WIDTH_PT,
+            kind: SeriesKind::Stick,
         }
     }
 
@@ -431,10 +477,20 @@ pub struct Figure {
     pub height: f32,
     pub background: Color,
     pub show_grid: bool,
-    /// Draw a legend box (series name + colour swatch). Populated only for
-    /// multi-series overlays; defaults off so single-trace figures are unchanged.
+    /// Authored visibility for every explanatory guide belonging to this plot.
     #[serde(default)]
-    pub show_legend: bool,
+    pub guide_visibility: GuideVisibility,
+    /// Authored guide placement. Auto uses the guide kind's publication default:
+    /// categorical legends inside, continuous colour scales outside right.
+    #[serde(default)]
+    pub guide_placement: GuidePlacement,
+    /// Direction used by categorical legend entries. Auto chooses a compact
+    /// vertical list; continuous colour scales follow their placement.
+    #[serde(default)]
+    pub guide_layout: GuideLayout,
+    /// Optional explanatory title above a categorical legend.
+    #[serde(default)]
+    pub guide_title: String,
     /// Manually placed legend origin within its available plot area.
     pub legend_position: Option<[f32; 2]>,
     /// The figure's logical child series own their colours. A parent field
@@ -472,7 +528,10 @@ impl Figure {
             height: 520.0,
             background: Color::rgb(255, 255, 255),
             show_grid: false,
-            show_legend: false,
+            guide_visibility: GuideVisibility::Auto,
+            guide_placement: GuidePlacement::Auto,
+            guide_layout: GuideLayout::Auto,
+            guide_title: String::new(),
             legend_position: None,
             series_colors_are_semantic: false,
             lock_aspect: false,

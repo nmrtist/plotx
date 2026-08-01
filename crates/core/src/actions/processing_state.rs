@@ -43,6 +43,7 @@ impl DatasetProcessingState {
             Dataset::Table(_) => Self::Table,
             Dataset::Electrophysiology(d) => Self::Electrophysiology(d.processing),
             Dataset::Afm(_) => Self::Afm,
+            Dataset::MassSpec(_) => Self::Table,
         }
     }
 

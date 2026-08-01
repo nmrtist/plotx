@@ -255,6 +255,9 @@ pub fn apply_scheme(
         Dataset::Afm(_) => Err(incompatible(
             "an AFM dataset has no spectral processing pipeline",
         )),
+        Dataset::MassSpec(_) => Err(incompatible(
+            "the imported data has no PlotX LC–MS processing pipeline",
+        )),
     }
 }
 
@@ -289,6 +292,7 @@ pub fn reset_processing(dataset: &Dataset) -> Option<DatasetProcessingState> {
         Dataset::Table(_) => None,
         Dataset::Electrophysiology(_) => None,
         Dataset::Afm(_) => None,
+        Dataset::MassSpec(_) => None,
     }?;
     let mut next = dataset_next_step_id(dataset);
     match &mut state {
@@ -334,6 +338,7 @@ fn scheme_from_dataset(dataset: &Dataset) -> Option<ProcessingScheme> {
         Dataset::Table(_) => None,
         Dataset::Electrophysiology(_) => None,
         Dataset::Afm(_) => None,
+        Dataset::MassSpec(_) => None,
     }
 }
 

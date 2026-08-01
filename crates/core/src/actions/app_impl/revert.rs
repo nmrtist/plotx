@@ -192,6 +192,20 @@ impl PlotxApp {
                     d.set_name(before.clone());
                 }
             }
+            Action::SetMassSpecFunction {
+                dataset, before, ..
+            } => {
+                self.set_mass_spec_function_value(dataset_index!(*dataset), *before);
+            }
+            Action::SetMassSpectrumExtractions {
+                dataset, before, ..
+            } => {
+                self.set_mass_spectrum_extractions_value(
+                    dataset_index!(*dataset),
+                    before.0.clone(),
+                    before.1,
+                );
+            }
             Action::SetCurveFitAnalyses {
                 dataset, before, ..
             } => {

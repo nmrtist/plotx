@@ -6,8 +6,12 @@ pub mod bruker;
 pub mod delimited;
 pub mod jcamp_dx;
 pub mod jeol;
+mod mass_spec;
 pub mod nanoscope;
+pub mod waters;
 pub mod xlsx;
+
+pub use mass_spec::*;
 
 use num_complex::Complex64;
 use std::path::{Path, PathBuf};
@@ -24,6 +28,7 @@ pub enum DataFormat {
     JcampDx1D,
     BrukerNanoScopeSpm,
     BrukerPeakForceCapture,
+    WatersMassLynxRaw,
 }
 
 impl DataFormat {
@@ -37,6 +42,7 @@ impl DataFormat {
             Self::JcampDx1D => "jcamp-dx-1d",
             Self::BrukerNanoScopeSpm => "bruker-nanoscope-spm",
             Self::BrukerPeakForceCapture => "bruker-peakforce-capture",
+            Self::WatersMassLynxRaw => "waters-masslynx-raw",
         }
     }
 }
@@ -63,6 +69,7 @@ pub enum LoadWarningCode {
     MissingCompanion,
     CompanionMismatch,
     OptionalChannelSkipped,
+    UnsupportedFunction,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -334,6 +341,7 @@ pub enum Acquisition {
     D2(Box<NmrData2D>),
     Electrophysiology(Box<ElectrophysiologyData>),
     Afm(Box<AfmData>),
+    MassSpec(Box<MassSpecRun>),
 }
 
 /// Linear calibration applied lazily to an AFM integer signal.
@@ -497,6 +505,19 @@ pub enum IoError {
 
     #[error("invalid NanoScope file: {0}")]
     InvalidNanoScope(String),
+
+    #[error("invalid Waters MassLynx RAW bundle: {0}")]
+    InvalidWatersRaw(String),
+
+    #[error(
+        "unsupported Waters encoding for function {function_id}: IDX stride {idx_stride}, pair width {pair_width}; instrument {instrument}"
+    )]
+    UnsupportedWatersEncoding {
+        function_id: FunctionId,
+        idx_stride: usize,
+        pair_width: usize,
+        instrument: String,
+    },
 }
 
 /// Load a dataset, auto-detecting the format from the path. A Bruker
@@ -504,6 +525,9 @@ pub enum IoError {
 /// `ser` file inside it; other files dispatch by extension, then by content.
 pub fn detect_format(path: impl AsRef<Path>) -> Result<DataFormat, IoError> {
     let path = path.as_ref();
+    if waters::is_masslynx_raw(path) {
+        return Ok(DataFormat::WatersMassLynxRaw);
+    }
     if let Some(format) = bruker::detect_processed(path) {
         return Ok(format);
     }
@@ -526,7 +550,7 @@ pub fn detect_format(path: impl AsRef<Path>) -> Result<DataFormat, IoError> {
         _ if abf2::is_abf2(path) => Ok(DataFormat::Abf2),
         _ if jeol::is_jdf(path) => Ok(DataFormat::JeolDelta),
         _ => Err(IoError::Unsupported(format!(
-            "unrecognised path {}: expected NanoScope .spm/.pfc, ABF2 .abf, JEOL .jdf, JCAMP-DX .dx/.jdx/.jcamp, Bruker fid/ser, or Bruker pdata",
+            "unrecognised path {}: expected a Waters .raw directory, NanoScope .spm/.pfc, ABF2 .abf, JEOL .jdf, JCAMP-DX .dx/.jdx/.jcamp, Bruker fid/ser, or Bruker pdata",
             path.display()
         ))),
     }
@@ -555,5 +579,6 @@ pub fn load_path(path: impl AsRef<Path>) -> Result<LoadResult, IoError> {
         DataFormat::BrukerNanoScopeSpm | DataFormat::BrukerPeakForceCapture => {
             nanoscope::load(path)
         }
+        DataFormat::WatersMassLynxRaw => waters::load(path),
     }
 }

@@ -1,11 +1,14 @@
 use super::field_runtime::*;
-use super::{FieldCatalog, FieldId, electrophysiology_channel_key};
+use super::{
+    FieldCatalog, FieldId, bpi_key, channel_key, electrophysiology_channel_key,
+    extracted_spectrum_key, extraction_title, mass_spec_dataset_field_keys, spectrum_key, tic_key,
+};
 use crate::automation::{
     CAP_FIELD_AFM_MAP, CAP_FIELD_BOUNDED, CAP_FIELD_COLORED_RASTER_2D, CAP_FIELD_CURVE_1D,
-    CAP_FIELD_FORCE_CURVE, CAP_FIELD_LOCATION_SCALE, CAP_FIELD_NMR_CONTOUR, CAP_FIELD_NMR_SIGNAL,
-    CAP_FIELD_NMR_STACK, CAP_FIELD_NOISE_SCALE, CAP_FIELD_REGION_SERIES,
-    CAP_FIELD_SCALAR_GRID_2D_REGULAR, CAP_FIELD_SIGNED, CAP_FIELD_SWEEP_COLLECTION,
-    CAP_FIELD_TABLE, CapabilityId,
+    CAP_FIELD_FORCE_CURVE, CAP_FIELD_LOCATION_SCALE, CAP_FIELD_MASS_CHROMATOGRAM,
+    CAP_FIELD_MASS_SPECTRUM, CAP_FIELD_NMR_CONTOUR, CAP_FIELD_NMR_SIGNAL, CAP_FIELD_NMR_STACK,
+    CAP_FIELD_NOISE_SCALE, CAP_FIELD_REGION_SERIES, CAP_FIELD_SCALAR_GRID_2D_REGULAR,
+    CAP_FIELD_SIGNED, CAP_FIELD_SWEEP_COLLECTION, CAP_FIELD_TABLE, CapabilityId,
 };
 use plotx_figure::{
     ColorSource, ContourBasePolicy, ContourLevelSpec, ContourSpec, ContourStyle,
@@ -226,6 +229,95 @@ impl super::Dataset {
                 }
                 fields
             }
+            Self::MassSpec(dataset) => {
+                let mut fields = Vec::new();
+                for function in dataset.run.functions.iter().filter(|function| {
+                    function.kind == plotx_io::FunctionKind::MassSpectrum
+                        && !function.scans.is_empty()
+                }) {
+                    let entries = [
+                        (
+                            tic_key(function.id),
+                            format!("Function {} TIC", function.id),
+                            CAP_FIELD_MASS_CHROMATOGRAM,
+                            function.scans.len(),
+                        ),
+                        (
+                            bpi_key(function.id),
+                            format!("Function {} BPI", function.id),
+                            CAP_FIELD_MASS_CHROMATOGRAM,
+                            function.scans.len(),
+                        ),
+                        (
+                            spectrum_key(function.id),
+                            format!("Function {} current spectrum", function.id),
+                            CAP_FIELD_MASS_SPECTRUM,
+                            function
+                                .scans
+                                .iter()
+                                .map(|scan| scan.mz.len())
+                                .max()
+                                .unwrap_or(0),
+                        ),
+                    ];
+                    for (key, name, capability, length) in entries {
+                        if let Some(id) = dataset.field_catalog.id_for_key(&key) {
+                            fields.push(descriptor(
+                                id,
+                                &key,
+                                &name,
+                                capabilities(id, &[capability]),
+                                vec![length],
+                                vec![
+                                    if capability == CAP_FIELD_MASS_SPECTRUM {
+                                        "m/z"
+                                    } else {
+                                        "min"
+                                    }
+                                    .to_owned(),
+                                ],
+                                "line",
+                            ));
+                        }
+                    }
+                }
+                for channel in dataset
+                    .run
+                    .chromatograms
+                    .iter()
+                    .filter(|channel| channel.kind == plotx_io::ChromatogramKind::Optical)
+                {
+                    let key = channel_key(&channel.id.0);
+                    if let Some(id) = dataset.field_catalog.id_for_key(&key) {
+                        fields.push(descriptor(
+                            id,
+                            &key,
+                            &channel.description,
+                            capabilities(id, &[CAP_FIELD_MASS_CHROMATOGRAM]),
+                            vec![channel.values.len()],
+                            vec!["min".to_owned(), channel.unit.clone()],
+                            "line",
+                        ));
+                    }
+                }
+                for extraction in &dataset.extracted_spectra {
+                    let key = extracted_spectrum_key(extraction.id);
+                    if let Some(id) = dataset.field_catalog.id_for_key(&key) {
+                        fields.push(descriptor(
+                            id,
+                            &key,
+                            &extraction_title(extraction),
+                            capabilities(id, &[CAP_FIELD_MASS_SPECTRUM]),
+                            // Aggregated spectra are computed lazily; descriptor
+                            // discovery must remain a metadata-only operation.
+                            vec![0],
+                            vec!["m/z".to_owned()],
+                            "line",
+                        ));
+                    }
+                }
+                fields
+            }
         }
     }
 
@@ -305,6 +397,12 @@ impl super::Dataset {
                 SeriesEncoding::Heatmap(heatmap) => afm.map_figure(id, heatmap.colormap),
                 SeriesEncoding::Image(_) => None,
             },
+            Self::MassSpec(dataset) => match encoding {
+                SeriesEncoding::Line(_) => dataset.field_figure(id),
+                SeriesEncoding::Contour(_)
+                | SeriesEncoding::Heatmap(_)
+                | SeriesEncoding::Image(_) => None,
+            },
         }
     }
 
@@ -320,7 +418,7 @@ impl super::Dataset {
         match self {
             Self::Nmr2D(nmr) => nmr.contour_figure_from_geometry(id, geometry, style),
             Self::Afm(afm) => afm.contour_figure_from_geometry(id, geometry, style),
-            Self::Nmr(_) | Self::Table(_) | Self::Electrophysiology(_) => None,
+            Self::Nmr(_) | Self::Table(_) | Self::Electrophysiology(_) | Self::MassSpec(_) => None,
         }
     }
 
@@ -339,6 +437,7 @@ impl super::Dataset {
             Self::Table(dataset) => &dataset.field_catalog,
             Self::Electrophysiology(dataset) => &dataset.field_catalog,
             Self::Afm(dataset) => &dataset.field_catalog,
+            Self::MassSpec(dataset) => &dataset.field_catalog,
         }
     }
 
@@ -369,6 +468,7 @@ impl super::Dataset {
                         .map(|_| "afm.force_curve".to_owned()),
                 )
                 .collect(),
+            Self::MassSpec(dataset) => mass_spec_dataset_field_keys(dataset),
         }
     }
 }

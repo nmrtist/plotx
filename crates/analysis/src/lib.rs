@@ -9,6 +9,7 @@ pub mod fit_model;
 pub mod ilt;
 pub mod integrate_2d;
 pub mod lineshape;
+pub mod mass_spec;
 pub mod models;
 pub mod multiplet;
 pub mod peaks;

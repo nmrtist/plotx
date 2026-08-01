@@ -1,5 +1,5 @@
 use plotx_core::data::ColumnId;
-use plotx_core::state::{Dataset, DatasetId, PlotxApp};
+use plotx_core::state::{Dataset, DatasetId, ExtractionId, PlotxApp};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -30,6 +30,7 @@ pub(super) enum AnalysisKind {
     LineFit(u64),
     Multiplet(u64),
     CurveFitResponse(ColumnId),
+    MassSpectrum(ExtractionId),
 }
 
 impl AnalysisKind {
@@ -41,6 +42,7 @@ impl AnalysisKind {
             Self::LineFit(id) => format!("line_fit:{dataset}:{id}"),
             Self::Multiplet(id) => format!("multiplet:{dataset}:{id}"),
             Self::CurveFitResponse(column) => format!("curve_fit_response:{dataset}:{column}"),
+            Self::MassSpectrum(id) => format!("mass_spectrum:{dataset}:{id}"),
         }
     }
 
@@ -52,6 +54,7 @@ impl AnalysisKind {
             Self::LineFit(_) => "Peak fit",
             Self::Multiplet(_) => "Multiplet",
             Self::CurveFitResponse(_) => "Curve fit response",
+            Self::MassSpectrum(_) => "Extracted mass spectrum",
         }
     }
 }
@@ -249,6 +252,17 @@ fn analysis_items(dataset: &Dataset) -> Vec<AnalysisItem> {
                             .column(binding.value_column)
                             .map_or("Value", |value| value.name.as_str())
                     ),
+                }),
+        );
+    }
+    if let Some(mass_spec) = dataset.as_mass_spec() {
+        result.extend(
+            mass_spec
+                .extracted_spectra
+                .iter()
+                .map(|extraction| AnalysisItem {
+                    kind: AnalysisKind::MassSpectrum(extraction.id),
+                    label: plotx_core::state::extraction_title(extraction),
                 }),
         );
     }

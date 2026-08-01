@@ -1,5 +1,5 @@
 use super::visible_y_range;
-use plotx_figure::{Axis, Figure};
+use plotx_figure::{Axis, Figure, GuideLayout, GuidePlacement, GuideVisibility};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AxisRange {
@@ -164,7 +164,10 @@ pub struct AxisOverrides {
     pub x_show_label: Option<bool>,
     pub y_show_tick_labels: Option<bool>,
     pub y_show_label: Option<bool>,
-    pub show_legend: Option<bool>,
+    pub guide_visibility: Option<GuideVisibility>,
+    pub guide_placement: Option<GuidePlacement>,
+    pub guide_layout: Option<GuideLayout>,
+    pub guide_title: Option<String>,
     pub legend_position: Option<[f32; 2]>,
 }
 
@@ -203,8 +206,17 @@ impl AxisOverrides {
         if let Some(show) = self.y_show_label {
             figure.y.show_label = show;
         }
-        if let Some(show) = self.show_legend {
-            figure.show_legend = show;
+        if let Some(visibility) = self.guide_visibility {
+            figure.guide_visibility = visibility;
+        }
+        if let Some(placement) = self.guide_placement {
+            figure.guide_placement = placement;
+        }
+        if let Some(layout) = self.guide_layout {
+            figure.guide_layout = layout;
+        }
+        if let Some(title) = &self.guide_title {
+            figure.guide_title.clone_from(title);
         }
         figure.legend_position = self.legend_position;
     }
@@ -214,6 +226,7 @@ impl AxisOverrides {
         self.y_label = normalize_label(self.y_label);
         self.x_range = self.x_range.filter(|range| range.is_valid());
         self.y_range = self.y_range.filter(|range| range.is_valid());
+        self.guide_title = normalize_label(self.guide_title);
         self.legend_position = self.legend_position.and_then(|[x, y]| {
             (x.is_finite() && y.is_finite()).then(|| [x.clamp(0.0, 1.0), y.clamp(0.0, 1.0)])
         });

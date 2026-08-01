@@ -19,6 +19,10 @@ pub(super) const AXIS_HOME: HomeRoute = HomeRoute {
     panel: PanelRoute::SecondarySidebar,
     section: panel::AXIS_SECTION,
 };
+pub(super) const GUIDE_HOME: HomeRoute = HomeRoute {
+    panel: PanelRoute::SecondarySidebar,
+    section: panel::GUIDE_SECTION,
+};
 pub(super) const STACK_HOME: HomeRoute = HomeRoute {
     panel: PanelRoute::SecondarySidebar,
     section: panel::STACK_SECTION,

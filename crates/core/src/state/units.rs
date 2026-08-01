@@ -274,11 +274,12 @@ impl PhaseAxis {
 /// format, so adding a data type only means implementing `Dataset::tool_groups`.
 /// Processing is domain-neutral (it dispatches on the dataset kind at render
 /// time) so 1D and 2D expose it in the same slot.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ToolGroup {
     Processing,
     Nmr1dAnalysis,
     Nmr2dExperiment,
+    MassSpectrometry,
     RegionAnalysis,
     Peaks,
     CurveFit,
@@ -293,6 +294,7 @@ impl ToolGroup {
             ToolGroup::Processing => "Processing",
             ToolGroup::Nmr1dAnalysis => "Analysis",
             ToolGroup::Nmr2dExperiment => "Experiment",
+            ToolGroup::MassSpectrometry => "Mass spectrometry",
             ToolGroup::RegionAnalysis => "Region analysis",
             ToolGroup::Peaks => "Peaks",
             ToolGroup::CurveFit => "Curve Fit",

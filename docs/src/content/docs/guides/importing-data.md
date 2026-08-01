@@ -3,7 +3,8 @@ title: Importing data
 description: Supported file formats and how to open them.
 ---
 
-PlotX reads vendor NMR, AFM, and electrophysiology formats directly — no conversion step is needed.
+PlotX reads vendor LC–MS, NMR, AFM, and electrophysiology formats directly —
+no conversion step is needed.
 
 ## Supported formats
 
@@ -11,6 +12,7 @@ PlotX reads vendor NMR, AFM, and electrophysiology formats directly — no conve
 | --- | --- | --- |
 | JEOL Delta | `.jdf` | 1D, 2D, and pseudo-2D (DOSY / T1 / T2) |
 | Bruker TopSpin | `fid` / `ser` directories | 1D and 2D |
+| Waters MassLynx RAW | `.raw` directory | Validated low-resolution runs, including SQD2 data |
 | Bruker NanoScope AFM | `.spm` / `.pfc` | Images, force curves, force-volume and PeakForce Capture cubes |
 | JCAMP-DX | `.dx` / `.jdx` / `.jcamp` | 1D frequency-domain NMR spectra |
 | Axon Binary Format 2 | `.abf` | int16/float32, multiple channels and sweeps, embedded DAC/epoch stimuli |
@@ -22,11 +24,59 @@ PlotX reads vendor NMR, AFM, and electrophysiology formats directly — no conve
 
 Drag a file onto the PlotX window, or use the toolbar's open menu:
 *Open File…*, *Open Folder…* (for acquisition directories such as Bruker
-TopSpin), *Open Project…*, or *Import Table / CSV…*. Each imported dataset
-appears in the Primary Side Bar and is placed on the board automatically.
+TopSpin and Waters MassLynx RAW), *Open Project…*, or *Import Table / CSV…*.
+Each imported dataset appears in the Primary Side Bar and is placed on the
+board automatically.
 The file picker accepts several ABF files at once. Opening a folder recursively
-imports every `.abf`, `.spm`, and `.pfc` below it; for ABF files, each immediate
-parent folder becomes the initial, editable cell ID.
+imports every `.abf`, `.spm`, `.pfc`, and recognized `.raw` bundle below it.
+A `.raw` directory is imported once as a complete run; its internal files are
+not treated as separate datasets. For ABF files, each immediate parent folder
+becomes the initial, editable cell ID.
+
+## Waters MassLynx RAW
+
+Open or drop the `.raw` directory itself. PlotX imports its supported MS
+functions and optical detector channels. Temperature, pressure, and other
+readable auxiliary channels remain in the dataset but are not plotted by
+default.
+
+When optical detector data is present, the initial page places its UV channels
+above the active function's total ion chromatogram (TIC) on a shared retention-
+time axis. Multiple UV channels are overlaid; their legend uses stored
+wavelengths such as `214 nm`. Select the UV plot and use **Legend & scales** in
+the Object inspector to hide, move, or lay out that legend. Without optical
+data, the initial page contains only the TIC.
+
+Select the LC–MS dataset, then choose **Extract Mass Spectrum** on the
+**Analyze** tab. PlotX opens **Dataset tools → Mass spectrometry** in the right
+sidebar and activates retention-time range selection.
+
+Click a TIC or UV chromatogram to show the nearest MS scan under **Scan
+preview**. The preview identifies its retention time and native scan number; it
+is neither added to the page nor saved as a result. Choose **Extract current
+scan** to add that scan as a stick spectrum.
+
+To extract from a time window, choose a **Method**, select **Select range**, and
+drag across a TIC or UV chromatogram. **Extract spectrum** adds the peak-apex
+scan, nearest scan, mean spectrum, or summed spectrum to the page. Each
+extracted spectrum records its function, time range, and method. It does not
+change when the preview cursor moves and appears under **Analysis** in the Data
+browser.
+
+If the run contains several supported MS functions, use **MS function** under
+**Dataset tools → Mass spectrometry**. The initial active function is the first
+non-reference MS function. Function changes and spectrum extractions can be
+undone and redone with the standard Edit commands.
+
+PlotX supports the low-resolution MassLynx encoding validated with SQD2 runs.
+If a required MS function uses another encoding, the import stops and
+identifies the function and instrument. Unsupported optional or reference
+functions produce an import warning when the rest of the run is readable.
+
+There is no LC–MS processing pipeline. The imported run, active function,
+detector channels, extracted spectra, and page layout are saved in the
+`.plotx` project. The scan preview is temporary and is cleared when the project
+is reopened.
 
 Tables can also be pasted straight from the clipboard with
 `Ctrl` + `Shift` + `V` — comma-, tab-, or semicolon-delimited text becomes a

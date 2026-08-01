@@ -26,7 +26,7 @@ fn overrides(app: &PlotxApp, object: crate::state::ObjectId) -> &AxisOverrides {
 type ResetCase = (PropertyId, fn(&AxisOverrides) -> bool);
 
 #[test]
-fn every_axis_property_reset_clears_its_stored_override() {
+fn every_axis_and_guide_property_reset_clears_its_stored_override() {
     let (mut app, target, object) = axis_app();
     app.set_axis_overrides_value(
         0,
@@ -39,7 +39,10 @@ fn every_axis_property_reset_clears_its_stored_override() {
             x_show_label: Some(false),
             y_show_tick_labels: Some(false),
             y_show_label: Some(false),
-            show_legend: Some(false),
+            guide_visibility: Some(plotx_figure::GuideVisibility::Hide),
+            guide_placement: Some(plotx_figure::GuidePlacement::OutsideRight),
+            guide_layout: Some(plotx_figure::GuideLayout::Horizontal),
+            guide_title: Some("Channels".to_owned()),
             ..AxisOverrides::default()
         },
     );
@@ -66,8 +69,17 @@ fn every_axis_property_reset_clears_its_stored_override() {
         (axis::Y_SHOW_LABEL, |value: &AxisOverrides| {
             value.y_show_label.is_none()
         }),
-        (axis::SHOW_LEGEND, |value: &AxisOverrides| {
-            value.show_legend.is_none()
+        (guide::VISIBILITY, |value: &AxisOverrides| {
+            value.guide_visibility.is_none()
+        }),
+        (guide::PLACEMENT, |value: &AxisOverrides| {
+            value.guide_placement.is_none()
+        }),
+        (guide::LAYOUT, |value: &AxisOverrides| {
+            value.guide_layout.is_none()
+        }),
+        (guide::TITLE, |value: &AxisOverrides| {
+            value.guide_title.is_none()
         }),
     ];
     for &(property, cleared) in cases {
@@ -80,31 +92,28 @@ fn every_axis_property_reset_clears_its_stored_override() {
 }
 
 #[test]
-fn legend_visibility_is_a_persistent_undoable_plot_override() {
+fn guide_visibility_is_a_persistent_undoable_plot_override() {
     let (mut app, target, object) = axis_app();
-    let before = app.doc.canvases[0]
-        .object(object)
-        .and_then(|object| object.plot())
-        .unwrap()
-        .figure()
-        .show_legend;
     let commit = app
         .plan_property_write(
-            axis::SHOW_LEGEND,
+            guide::VISIBILITY,
             std::slice::from_ref(&target),
-            &PropertyValue::Bool(!before),
+            &PropertyValue::Enum(guide::HIDE),
         )
         .expect("legend visibility write plans");
     app.commit_property(commit);
-    assert_eq!(overrides(&app, object).show_legend, Some(!before));
+    assert_eq!(
+        overrides(&app, object).guide_visibility,
+        Some(plotx_figure::GuideVisibility::Hide)
+    );
     assert_eq!(
         app.doc.canvases[0]
             .object(object)
             .and_then(|object| object.plot())
             .unwrap()
             .figure()
-            .show_legend,
-        !before
+            .guide_visibility,
+        plotx_figure::GuideVisibility::Hide
     );
     app.undo();
     assert_eq!(
@@ -113,8 +122,8 @@ fn legend_visibility_is_a_persistent_undoable_plot_override() {
             .and_then(|object| object.plot())
             .unwrap()
             .figure()
-            .show_legend,
-        before
+            .guide_visibility,
+        plotx_figure::GuideVisibility::Auto
     );
 }
 

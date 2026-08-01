@@ -104,6 +104,28 @@ pub(crate) fn axis_section(
     )
 }
 
+pub(crate) fn guide_section(
+    app: &mut PlotxApp,
+    canvas: usize,
+    objects: &[ObjectId],
+    ui: &mut Ui,
+) -> bool {
+    let targets: Vec<TargetRef> = objects
+        .iter()
+        .filter_map(|&object| app.object_target(canvas, object))
+        .collect();
+    render_section(
+        app,
+        GUIDE_SECTION,
+        "Legend & scales",
+        SectionNoun::new("plot", "plots"),
+        &targets,
+        None,
+        SectionLayout::Standard,
+        ui,
+    )
+}
+
 pub(crate) fn stack_section(
     app: &mut PlotxApp,
     canvas: usize,

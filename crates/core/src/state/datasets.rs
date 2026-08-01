@@ -447,6 +447,7 @@ pub enum Dataset {
     Table(Box<TableDataset>),
     Electrophysiology(Box<ElectrophysiologyDataset>),
     Afm(Box<AfmDataset>),
+    MassSpec(Box<MassSpecDataset>),
 }
 
 fn set_pipeline_pivot_frac(pipe: &mut AxisPipeline, frac: f64) {

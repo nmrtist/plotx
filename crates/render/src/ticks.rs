@@ -167,6 +167,7 @@ fn margins_for_ticks_with_widths(
     widths: TickLabelWidths,
 ) -> Margins {
     let ty = fig.typography;
+    let (guide_right, guide_bottom) = crate::guide_extra_margins(fig);
     if fig.axis_frame == AxisFrame::Hidden {
         let title_clearance = if fig.title.trim().is_empty() {
             0.0
@@ -175,9 +176,9 @@ fn margins_for_ticks_with_widths(
         };
         return Margins {
             left: OUTER_PAD,
-            right: OUTER_PAD,
+            right: OUTER_PAD + guide_right,
             top: OUTER_PAD + title_clearance,
-            bottom: OUTER_PAD,
+            bottom: OUTER_PAD + guide_bottom,
         };
     }
 
@@ -214,7 +215,7 @@ fn margins_for_ticks_with_widths(
     } else {
         0.0
     };
-    let right = (OUTER_PAD + x_width * 0.5).max(8.0);
+    let right = (OUTER_PAD + x_width * 0.5).max(8.0) + guide_right;
     let title_clearance = if fig.title.trim().is_empty() {
         0.0
     } else {
@@ -236,7 +237,7 @@ fn margins_for_ticks_with_widths(
         0.0
     };
     let top = OUTER_PAD + title_clearance + y_multiplier;
-    let bottom = OUTER_PAD + x_multiplier + x_title_clearance + x_tick_clearance;
+    let bottom = OUTER_PAD + x_multiplier + x_title_clearance + x_tick_clearance + guide_bottom;
 
     Margins {
         left,

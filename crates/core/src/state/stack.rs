@@ -60,7 +60,29 @@ impl PlotxApp {
         let domain = self.doc.datasets[primary].domain();
         let line_chart = ChartSpec::default_for(domain);
         // The primary's line figure supplies the axis labels and orientation.
-        let mut fig = self.build_full_canvas_figure(primary, &line_chart, size_mm);
+        let primary_is_encoded_curve = binding.series.first().is_some_and(|series| {
+            self.doc
+                .dataset_by_id(series.source.resource)
+                .and_then(|dataset| dataset.field_descriptor(series.source.field))
+                .is_some_and(|field| {
+                    field
+                        .capabilities
+                        .contains(crate::automation::CAP_FIELD_MASS_CHROMATOGRAM)
+                        || field
+                            .capabilities
+                            .contains(crate::automation::CAP_FIELD_MASS_SPECTRUM)
+                })
+        });
+        let mut fig = if primary_is_encoded_curve {
+            binding
+                .series
+                .first()
+                .and_then(|series| self.build_encoded_series_figure(series))
+                .map(|figure| self.normalize_binding_figure(figure, size_mm))
+                .unwrap_or_else(|| self.build_full_canvas_figure(primary, &line_chart, size_mm))
+        } else {
+            self.build_full_canvas_figure(primary, &line_chart, size_mm)
+        };
         let x_span = (fig.x.max - fig.x.min).abs().max(f64::MIN_POSITIVE);
         fig.series.clear();
         fig.error_bars.clear();
@@ -76,7 +98,25 @@ impl PlotxApp {
             if !sb.visible {
                 continue;
             }
-            let part = self.build_full_canvas_figure(dataset, &line_chart, size_mm);
+            let encoded_curve = self
+                .doc
+                .dataset_by_id(sb.source.resource)
+                .and_then(|dataset| dataset.field_descriptor(sb.source.field))
+                .is_some_and(|field| {
+                    field
+                        .capabilities
+                        .contains(crate::automation::CAP_FIELD_MASS_CHROMATOGRAM)
+                        || field
+                            .capabilities
+                            .contains(crate::automation::CAP_FIELD_MASS_SPECTRUM)
+                });
+            let part = if encoded_curve {
+                self.build_encoded_series_figure(sb)
+                    .map(|figure| self.normalize_binding_figure(figure, size_mm))
+                    .unwrap_or_else(|| self.build_full_canvas_figure(dataset, &line_chart, size_mm))
+            } else {
+                self.build_full_canvas_figure(dataset, &line_chart, size_mm)
+            };
             let mut series = part.series;
             let mut error_bars = part.error_bars;
             let peak = series
@@ -162,7 +202,6 @@ impl PlotxApp {
         if !binding.primary_visible() {
             fig.integral_curves.clear();
         }
-        fig.show_legend = true;
         fig
     }
 
@@ -224,7 +263,6 @@ impl PlotxApp {
         fig.x.max = x_max;
         fig.y.min = y_min;
         fig.y.max = y_max;
-        fig.show_legend = true;
         self.normalize_binding_figure(fig, size_mm)
     }
 

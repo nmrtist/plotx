@@ -2,14 +2,17 @@ pub use crate::screen_stats::RenderStats;
 use crate::screen_stats::visible_source_len;
 use crate::{
     AXIS_LINE_WIDTH, Document, DocumentItem, DocumentObject, DocumentOverlay, DocumentViewport,
-    LegendMark, OUTER_PAD, OverlayAlign, OverlayKind, OverlayShape, OverlayShapeKind, OverlayText,
-    Projector, Rect, TICK_LABEL_PAD, TICK_LENGTH, arrow_head, axis_layout, error_bar_segments,
-    heatmap_cells, integral, legend_entries, legend_layout, legend_rect, polygon_outline,
-    projection_points,
+    OUTER_PAD, OverlayAlign, OverlayKind, OverlayShape, OverlayShapeKind, OverlayText, Projector,
+    Rect, TICK_LABEL_PAD, TICK_LENGTH, arrow_head, axis_layout, error_bar_segments, heatmap_cells,
+    integral, polygon_outline, projection_points,
 };
 use egui::{Align2, Color32, FontId, Pos2, Sense, Shape, Stroke, StrokeKind, Ui, Vec2};
 use plotx_figure::{AxisFrame, AxisTrace, Color, Figure, SeriesKind};
 use std::borrow::Cow;
+
+mod color_scale;
+mod legend;
+mod sticks;
 
 /// Bounds on a pooled line's column grid.
 const MIN_LINE_COLUMNS: usize = 2_048;
@@ -328,6 +331,7 @@ pub fn paint_with_stats(
                     clipped.circle_filled(to_pos(px, py), series.width * scale, col(series.color));
                 }
             }
+            SeriesKind::Stick => sticks::paint(&clipped, &proj, series, scale),
             SeriesKind::Line => {}
         }
     }
@@ -375,7 +379,8 @@ pub fn paint_with_stats(
         paint_projection(painter, fig, trace, plot, band, false, scale);
     }
 
-    paint_legend(painter, plot, fig, scale);
+    legend::paint(painter, plot, fig, scale);
+    color_scale::paint(painter, plot, fig, scale);
 }
 
 fn paint_error_bars(
@@ -528,75 +533,6 @@ fn paint_projection(
         pts,
         Stroke::new(trace.width * scale, col(trace.color)),
     ));
-}
-
-fn paint_legend(painter: &egui::Painter, plot: Rect, fig: &Figure, scale: f32) {
-    let entries = legend_entries(fig);
-    if !fig.show_legend || entries.len() < 2 {
-        return;
-    }
-    let layout = legend_layout(&entries, fig.typography.legend_pt);
-    let font = fig.typography.legend_pt * scale;
-    let (row, sw, pad) = (
-        layout.row * scale,
-        layout.swatch * scale,
-        layout.padding * scale,
-    );
-    let Some(box_geometry) = legend_rect(fig, plot, scale) else {
-        return;
-    };
-    let (bx, by) = (box_geometry.left, box_geometry.top);
-    let box_rect = egui::Rect::from_min_size(
-        Pos2::new(bx, by),
-        Vec2::new(box_geometry.width, box_geometry.height),
-    );
-    painter.rect_filled(box_rect, 3.0 * scale, Color32::from_white_alpha(217));
-    painter.rect_stroke(
-        box_rect,
-        3.0 * scale,
-        Stroke::new(0.75 * scale, col(Color::AXIS)),
-        StrokeKind::Inside,
-    );
-    let font_id = FontId::proportional(font);
-    for (i, (name, color, mark)) in entries.iter().enumerate() {
-        let ly = by + pad + row * i as f32 + row * 0.5;
-        let lx = bx + pad;
-        match mark {
-            LegendMark::Line => {
-                painter.line_segment(
-                    [Pos2::new(lx, ly), Pos2::new(lx + sw, ly)],
-                    Stroke::new(2.0 * scale, col(*color)),
-                );
-            }
-            LegendMark::Points => {
-                painter.circle_filled(Pos2::new(lx + sw * 0.5, ly), 3.0 * scale, col(*color));
-            }
-            LegendMark::LinePoints => {
-                painter.line_segment(
-                    [Pos2::new(lx, ly), Pos2::new(lx + sw, ly)],
-                    Stroke::new(2.0 * scale, col(*color)),
-                );
-                painter.circle_filled(Pos2::new(lx + sw * 0.5, ly), 3.0 * scale, col(*color));
-            }
-            LegendMark::Rect => {
-                painter.rect_filled(
-                    egui::Rect::from_min_size(
-                        Pos2::new(lx, ly - 4.0 * scale),
-                        Vec2::new(sw, 8.0 * scale),
-                    ),
-                    1.0 * scale,
-                    col(*color),
-                );
-            }
-        }
-        painter.text(
-            Pos2::new(lx + sw + 5.0 * scale, ly),
-            Align2::LEFT_CENTER,
-            name,
-            font_id.clone(),
-            col(fig.typography.legend_color),
-        );
-    }
 }
 
 /// Paint a fixed-size page document through a zoomable screen viewport.

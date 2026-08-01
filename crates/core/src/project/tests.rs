@@ -262,7 +262,10 @@ fn project_roundtrip_preserves_data_recipe_and_view() {
         y_label: Some("Response".to_owned()),
         x_range: Some(AxisRange::new(1.0, 8.0)),
         y_range: Some(AxisRange::new(-2.0, 12.0)),
-        show_legend: Some(false),
+        guide_visibility: Some(plotx_figure::GuideVisibility::Hide),
+        guide_placement: Some(plotx_figure::GuidePlacement::Inside),
+        guide_layout: Some(plotx_figure::GuideLayout::Horizontal),
+        guide_title: Some("Channels".to_owned()),
         legend_position: Some([0.25, 0.75]),
         ..AxisOverrides::default()
     };
@@ -623,7 +626,7 @@ fn project_roundtrip_preserves_overlay_binding() {
         Some(Color::rgb(10, 20, 30))
     );
     assert_eq!(binding.series[1].label.as_deref(), Some("treated"));
-    assert!(first_plot(&loaded).figure().show_legend);
+    assert_eq!(first_plot(&loaded).figure().series.len(), 2);
 }
 
 #[test]

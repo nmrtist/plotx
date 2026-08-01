@@ -361,7 +361,7 @@ pub(crate) fn choose_project_save_path() -> Option<std::path::PathBuf> {
 
 pub(crate) fn open_folder(app: &mut PlotxApp) {
     if let Some(path) = rfd::FileDialog::new()
-        .set_title("Open a data folder (Bruker acquisition or recursive AFM/ABF2 import)")
+        .set_title("Open a data folder (Waters MassLynx RAW, Bruker, or recursive AFM/ABF2 import)")
         .pick_folder()
     {
         open_folder_path(app, &path);

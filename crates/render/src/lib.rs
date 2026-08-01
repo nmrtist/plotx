@@ -383,6 +383,7 @@ pub(crate) fn legend_entries(fig: &Figure) -> Vec<(&str, Color, LegendMark)> {
         let mark = match series.kind {
             plotx_figure::SeriesKind::Line => LegendMark::Line,
             plotx_figure::SeriesKind::Points => LegendMark::Points,
+            plotx_figure::SeriesKind::Stick => LegendMark::Line,
         };
         if let Some((_, _, existing)) = entries
             .iter_mut()
@@ -404,7 +405,17 @@ pub(crate) fn legend_entries(fig: &Figure) -> Vec<(&str, Color, LegendMark)> {
 
 /// Whether the renderer will emit a legend for this figure.
 pub fn renders_legend(fig: &Figure) -> bool {
-    fig.show_legend && legend_entries(fig).len() >= 2
+    let entries = legend_entries(fig);
+    match fig.guide_visibility {
+        plotx_figure::GuideVisibility::Auto => entries.len() >= 2,
+        plotx_figure::GuideVisibility::Show => !entries.is_empty(),
+        plotx_figure::GuideVisibility::Hide => false,
+    }
+}
+
+/// Whether a continuous colour scale should explain the heatmap encoding.
+pub fn renders_color_scale(fig: &Figure) -> bool {
+    fig.heatmap.is_some() && !matches!(fig.guide_visibility, plotx_figure::GuideVisibility::Hide)
 }
 
 #[derive(Clone, Copy)]
@@ -412,12 +423,16 @@ pub(crate) struct LegendLayout {
     pub row: f32,
     pub swatch: f32,
     pub padding: f32,
+    pub entry_width: f32,
+    pub columns: usize,
+    pub title_height: f32,
     pub width: f32,
     pub height: f32,
 }
 
 /// Keep legend geometry identical across screen, SVG, and EMF output.
-pub(crate) fn legend_layout(entries: &[(&str, Color, LegendMark)], font: f32) -> LegendLayout {
+pub(crate) fn legend_layout(fig: &Figure, entries: &[(&str, Color, LegendMark)]) -> LegendLayout {
+    let font = fig.typography.legend_pt;
     let row = (font * 1.4).max(9.0);
     let swatch = (font * 1.8).max(10.0);
     let padding = (font * 0.6).max(3.0);
@@ -426,33 +441,61 @@ pub(crate) fn legend_layout(entries: &[(&str, Color, LegendMark)], font: f32) ->
         .map(|(name, _, _)| name.chars().count())
         .max()
         .unwrap_or(0);
+    let entry_width = swatch + 5.0 + chars as f32 * font * 0.6;
+    let columns = if matches!(fig.guide_layout, plotx_figure::GuideLayout::Horizontal) {
+        entries.len().max(1)
+    } else {
+        1
+    };
+    let title_height = if fig.guide_title.trim().is_empty() {
+        0.0
+    } else {
+        row
+    };
+    let title_width = fig.guide_title.chars().count() as f32 * font * 0.6;
+    let entries_width = entry_width * columns as f32;
+    let entry_rows = entries.len().div_ceil(columns).max(1);
     LegendLayout {
         row,
         swatch,
         padding,
-        width: swatch + 5.0 + chars as f32 * font * 0.6 + padding * 2.0,
-        height: entries.len() as f32 * row + padding * 2.0,
+        entry_width,
+        columns,
+        title_height,
+        width: entries_width.max(title_width) + padding * 2.0,
+        height: title_height + entry_rows as f32 * row + padding * 2.0,
     }
+}
+
+pub(crate) fn legend_entry_origin(layout: &LegendLayout, index: usize) -> (f32, f32) {
+    let column = index % layout.columns;
+    let row = index / layout.columns;
+    (
+        layout.padding + layout.entry_width * column as f32,
+        layout.padding + layout.title_height + layout.row * (row as f32 + 0.5),
+    )
 }
 
 /// Legend box in output coordinates. Manual coordinates are fractions of the
 /// space in which the complete box can move, so resizing keeps it inside.
 pub fn legend_rect(fig: &Figure, plot: Rect, scale: f32) -> Option<Rect> {
     let entries = legend_entries(fig);
-    if !fig.show_legend || entries.len() < 2 {
+    if !renders_legend(fig) {
         return None;
     }
-    let layout = legend_layout(&entries, fig.typography.legend_pt);
+    let layout = legend_layout(fig, &entries);
     let width = layout.width * scale;
     let height = layout.height * scale;
     let available_x = (plot.width - width).max(0.0);
     let available_y = (plot.height - height).max(0.0);
     let (left, top) = fig.legend_position.map_or_else(
-        || {
-            (
+        || match fig.guide_placement {
+            plotx_figure::GuidePlacement::OutsideRight => (plot.right() + 8.0 * scale, plot.top),
+            plotx_figure::GuidePlacement::OutsideBottom => (plot.left, plot.bottom() + 8.0 * scale),
+            plotx_figure::GuidePlacement::Auto | plotx_figure::GuidePlacement::Inside => (
                 (plot.right() - width - 8.0 * scale).max(plot.left + 2.0 * scale),
                 plot.top + 8.0 * scale,
-            )
+            ),
         },
         |[x, y]| {
             (
@@ -462,6 +505,72 @@ pub fn legend_rect(fig: &Figure, plot: Rect, scale: f32) -> Option<Rect> {
         },
     );
     Some(Rect::new(left, top, width, height))
+}
+
+/// Geometry for a heatmap's continuous colour scale. The scale is vertical by
+/// default and horizontal when explicitly placed below the plot.
+pub fn color_scale_rect(fig: &Figure, plot: Rect, scale: f32) -> Option<Rect> {
+    renders_color_scale(fig).then(|| match fig.guide_placement {
+        plotx_figure::GuidePlacement::Inside => Rect::new(
+            plot.right() - 16.0 * scale,
+            plot.top + 8.0 * scale,
+            8.0 * scale,
+            (plot.height * 0.45).max(36.0 * scale),
+        ),
+        plotx_figure::GuidePlacement::OutsideBottom => {
+            let top = legend_rect(fig, plot, scale)
+                .map(|legend| legend.bottom() + 10.0 * scale)
+                .unwrap_or_else(|| plot.bottom() + 10.0 * scale);
+            Rect::new(
+                plot.left,
+                top,
+                (plot.width * 0.5).max(54.0 * scale),
+                8.0 * scale,
+            )
+        }
+        plotx_figure::GuidePlacement::Auto | plotx_figure::GuidePlacement::OutsideRight => {
+            let top = if matches!(
+                fig.guide_placement,
+                plotx_figure::GuidePlacement::OutsideRight
+            ) {
+                legend_rect(fig, plot, scale)
+                    .map(|legend| legend.bottom() + 10.0 * scale)
+                    .unwrap_or(plot.top)
+            } else {
+                plot.top
+            };
+            Rect::new(
+                plot.right() + 10.0 * scale,
+                top,
+                8.0 * scale,
+                (plot.height * 0.55).max(48.0 * scale),
+            )
+        }
+    })
+}
+
+pub(crate) fn guide_extra_margins(fig: &Figure) -> (f32, f32) {
+    let mut right: f32 = 0.0;
+    let mut bottom: f32 = 0.0;
+    if renders_color_scale(fig) {
+        match fig.guide_placement {
+            plotx_figure::GuidePlacement::OutsideBottom => bottom = 22.0,
+            plotx_figure::GuidePlacement::Auto | plotx_figure::GuidePlacement::OutsideRight => {
+                right = 44.0
+            }
+            plotx_figure::GuidePlacement::Inside => {}
+        }
+    }
+    if renders_legend(fig) && fig.legend_position.is_none() {
+        let entries = legend_entries(fig);
+        let layout = legend_layout(fig, &entries);
+        match fig.guide_placement {
+            plotx_figure::GuidePlacement::OutsideRight => right = right.max(layout.width + 12.0),
+            plotx_figure::GuidePlacement::OutsideBottom => bottom += layout.height + 12.0,
+            plotx_figure::GuidePlacement::Auto | plotx_figure::GuidePlacement::Inside => {}
+        }
+    }
+    (right, bottom)
 }
 
 pub fn legend_position_for_origin(

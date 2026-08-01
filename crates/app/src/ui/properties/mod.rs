@@ -28,8 +28,8 @@ pub use types::*;
 use plotx_core::properties::definition;
 use plotx_core::properties::{
     PropertyId, Tier, apodization, app_preferences, axis, baseline, bin, canvas, contour,
-    export_dpi, group_delay, heatmap, ilt, line, normalize, object, phase, reference, smooth,
-    step_enabled, typography, zero_fill,
+    export_dpi, group_delay, guide, heatmap, ilt, line, normalize, object, phase, reference,
+    smooth, step_enabled, typography, zero_fill,
 };
 #[cfg(test)]
 use plotx_core::state::SettingsCategory;
@@ -121,10 +121,40 @@ pub const PRESENTATIONS: &[PropertyPresentation] = &[
         uses_canvas_length_unit: false,
     },
     PropertyPresentation {
-        id: axis::SHOW_LEGEND,
-        localized_label: LocalizedText("Show legend"),
-        localized_aliases: &[LocalizedText("legend visibility")],
-        home_route: AXIS_HOME,
+        id: guide::VISIBILITY,
+        localized_label: LocalizedText("Visibility"),
+        localized_aliases: &[
+            LocalizedText("legend visibility"),
+            LocalizedText("color scale visibility"),
+        ],
+        home_route: GUIDE_HOME,
+        canvas_step: false,
+        uses_canvas_length_unit: false,
+    },
+    PropertyPresentation {
+        id: guide::PLACEMENT,
+        localized_label: LocalizedText("Position"),
+        localized_aliases: &[
+            LocalizedText("legend position"),
+            LocalizedText("color scale position"),
+        ],
+        home_route: GUIDE_HOME,
+        canvas_step: false,
+        uses_canvas_length_unit: false,
+    },
+    PropertyPresentation {
+        id: guide::LAYOUT,
+        localized_label: LocalizedText("Layout"),
+        localized_aliases: &[LocalizedText("legend direction")],
+        home_route: GUIDE_HOME,
+        canvas_step: false,
+        uses_canvas_length_unit: false,
+    },
+    PropertyPresentation {
+        id: guide::TITLE,
+        localized_label: LocalizedText("Title"),
+        localized_aliases: &[LocalizedText("legend title")],
+        home_route: GUIDE_HOME,
         canvas_step: false,
         uses_canvas_length_unit: false,
     },

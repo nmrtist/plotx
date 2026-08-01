@@ -78,6 +78,14 @@ impl FieldCatalog {
         self.key_to_id.insert(key, id);
     }
 
+    pub(crate) fn ensure_key(&mut self, key: String) -> FieldId {
+        if let Some(id) = self.id_for_key(&key) {
+            return id;
+        }
+        self.allocate(key.clone());
+        self.id_for_key(&key).expect("new field key was allocated")
+    }
+
     pub(crate) fn validate_for_keys(&self, keys: Vec<String>) -> Result<(), String> {
         let supplied_len = keys.len();
         let expected = keys.into_iter().collect::<BTreeSet<_>>();

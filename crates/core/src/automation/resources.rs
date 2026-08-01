@@ -6,6 +6,8 @@ use super::{
 use crate::state::{Dataset, PlotxApp};
 use std::collections::BTreeMap;
 
+mod mass_spec;
+
 pub const KIND_DATASET: &str = "plotx.dataset";
 pub const KIND_APP: &str = "plotx.app";
 pub const KIND_DOCUMENT: &str = "plotx.document";
@@ -50,6 +52,8 @@ pub const CAP_FIELD_SWEEP_COLLECTION: &str = "field.sweep_collection";
 pub const CAP_FIELD_FORCE_CURVE: &str = "field.force_curve";
 pub const CAP_FIELD_AFM_MAP: &str = "field.afm.map";
 pub const CAP_FIELD_REGION_SERIES: &str = "field.region_series";
+pub const CAP_FIELD_MASS_CHROMATOGRAM: &str = "field.mass_spectrometry.chromatogram";
+pub const CAP_FIELD_MASS_SPECTRUM: &str = "field.mass_spectrometry.spectrum";
 
 /// Capability-oriented resource access. New resource types can participate by
 /// implementing this trait; query and tool orchestration do not dispatch on a
@@ -176,6 +180,7 @@ impl<'a> ProjectResourceProvider<'a> {
                     .collect();
                 (dimensions, units, Vec::new())
             }
+            Dataset::MassSpec(dataset) => mass_spec::descriptor(dataset),
         };
         children.extend(
             dataset
@@ -668,6 +673,7 @@ fn preview_dataset(
                 total,
             )
         }
+        Dataset::MassSpec(dataset) => mass_spec::preview(dataset, target, limit, &mut statistics),
     };
     let returned = total.min(limit);
     Ok(DataPreview {

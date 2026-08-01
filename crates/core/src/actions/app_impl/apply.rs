@@ -190,6 +190,16 @@ impl PlotxApp {
                     d.set_name(after.clone());
                 }
             }
+            Action::SetMassSpecFunction { dataset, after, .. } => {
+                self.set_mass_spec_function_value(dataset_index!(*dataset), *after);
+            }
+            Action::SetMassSpectrumExtractions { dataset, after, .. } => {
+                self.set_mass_spectrum_extractions_value(
+                    dataset_index!(*dataset),
+                    after.0.clone(),
+                    after.1,
+                );
+            }
             Action::SetCurveFitAnalyses { dataset, after, .. } => {
                 self.set_curve_fit_analyses(dataset_index!(*dataset), after);
             }

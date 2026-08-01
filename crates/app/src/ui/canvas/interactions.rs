@@ -33,6 +33,11 @@ pub(crate) fn handle_selection_drag(
     plot: PlotRect,
     ui: &Ui,
 ) {
+    if app.doc.datasets[dataset].as_mass_spec().is_some()
+        && !is_mass_chromatogram_plot(app, ci, object_id)
+    {
+        return;
+    }
     let (hover, primary_down, primary_pressed, primary_released, esc) = ui.input(|i| {
         (
             i.pointer.hover_pos(),
@@ -89,6 +94,11 @@ pub(crate) fn finish_selection_drag(
     if drag.dataset != dataset {
         return;
     }
+    if app.doc.datasets[dataset].as_mass_spec().is_some()
+        && !is_mass_chromatogram_plot(app, ci, object_id)
+    {
+        return;
+    }
     let a = clamp_to_plot(plot, pos(drag.start));
     let b = clamp_to_plot(plot, pos(drag.current));
     if (a.x - b.x).abs() < SELECT_MIN_PX {
@@ -116,7 +126,31 @@ pub(crate) fn finish_selection_drag(
         x_range: x,
         y_range: y,
     });
-    app.session.status = format!("Selected {:.3}-{:.3} ppm.", x.min, x.max);
+    let unit = if app.doc.datasets[dataset].as_mass_spec().is_some() {
+        "min"
+    } else {
+        "ppm"
+    };
+    app.session.status = format!("Selected {:.3}-{:.3} {unit}.", x.min, x.max);
+}
+
+fn is_mass_chromatogram_plot(app: &PlotxApp, canvas: usize, object: ObjectId) -> bool {
+    app.doc.canvases[canvas]
+        .object(object)
+        .and_then(|object| object.plot())
+        .is_some_and(|plot| {
+            !plot.binding.series.is_empty()
+                && plot.binding.series.iter().all(|series| {
+                    app.doc
+                        .dataset_by_id(series.source.resource)
+                        .and_then(|dataset| dataset.field_descriptor(series.source.field))
+                        .is_some_and(|field| {
+                            field
+                                .capabilities
+                                .contains(plotx_core::automation::CAP_FIELD_MASS_CHROMATOGRAM)
+                        })
+                })
+        })
 }
 
 pub(crate) fn handle_zoom_drag(
@@ -247,6 +281,57 @@ pub(crate) fn handle_data_tool_target(
         return;
     };
     let id = hit.object;
+    let mass_spec_target = (|| {
+        let object = app.doc.canvases[ci].object(id)?;
+        let plot_object = object.plot()?;
+        let series = plot_object.binding.series.first()?;
+        let dataset_index = app.doc.dataset_index(series.source.resource)?;
+        let mass_spec = app.doc.datasets.get(dataset_index)?.as_mass_spec()?;
+        let function = mass_spec
+            .supported_ms_functions()
+            .find(|function| {
+                mass_spec
+                    .field_catalog
+                    .id_for_key(&plotx_core::state::tic_key(*function))
+                    == Some(series.source.field)
+                    || mass_spec
+                        .field_catalog
+                        .id_for_key(&plotx_core::state::bpi_key(*function))
+                        == Some(series.source.field)
+            })
+            .or_else(|| {
+                mass_spec
+                    .run
+                    .chromatograms
+                    .iter()
+                    .filter(|channel| channel.kind == plotx_io::ChromatogramKind::Optical)
+                    .any(|channel| {
+                        mass_spec
+                            .field_catalog
+                            .id_for_key(&plotx_core::state::channel_key(&channel.id.0))
+                            == Some(series.source.field)
+                    })
+                    .then_some(mass_spec.active_function)
+            })?;
+        let inner = plot_inner_rect(app, ci, id, rect)?;
+        plot_contains(inner, screen_pos).then_some((
+            series.source.resource,
+            function,
+            screen_to_x(
+                screen_pos.x,
+                inner,
+                plot_object.figure().x.min,
+                plot_object.figure().x.span(),
+                plot_object.figure().x.reversed,
+            ),
+        ))
+    })();
+    if let Some((dataset, function, retention_time_min)) = mass_spec_target {
+        app.select_mass_spec_scan_near(dataset, function, retention_time_min);
+        app.session.status = format!(
+            "Selected the nearest scan in function {function} at {retention_time_min:.3} min."
+        );
+    }
     if app.doc.canvases[ci].selected_object == Some(id) {
         return;
     }

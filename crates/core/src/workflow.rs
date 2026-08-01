@@ -1,9 +1,4 @@
-//! UI-independent loading, processing and export workflows.
-//!
-//! This module owns the canonical path from a detected acquisition to a
-//! [`Dataset`], and the default figure/canvas construction used by both the GUI
-//! and automation. It intentionally contains no session, status or undo state.
-
+//! UI-independent loading, export, and default-layout workflows shared by all frontends.
 use crate::actions::ProcessingStateError;
 use crate::export::{
     DEFAULT_BITMAP_DPI, ExportError, ExportFormat, ExportPageScope, ExportSettings, export_canvases,
@@ -18,9 +13,9 @@ use plotx_io::{Acquisition, DataFormat, Domain, LoadWarning, LoadWarningCode, Pr
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-
+#[path = "workflow/mass_spec_layout.rs"]
+mod mass_spec_layout;
 pub const INSPECTION_SCHEMA: &str = "plotx.inspect.v1";
-
 #[derive(Clone, Debug, Serialize)]
 pub struct InspectionReport {
     pub schema: &'static str,
@@ -33,6 +28,16 @@ pub struct InspectionReport {
     pub electrophysiology: Option<ElectrophysiologyReport>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub afm: Option<AfmReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mass_spectrometry: Option<MassSpecReport>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct MassSpecReport {
+    pub instrument: Option<String>,
+    pub function_count: usize,
+    pub ms_scan_count: usize,
+    pub chromatograms: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -233,6 +238,13 @@ pub fn dataset_from_acquisition_with_equal_scale_preference(
                 source,
             )
         }
+        Acquisition::MassSpec(data) => {
+            let source = data.source.clone();
+            (
+                Dataset::MassSpec(Box::new(crate::state::MassSpecDataset::load(*data))),
+                source,
+            )
+        }
     }
 }
 
@@ -255,6 +267,10 @@ pub fn dataset_title(dataset: &Dataset) -> String {
             .name
             .clone()
             .unwrap_or_else(|| short_name(&data.data.source)),
+        Dataset::MassSpec(data) => data
+            .name
+            .clone()
+            .unwrap_or_else(|| short_name(&data.run.source)),
     }
 }
 
@@ -340,6 +356,10 @@ pub fn build_default_canvas_for_dataset(
     size_mm: [f32; 2],
 ) -> CanvasDocument {
     let has_map_and_force = matches!(dataset, Dataset::Afm(afm) if !afm.data.images.is_empty() && afm.data.forces.is_some());
+    let optical_fields = dataset
+        .as_mass_spec()
+        .map_or_else(Vec::new, mass_spec_layout::optical_fields);
+    let has_uv = !optical_fields.is_empty();
     let size_mm = if has_map_and_force && size_mm == DEFAULT_CANVAS_SIZE_MM {
         [crate::state::NATURE_DOUBLE_COLUMN.width_mm, size_mm[1]]
     } else {
@@ -356,13 +376,43 @@ pub fn build_default_canvas_for_dataset(
     } else {
         width
     };
-    let first = build_plot_object(
+    let first_height = if has_uv { height / 2.0 } else { height };
+    let mut first = build_plot_object(
         dataset,
         dataset_index,
-        ObjectFrame::new(0.0, 0.0, first_width, height),
+        ObjectFrame::new(0.0, 0.0, first_width, first_height),
         id,
-        "Plot 1".to_owned(),
+        if has_uv {
+            "UV Chromatogram".to_owned()
+        } else if matches!(dataset, Dataset::MassSpec(_)) {
+            "Total Ion Chromatogram".to_owned()
+        } else {
+            "Plot 1".to_owned()
+        },
     );
+    if let Dataset::MassSpec(mass_spec) = dataset {
+        if has_uv {
+            mass_spec_layout::configure_fields(
+                &mut first,
+                dataset,
+                &optical_fields,
+                "mass_chromatogram",
+            );
+            if let Some(plot) = first.plot_mut() {
+                plot.panel.user_note = format!(
+                    "UV chromatogram{} — {}",
+                    if optical_fields.len() == 1 { "" } else { "s" },
+                    optical_fields
+                        .iter()
+                        .map(|item| item.1.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            }
+        } else if let Some(plot) = first.plot_mut() {
+            plot.panel.user_note = mass_spec.tic_panel_note();
+        }
+    }
     canvas.objects.push(first);
     if has_map_and_force {
         let second_id = canvas.allocate_object_id();
@@ -388,6 +438,37 @@ pub fn build_default_canvas_for_dataset(
                 dataset,
                 &plot.chart,
                 [width / 2.0 / MM_TO_PT, height / MM_TO_PT],
+            );
+            plot.adopt_rebuilt_figure(figure);
+        }
+        canvas.objects.push(second);
+    }
+    if let Dataset::MassSpec(mass_spec) = dataset
+        && has_uv
+    {
+        let second_id = canvas.allocate_object_id();
+        let mut second = build_plot_object(
+            dataset,
+            dataset_index,
+            ObjectFrame::new(0.0, height / 2.0, width, height / 2.0),
+            second_id,
+            "Total Ion Chromatogram".to_owned(),
+        );
+        if let CanvasObjectKind::Plot(plot) = &mut second.kind {
+            plot.chart.type_id = "mass_chromatogram".to_owned();
+            if let Some(series) = plot.binding.series.first_mut()
+                && let Some(field) = mass_spec
+                    .field_catalog
+                    .id_for_key(&crate::state::tic_key(mass_spec.active_function))
+            {
+                series.source.field = field;
+                series.encoding = plotx_figure::SeriesEncoding::default();
+            }
+            plot.panel.user_note = mass_spec.tic_panel_note();
+            let figure = build_dataset_figure(
+                dataset,
+                &plot.chart,
+                [width / MM_TO_PT, height / 2.0 / MM_TO_PT],
             );
             plot.adopt_rebuilt_figure(figure);
         }
@@ -445,6 +526,7 @@ fn inspection_report(
                     protocol: data.protocol.clone(),
                 }),
                 afm: None,
+                mass_spectrometry: None,
             };
         }
         Acquisition::Afm(data) => {
@@ -481,6 +563,43 @@ fn inspection_report(
                     }),
                     samples_per_curve: force.map(|force| force.samples_per_curve),
                 }),
+                mass_spectrometry: None,
+            };
+        }
+        Acquisition::MassSpec(run) => {
+            let ms_scan_count = run
+                .functions
+                .iter()
+                .filter(|function| function.kind == plotx_io::FunctionKind::MassSpectrum)
+                .map(|function| function.scans.len())
+                .sum();
+            return InspectionReport {
+                schema: INSPECTION_SCHEMA,
+                format: format.as_str().to_owned(),
+                provenance: ProvenanceReport {
+                    selected_path: provenance.selected_path.clone(),
+                    data_path: provenance.data_path.clone(),
+                    parameter_paths: provenance.parameter_paths.clone(),
+                    companion_paths: provenance.companion_paths.clone(),
+                },
+                dimension: DimensionReport {
+                    count: 3,
+                    shape: vec![run.functions.len(), ms_scan_count, run.chromatograms.len()],
+                },
+                domain: "mass_spectrometry".to_owned(),
+                warnings: warnings.iter().map(warning_report).collect(),
+                electrophysiology: None,
+                afm: None,
+                mass_spectrometry: Some(MassSpecReport {
+                    instrument: run.instrument.clone(),
+                    function_count: run.functions.len(),
+                    ms_scan_count,
+                    chromatograms: run
+                        .chromatograms
+                        .iter()
+                        .map(|channel| channel.description.clone())
+                        .collect(),
+                }),
             };
         }
     };
@@ -498,6 +617,7 @@ fn inspection_report(
         warnings: warnings.iter().map(warning_report).collect(),
         electrophysiology: None,
         afm: None,
+        mass_spectrometry: None,
     }
 }
 
@@ -511,6 +631,7 @@ fn warning_report(warning: &LoadWarning) -> WarningReport {
         LoadWarningCode::MissingCompanion => "missing-companion",
         LoadWarningCode::CompanionMismatch => "companion-mismatch",
         LoadWarningCode::OptionalChannelSkipped => "optional-channel-skipped",
+        LoadWarningCode::UnsupportedFunction => "unsupported-function",
     };
     WarningReport {
         code,

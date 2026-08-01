@@ -133,6 +133,17 @@ impl super::Dataset {
                     })
                 })
             }
+            Self::MassSpec(dataset) => dataset.field_values(id).map(|(_, _, _, points, _)| {
+                FieldPayload::Curve1D(Curve1D {
+                    x: Arc::from(points.iter().map(|point| point[0]).collect::<Vec<_>>()),
+                    values: Arc::from(
+                        points
+                            .iter()
+                            .map(|point| point[1] as f32)
+                            .collect::<Vec<_>>(),
+                    ),
+                })
+            }),
         }
     }
 
@@ -184,6 +195,7 @@ impl super::Dataset {
                 (afm.field_catalog.id_for_key("afm.force_curve") == Some(id))
                     .then_some(FieldRepresentation::Curve1D)
             }
+            Self::MassSpec(dataset) => dataset.field_representation(id),
         }
     }
 
@@ -233,6 +245,7 @@ impl super::Dataset {
                     Self::Table(dataset) => (dataset.name.as_deref().unwrap_or("table"), None),
                     Self::Electrophysiology(dataset) => (dataset.data.source.as_str(), None),
                     Self::Afm(dataset) => (dataset.data.source.as_str(), None),
+                    Self::MassSpec(dataset) => (dataset.run.source.as_str(), None),
                 };
                 FieldCatalog::make_provenance(source, id, algorithm)
             })

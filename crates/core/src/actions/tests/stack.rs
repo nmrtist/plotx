@@ -26,7 +26,7 @@ fn stacked_figure_is_domain_generic_with_offset_scale_and_hide() {
             ],
         };
         let sup = app.build_binding_figure(&binding, &chart, &StackSpec::default(), size);
-        assert!(sup.show_legend, "a combined figure shows a legend");
+        assert_eq!(sup.guide_visibility, plotx_figure::GuideVisibility::Auto);
         assert!(sup.series.len() >= 2, "both traces are drawn");
         if domain == DataDomain::Table {
             assert_eq!(sup.error_bars.len(), 6, "both tables keep their errors");
@@ -127,7 +127,7 @@ fn field_overlay_stacks_two_2d_contours_in_distinct_colors() {
     app.poll_compute();
     let fig = app.build_binding_figure(&binding, &chart, &stack, [120.0, 80.0]);
 
-    assert!(fig.show_legend, "a Field overlay shows a legend");
+    assert_eq!(fig.guide_visibility, plotx_figure::GuideVisibility::Auto);
     assert_eq!(
         fig.contours.len(),
         4,

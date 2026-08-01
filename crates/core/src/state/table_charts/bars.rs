@@ -184,7 +184,6 @@ pub(crate) fn grouped_bar_figure(dataset: &TableDataset, ctx: &ChartContext) -> 
     let yr = (yhi - ylo).max(f64::MIN_POSITIVE);
     fig.y.min = if ylo < 0.0 { ylo - 0.05 * yr } else { 0.0 };
     fig.y.max = yhi + 0.08 * yr;
-    fig.show_legend = n_cols >= 2;
     fig
 }
 
@@ -257,7 +256,13 @@ mod tests {
         let categories = fig.x.categories.as_ref().expect("categorical x");
         assert_eq!(categories, &["0", "1", "2"]);
         assert_eq!(fig.polygons.len(), 6);
-        assert!(fig.show_legend);
+        assert!(
+            fig.polygons
+                .iter()
+                .filter(|polygon| !polygon.name.is_empty())
+                .count()
+                >= 2
+        );
         assert_eq!(fig.error_bars.len(), 3, "sigma only on the second column");
         // Both columns of row 0 stay within its slot [-0.4, 0.4].
         for p in fig.polygons.iter().filter(|p| p.points[0][0] < 0.5) {

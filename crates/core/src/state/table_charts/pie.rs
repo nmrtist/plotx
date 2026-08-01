@@ -48,7 +48,6 @@ pub(crate) fn pie_figure(dataset: &TableDataset, ctx: &ChartContext) -> Figure {
     );
     fig.axis_frame = AxisFrame::Hidden;
     fig.lock_aspect = true;
-    fig.show_legend = slices.len() >= 2;
 
     // Clockwise from 12 o'clock, the familiar spreadsheet convention.
     let mut start = 0.0f64;
@@ -138,7 +137,14 @@ mod tests {
             &ChartContext::default(),
         );
         assert_eq!(fig.axis_frame, AxisFrame::Hidden);
-        assert!(fig.lock_aspect && fig.show_legend);
+        assert!(fig.lock_aspect);
+        assert!(
+            fig.polygons
+                .iter()
+                .filter(|polygon| !polygon.name.is_empty())
+                .count()
+                >= 2
+        );
         // 50% (180°) splits into 2 fans, 30% (108°) into 2, 20% (72°) into 1.
         assert_eq!(fig.polygons.len(), 5);
         let names: Vec<&str> = fig.polygons.iter().map(|p| p.name.as_str()).collect();

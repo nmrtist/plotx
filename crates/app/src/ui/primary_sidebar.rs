@@ -712,6 +712,11 @@ fn select_analysis(app: &mut PlotxApp, ui: &Ui, di: usize, item: &AnalysisItem, 
             }
             return;
         }
+        AnalysisKind::MassSpectrum(_) => {
+            if open {
+                request_tool_group(app, plotx_core::state::ToolGroup::MassSpectrometry);
+            }
+        }
     }
     if open && let Some(frame) = plotx_core::state::page_frame_showing_dataset(app, di) {
         jump_to_frame(app, ui, frame);

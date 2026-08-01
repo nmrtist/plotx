@@ -13,6 +13,17 @@ pub(crate) const GROUPS: &[PropertyGroup] = &[
         unavailable_reason: "Select a plot before changing its axis text.",
     },
     PropertyGroup {
+        section: panel::GUIDE_SECTION,
+        label: LocalizedText("Legend & scales"),
+        icon: egui_phosphor::regular::LIST_BULLETS,
+        ribbon: RibbonSpot {
+            tab: WorkflowTab::Figure,
+            group: "Style",
+            priority: 2,
+        },
+        unavailable_reason: "Select a plot with a named or colour-mapped encoding.",
+    },
+    PropertyGroup {
         section: panel::STACK_SECTION,
         label: LocalizedText("Stack"),
         icon: egui_phosphor::regular::STACK,

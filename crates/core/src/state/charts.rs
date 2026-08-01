@@ -12,6 +12,7 @@ pub enum DataDomain {
     Table,
     Electrophysiology,
     Afm,
+    MassSpectrometry,
 }
 
 /// How a domain's datasets combine when several are stacked onto one plot:
@@ -29,9 +30,10 @@ impl DataDomain {
     /// its own increments so it is excluded.
     pub fn stack_kind(self) -> Option<StackKind> {
         match self {
-            DataDomain::Nmr1d | DataDomain::Table | DataDomain::Electrophysiology => {
-                Some(StackKind::Line)
-            }
+            DataDomain::Nmr1d
+            | DataDomain::Table
+            | DataDomain::Electrophysiology
+            | DataDomain::MassSpectrometry => Some(StackKind::Line),
             DataDomain::Nmr2d => Some(StackKind::Field),
             DataDomain::PseudoNmr | DataDomain::Afm => None,
         }
@@ -78,6 +80,28 @@ impl ChartDescriptor {
 /// The catalog. The first entry for a domain is that domain's default chart, so
 /// old `.plotx` files (no recorded chart type) map to it.
 static CHART_TYPES: &[ChartDescriptor] = &[
+    ChartDescriptor {
+        id: "mass_chromatogram",
+        name: "Mass chromatogram",
+        recommended_domains: &[DataDomain::MassSpectrometry],
+        required_capabilities: &[
+            crate::automation::CAP_FIELD_CURVE_1D,
+            crate::automation::CAP_FIELD_MASS_CHROMATOGRAM,
+        ],
+        needs_column: false,
+        build: build_mass_chromatogram,
+    },
+    ChartDescriptor {
+        id: "mass_spectrum",
+        name: "Mass spectrum",
+        recommended_domains: &[DataDomain::MassSpectrometry],
+        required_capabilities: &[
+            crate::automation::CAP_FIELD_CURVE_1D,
+            crate::automation::CAP_FIELD_MASS_SPECTRUM,
+        ],
+        needs_column: false,
+        build: build_mass_spectrum,
+    },
     ChartDescriptor {
         id: "afm_map",
         name: "AFM Map",
@@ -366,6 +390,22 @@ fn build_nmr_spectrum(dataset: &Dataset, _ctx: &ChartContext) -> Option<Figure> 
         &n.processed,
         &n.peaks.resolve(),
     ))
+}
+
+fn build_mass_chromatogram(dataset: &Dataset, _ctx: &ChartContext) -> Option<Figure> {
+    let dataset = dataset.as_mass_spec()?;
+    let id = dataset
+        .field_catalog
+        .id_for_key(&tic_key(dataset.active_function))?;
+    dataset.field_figure(id)
+}
+
+fn build_mass_spectrum(dataset: &Dataset, _ctx: &ChartContext) -> Option<Figure> {
+    let dataset = dataset.as_mass_spec()?;
+    let id = dataset
+        .field_catalog
+        .id_for_key(&spectrum_key(dataset.active_function))?;
+    dataset.field_figure(id)
 }
 
 fn build_electrophysiology(dataset: &Dataset, _ctx: &ChartContext) -> Option<Figure> {

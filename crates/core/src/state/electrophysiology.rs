@@ -229,7 +229,6 @@ impl ElectrophysiologyDataset {
                     .colored(colors[index % colors.len()]),
             );
         }
-        figure.show_legend = figure.series.len() >= 2;
         figure.series_colors_are_semantic = figure.series.len() >= 2;
         figure
     }

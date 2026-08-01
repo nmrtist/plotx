@@ -6,7 +6,7 @@ use plotx_core::actions::ZOrder;
 use plotx_core::export::ExportFormat;
 use plotx_core::layout::{Align, Distribute, GutterPreset, SpacingMode};
 use plotx_core::properties::PropertyStep;
-use plotx_core::state::{Dataset, ObjectId, PlotxApp, Tool, WorkflowTab};
+use plotx_core::state::{Dataset, ObjectId, PlotxApp, Tool, ToolGroup, WorkflowTab};
 
 pub use super::command_exec::execute;
 
@@ -34,6 +34,7 @@ pub enum Applicability {
     TableOnly,
     SeriesOnly,
     Homonuclear2dOnly,
+    ToolGroup(ToolGroup),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -83,6 +84,7 @@ pub enum CommandId {
     SpectrumArithmetic,
     AlignSpectra,
     StackData,
+    ExtractMassSpectrum,
     SelectRange,
     ClearRange,
     Regions,
@@ -221,6 +223,7 @@ pub fn catalog(app: &PlotxApp) -> Vec<CommandDescriptor> {
         CommandId::SpectrumArithmetic,
         CommandId::AlignSpectra,
         CommandId::StackData,
+        CommandId::ExtractMassSpectrum,
         CommandId::SelectRange,
         CommandId::ClearRange,
         CommandId::Regions,
@@ -463,8 +466,17 @@ pub fn describe(app: &PlotxApp, id: CommandId) -> CommandDescriptor {
             app.stackable_selection().is_some(),
             "Select at least two compatible datasets before stacking them.",
         ),
+        CommandId::ExtractMassSpectrum => requires(
+            dataset().is_some_and(|dataset| {
+                dataset.tool_groups().contains(&ToolGroup::MassSpectrometry)
+            }),
+            "Select an LC–MS dataset before extracting a mass spectrum.",
+        ),
         CommandId::SelectRange => requires(
-            has_frequency_analysis_trace(),
+            has_frequency_analysis_trace()
+                || dataset().is_some_and(|dataset| {
+                    dataset.tool_groups().contains(&ToolGroup::MassSpectrometry)
+                }),
             "Plot 1D data before selecting an analysis range.",
         ),
         CommandId::ClearRange => requires(
@@ -653,6 +665,9 @@ pub fn describe(app: &PlotxApp, id: CommandId) -> CommandDescriptor {
         Applicability::Homonuclear2dOnly => dataset()
             .and_then(Dataset::as_nmr2d)
             .is_some_and(|dataset| dataset.preset.homonuclear()),
+        Applicability::ToolGroup(group) => {
+            dataset().is_some_and(|dataset| dataset.tool_groups().contains(&group))
+        }
     });
     CommandDescriptor {
         id,
@@ -697,6 +712,12 @@ fn ribbon_placement(id: CommandId) -> Option<RibbonPlacement> {
             (Process, "Recipes", 2, Always)
         }
         CommandId::SelectRange | CommandId::ClearRange => (Analyze, "Range", 0, Always),
+        CommandId::ExtractMassSpectrum => (
+            Analyze,
+            "Extract",
+            0,
+            Applicability::ToolGroup(ToolGroup::MassSpectrometry),
+        ),
         CommandId::Regions => (Analyze, "Regions", 0, SeriesOnly),
         CommandId::SeriesTable => (Analyze, "Regions", 0, SeriesOnly),
         CommandId::LineFit | CommandId::RunPeakFit => (Analyze, "Peak Fit", 0, Always),
@@ -768,3 +789,7 @@ fn tool_commands() -> [Tool; 17] {
 #[cfg(test)]
 #[path = "commands_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "commands_mass_spec_tests.rs"]
+mod mass_spec_tests;

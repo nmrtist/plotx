@@ -14,6 +14,20 @@ impl Dataset {
         }
     }
 
+    pub fn as_mass_spec(&self) -> Option<&MassSpecDataset> {
+        match self {
+            Dataset::MassSpec(data) => Some(data),
+            _ => None,
+        }
+    }
+
+    pub fn as_mass_spec_mut(&mut self) -> Option<&mut MassSpecDataset> {
+        match self {
+            Dataset::MassSpec(data) => Some(data),
+            _ => None,
+        }
+    }
+
     pub fn kind_label(&self) -> &'static str {
         match self {
             Dataset::Nmr(_) => "NMR 1D",
@@ -21,6 +35,7 @@ impl Dataset {
             Dataset::Table(_) => "Data Table",
             Dataset::Electrophysiology(_) => "Electrophysiology",
             Dataset::Afm(_) => "AFM",
+            Dataset::MassSpec(_) => "LC–MS",
         }
     }
 
@@ -35,6 +50,7 @@ impl Dataset {
             Dataset::Table(_) => DataDomain::Table,
             Dataset::Electrophysiology(_) => DataDomain::Electrophysiology,
             Dataset::Afm(_) => DataDomain::Afm,
+            Dataset::MassSpec(_) => DataDomain::MassSpectrometry,
         }
     }
 
@@ -47,6 +63,7 @@ impl Dataset {
             Dataset::Table(d) => d.name.clone(),
             Dataset::Electrophysiology(d) => d.name.clone(),
             Dataset::Afm(d) => d.name.clone(),
+            Dataset::MassSpec(d) => d.name.clone(),
         };
         custom.unwrap_or_else(|| format!("[{}] {}", self.kind_label(), self.summary()))
     }
@@ -58,6 +75,7 @@ impl Dataset {
             Dataset::Table(d) => d.name = name,
             Dataset::Electrophysiology(d) => d.name = name,
             Dataset::Afm(d) => d.name = name,
+            Dataset::MassSpec(d) => d.name = name,
         }
     }
 
@@ -68,6 +86,7 @@ impl Dataset {
             Dataset::Table(d) => d.name.clone(),
             Dataset::Electrophysiology(d) => d.name.clone(),
             Dataset::Afm(d) => d.name.clone(),
+            Dataset::MassSpec(d) => d.name.clone(),
         }
     }
 
@@ -95,6 +114,16 @@ impl Dataset {
                     .map_or(0, |f| f.grid_width * f.grid_height);
                 format!("{} channels · {curves} force curves", d.data.images.len())
             }
+            Dataset::MassSpec(d) => format!(
+                "{} MS functions · {} scans · {} detector channels",
+                d.supported_ms_functions().count(),
+                d.run
+                    .functions
+                    .iter()
+                    .map(|function| function.scans.len())
+                    .sum::<usize>(),
+                d.run.chromatograms.len()
+            ),
         }
     }
 
@@ -148,6 +177,7 @@ impl Dataset {
             Dataset::Nmr2D(_) => None,
             Dataset::Electrophysiology(_) => None,
             Dataset::Afm(_) => None,
+            Dataset::MassSpec(_) => None,
         }
     }
 
@@ -158,6 +188,7 @@ impl Dataset {
             Dataset::Nmr2D(_) => None,
             Dataset::Electrophysiology(_) => None,
             Dataset::Afm(_) => None,
+            Dataset::MassSpec(_) => None,
         }
     }
 
@@ -169,6 +200,7 @@ impl Dataset {
             Dataset::Nmr2D(_) => &[],
             Dataset::Electrophysiology(_) => &[],
             Dataset::Afm(_) => &[],
+            Dataset::MassSpec(_) => &[],
         }
     }
 
@@ -179,6 +211,7 @@ impl Dataset {
             Dataset::Nmr2D(_) => None,
             Dataset::Electrophysiology(_) => None,
             Dataset::Afm(_) => None,
+            Dataset::MassSpec(_) => None,
         }
     }
 
@@ -189,6 +222,7 @@ impl Dataset {
             Dataset::Nmr2D(_) => None,
             Dataset::Electrophysiology(_) => None,
             Dataset::Afm(_) => None,
+            Dataset::MassSpec(_) => None,
         }
     }
 
@@ -232,7 +266,7 @@ impl Dataset {
             Dataset::Electrophysiology(dataset) => {
                 !dataset.data.channels.is_empty() && !dataset.data.sweeps.is_empty()
             }
-            Dataset::Nmr(_) | Dataset::Table(_) | Dataset::Afm(_) => false,
+            Dataset::Nmr(_) | Dataset::Table(_) | Dataset::Afm(_) | Dataset::MassSpec(_) => false,
         }
     }
 
@@ -302,6 +336,7 @@ impl Dataset {
             }
             Dataset::Electrophysiology(_) => &[ToolGroup::Electrophysiology],
             Dataset::Afm(_) => &[],
+            Dataset::MassSpec(_) => &[ToolGroup::MassSpectrometry],
         }
     }
 
@@ -316,6 +351,7 @@ impl Dataset {
             Dataset::Table(_) => &[],
             Dataset::Electrophysiology(_) => &[],
             Dataset::Afm(_) => &[],
+            Dataset::MassSpec(_) => &[],
         }
     }
 

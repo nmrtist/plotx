@@ -106,7 +106,10 @@ impl PlotxApp {
             || cleared(&before.x_show_label, &after.x_show_label)
             || cleared(&before.y_show_tick_labels, &after.y_show_tick_labels)
             || cleared(&before.y_show_label, &after.y_show_label)
-            || cleared(&before.show_legend, &after.show_legend)
+            || cleared(&before.guide_visibility, &after.guide_visibility)
+            || cleared(&before.guide_placement, &after.guide_placement)
+            || cleared(&before.guide_layout, &after.guide_layout)
+            || cleared(&before.guide_title, &after.guide_title)
             || cleared(&before.legend_position, &after.legend_position);
 
         let rebuilt = needs_automatic_rebuild.then(|| {

@@ -17,10 +17,10 @@ enabled at 1 kHz by default. It affects charts and analysis consistently; raw
 samples remain unchanged and the setting is saved in the project.
 
 Sweep names share the plot legend. To recover plot area, select the plot and
-turn off **Show legend** under **Axes** in the Object inspector. **Legend size**
-and **Legend text color** under **Figure typography** style legends throughout
-the document. With **Select** active, drag the legend to a clear part of the
-plot; double-click it to restore automatic placement.
+set **Visibility** to **Hide** under **Legend & scales** in the Object
+inspector. **Legend size** and **Legend text color** under **Figure typography**
+style legends throughout the document. With **Select** active, drag the legend
+to a clear part of the plot; double-click it to restore automatic placement.
 
 ## Regions and window statistics
 

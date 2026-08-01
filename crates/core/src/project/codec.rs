@@ -78,6 +78,11 @@ pub fn write_dataset_blob(
             super::electrophysiology_convert::write_electrophysiology_blob(zip, recording)
         }
         DatasetBlob::Afm(data) => super::afm_convert::write_afm(zip, data),
+        DatasetBlob::MassSpec(run) => {
+            let bytes = super::mass_spec_convert::encode(run)?;
+            zip.write_all(&bytes)?;
+            Ok(())
+        }
     }
 }
 

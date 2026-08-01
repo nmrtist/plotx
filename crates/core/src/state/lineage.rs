@@ -72,6 +72,7 @@ impl Dataset {
             Dataset::Table(data) => data.lineage.as_ref(),
             Dataset::Electrophysiology(data) => data.lineage.as_ref(),
             Dataset::Afm(data) => data.lineage.as_ref(),
+            Dataset::MassSpec(data) => data.lineage.as_ref(),
         }
     }
 
@@ -82,6 +83,7 @@ impl Dataset {
             Dataset::Table(data) => data.lineage = lineage,
             Dataset::Electrophysiology(data) => data.lineage = lineage,
             Dataset::Afm(data) => data.lineage = lineage,
+            Dataset::MassSpec(data) => data.lineage = lineage,
         }
     }
 }

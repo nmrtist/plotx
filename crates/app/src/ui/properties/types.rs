@@ -36,6 +36,7 @@ impl PanelRoute {
                 panel::HEATMAP_SECTION,
                 panel::LINE_SECTION,
                 panel::AXIS_SECTION,
+                panel::GUIDE_SECTION,
                 panel::STACK_SECTION,
                 panel::CHART_SECTION,
                 panel::TEXT_SECTION,

@@ -93,7 +93,7 @@ fn one_registration_joins_its_group_without_a_second_entry() {
         "membership is derived, so it grows with the table and nothing else"
     );
     // The group table itself is untouched: the newcomer contributed no entry.
-    assert_eq!(GROUPS.len(), 25);
+    assert_eq!(GROUPS.len(), 26);
 }
 
 /// Channel 3: the gesture picks up whichever property declared itself

@@ -5,6 +5,7 @@ mod cursors;
 mod curve_fit;
 mod electrophysiology;
 mod line_fit;
+mod mass_spec;
 mod processing;
 mod pseudo;
 mod region_analysis;
@@ -19,6 +20,7 @@ use curve_fit::curve_fit_group;
 use egui::{Button, DragValue, Id, Ui};
 use egui_phosphor::regular as icon;
 use line_fit::line_fit_group;
+use mass_spec::mass_spectrometry_group;
 use plotx_core::state::{Dataset, PlotxApp, TaskDockTab, Tool, ToolGroup};
 use pseudo::experiment_group;
 use region_analysis::region_analysis_group;
@@ -118,6 +120,7 @@ pub fn render_group(app: &mut PlotxApp, di: usize, group: ToolGroup, ui: &mut Ui
         ToolGroup::Processing => processing::processing_group(app, di, ui),
         ToolGroup::Nmr1dAnalysis => analysis_group(app, di, ui),
         ToolGroup::Nmr2dExperiment => experiment_group(app, di, ui),
+        ToolGroup::MassSpectrometry => mass_spectrometry_group(app, di, ui),
         ToolGroup::RegionAnalysis => region_analysis_group(app, di, ui),
         ToolGroup::Peaks => peaks_group(app, di, ui),
         ToolGroup::CurveFit => curve_fit_group(app, di, ui),

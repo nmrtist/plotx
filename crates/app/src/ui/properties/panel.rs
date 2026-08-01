@@ -30,6 +30,7 @@ pub(crate) const HEATMAP_SECTION: &str = "object.heatmap";
 /// The home section for line-encoding rows on selected plot objects.
 pub(crate) const LINE_SECTION: &str = "object.line";
 pub(crate) const AXIS_SECTION: &str = "object.axes";
+pub(crate) const GUIDE_SECTION: &str = "object.guides";
 pub(crate) const STACK_SECTION: &str = "object.stack";
 pub(crate) const CHART_SECTION: &str = "object.chart";
 pub(crate) const TEXT_SECTION: &str = "object.text";
@@ -172,8 +173,8 @@ enum GestureEdge {
 pub(crate) use self::sections::{
     apodization_section, axis_section, baseline_section, bin_section, canvas_caption_section,
     canvas_grid_section, canvas_margins_section, canvas_size_section, chart_section,
-    contour_section, general_object_section, heatmap_section, line_section, normalize_section,
-    panel_inline_section, panel_section, phase_section, preferences_section,
+    contour_section, general_object_section, guide_section, heatmap_section, line_section,
+    normalize_section, panel_inline_section, panel_section, phase_section, preferences_section,
     processing_advanced_section, processing_step_section, reference_section, shape_section,
     smooth_section, stack_section, text_section, typography_section, zero_fill_section,
 };

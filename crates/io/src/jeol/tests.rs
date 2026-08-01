@@ -143,6 +143,7 @@ fn round_trips_a_hand_built_1d_le_file() {
         Acquisition::D2(_) => panic!("expected 1D"),
         Acquisition::Electrophysiology(_) => panic!("expected NMR"),
         Acquisition::Afm(_) => panic!("expected NMR"),
+        Acquisition::MassSpec(_) => panic!("expected NMR"),
     };
     assert_eq!(data.len(), 4);
     // FID conjugated on read (imaginary channel negated).
@@ -204,6 +205,7 @@ fn uses_real_point_count_over_padded_count_for_1d() {
         Acquisition::D2(_) => panic!("expected 1D"),
         Acquisition::Electrophysiology(_) => panic!("expected NMR"),
         Acquisition::Afm(_) => panic!("expected NMR"),
+        Acquisition::MassSpec(_) => panic!("expected NMR"),
     };
     assert_eq!(data.len(), nreal, "FID truncated to the real point count");
     assert_eq!(data.points[0], Complex64::new(1.0, -5.0));
@@ -349,6 +351,7 @@ fn de_tiles_a_hand_built_2d_across_tile_blocks() {
         Acquisition::D1(_) => panic!("expected 2D"),
         Acquisition::Electrophysiology(_) => panic!("expected NMR"),
         Acquisition::Afm(_) => panic!("expected NMR"),
+        Acquisition::MassSpec(_) => panic!("expected NMR"),
     };
     assert_eq!((two.cols, two.rows), (cols_real, rows_real));
     assert_eq!(two.data.len(), cols_real * rows_real);
@@ -430,6 +433,7 @@ fn de_tiles_a_hand_built_hypercomplex_2d() {
         Acquisition::D1(_) => panic!("expected 2D"),
         Acquisition::Electrophysiology(_) => panic!("expected NMR"),
         Acquisition::Afm(_) => panic!("expected NMR"),
+        Acquisition::MassSpec(_) => panic!("expected NMR"),
     };
     assert_eq!(two.quad, QuadMode::States);
     assert_eq!(two.cols, cols_real);

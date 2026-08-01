@@ -4,6 +4,8 @@ use super::*;
 pub enum ActionApplyError {
     #[error("action target is stale: {0}")]
     StaleTarget(String),
+    #[error("action value is invalid: {0}")]
+    InvalidValue(String),
 }
 
 /// The document shape a composite has projected so far. Validation runs before
@@ -45,6 +47,59 @@ pub(super) fn validate_action(
         Action::RenameDataset { dataset, .. } | Action::UpdateDatasetProcessing { dataset, .. } => {
             if !shape.has_dataset(app, *dataset) {
                 return Err(ActionApplyError::StaleTarget(format!("dataset {dataset}")));
+            }
+        }
+        Action::SetMassSpecFunction {
+            dataset,
+            before,
+            after,
+        } => {
+            let Some(mass_spec) = app
+                .doc
+                .dataset_index(*dataset)
+                .and_then(|index| app.doc.datasets[index].as_mass_spec())
+            else {
+                return Err(ActionApplyError::InvalidValue(format!(
+                    "dataset {dataset} is not LC–MS data"
+                )));
+            };
+            if [before, after].into_iter().any(|function| {
+                !mass_spec
+                    .supported_ms_functions()
+                    .any(|candidate| candidate == *function)
+            }) {
+                return Err(ActionApplyError::InvalidValue(format!(
+                    "dataset {dataset} does not contain both MS functions"
+                )));
+            }
+        }
+        Action::SetMassSpectrumExtractions {
+            dataset,
+            before,
+            after,
+        } => {
+            let Some(mass_spec) = app
+                .doc
+                .dataset_index(*dataset)
+                .and_then(|index| app.doc.datasets[index].as_mass_spec())
+            else {
+                return Err(ActionApplyError::InvalidValue(format!(
+                    "dataset {dataset} is not LC–MS data"
+                )));
+            };
+            for (label, (extractions, next_id)) in [("before", before), ("after", after)] {
+                let mut extractions = extractions.clone();
+                let mut next_id = *next_id;
+                crate::state::MassSpecDataset::validate_extraction_state(
+                    &mass_spec.run,
+                    &mut extractions,
+                    &mut next_id,
+                )
+                .map_err(|error| {
+                    ActionApplyError::InvalidValue(format!(
+                        "{label} mass-spectrum extraction state: {error}"
+                    ))
+                })?;
             }
         }
         Action::RenameCanvas { canvas, .. }

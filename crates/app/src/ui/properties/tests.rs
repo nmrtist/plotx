@@ -365,8 +365,14 @@ fn equal_scale_is_directly_visible_and_title_visibility_is_advanced() {
             axis::Y_LABEL,
             axis::X_SHOW_TICK_LABELS,
             axis::Y_SHOW_TICK_LABELS,
-            axis::SHOW_LEGEND,
         ]
+    );
+    assert_eq!(
+        essential_in(panel::GUIDE_SECTION)
+            .iter()
+            .map(|entry| entry.id)
+            .collect::<Vec<_>>(),
+        [guide::VISIBILITY, guide::PLACEMENT, guide::LAYOUT]
     );
     assert_eq!(
         presentation(axis::X_SHOW_LABEL)

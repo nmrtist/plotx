@@ -131,8 +131,7 @@ What you control directly:
 
 - Select one plot and use **Axes** in the Object inspector to override its X
   and Y titles or numeric ranges, or to hide either axis's tick labels and
-  title. **Show legend** controls that plot's legend independently. For a true
-  2D NMR spectrum, **F1/F2 equal scale (1:1)** uses the same
+  title. For a true 2D NMR spectrum, **F1/F2 equal scale (1:1)** uses the same
   data units per screen unit on both axes. PlotX sets its initial value when
   the spectrum is imported; you can change it afterward without changing the
   import preference. Leave a title blank, or keep a range on **Auto**, to use
@@ -140,10 +139,18 @@ What you control directly:
   range: zooming and panning stay inside it, and a double-click on the plot
   returns to it. Charts without visible axes offer no axis settings, and
   categorical axes have no range controls.
-- With **Select** active, drag a visible legend to a clearer part of its plot.
-  The position belongs to that plot, survives resizing, and is used by every
-  export format. Double-click the legend to restore automatic top-right
-  placement.
+- Use **Legend & scales** in the Object inspector for any plot. With
+  **Visibility** on **Auto**, PlotX shows a categorical legend when the plot
+  has two or more named entries and shows a continuous colour scale for a
+  heatmap. **Show** also permits a one-entry legend; **Hide** removes the legend
+  or colour scale from that plot. **Position** can keep it inside the plot or
+  reserve space to its right or below it. **Layout** switches a categorical
+  legend between a vertical list and a horizontal row; **Title** is available
+  under the section's advanced controls.
+- With **Select** active, click a legend or colour scale to open its
+  **Legend & scales** settings. Drag a categorical legend to place it freely;
+  the custom position survives resizing and is used by every export format.
+  Double-click a legend or colour scale to restore its automatic placement.
 - **Figure Typography…** on the Figure Ribbon tab sets the text sizes (tick
   labels, axis titles, the figure title, and legends) for every plot at once,
   in absolute points — a document-level style, so resizing a panel never

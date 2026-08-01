@@ -112,6 +112,10 @@ pub fn execute(
         CommandId::SpectrumArithmetic => super::arithmetic::open_spectrum_arithmetic_dialog(app),
         CommandId::AlignSpectra => super::align::open_align_spectra_dialog(app),
         CommandId::StackData => app.stack_selected_data(),
+        CommandId::ExtractMassSpectrum => {
+            app.set_tool(Tool::SelectRegion);
+            reveal_group(app, ToolGroup::MassSpectrometry);
+        }
         CommandId::SelectRange => app.toggle_tool(Tool::SelectRegion),
         CommandId::ClearRange => app.clear_analysis_selection(),
         CommandId::Regions => toggle_regions(app),

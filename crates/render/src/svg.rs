@@ -1,14 +1,16 @@
 use crate::{
-    AXIS_LINE_WIDTH, Document, DocumentItem, DocumentObject, DocumentOverlay, LegendMark,
-    OUTER_PAD, OverlayAlign, OverlayKind, OverlayShapeKind, Projector, Rect, TICK_LABEL_PAD,
-    TICK_LENGTH, TextAnchor, arrow_head, axis_layout, error_bar_segments, heatmap_cells, integral,
-    legend_entries, legend_layout, legend_rect, polygon_outline, projection_points,
-    range_label_layout,
+    AXIS_LINE_WIDTH, Document, DocumentItem, DocumentObject, DocumentOverlay, OUTER_PAD,
+    OverlayAlign, OverlayKind, OverlayShapeKind, Projector, Rect, TICK_LABEL_PAD, TICK_LENGTH,
+    TextAnchor, arrow_head, axis_layout, error_bar_segments, heatmap_cells, integral,
+    polygon_outline, projection_points, range_label_layout,
 };
 use plotx_figure::{AxisFrame, AxisTrace, Figure, SeriesKind};
 use std::fmt::Write as _;
 
+mod color_scale;
 mod document;
+mod legend;
+mod sticks;
 pub use document::{export_document, export_document_for_bounds, export_document_page};
 
 pub fn export(fig: &Figure) -> String {
@@ -465,6 +467,7 @@ fn write_figure(
                     );
                 }
             }
+            SeriesKind::Stick => sticks::write(s, &proj, series),
             SeriesKind::Line => {}
         }
     }
@@ -509,7 +512,8 @@ fn write_figure(
         write_projection(s, fig, trace, plot, band, false, clip_id);
     }
 
-    write_legend(s, fig, plot);
+    legend::write(s, fig, plot);
+    color_scale::write(s, fig, plot);
 }
 
 fn write_error_bars(s: &mut String, fig: &Figure, proj: &Projector<'_>, draw_over_data: bool) {
@@ -579,76 +583,6 @@ fn write_projection(
         col = trace.color.to_hex(),
         w = trace.width,
     );
-}
-
-fn write_legend(s: &mut String, fig: &Figure, plot: Rect) {
-    let entries = legend_entries(fig);
-    if !fig.show_legend || entries.len() < 2 {
-        return;
-    }
-    let font = fig.typography.legend_pt;
-    let layout = legend_layout(&entries, font);
-    let (row, sw, pad) = (layout.row, layout.swatch, layout.padding);
-    let Some(box_geometry) = legend_rect(fig, plot, 1.0) else {
-        return;
-    };
-    let (bx, by, box_w, box_h) = (
-        box_geometry.left,
-        box_geometry.top,
-        box_geometry.width,
-        box_geometry.height,
-    );
-    let _ = write!(
-        s,
-        r#"<rect x="{bx:.2}" y="{by:.2}" width="{box_w:.2}" height="{box_h:.2}" rx="3" fill="white" fill-opacity="0.85" stroke="{axis}" stroke-width="0.75"/>"#,
-        axis = plotx_figure::Color::AXIS.to_hex(),
-    );
-    for (i, (name, color, mark)) in entries.iter().enumerate() {
-        let ly = by + pad + row * i as f32 + row * 0.5;
-        let lx = bx + pad;
-        match mark {
-            LegendMark::Line => {
-                let _ = write!(
-                    s,
-                    r#"<line x1="{lx:.2}" y1="{ly:.2}" x2="{x2:.2}" y2="{ly:.2}" stroke="{col}" stroke-width="2"/>"#,
-                    x2 = lx + sw,
-                    col = color.to_hex(),
-                );
-            }
-            LegendMark::Points => {
-                let _ = write!(
-                    s,
-                    r#"<circle cx="{cx:.2}" cy="{ly:.2}" r="3" fill="{col}"/>"#,
-                    cx = lx + sw * 0.5,
-                    col = color.to_hex(),
-                );
-            }
-            LegendMark::LinePoints => {
-                let _ = write!(
-                    s,
-                    r#"<line x1="{lx:.2}" y1="{ly:.2}" x2="{x2:.2}" y2="{ly:.2}" stroke="{col}" stroke-width="2"/><circle cx="{cx:.2}" cy="{ly:.2}" r="3" fill="{col}"/>"#,
-                    x2 = lx + sw,
-                    cx = lx + sw * 0.5,
-                    col = color.to_hex(),
-                );
-            }
-            LegendMark::Rect => {
-                let _ = write!(
-                    s,
-                    r#"<rect x="{lx:.2}" y="{y:.2}" width="{sw:.2}" height="8" rx="1" fill="{col}"/>"#,
-                    y = ly - 4.0,
-                    col = color.to_hex(),
-                );
-            }
-        }
-        let _ = write!(
-            s,
-            r#"<text x="{tx:.2}" y="{ly:.2}" font-size="{font}" fill="{axis}" dominant-baseline="middle">{txt}</text>"#,
-            tx = lx + sw + 5.0,
-            axis = fig.typography.legend_color.to_hex(),
-            txt = escape(name),
-        );
-    }
 }
 
 fn write_panel_letter(s: &mut String, text: &str, position: [f32; 2], font_size: f32) {

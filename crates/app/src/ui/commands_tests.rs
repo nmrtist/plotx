@@ -184,6 +184,10 @@ fn stable_ids_cover_static_and_dynamic_commands() {
     assert_eq!(CommandId::ArrangeGrid(2, 3).stable_id(), "arrange.grid.2x3");
     assert_eq!(CommandId::Tool(Tool::LineFit).stable_id(), "tool.line_fit");
     assert_eq!(CommandId::CurveFit.stable_id(), "analysis.curve_fit");
+    assert_eq!(
+        CommandId::ExtractMassSpectrum.stable_id(),
+        "analysis.extract_mass_spectrum"
+    );
     assert_eq!(CommandId::ExportData.stable_id(), "file.export_data");
     assert_eq!(CommandId::OpenRecent(3).stable_id(), "file.open_recent.3");
     assert_eq!(CommandId::ClearRecentFiles.stable_id(), "file.clear_recent");

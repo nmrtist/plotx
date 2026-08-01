@@ -188,7 +188,6 @@ impl AfmDataset {
             Series::line("Retract", ordered[split..].to_vec())
                 .colored(Color::rgb(0xd1, 0x24, 0x2a)),
         );
-        figure.show_legend = true;
         Some(figure)
     }
 

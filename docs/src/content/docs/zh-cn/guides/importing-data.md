@@ -3,7 +3,7 @@ title: 导入数据
 description: 支持的文件格式及打开方式。
 ---
 
-PlotX 直接读取厂商 NMR、AFM 与电生理格式，无需任何转换步骤。
+PlotX 直接读取厂商 LC–MS、NMR、AFM 与电生理格式，无需任何转换步骤。
 
 ## 支持的格式
 
@@ -11,6 +11,7 @@ PlotX 直接读取厂商 NMR、AFM 与电生理格式，无需任何转换步骤
 | --- | --- | --- |
 | JEOL Delta | `.jdf` | 1D、2D 及伪 2D（DOSY / T1 / T2） |
 | Bruker TopSpin | `fid` / `ser` 目录 | 1D 与 2D |
+| Waters MassLynx RAW | `.raw` 目录 | 已验证的低分辨率数据，包括 SQD2 数据 |
 | Bruker NanoScope AFM | `.spm` / `.pfc` | 图像、力曲线、Force Volume 与 PeakForce Capture 数据立方体 |
 | JCAMP-DX | `.dx` / `.jdx` / `.jcamp` | 1D 频域 NMR 谱 |
 | Axon Binary Format 2 | `.abf` | int16/float32、多通道、多 sweep，以及文件内 DAC/epoch 刺激 |
@@ -21,12 +22,47 @@ PlotX 直接读取厂商 NMR、AFM 与电生理格式，无需任何转换步骤
 ## 打开文件
 
 把文件拖到 PlotX 窗口上，或使用工具栏的打开菜单：*Open File…*、
-*Open Folder…*（用于 Bruker TopSpin 等采集目录）、*Open Project…* 或
-*Import Table / CSV…*。每个导入的数据集会出现在主侧栏中，并自动放置到
-画板上。
+*Open Folder…*（用于 Bruker TopSpin 与 Waters MassLynx RAW 等采集目录）、
+*Open Project…* 或 *Import Table / CSV…*。每个导入的数据集会出现在主侧栏中，
+并自动放置到画板上。
 文件选择器可以一次选择多个 ABF。打开文件夹时会递归导入其中所有 `.abf`、
-`.spm` 和 `.pfc`；对 ABF 文件，每个文件的直接父目录名会成为可编辑的初始
-cell ID。
+`.spm`、`.pfc` 和已识别的 `.raw` 数据包。每个 `.raw` 目录会作为一次完整采集
+导入一次，其中的内部文件不会被当作独立数据集。对 ABF 文件，每个文件的直接
+父目录名会成为可编辑的初始 cell ID。
+
+## Waters MassLynx RAW
+
+请打开或拖入 `.raw` 目录本身。PlotX 会导入其中受支持的 MS 功能和光学检测器
+通道。温度、压力及其他可读取的辅助通道会保留在数据集中，但默认不绘图。
+
+存在光学检测器数据时，初始页面会把 UV 通道放在活动功能的总离子流图（TIC）
+上方，并共享保留时间轴。多个 UV 通道会叠加显示，图例使用文件中存储的波长，
+例如 `214 nm`。若要隐藏、移动或调整该图例的排版，请选中 UV 图并使用对象检查器的
+**Legend & scales**。没有光学数据时，初始页面只显示 TIC。
+
+选中 LC–MS 数据集，然后在 **Analyze（分析）** 标签中选择 **Extract Mass
+Spectrum**。PlotX 会在右侧栏打开 **Dataset tools → Mass spectrometry**，并启用
+保留时间范围选择。
+
+单击 TIC 或 UV 色谱图，会在 **Scan preview** 中显示保留时间最近的 MS 扫描。
+预览会标明保留时间和原始扫描编号，但不会加入页面，也不会保存为结果。选择
+**Extract current scan** 可把该扫描作为棒状谱加入页面。
+
+若要从时间窗提取，请选择 **Method**，启用 **Select range**，然后在 TIC 或 UV
+色谱图上拖出范围。选择 **Extract spectrum**，即可把峰顶扫描、最近扫描、平均谱
+或求和谱加入页面。每张提取谱都会记录功能、时间范围和提取方式；移动预览游标
+不会改变它，并且它会列在数据浏览器的 **Analysis** 下。
+
+数据中含多个受支持的 MS 功能时，请使用 **Dataset tools → Mass spectrometry**
+中的 **MS function**。初始活动功能是第一个非参考 MS 功能。切换功能与提取谱图
+都可通过标准的 Edit 命令撤销和重做。
+
+PlotX 支持已使用 SQD2 数据验证的低分辨率 MassLynx 编码。如果必需的 MS 功能
+使用其他编码，导入会停止并指出相应功能和仪器。如果其余数据可读，不受支持的
+可选功能或参考功能会产生导入警告。
+
+PlotX 不提供 LC–MS 处理流程。导入的数据、活动功能、检测器通道、提取谱图和页面
+排版都会保存在 `.plotx` 项目中。扫描预览是临时状态，重新打开项目后会被清除。
 
 表格也可以直接从剪贴板粘贴：`Ctrl` + `Shift` + `V` 会把逗号、制表符或
 分号分隔的文本变成新数据表。

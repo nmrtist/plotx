@@ -11,6 +11,7 @@ pub enum DatasetBlob<'a> {
     Complex(&'a [Complex64]),
     Electrophysiology(&'a crate::state::ElectrophysiologyDataset),
     Afm(&'a plotx_io::AfmData),
+    MassSpec(&'a plotx_io::MassSpecRun),
 }
 
 pub struct DatasetObjects<'a> {
@@ -230,6 +231,58 @@ pub fn dataset_to_objects<'a>(
             };
             DatasetObjects::primary(data, DatasetBlob::Afm(&afm.data), recipe)
         }
+        Dataset::MassSpec(mass_spec) => {
+            let scan_count = mass_spec
+                .run
+                .functions
+                .iter()
+                .map(|function| function.scans.len())
+                .sum();
+            let point_count = mass_spec
+                .run
+                .functions
+                .iter()
+                .flat_map(|function| &function.scans)
+                .map(|scan| scan.mz.len())
+                .sum();
+            let data = DataObject {
+                id: data_id.to_owned(),
+                role: "data".to_owned(),
+                classification: Classification {
+                    domain: "mass_spectrometry".to_owned(),
+                    technique: Some("lc_ms".to_owned()),
+                    object: "acquisition".to_owned(),
+                },
+                label: mass_spec.name.clone(),
+                dimensions: Vec::new(),
+                payload: Payload {
+                    storage: STORAGE_MASS_SPEC_V1.to_owned(),
+                    blob: format!("objects/{data_id}/data.bin"),
+                    shape: vec![mass_spec.run.functions.len(), scan_count, point_count],
+                    domain: "mass_spectrometry".to_owned(),
+                },
+                extensions: serde_json::json!({
+                    "plotx.mass_spec": {
+                        "active_function": mass_spec.active_function.get(),
+                        "extracted_spectra": &mass_spec.extracted_spectra
+                    },
+                    "plotx.fields": &mass_spec.field_catalog
+                }),
+            };
+            let recipe = RecipeObject {
+                id: recipe_id.to_owned(),
+                role: "recipe".to_owned(),
+                classification: Classification {
+                    domain: "mass_spectrometry".to_owned(),
+                    technique: Some("lc_ms".to_owned()),
+                    object: "display_recipe".to_owned(),
+                },
+                input: data_id.to_owned(),
+                parameters: RecipeParameters::default(),
+                extensions: serde_json::Value::Null,
+            };
+            DatasetObjects::primary(data, DatasetBlob::MassSpec(&mass_spec.run), recipe)
+        }
     })
 }
 pub fn object_to_dataset(
@@ -237,6 +290,44 @@ pub fn object_to_dataset(
     data: &DataObject,
     recipe: &RecipeObject,
 ) -> Result<Dataset> {
+    if data.classification.domain == "mass_spectrometry" {
+        if data.payload.storage != STORAGE_MASS_SPEC_V1 {
+            return Err(ProjectError::Unsupported(format!(
+                "LC–MS payload storage {}",
+                data.payload.storage
+            )));
+        }
+        let raw = read_bytes(zip, &data.payload.blob)?;
+        let run = super::mass_spec_convert::decode(&raw)?;
+        let mut dataset = crate::state::MassSpecDataset::load(run);
+        dataset.field_catalog = read_field_catalog(data)?;
+        dataset.name = data.label.clone();
+        if let Some(state) = data.extensions.get("plotx.mass_spec") {
+            if let Some(value) = state
+                .get("active_function")
+                .and_then(serde_json::Value::as_u64)
+            {
+                dataset.active_function =
+                    plotx_io::FunctionId::new(u16::try_from(value).map_err(|_| {
+                        ProjectError::Invalid("LC–MS active function id exceeds u16".to_owned())
+                    })?);
+            }
+            if let Some(value) = state.get("extracted_spectra") {
+                dataset.extracted_spectra =
+                    serde_json::from_value(value.clone()).map_err(|error| {
+                        ProjectError::Invalid(format!(
+                            "LC–MS extracted-spectrum metadata is malformed: {error}"
+                        ))
+                    })?;
+            }
+        }
+        dataset.repair_selection().map_err(ProjectError::Invalid)?;
+        let dataset = Dataset::MassSpec(Box::new(dataset));
+        dataset
+            .validate_field_catalog()
+            .map_err(ProjectError::Invalid)?;
+        return Ok(dataset);
+    }
     if data.classification.domain == "afm" && data.payload.storage == STORAGE_AFM_V1 {
         let raw = read_bytes(zip, &data.payload.blob)?;
         let decoded = super::afm_convert::decode_afm(&raw)?;

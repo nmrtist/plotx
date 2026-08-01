@@ -24,6 +24,7 @@ impl Dataset {
             Self::Nmr2D(_) => String::new(),
             Self::Electrophysiology(_) => "s".into(),
             Self::Afm(_) => String::new(),
+            Self::MassSpec(_) => "min".into(),
         }
     }
 
@@ -42,6 +43,7 @@ impl Dataset {
             Self::Nmr2D(_) => false,
             Self::Electrophysiology(data) => !data.data.sweeps.is_empty(),
             Self::Afm(_) => false,
+            Self::MassSpec(_) => true,
         }
     }
 
@@ -73,6 +75,18 @@ impl Dataset {
                 })
             }
             Self::Afm(_) => None,
+            Self::MassSpec(data) => {
+                let function = data.run.function(data.active_function)?;
+                Some(Trace1d {
+                    xs: function
+                        .scans
+                        .iter()
+                        .map(|scan| scan.retention_time_min)
+                        .collect(),
+                    ys: function.scans.iter().map(|scan| scan.tic).collect(),
+                    x_reversed: false,
+                })
+            }
         }
     }
 }

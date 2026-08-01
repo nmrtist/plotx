@@ -304,7 +304,7 @@ mod tests {
     fn visible_legend_contributes_its_authored_font_size() {
         let mut figure = Figure::new("", Axis::new("x", 0.0, 1.0), Axis::new("y", 0.0, 1.0));
         figure.axis_frame = AxisFrame::Hidden;
-        figure.show_legend = true;
+        figure.guide_visibility = plotx_figure::GuideVisibility::Show;
         figure.typography.legend_pt = 5.5;
         figure.series = vec![
             Series::line("A", vec![[0.0, 0.0]]),

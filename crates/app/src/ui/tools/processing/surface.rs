@@ -54,7 +54,10 @@ fn surface_shape(dataset: &Dataset) -> Option<SurfaceShape> {
                 Domain::Frequency => SourceShape::ImportedSpectrum,
             },
         ),
-        Dataset::Table(_) | Dataset::Electrophysiology(_) | Dataset::Afm(_) => return None,
+        Dataset::Table(_)
+        | Dataset::Electrophysiology(_)
+        | Dataset::Afm(_)
+        | Dataset::MassSpec(_) => return None,
     };
     let axes = dataset
         .phase_axes()

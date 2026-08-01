@@ -173,7 +173,10 @@ fn add_step_menu(app: &mut PlotxApp, di: usize, axis: PhaseAxis, ui: &mut Ui) {
     let input_domain = match dataset {
         Dataset::Nmr(dataset) => dataset.data.domain,
         Dataset::Nmr2D(dataset) => dataset.data.domain,
-        Dataset::Table(_) | Dataset::Electrophysiology(_) | Dataset::Afm(_) => return,
+        Dataset::Table(_)
+        | Dataset::Electrophysiology(_)
+        | Dataset::Afm(_)
+        | Dataset::MassSpec(_) => return,
     };
     let Some(pipeline) = dataset.axis_pipeline(axis) else {
         return;
@@ -319,7 +322,10 @@ fn apply_row_op(app: &mut PlotxApp, di: usize, axis: PhaseAxis, id: StepId, op: 
     let input_domain = match dataset {
         Dataset::Nmr(dataset) => dataset.data.domain,
         Dataset::Nmr2D(dataset) => dataset.data.domain,
-        Dataset::Table(_) | Dataset::Electrophysiology(_) | Dataset::Afm(_) => return,
+        Dataset::Table(_)
+        | Dataset::Electrophysiology(_)
+        | Dataset::Afm(_)
+        | Dataset::MassSpec(_) => return,
     };
     let before = DatasetProcessingState::from_dataset(dataset);
     let mut after = before.clone();

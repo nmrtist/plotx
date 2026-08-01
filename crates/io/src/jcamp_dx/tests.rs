@@ -27,6 +27,7 @@ fn data(text: &str) -> NmrData {
         Acquisition::D2(_) => panic!("expected 1D data"),
         Acquisition::Electrophysiology(_) => panic!("expected NMR"),
         Acquisition::Afm(_) => panic!("expected NMR"),
+        Acquisition::MassSpec(_) => panic!("expected NMR"),
     }
 }
 

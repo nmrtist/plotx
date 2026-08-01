@@ -17,6 +17,7 @@ pub mod canvas;
 pub mod contour;
 pub mod export_dpi;
 pub mod group_delay;
+pub mod guide;
 pub mod heatmap;
 pub mod ilt;
 pub mod line;
@@ -75,6 +76,9 @@ pub(crate) static GROUPS: &[PropertyProviderGroup] = &[
     },
     PropertyProviderGroup {
         provider: &group_delay::PROVIDER,
+    },
+    PropertyProviderGroup {
+        provider: &guide::PROVIDER,
     },
     PropertyProviderGroup {
         provider: &heatmap::PROVIDER,

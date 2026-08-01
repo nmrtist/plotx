@@ -1,13 +1,14 @@
 use crate::layout::PageLayout;
 use crate::state::{
     AxisOverrides, AxisProjections, CanvasDocument, CanvasObject, CanvasViewport, ChartSpec,
-    CurveFitReference, DataBinding, Dataset, DatasetId, NamedView, ObjectFrame, ObjectId,
-    ObjectStyle, PanelLabelStyle, PanelMeta, PlotxApp, PrimaryView, Region, Selection, StackSpec,
-    StatAnalysis, StoredCurveFitAnalysis, StoredLineFit, StoredMultiplet, TableEditDelta, TextBox,
-    TypedTableState,
+    CurveFitReference, DataBinding, Dataset, DatasetId, ExtractedMassSpectrum, ExtractionId,
+    NamedView, ObjectFrame, ObjectId, ObjectStyle, PanelLabelStyle, PanelMeta, PlotxApp,
+    PrimaryView, Region, Selection, StackSpec, StatAnalysis, StoredCurveFitAnalysis, StoredLineFit,
+    StoredMultiplet, TableEditDelta, TextBox, TypedTableState,
 };
 use crate::theme::ThemeSnapshot;
 use crate::{Integral2D, IntegralResult};
+use plotx_io::FunctionId;
 use plotx_processing::{AxisPipeline, Params2D, Preset2D};
 
 mod app_impl;
@@ -309,6 +310,16 @@ pub enum Action {
         before: Option<String>,
         after: Option<String>,
     },
+    SetMassSpecFunction {
+        dataset: DatasetId,
+        before: FunctionId,
+        after: FunctionId,
+    },
+    SetMassSpectrumExtractions {
+        dataset: DatasetId,
+        before: (Vec<ExtractedMassSpectrum>, ExtractionId),
+        after: (Vec<ExtractedMassSpectrum>, ExtractionId),
+    },
     /// Replace a table's analysis snapshots and per-column references atomically.
     SetCurveFitAnalyses {
         dataset: DatasetId,
@@ -479,6 +490,8 @@ impl Action {
                 .map(Self::undo_label)
                 .unwrap_or("edit"),
             Self::SetObjectViewport { .. } => "plot navigation",
+            Self::SetMassSpecFunction { .. } => "mass spectrometry function",
+            Self::SetMassSpectrumExtractions { .. } => "mass spectrum extraction",
             Self::SetSeriesPresentation { .. } => "display setting",
             Self::SetAxisOverrides { .. } => "axis setting",
             Self::UpdateDatasetProcessing { .. } => "data processing",
@@ -498,6 +511,8 @@ impl Action {
             Self::Composite(actions) => actions.iter().all(Self::is_noop),
             Self::UpdateDatasetProcessing { before, after, .. } => before == after,
             Self::SetObjectViewport { before, after, .. } => before == after,
+            Self::SetMassSpecFunction { before, after, .. } => before == after,
+            Self::SetMassSpectrumExtractions { before, after, .. } => before == after,
             Self::MoveResizeObject { before, after, .. } => before == after,
             Self::SetObjectFrames { before, after, .. } => before == after,
             Self::SetObjectGroups { before, after, .. } => before == after,

@@ -120,17 +120,11 @@ fn select_workflow_tab(app: &mut PlotxApp, tab: WorkflowTab) {
         WorkflowTab::Process => super::tools::expand_processing_surface(app),
         WorkflowTab::Analyze => {
             if let Some(dataset) = app.active_dataset().and_then(|di| app.doc.datasets.get(di)) {
-                let groups = dataset.tool_groups();
-                app.session.ui.requested_tool_group = [
-                    ToolGroup::Nmr1dAnalysis,
-                    ToolGroup::Nmr2dExperiment,
-                    ToolGroup::RegionAnalysis,
-                    ToolGroup::CurveFit,
-                    ToolGroup::LineFit,
-                    ToolGroup::Peaks,
-                ]
-                .into_iter()
-                .find(|group| groups.contains(group));
+                app.session.ui.requested_tool_group = dataset
+                    .tool_groups()
+                    .iter()
+                    .copied()
+                    .find(|group| *group != ToolGroup::Processing);
             }
         }
         WorkflowTab::View | WorkflowTab::Figure | WorkflowTab::Arrange => {}

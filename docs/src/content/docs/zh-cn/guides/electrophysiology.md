@@ -15,7 +15,8 @@ float32、单/多记录通道、定长或变长 sweep、ADC 缩放、通道名�
 处理结果；原始样本不改变，设置会随项目保存。
 
 各 sweep 的名称共用图内图例。若要释放数据区空间，请选中该图，并在对象
-检查器的 **Axes** 中关闭 **Show legend**。**Figure typography** 中的
+检查器的 **Legend & scales** 中把 **Visibility** 设为 **Hide**。
+**Figure typography** 中的
 **Legend size** 和 **Legend text color** 统一设定文档内所有图例的样式。
 启用 **Select** 工具后可把图例拖到不遮挡曲线的位置；双击图例即可恢复
 自动放置。

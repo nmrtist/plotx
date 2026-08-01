@@ -414,7 +414,6 @@ impl TableDataset {
             let color = fig.series[i].color;
             fig = fig.with_series(Series::line(name, curve).colored(color));
         }
-        fig.show_legend = plot.series.len() >= 2;
         fig.series_colors_are_semantic = plot.series.len() >= 2;
         fig
     }

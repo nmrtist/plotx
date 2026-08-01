@@ -5,6 +5,9 @@ enum FurnitureHit {
         object: ObjectId,
         rect: PlotRect,
     },
+    ColorScale {
+        object: ObjectId,
+    },
     RegionLabel {
         object: ObjectId,
         dataset: plotx_core::state::DatasetId,
@@ -16,7 +19,9 @@ enum FurnitureHit {
 impl FurnitureHit {
     fn object(&self) -> ObjectId {
         match self {
-            Self::Legend { object, .. } | Self::RegionLabel { object, .. } => *object,
+            Self::Legend { object, .. }
+            | Self::ColorScale { object, .. }
+            | Self::RegionLabel { object, .. } => *object,
         }
     }
 }
@@ -66,7 +71,16 @@ pub(crate) fn handle_furniture_interactions(
         return false;
     };
     ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+    let object = hit.object();
     if double_clicked {
+        app.select_object(ci, object);
+        if matches!(
+            &hit,
+            FurnitureHit::Legend { .. } | FurnitureHit::ColorScale { .. }
+        ) {
+            app.session.ui.requested_inspector_section =
+                Some(crate::ui::properties::panel::GUIDE_SECTION.to_owned());
+        }
         reset_furniture_position(app, ci, hit);
         return true;
     }
@@ -74,8 +88,17 @@ pub(crate) fn handle_furniture_interactions(
         return true;
     }
 
-    let object = hit.object();
     app.select_object(ci, object);
+    if matches!(
+        &hit,
+        FurnitureHit::Legend { .. } | FurnitureHit::ColorScale { .. }
+    ) {
+        app.session.ui.requested_inspector_section =
+            Some(crate::ui::properties::panel::GUIDE_SECTION.to_owned());
+    }
+    if matches!(&hit, FurnitureHit::ColorScale { .. }) {
+        return true;
+    }
     freeze_board_for_gesture(app);
     let target = match hit {
         FurnitureHit::Legend { rect, .. } => {
@@ -89,6 +112,7 @@ pub(crate) fn handle_furniture_interactions(
                 grab_offset: [pointer.x - rect.left, pointer.y - rect.top],
             }
         }
+        FurnitureHit::ColorScale { .. } => return true,
         FurnitureHit::RegionLabel {
             dataset,
             region,
@@ -147,6 +171,11 @@ fn furniture_hit(
                 object: object.id,
                 rect,
             });
+        }
+        if let Some(rect) = plotx_render::color_scale_rect(figure, plot, scale)
+            && rect_contains(rect, pointer, 3.0)
+        {
+            return Some(FurnitureHit::ColorScale { object: object.id });
         }
         let Some(dataset) = object.dataset() else {
             continue;
@@ -248,6 +277,7 @@ fn update_furniture_drag(app: &mut PlotxApp, ci: usize, canvas_rect: egui::Rect,
                 return;
             };
             let mut overrides = plot_object.axis_overrides.clone();
+            overrides.guide_placement = Some(plotx_figure::GuidePlacement::Inside);
             overrides.legend_position = Some(position);
             app.set_axis_overrides_value(ci, object, &overrides);
         }
@@ -327,8 +357,22 @@ fn reset_furniture_position(app: &mut PlotxApp, ci: usize, hit: FurnitureHit) {
             };
             let mut after = before.clone();
             after.legend_position = None;
+            after.guide_placement = None;
             app.execute_action(Action::set_axis_overrides(ci, object, before, after));
             app.session.status = "Restored automatic legend placement.".into();
+        }
+        FurnitureHit::ColorScale { object, .. } => {
+            let Some(before) = app.doc.canvases[ci]
+                .object(object)
+                .and_then(|object| object.plot())
+                .map(|plot| plot.axis_overrides.clone())
+            else {
+                return;
+            };
+            let mut after = before.clone();
+            after.guide_placement = None;
+            app.execute_action(Action::set_axis_overrides(ci, object, before, after));
+            app.session.status = "Restored automatic colour-scale placement.".into();
         }
         FurnitureHit::RegionLabel {
             dataset, region, ..

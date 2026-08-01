@@ -59,6 +59,25 @@ impl PlotxApp {
             self.build_stacked_figure(binding, stack, size_mm)
         } else {
             if let Some(series) = binding.series.first()
+                && self
+                    .doc
+                    .dataset_by_id(series.source.resource)
+                    .and_then(|dataset| dataset.field_descriptor(series.source.field))
+                    .is_some_and(|field| {
+                        field
+                            .capabilities
+                            .contains(crate::automation::CAP_FIELD_MASS_CHROMATOGRAM)
+                            || field
+                                .capabilities
+                                .contains(crate::automation::CAP_FIELD_MASS_SPECTRUM)
+                    })
+            {
+                let figure = self
+                    .build_encoded_series_figure(series)
+                    .unwrap_or_else(|| unsupported_series_figure(series));
+                return self.normalize_binding_figure(figure, size_mm);
+            }
+            if let Some(series) = binding.series.first()
                 && !matches!(series.encoding, plotx_figure::SeriesEncoding::Line(_))
             {
                 let figure = self

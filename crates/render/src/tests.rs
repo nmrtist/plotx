@@ -456,7 +456,7 @@ fn manual_legend_position_maps_to_the_available_plot_area() {
     let mut figure = Figure::new("", Axis::new("x", 0.0, 1.0), Axis::new("y", 0.0, 1.0))
         .with_series(Series::line("A", vec![[0.0, 0.0], [1.0, 1.0]]))
         .with_series(Series::line("B", vec![[0.0, 1.0], [1.0, 0.0]]));
-    figure.show_legend = true;
+    figure.guide_visibility = plotx_figure::GuideVisibility::Show;
     figure.legend_position = Some([0.0, 1.0]);
     let plot = Rect::new(10.0, 20.0, 300.0, 200.0);
     let legend = legend_rect(&figure, plot, 1.0).unwrap();
@@ -466,6 +466,64 @@ fn manual_legend_position_maps_to_the_available_plot_area() {
     let position =
         legend_position_for_origin(&figure, plot, 1.0, [plot.right(), plot.top]).unwrap();
     assert_eq!(position, [1.0, 0.0]);
+}
+
+#[test]
+fn guide_visibility_auto_show_and_hide_have_distinct_semantics() {
+    let mut figure = Figure::new("", Axis::new("x", 0.0, 1.0), Axis::new("y", 0.0, 1.0))
+        .with_series(Series::line("A", vec![[0.0, 0.0], [1.0, 1.0]]));
+    assert!(
+        !renders_legend(&figure),
+        "Auto omits a redundant one-item key"
+    );
+    figure.guide_visibility = plotx_figure::GuideVisibility::Show;
+    assert!(
+        renders_legend(&figure),
+        "Show permits a useful one-item key"
+    );
+    figure = figure.with_series(Series::line("B", vec![[0.0, 1.0], [1.0, 0.0]]));
+    figure.guide_visibility = plotx_figure::GuideVisibility::Auto;
+    assert!(renders_legend(&figure));
+    figure.guide_visibility = plotx_figure::GuideVisibility::Hide;
+    assert!(!renders_legend(&figure));
+}
+
+#[test]
+fn horizontal_legend_and_title_change_the_shared_layout() {
+    let mut figure = Figure::new("", Axis::new("x", 0.0, 1.0), Axis::new("y", 0.0, 1.0))
+        .with_series(Series::line("A", vec![[0.0, 0.0], [1.0, 1.0]]))
+        .with_series(Series::line("B", vec![[0.0, 1.0], [1.0, 0.0]]));
+    let entries = legend_entries(&figure);
+    let vertical = legend_layout(&figure, &entries);
+    drop(entries);
+    figure.guide_layout = plotx_figure::GuideLayout::Horizontal;
+    let entries = legend_entries(&figure);
+    let horizontal = legend_layout(&figure, &entries);
+    assert!(horizontal.width > vertical.width);
+    assert!(horizontal.height < vertical.height);
+    drop(entries);
+    figure.guide_title = "Channels".to_owned();
+    let entries = legend_entries(&figure);
+    assert!(legend_layout(&figure, &entries).height > horizontal.height);
+}
+
+#[test]
+fn heatmap_auto_reserves_a_color_scale_and_hide_removes_it() {
+    let mut figure = Figure::new("", Axis::new("x", 0.0, 2.0), Axis::new("y", 0.0, 2.0));
+    figure.heatmap = Some(plotx_figure::HeatmapGrid {
+        rows: 2,
+        cols: 2,
+        values: vec![0.0, 1.0, 2.0, 3.0],
+        x_bounds: [0.0, 2.0],
+        y_bounds: [0.0, 2.0],
+        colormap: plotx_figure::ColormapId::Viridis,
+        value_range: [0.0, 3.0],
+    });
+    assert!(renders_color_scale(&figure));
+    let visible = Margins::for_figure(&figure);
+    figure.guide_visibility = plotx_figure::GuideVisibility::Hide;
+    assert!(!renders_color_scale(&figure));
+    assert!(visible.right > Margins::for_figure(&figure).right);
 }
 
 #[test]

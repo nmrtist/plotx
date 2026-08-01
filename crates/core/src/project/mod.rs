@@ -34,6 +34,7 @@ mod dto;
 mod electrophysiology_convert;
 mod field_catalog;
 mod integrals2d;
+mod mass_spec_convert;
 mod peaks2d;
 mod persistence;
 mod pipeline_conv;
@@ -62,6 +63,7 @@ const STORAGE_COMPLEX_F64_LE: &str = "complex_f64_le";
 const STORAGE_TABLE_V1: &str = "plotx_table_envelope_v1";
 const STORAGE_AFM_V1: &str = "plotx_afm_v1";
 const STORAGE_DOSY_V1: &str = "plotx_dosy_v1";
+const STORAGE_MASS_SPEC_V1: &str = "plotx_mass_spec_v1";
 const SNAPSHOT_KIND: &str = "editable_figure_v1";
 
 type Result<T> = std::result::Result<T, ProjectError>;
