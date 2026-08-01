@@ -2,7 +2,136 @@ use super::*;
 use crate::actions::Action;
 use plotx_io::AcquisitionStreamId;
 
+const LCMS_CHROMATOGRAM_GESTURES: &[PlotInteractionGesture] = &[
+    PlotInteractionGesture::Cursor,
+    PlotInteractionGesture::Range,
+];
+
 impl PlotxApp {
+    /// Returns the explicit semantic boundary for a plot that currently accepts
+    /// LC–MS chromatogram cursor/range input.  The descriptor itself is domain
+    /// neutral; the field's owner decides whether it exposes one.
+    pub fn plot_interaction_descriptor(
+        &self,
+        canvas_index: usize,
+        object: ObjectId,
+    ) -> Option<PlotInteractionDescriptor> {
+        let canvas = self.doc.canvases.get(canvas_index)?;
+        let plot = canvas.object(object)?.plot()?;
+        let source = plot.binding.series.first()?.source;
+        let dataset = self.doc.dataset_by_id(source.resource)?;
+        let mass_spec = dataset.as_mass_spec()?;
+        mass_spec.chromatogram_stream_for_field(source.field)?;
+        let field = dataset.field_descriptor(source.field)?;
+        let unit = field.units.first()?.clone();
+        // A selection describes the whole overlaid plot.  Do not silently let
+        // its first trace stand in for an incompatible secondary trace.
+        if plot.binding.series.iter().any(|series| {
+            series.source.resource != source.resource
+                || self
+                    .doc
+                    .dataset_by_id(series.source.resource)
+                    .and_then(Dataset::as_mass_spec)
+                    .and_then(|dataset| dataset.chromatogram_stream_for_field(series.source.field))
+                    .is_none()
+                || self
+                    .doc
+                    .dataset_by_id(series.source.resource)
+                    .and_then(|dataset| dataset.field_descriptor(series.source.field))
+                    .and_then(|field| field.units.into_iter().next())
+                    .as_deref()
+                    != Some(unit.as_str())
+        }) {
+            return None;
+        }
+        let axis = &plot.figure().x;
+        (axis.categories.is_none() && axis.min.is_finite() && axis.max.is_finite()).then_some(
+            PlotInteractionDescriptor {
+                dataset: source.resource,
+                canvas: canvas.resource_id,
+                object,
+                field: source.field,
+                axis: PlotInteractionAxis::X,
+                gestures: LCMS_CHROMATOGRAM_GESTURES,
+                unit,
+            },
+        )
+    }
+
+    /// Mass-spectrometry plots reserve range input for their declared semantic
+    /// interaction.  Other plots retain the legacy analysis-selection path.
+    pub fn plot_rejects_legacy_selection(&self, canvas: usize, object: ObjectId) -> bool {
+        self.doc
+            .canvases
+            .get(canvas)
+            .and_then(|canvas| canvas.object(object))
+            .and_then(|object| object.plot())
+            .and_then(|plot| plot.binding.primary_dataset())
+            .and_then(|id| self.doc.dataset_by_id(id))
+            .is_some_and(|dataset| dataset.as_mass_spec().is_some())
+    }
+
+    /// Route presentation intent to the bound domain.  Stale transient input is
+    /// deliberately dropped; no fallback lookup is attempted.
+    pub fn dispatch_plot_interaction(&mut self, request: PlotInteractionRequest) -> bool {
+        let target = match &request {
+            PlotInteractionRequest::Cursor { target, .. }
+            | PlotInteractionRequest::Range { target, .. } => target,
+        };
+        let Some(canvas_index) = self
+            .doc
+            .canvases
+            .iter()
+            .position(|canvas| canvas.resource_id == target.canvas)
+        else {
+            return false;
+        };
+        let Some(current) = self.plot_interaction_descriptor(canvas_index, target.object) else {
+            return false;
+        };
+        if current != *target {
+            return false;
+        }
+        let Some(dataset_index) = self.doc.dataset_index(target.dataset) else {
+            return false;
+        };
+        let Some(dataset) = self
+            .doc
+            .datasets
+            .get(dataset_index)
+            .and_then(Dataset::as_mass_spec)
+        else {
+            return false;
+        };
+        let Some(stream) = dataset.chromatogram_stream_for_field(target.field) else {
+            return false;
+        };
+        let stream_label = stream_display_label_for_id(&dataset.run, stream);
+        match request {
+            PlotInteractionRequest::Cursor { value, .. } => {
+                let selected = self.select_mass_spec_spectrum_near(target.dataset, stream, value);
+                if selected {
+                    self.session.status =
+                        format!("Selected the nearest scan in {stream_label} at {value:.3} min.");
+                }
+                selected
+            }
+            PlotInteractionRequest::Range { range, .. } => {
+                if target.unit != "min" || !range.is_valid() {
+                    return false;
+                }
+                self.session.ui.analysis_selection = Some(AnalysisSelection {
+                    dataset: target.dataset,
+                    canvas: target.canvas,
+                    object: target.object,
+                    x_range: range,
+                    y_range: None,
+                });
+                self.session.status = format!("Selected {:.3}-{:.3} min.", range.min, range.max);
+                true
+            }
+        }
+    }
     pub fn pin_mass_spectrum_extraction(
         &mut self,
         dataset_id: DatasetId,

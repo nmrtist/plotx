@@ -75,6 +75,25 @@ pub struct MassSpecDataset {
 }
 
 impl MassSpecDataset {
+    /// Resolve a chromatogram field to the stream whose scan cursor it drives.
+    /// Optical channels intentionally use the active MS stream.
+    pub fn chromatogram_stream_for_field(&self, field: FieldId) -> Option<AcquisitionStreamId> {
+        self.supported_ms_streams()
+            .find(|stream| {
+                self.field_catalog.id_for_key(&stream_tic_key(*stream)) == Some(field)
+                    || self.field_catalog.id_for_key(&stream_bpi_key(*stream)) == Some(field)
+            })
+            .or_else(|| {
+                self.run
+                    .chromatograms
+                    .iter()
+                    .filter(|channel| channel.kind == ChromatogramKind::Optical)
+                    .any(|channel| {
+                        self.field_catalog.id_for_key(&channel_key(&channel.id.0)) == Some(field)
+                    })
+                    .then_some(self.active_stream)
+            })
+    }
     pub fn load(run: MassSpecRun) -> Self {
         let active_stream =
             first_ms_stream(&run).expect("a validated LC–MS run has a readable primary stream");

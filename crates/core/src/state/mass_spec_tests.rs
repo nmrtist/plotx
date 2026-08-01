@@ -1,6 +1,6 @@
 use super::*;
 use crate::actions::Action;
-use crate::state::{Dataset, PlotxApp, ToolGroup};
+use crate::state::{AxisRange, Dataset, PlotxApp, SeriesBinding, SeriesSource, ToolGroup};
 
 #[test]
 fn dynamic_catalog_and_stable_selection_follow_stream_identity() {
@@ -121,6 +121,180 @@ fn stream_and_retention_time_selection_retarget_all_linked_plots() {
             .id_for_key(&stream_tic_key(AcquisitionStreamId::new(3)))
             .unwrap()
     );
+}
+
+#[test]
+fn chromatogram_interaction_dispatches_cursor_and_normalized_minute_range() {
+    let dataset = Dataset::MassSpec(Box::new(MassSpecDataset::load(sample_mass_spec_run())));
+    let dataset_id = dataset.resource_id();
+    let mut app = PlotxApp::new();
+    app.doc.canvases.push(crate::workflow::build_default_canvas(
+        &dataset,
+        "synthetic.raw",
+    ));
+    app.doc.datasets.push(dataset);
+    let object = app.doc.canvases[0].objects[1].id;
+    let descriptor = app
+        .plot_interaction_descriptor(0, object)
+        .expect("TIC declares a semantic x interaction");
+    assert_eq!(descriptor.unit, "min");
+
+    assert!(app.dispatch_plot_interaction(descriptor.cursor(1.3).unwrap()));
+    assert_eq!(
+        app.doc.datasets[0]
+            .as_mass_spec()
+            .unwrap()
+            .selected_spectrum,
+        Some(SpectrumId::new(12))
+    );
+    assert_eq!(
+        app.session.status,
+        "Selected the nearest scan in Function 3 at 1.300 min."
+    );
+    assert!(!app.can_undo(), "cursor preview is transient");
+
+    assert!(app.dispatch_plot_interaction(descriptor.range(1.2, 0.6).unwrap()));
+    let selection = app.session.ui.analysis_selection.as_ref().unwrap();
+    assert_eq!(selection.x_range, AxisRange::new(0.6, 1.2));
+    assert_eq!(selection.dataset, dataset_id);
+}
+
+#[test]
+fn mixed_or_cross_dataset_chromatogram_overlays_do_not_declare_interactions() {
+    let dataset = Dataset::MassSpec(Box::new(MassSpecDataset::load(sample_mass_spec_run())));
+    let mut app = PlotxApp::new();
+    app.doc.canvases.push(crate::workflow::build_default_canvas(
+        &dataset,
+        "synthetic.raw",
+    ));
+    app.doc.datasets.push(dataset);
+    let object = app.doc.canvases[0].objects[1].id;
+    let spectrum = app.doc.datasets[0]
+        .as_mass_spec()
+        .unwrap()
+        .field_catalog
+        .id_for_key(&stream_spectrum_key(AcquisitionStreamId::new(3)))
+        .unwrap();
+    let dataset_id = app.doc.datasets[0].resource_id();
+    app.doc.canvases[0]
+        .object_mut(object)
+        .unwrap()
+        .plot_mut()
+        .unwrap()
+        .binding
+        .series
+        .push(SeriesBinding::with_source(SeriesSource {
+            resource: dataset_id,
+            field: spectrum,
+        }));
+    assert!(app.plot_interaction_descriptor(0, object).is_none());
+
+    app.doc.canvases[0]
+        .object_mut(object)
+        .unwrap()
+        .plot_mut()
+        .unwrap()
+        .binding
+        .series
+        .truncate(1);
+    let other = Dataset::MassSpec(Box::new(MassSpecDataset::load(sample_mass_spec_run())));
+    let other_id = other.resource_id();
+    let other_field = other
+        .as_mass_spec()
+        .unwrap()
+        .field_catalog
+        .id_for_key(&stream_tic_key(AcquisitionStreamId::new(3)))
+        .unwrap();
+    app.doc.datasets.push(other);
+    app.doc.canvases[0]
+        .object_mut(object)
+        .unwrap()
+        .plot_mut()
+        .unwrap()
+        .binding
+        .series
+        .push(SeriesBinding::with_source(SeriesSource {
+            resource: other_id,
+            field: other_field,
+        }));
+    assert!(app.plot_interaction_descriptor(0, object).is_none());
+}
+
+#[test]
+fn cross_stream_cursor_uses_one_stream_action_and_a_transient_preview() {
+    let dataset = Dataset::MassSpec(Box::new(MassSpecDataset::load(sample_mass_spec_run())));
+    let mut app = PlotxApp::new();
+    app.doc.canvases.push(crate::workflow::build_default_canvas(
+        &dataset,
+        "synthetic.raw",
+    ));
+    app.doc.datasets.push(dataset);
+    let object = app.doc.canvases[0].objects[1].id;
+    let field = app.doc.datasets[0]
+        .as_mass_spec()
+        .unwrap()
+        .field_catalog
+        .id_for_key(&stream_tic_key(AcquisitionStreamId::new(7)))
+        .unwrap();
+    app.doc.canvases[0]
+        .object_mut(object)
+        .unwrap()
+        .plot_mut()
+        .unwrap()
+        .binding
+        .series[0]
+        .source
+        .field = field;
+    let descriptor = app.plot_interaction_descriptor(0, object).unwrap();
+    assert!(app.dispatch_plot_interaction(descriptor.cursor(1.3).unwrap()));
+    assert_eq!(
+        app.doc.datasets[0].as_mass_spec().unwrap().active_stream,
+        AcquisitionStreamId::new(7)
+    );
+    assert_eq!(
+        app.doc.datasets[0]
+            .as_mass_spec()
+            .unwrap()
+            .selected_spectrum,
+        Some(SpectrumId::new(105))
+    );
+    assert_eq!(
+        app.session.status,
+        "Selected the nearest scan in Function 7 at 1.300 min."
+    );
+    assert!(app.can_undo());
+    app.undo();
+    assert_eq!(
+        app.doc.datasets[0].as_mass_spec().unwrap().active_stream,
+        AcquisitionStreamId::new(3)
+    );
+    assert!(
+        !app.can_undo(),
+        "preview did not create a second undo entry"
+    );
+    app.redo();
+    assert_eq!(
+        app.doc.datasets[0].as_mass_spec().unwrap().active_stream,
+        AcquisitionStreamId::new(7)
+    );
+}
+
+#[test]
+fn stale_or_invalid_chromatogram_interaction_is_dropped() {
+    let dataset = Dataset::MassSpec(Box::new(MassSpecDataset::load(sample_mass_spec_run())));
+    let mut app = PlotxApp::new();
+    app.doc.canvases.push(crate::workflow::build_default_canvas(
+        &dataset,
+        "synthetic.raw",
+    ));
+    app.doc.datasets.push(dataset);
+    let object = app.doc.canvases[0].objects[1].id;
+    let descriptor = app.plot_interaction_descriptor(0, object).unwrap();
+    assert!(descriptor.cursor(f64::NAN).is_none());
+    assert!(descriptor.range(1.0, f64::INFINITY).is_none());
+    app.doc.canvases.clear();
+    assert!(!app.dispatch_plot_interaction(descriptor.cursor(1.0).unwrap()));
+    assert!(app.session.ui.analysis_selection.is_none());
 }
 
 #[test]

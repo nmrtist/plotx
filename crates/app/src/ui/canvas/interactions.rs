@@ -33,8 +33,8 @@ pub(crate) fn handle_selection_drag(
     plot: PlotRect,
     ui: &Ui,
 ) {
-    if app.doc.datasets[dataset].as_mass_spec().is_some()
-        && !is_mass_chromatogram_plot(app, ci, object_id)
+    if app.plot_rejects_legacy_selection(ci, object_id)
+        && app.plot_interaction_descriptor(ci, object_id).is_none()
     {
         return;
     }
@@ -94,17 +94,26 @@ pub(crate) fn finish_selection_drag(
     if drag.dataset != dataset {
         return;
     }
-    if app.doc.datasets[dataset].as_mass_spec().is_some()
-        && !is_mass_chromatogram_plot(app, ci, object_id)
-    {
-        return;
-    }
     let a = clamp_to_plot(plot, pos(drag.start));
     let b = clamp_to_plot(plot, pos(drag.current));
     if (a.x - b.x).abs() < SELECT_MIN_PX {
         return;
     }
 
+    if let Some(descriptor) = app.plot_interaction_descriptor(ci, object_id) {
+        let object = app.doc.canvases[ci].object(object_id).unwrap();
+        let figure = object.plot().unwrap().figure();
+        let start = screen_to_x(a.x, plot, figure.x.min, figure.x.span(), figure.x.reversed);
+        let end = screen_to_x(b.x, plot, figure.x.min, figure.x.span(), figure.x.reversed);
+        if let Some(request) = descriptor.range(start, end) {
+            app.dispatch_plot_interaction(request);
+        }
+        return;
+    }
+
+    if app.plot_rejects_legacy_selection(ci, object_id) {
+        return;
+    }
     let object = app.doc.canvases[ci].object(object_id).unwrap();
     let plot_object = object.plot().unwrap();
     let fig = plot_object.figure();
@@ -132,25 +141,6 @@ pub(crate) fn finish_selection_drag(
         "ppm"
     };
     app.session.status = format!("Selected {:.3}-{:.3} {unit}.", x.min, x.max);
-}
-
-fn is_mass_chromatogram_plot(app: &PlotxApp, canvas: usize, object: ObjectId) -> bool {
-    app.doc.canvases[canvas]
-        .object(object)
-        .and_then(|object| object.plot())
-        .is_some_and(|plot| {
-            !plot.binding.series.is_empty()
-                && plot.binding.series.iter().all(|series| {
-                    app.doc
-                        .dataset_by_id(series.source.resource)
-                        .and_then(|dataset| dataset.field_descriptor(series.source.field))
-                        .is_some_and(|field| {
-                            field
-                                .capabilities
-                                .contains(plotx_core::automation::CAP_FIELD_MASS_CHROMATOGRAM)
-                        })
-                })
-        })
 }
 
 pub(crate) fn handle_zoom_drag(
@@ -281,61 +271,22 @@ pub(crate) fn handle_data_tool_target(
         return;
     };
     let id = hit.object;
-    let mass_spec_target = (|| {
-        let object = app.doc.canvases[ci].object(id)?;
-        let plot_object = object.plot()?;
-        let series = plot_object.binding.series.first()?;
-        let dataset_index = app.doc.dataset_index(series.source.resource)?;
-        let mass_spec = app.doc.datasets.get(dataset_index)?.as_mass_spec()?;
-        let stream = mass_spec
-            .supported_ms_streams()
-            .find(|stream| {
-                mass_spec
-                    .field_catalog
-                    .id_for_key(&plotx_core::state::stream_tic_key(*stream))
-                    == Some(series.source.field)
-                    || mass_spec
-                        .field_catalog
-                        .id_for_key(&plotx_core::state::stream_bpi_key(*stream))
-                        == Some(series.source.field)
-            })
-            .or_else(|| {
-                mass_spec
-                    .run
-                    .chromatograms
-                    .iter()
-                    .filter(|channel| channel.kind == plotx_io::ChromatogramKind::Optical)
-                    .any(|channel| {
-                        mass_spec
-                            .field_catalog
-                            .id_for_key(&plotx_core::state::channel_key(&channel.id.0))
-                            == Some(series.source.field)
-                    })
-                    .then_some(mass_spec.active_stream)
-            })?;
-        let inner = plot_inner_rect(app, ci, id, rect)?;
-        let stream_label = mass_spec
-            .run
-            .stream(stream)
-            .map(plotx_core::state::stream_display_label)
-            .unwrap_or_else(|| format!("Stream {stream}"));
-        plot_contains(inner, screen_pos).then_some((
-            series.source.resource,
-            stream,
-            stream_label,
-            screen_to_x(
-                screen_pos.x,
-                inner,
-                plot_object.figure().x.min,
-                plot_object.figure().x.span(),
-                plot_object.figure().x.reversed,
-            ),
+    if let Some(descriptor) = app.plot_interaction_descriptor(ci, id)
+        && let Some(inner) = plot_inner_rect(app, ci, id, rect)
+        && plot_contains(inner, screen_pos)
+        && let Some(figure) = app.doc.canvases[ci]
+            .object(id)
+            .and_then(|object| object.plot())
+            .map(|plot| plot.figure())
+        && let Some(request) = descriptor.cursor(screen_to_x(
+            screen_pos.x,
+            inner,
+            figure.x.min,
+            figure.x.span(),
+            figure.x.reversed,
         ))
-    })();
-    if let Some((dataset, stream, stream_label, retention_time_min)) = mass_spec_target {
-        app.select_mass_spec_spectrum_near(dataset, stream, retention_time_min);
-        app.session.status =
-            format!("Selected the nearest scan in {stream_label} at {retention_time_min:.3} min.");
+    {
+        app.dispatch_plot_interaction(request);
     }
     if app.doc.canvases[ci].selected_object == Some(id) {
         return;
