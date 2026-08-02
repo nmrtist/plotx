@@ -11,6 +11,10 @@ use std::sync::Arc;
 pub struct FieldCatalog {
     next_id: u64,
     key_to_id: BTreeMap<String, FieldId>,
+    /// Identities of removed derived fields. Kept outside the live catalog so
+    /// undo/redo can restore the same field identity without exposing a field
+    /// that no longer exists.
+    retired_key_to_id: BTreeMap<String, FieldId>,
     /// Persisted source and algorithm provenance for each stable child field.
     /// Runtime `FieldVersion` deliberately does not live here.
     provenance: BTreeMap<FieldId, FieldProvenance>,
@@ -21,10 +25,11 @@ impl FieldCatalog {
         let mut catalog = Self {
             next_id: 0,
             key_to_id: BTreeMap::new(),
+            retired_key_to_id: BTreeMap::new(),
             provenance: BTreeMap::new(),
         };
         for key in keys {
-            catalog.allocate(key);
+            catalog.activate_key(key);
         }
         catalog
     }
@@ -66,9 +71,15 @@ impl FieldCatalog {
         }
     }
 
-    fn allocate(&mut self, key: String) {
-        if self.key_to_id.contains_key(&key) {
-            return;
+    /// Activate a key by the same rule used for planning and reconciliation:
+    /// live first, then a retired identity, then a new allocation.
+    fn activate_key(&mut self, key: String) -> FieldId {
+        if let Some(id) = self.id_for_key(&key) {
+            return id;
+        }
+        if let Some(id) = self.retired_key_to_id.remove(&key) {
+            self.key_to_id.insert(key, id);
+            return id;
         }
         let id = FieldId::new(self.next_id);
         self.next_id = self
@@ -76,14 +87,39 @@ impl FieldCatalog {
             .checked_add(1)
             .expect("dataset field identity allocator overflow");
         self.key_to_id.insert(key, id);
+        id
     }
 
     pub(crate) fn ensure_key(&mut self, key: String) -> FieldId {
-        if let Some(id) = self.id_for_key(&key) {
-            return id;
+        self.activate_key(key)
+    }
+
+    /// Reconcile a provider's current keys without renumbering surviving fields.
+    /// Derived results are added and removed through actions, so their child
+    /// identities must remain stable across catalog rebuilds and project reloads.
+    pub(crate) fn reconcile_keys(
+        &mut self,
+        keys: impl IntoIterator<Item = String>,
+        source: &str,
+        algorithm: Option<FieldAlgorithmProvenance>,
+    ) {
+        let expected = keys.into_iter().collect::<BTreeSet<_>>();
+        let removed = self
+            .key_to_id
+            .iter()
+            .filter(|(key, _)| !expected.contains(*key))
+            .map(|(key, id)| (key.clone(), *id))
+            .collect::<Vec<_>>();
+        for (key, id) in removed {
+            self.key_to_id.remove(&key);
+            self.retired_key_to_id.insert(key, id);
         }
-        self.allocate(key.clone());
-        self.id_for_key(&key).expect("new field key was allocated")
+        let live = self.key_to_id.values().copied().collect::<BTreeSet<_>>();
+        self.provenance.retain(|id, _| live.contains(id));
+        for key in expected {
+            self.activate_key(key);
+        }
+        self.attach_provenance(source, algorithm);
     }
 
     pub(crate) fn validate_for_keys(&self, keys: Vec<String>) -> Result<(), String> {
@@ -99,8 +135,19 @@ impl FieldCatalog {
         if ids.len() != self.key_to_id.len() {
             return Err("field catalog contains duplicate field identities".to_owned());
         }
+        let retired = self
+            .retired_key_to_id
+            .values()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        if retired.len() != self.retired_key_to_id.len() || !ids.is_disjoint(&retired) {
+            return Err("field catalog contains conflicting retired identities".to_owned());
+        }
         let minimum_next = ids
             .last()
+            .into_iter()
+            .chain(retired.last())
+            .max()
             .map_or(Some(0), |id| id.get().checked_add(1))
             .ok_or_else(|| "field catalog identity allocator overflow".to_owned())?;
         if self.next_id < minimum_next {
@@ -311,5 +358,20 @@ mod tests {
                 version: 1,
             })
         );
+    }
+
+    #[test]
+    fn activating_a_retired_key_restores_only_its_own_identity() {
+        let mut catalog = FieldCatalog::for_keys(["first".to_owned()]);
+        catalog.attach_provenance("source.raw", None);
+        let first = catalog.id_for_key("first").unwrap();
+        catalog.reconcile_keys(Vec::new(), "source.raw", None);
+
+        assert_eq!(catalog.ensure_key("first".to_owned()), first);
+        let second = catalog.ensure_key("second".to_owned());
+        assert_ne!(second, first);
+        assert_eq!(catalog.id_for_key("first"), Some(first));
+        assert_eq!(catalog.id_for_key("second"), Some(second));
+        assert!(catalog.retired_key_to_id.is_empty());
     }
 }

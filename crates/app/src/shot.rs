@@ -357,6 +357,9 @@ fn setup(app: &mut PlotxApp) {
             object,
             x_range: AxisRange::new(FIT_LO, FIT_HI),
             y_range: None,
+            field: None,
+            unit: None,
+            source_stream: None,
         });
     }
 }

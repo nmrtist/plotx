@@ -1,6 +1,8 @@
 use super::*;
 use crate::actions::Action;
-use crate::state::{AxisRange, Dataset, PlotxApp, SeriesBinding, SeriesSource, ToolGroup};
+use crate::state::{
+    AxisRange, Dataset, ObjectFrame, PlotxApp, SeriesBinding, SeriesSource, ToolGroup,
+};
 
 #[test]
 fn dynamic_catalog_and_stable_selection_follow_stream_identity() {
@@ -432,5 +434,176 @@ fn extracted_spectrum_is_pinned_and_does_not_follow_preview_cursor() {
             .series[0]
             .kind,
         SeriesKind::Stick
+    );
+}
+
+#[test]
+fn xic_is_pinned_to_its_stream_and_undo_redo_preserve_its_identity() {
+    let dataset = Dataset::MassSpec(Box::new(MassSpecDataset::load(sample_mass_spec_run())));
+    let dataset_id = dataset.resource_id();
+    let mut app = PlotxApp::new();
+    app.doc.canvases.push(crate::workflow::build_default_canvas(
+        &dataset,
+        "synthetic.raw",
+    ));
+    app.doc.datasets.push(dataset);
+
+    let reversed = app.doc.datasets[0]
+        .as_mass_spec()
+        .unwrap()
+        .plan_ion_chromatogram(AcquisitionStreamId::new(3), 20.0, 10.0)
+        .unwrap();
+    assert_eq!((reversed.mz_min, reversed.mz_max), (10.0, 20.0));
+    assert_eq!(reversed.intensity, [2.0, 9.0]);
+
+    let id = app
+        .pin_ion_chromatogram(dataset_id, AcquisitionStreamId::new(3), 10.0, 20.0)
+        .unwrap();
+    assert_eq!(
+        app.doc.canvases[0].objects[2].plot().unwrap().chart.type_id,
+        "mass_chromatogram"
+    );
+    let xic = &app.doc.datasets[0]
+        .as_mass_spec()
+        .unwrap()
+        .extracted_ion_chromatograms[0];
+    assert_eq!(xic.id, id);
+    assert_eq!(xic.stream, AcquisitionStreamId::new(3));
+    assert_eq!(xic.time_min, [0.5, 1.0]);
+    assert_eq!(xic.intensity, [2.0, 9.0]);
+    let field = app.doc.datasets[0]
+        .as_mass_spec()
+        .unwrap()
+        .field_catalog
+        .id_for_key(&xic_key(id))
+        .unwrap();
+    assert_eq!(app.doc.canvases[0].objects.len(), 3);
+    assert_eq!(
+        app.doc.canvases[0].objects[2]
+            .plot()
+            .unwrap()
+            .binding
+            .series[0]
+            .source
+            .field,
+        field
+    );
+
+    assert!(app.select_mass_spec_stream(dataset_id, AcquisitionStreamId::new(7)));
+    assert_eq!(
+        app.doc.datasets[0]
+            .as_mass_spec()
+            .unwrap()
+            .extracted_ion_chromatograms[0]
+            .stream,
+        AcquisitionStreamId::new(3)
+    );
+    app.undo(); // stream switch
+    app.undo(); // XIC
+    assert!(
+        app.doc.datasets[0]
+            .as_mass_spec()
+            .unwrap()
+            .extracted_ion_chromatograms
+            .is_empty()
+    );
+    assert_eq!(app.doc.canvases[0].objects.len(), 2);
+    app.redo();
+    let restored = &app.doc.datasets[0]
+        .as_mass_spec()
+        .unwrap()
+        .extracted_ion_chromatograms[0];
+    assert_eq!(restored.id, id);
+    assert_eq!(restored.time_min, [0.5, 1.0]);
+    assert_eq!(restored.intensity, [2.0, 9.0]);
+    assert_eq!(
+        app.doc.datasets[0]
+            .as_mass_spec()
+            .unwrap()
+            .field_catalog
+            .id_for_key(&xic_key(id)),
+        Some(field)
+    );
+}
+
+#[test]
+fn current_spectrum_declares_mz_range_while_chromatograms_remain_minutes() {
+    let dataset = Dataset::MassSpec(Box::new(MassSpecDataset::load(sample_mass_spec_run())));
+    let dataset_id = dataset.resource_id();
+    let mut app = PlotxApp::new();
+    app.doc.canvases.push(crate::workflow::build_default_canvas(
+        &dataset,
+        "synthetic.raw",
+    ));
+    app.doc.datasets.push(dataset);
+    let chromatogram = app.doc.canvases[0].objects[1].id;
+    assert_eq!(
+        app.plot_interaction_descriptor(0, chromatogram)
+            .unwrap()
+            .unit,
+        "min"
+    );
+    assert!(app.select_mass_spec_spectrum_near(dataset_id, AcquisitionStreamId::new(3), 0.5));
+    let spectrum_field = app.doc.datasets[0]
+        .as_mass_spec()
+        .unwrap()
+        .field_catalog
+        .id_for_key(&stream_spectrum_key(AcquisitionStreamId::new(3)))
+        .unwrap();
+    let object_id = app.doc.canvases[0].allocate_object_id();
+    let mut object = app.build_plot_object(
+        0,
+        ObjectFrame::new(0.0, 0.0, 100.0, 100.0),
+        object_id,
+        "Current spectrum".to_owned(),
+    );
+    object.plot_mut().unwrap().binding.series[0].source.field = spectrum_field;
+    app.doc.canvases[0].objects.push(object);
+    app.rebuild_canvases_for(0);
+    let descriptor = app.plot_interaction_descriptor(0, object_id).unwrap();
+    assert_eq!(descriptor.unit, "m/z");
+    assert!(descriptor.cursor(10.0).is_none());
+    assert!(app.dispatch_plot_interaction(descriptor.range(20.0, 10.0).unwrap()));
+    assert!(!app.can_undo(), "m/z selection is transient");
+    let selection = app.session.ui.analysis_selection.as_ref().unwrap();
+    assert_eq!(selection.field, Some(spectrum_field));
+    assert_eq!(selection.x_range, AxisRange::new(10.0, 20.0));
+}
+
+#[test]
+fn persisted_xic_validation_rejects_missing_stream_and_mismatched_arrays() {
+    let run = sample_mass_spec_run();
+    let invalid_stream = ExtractedIonChromatogram {
+        id: IonChromatogramId::new(1),
+        stream: AcquisitionStreamId::new(999),
+        mz_min: 10.0,
+        mz_max: 20.0,
+        time_min: vec![0.5],
+        intensity: vec![1.0],
+    };
+    assert!(
+        MassSpecDataset::validate_ion_chromatogram_state(
+            &run,
+            &mut [invalid_stream],
+            &mut IonChromatogramId::new(2)
+        )
+        .unwrap_err()
+        .contains("missing stream")
+    );
+    let mismatched = ExtractedIonChromatogram {
+        id: IonChromatogramId::new(1),
+        stream: AcquisitionStreamId::new(3),
+        mz_min: 10.0,
+        mz_max: 20.0,
+        time_min: vec![0.5],
+        intensity: vec![1.0, 2.0],
+    };
+    assert!(
+        MassSpecDataset::validate_ion_chromatogram_state(
+            &run,
+            &mut [mismatched],
+            &mut IonChromatogramId::new(2)
+        )
+        .is_err()
     );
 }

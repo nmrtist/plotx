@@ -1,10 +1,11 @@
 use crate::layout::PageLayout;
 use crate::state::{
     AxisOverrides, AxisProjections, CanvasDocument, CanvasObject, CanvasViewport, ChartSpec,
-    CurveFitReference, DataBinding, Dataset, DatasetId, ExtractedMassSpectrum, ExtractionId,
-    NamedView, ObjectFrame, ObjectId, ObjectStyle, PanelLabelStyle, PanelMeta, PlotxApp,
-    PrimaryView, Region, Selection, StackSpec, StatAnalysis, StoredCurveFitAnalysis, StoredLineFit,
-    StoredMultiplet, TableEditDelta, TextBox, TypedTableState,
+    CurveFitReference, DataBinding, Dataset, DatasetId, ExtractedIonChromatogram,
+    ExtractedMassSpectrum, ExtractionId, IonChromatogramId, NamedView, ObjectFrame, ObjectId,
+    ObjectStyle, PanelLabelStyle, PanelMeta, PlotxApp, PrimaryView, Region, Selection, StackSpec,
+    StatAnalysis, StoredCurveFitAnalysis, StoredLineFit, StoredMultiplet, TableEditDelta, TextBox,
+    TypedTableState,
 };
 use crate::theme::ThemeSnapshot;
 use crate::{Integral2D, IntegralResult};
@@ -320,6 +321,11 @@ pub enum Action {
         before: (Vec<ExtractedMassSpectrum>, ExtractionId),
         after: (Vec<ExtractedMassSpectrum>, ExtractionId),
     },
+    SetMassSpecIonChromatograms {
+        dataset: DatasetId,
+        before: (Vec<ExtractedIonChromatogram>, IonChromatogramId),
+        after: (Vec<ExtractedIonChromatogram>, IonChromatogramId),
+    },
     /// Replace a table's analysis snapshots and per-column references atomically.
     SetCurveFitAnalyses {
         dataset: DatasetId,
@@ -492,6 +498,7 @@ impl Action {
             Self::SetObjectViewport { .. } => "plot navigation",
             Self::SetMassSpecStream { .. } => "mass spectrometry stream",
             Self::SetMassSpectrumExtractions { .. } => "mass spectrum extraction",
+            Self::SetMassSpecIonChromatograms { .. } => "extracted ion chromatogram",
             Self::SetSeriesPresentation { .. } => "display setting",
             Self::SetAxisOverrides { .. } => "axis setting",
             Self::UpdateDatasetProcessing { .. } => "data processing",
@@ -513,6 +520,7 @@ impl Action {
             Self::SetObjectViewport { before, after, .. } => before == after,
             Self::SetMassSpecStream { before, after, .. } => before == after,
             Self::SetMassSpectrumExtractions { before, after, .. } => before == after,
+            Self::SetMassSpecIonChromatograms { before, after, .. } => before == after,
             Self::MoveResizeObject { before, after, .. } => before == after,
             Self::SetObjectFrames { before, after, .. } => before == after,
             Self::SetObjectGroups { before, after, .. } => before == after,

@@ -102,6 +102,35 @@ pub(super) fn validate_action(
                 })?;
             }
         }
+        Action::SetMassSpecIonChromatograms {
+            dataset,
+            before,
+            after,
+        } => {
+            let Some(mass_spec) = app
+                .doc
+                .dataset_index(*dataset)
+                .and_then(|index| app.doc.datasets[index].as_mass_spec())
+            else {
+                return Err(ActionApplyError::InvalidValue(format!(
+                    "dataset {dataset} is not LC–MS data"
+                )));
+            };
+            for (label, (chromatograms, next_id)) in [("before", before), ("after", after)] {
+                let mut chromatograms = chromatograms.clone();
+                let mut next_id = *next_id;
+                crate::state::MassSpecDataset::validate_ion_chromatogram_state(
+                    &mass_spec.run,
+                    &mut chromatograms,
+                    &mut next_id,
+                )
+                .map_err(|error| {
+                    ActionApplyError::InvalidValue(format!(
+                        "{label} extracted-ion chromatogram state: {error}"
+                    ))
+                })?;
+            }
+        }
         Action::RenameCanvas { canvas, .. }
         | Action::ApplyTheme { canvas, .. }
         | Action::SetCanvasSize { canvas, .. }

@@ -32,6 +32,9 @@ fn identity_schema_snapshot_uses_typed_text_and_persists_object_allocator() {
         object,
         x_range: AxisRange::new(1.0, 2.0),
         y_range: None,
+        field: None,
+        unit: None,
+        source_stream: None,
     });
 
     let path = temp_project("identity_schema_snapshot");
@@ -48,18 +51,7 @@ fn identity_schema_snapshot_uses_typed_text_and_persists_object_allocator() {
         app.doc.canvases[0].next_object_id.get()
     );
     assert_eq!(view["objects"][0]["id"], object.to_string());
-    assert_eq!(
-        workspace["analysis_selection"]["dataset"],
-        dataset.to_string()
-    );
-    assert_eq!(
-        workspace["analysis_selection"]["canvas"],
-        canvas.to_string()
-    );
-    assert_eq!(
-        workspace["analysis_selection"]["object"],
-        object.to_string()
-    );
+    assert!(workspace.get("analysis_selection").is_none());
     std::fs::remove_file(path).unwrap();
 }
 

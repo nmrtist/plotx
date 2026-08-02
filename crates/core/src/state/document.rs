@@ -26,6 +26,16 @@ pub struct AnalysisSelection {
     pub object: ObjectId,
     pub x_range: AxisRange,
     pub y_range: Option<AxisRange>,
+    /// The bound field which produced a semantic selection, when available.
+    /// This remains transient UI state and prevents a stale current-spectrum
+    /// range from being interpreted after the stream changes.
+    pub field: Option<FieldId>,
+    /// The semantic x-axis unit captured with a range gesture. This is
+    /// transient and rejects selections whose binding semantics changed.
+    pub unit: Option<String>,
+    /// The semantic source stream captured with an LC–MS range gesture.
+    /// It is transient and guards against active-stream retargeting.
+    pub source_stream: Option<plotx_io::AcquisitionStreamId>,
 }
 
 #[derive(Clone, Copy, Debug)]

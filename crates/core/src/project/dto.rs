@@ -784,6 +784,9 @@ impl SelectionDto {
             object: self.object.parse().ok()?,
             x_range: self.x_range.into_range(),
             y_range: self.y_range.map(RangeDto::into_range),
+            field: None,
+            unit: None,
+            source_stream: None,
         })
     }
 }

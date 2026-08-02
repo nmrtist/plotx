@@ -1,5 +1,5 @@
 use egui::{Button, ComboBox, Ui};
-use plotx_core::state::{MassSpectrumExtractionMethod, PlotxApp, Tool};
+use plotx_core::state::{MassSpecRangeSelection, MassSpectrumExtractionMethod, PlotxApp, Tool};
 
 pub(super) fn mass_spectrometry_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) -> bool {
     let Some(dataset) = app
@@ -43,6 +43,7 @@ pub(super) fn mass_spectrometry_group(app: &mut PlotxApp, di: usize, ui: &mut Ui
         .collect::<Vec<_>>();
     let selected_spectrum = dataset.selected_spectrum().cloned();
     let extraction_count = dataset.extracted_spectra.len();
+    let xic_count = dataset.extracted_ion_chromatograms.len();
 
     ui.label(crate::typography::headline("Acquisition"));
     let active_label = streams
@@ -92,15 +93,13 @@ pub(super) fn mass_spectrometry_group(app: &mut PlotxApp, di: usize, ui: &mut Ui
     ui.separator();
     ui.label(crate::typography::headline("Extract spectrum"));
     ui.small("Choose a method, select a retention-time range, then extract a fixed spectrum.");
-    let range = app
-        .session
-        .ui
-        .analysis_selection
-        .as_ref()
-        .filter(|selection| selection.dataset == dataset_id)
-        .map(|selection| selection.x_range);
+    let semantic_selection = app.mass_spec_range_selection(dataset_id);
+    let spectrum_selection = match semantic_selection {
+        Some(MassSpecRangeSelection::Chromatogram { range, stream }) => Some((range, stream)),
+        _ => None,
+    };
     ui.horizontal(|ui| {
-        let selecting = app.session.tool == Tool::SelectRegion;
+        let selecting = spectrum_selection.is_some();
         if ui
             .selectable_label(selecting, "Select range")
             .on_hover_text("Drag across a TIC or UV chromatogram.")
@@ -109,14 +108,14 @@ pub(super) fn mass_spectrometry_group(app: &mut PlotxApp, di: usize, ui: &mut Ui
             app.toggle_tool(Tool::SelectRegion);
         }
         if ui
-            .add_enabled(range.is_some(), Button::new("Clear"))
+            .add_enabled(spectrum_selection.is_some(), Button::new("Clear"))
             .on_disabled_hover_text("No retention-time range is selected.")
             .clicked()
         {
             app.clear_analysis_selection();
         }
     });
-    if let Some(range) = range {
+    if let Some((range, _)) = spectrum_selection {
         ui.label(format!("Range: {:.3}–{:.3} min", range.min, range.max));
     } else {
         ui.weak("No retention-time range selected.");
@@ -141,7 +140,10 @@ pub(super) fn mass_spectrometry_group(app: &mut PlotxApp, di: usize, ui: &mut Ui
     ui.data_mut(|data| data.insert_temp(method_id, method));
 
     let extract_range = ui
-        .add_enabled(range.is_some(), Button::new("Extract spectrum"))
+        .add_enabled(
+            spectrum_selection.is_some(),
+            Button::new("Extract spectrum"),
+        )
         .on_disabled_hover_text("Select a retention-time range first.")
         .clicked();
     if extraction_count > 0 {
@@ -154,21 +156,21 @@ pub(super) fn mass_spectrometry_group(app: &mut PlotxApp, di: usize, ui: &mut Ui
         app.focus_single(di);
         app.session.status = format!("Selected LC–MS {label}.");
     }
-    let extraction = if pin_scan {
+    let scan_extraction = if pin_scan {
         selected_spectrum.as_ref().map(|scan| {
             (
+                active_stream,
                 scan.retention_time_min,
                 scan.retention_time_min,
                 MassSpectrumExtractionMethod::NearestScan,
             )
         })
-    } else if extract_range {
-        range.map(|range| (range.min, range.max, method))
     } else {
         None
     };
-    if let Some((start, end, method)) = extraction {
-        match app.pin_mass_spectrum_extraction(dataset_id, start, end, method) {
+    if let Some(extraction) = scan_extraction {
+        let (stream, start, end, method) = extraction;
+        match app.pin_mass_spectrum_extraction_for_stream(dataset_id, stream, start, end, method) {
             Ok(id) => {
                 app.focus_single(di);
                 app.session.status = format!(
@@ -178,6 +180,59 @@ pub(super) fn mass_spectrometry_group(app: &mut PlotxApp, di: usize, ui: &mut Ui
             }
             Err(error) => app.session.status = error,
         }
+    } else if extract_range {
+        match app.pin_mass_spectrum_extraction_from_selection(dataset_id, method) {
+            Ok(id) => {
+                app.focus_single(di);
+                app.session.status = format!("Extracted {} #{id}.", method.label());
+            }
+            Err(error) => app.session.status = error,
+        }
+    }
+
+    ui.separator();
+    ui.label(crate::typography::headline(
+        "Extract ion chromatogram (XIC)",
+    ));
+    ui.small(
+        "Select an m/z interval on the current mass spectrum, then create a fixed chromatogram.",
+    );
+    let xic_selection = match semantic_selection {
+        Some(MassSpecRangeSelection::Spectrum { range, stream }) => Some((range, stream)),
+        _ => None,
+    };
+    let selecting_xic = xic_selection.is_some();
+    if ui
+        .selectable_label(selecting_xic, "Select m/z range")
+        .on_hover_text("Drag across the current mass-spectrum plot.")
+        .clicked()
+    {
+        app.set_tool(Tool::SelectRegion);
+    }
+    if let Some((range, stream)) = xic_selection {
+        let label = streams
+            .iter()
+            .find(|(id, _, _)| *id == stream)
+            .map(|(_, _, label)| label.as_str())
+            .unwrap_or("Unavailable stream");
+        ui.label(format!(
+            "m/z interval: {:.4}–{:.4} · {label}",
+            range.min, range.max
+        ));
+        if ui.button("Extract ion chromatogram").clicked() {
+            match app.pin_ion_chromatogram_from_selection(dataset_id) {
+                Ok(id) => {
+                    app.focus_single(di);
+                    app.session.status = format!("Created extracted ion chromatogram #{id}.");
+                }
+                Err(error) => app.session.status = error,
+            }
+        }
+    } else {
+        ui.weak("No m/z interval selected on the current mass spectrum.");
+    }
+    if xic_count > 0 {
+        ui.weak(format!("{xic_count} saved extracted-ion chromatogram(s)"));
     }
     false
 }

@@ -2,7 +2,7 @@ use super::field_runtime::*;
 use super::{
     FieldCatalog, FieldId, channel_key, electrophysiology_channel_key,
     extracted_stream_spectrum_key, extraction_title, mass_spec_dataset_field_keys, stream_bpi_key,
-    stream_display_label, stream_spectrum_key, stream_tic_key,
+    stream_display_label, stream_spectrum_key, stream_tic_key, xic_key, xic_title,
 };
 use crate::automation::{
     CAP_FIELD_AFM_MAP, CAP_FIELD_BOUNDED, CAP_FIELD_COLORED_RASTER_2D, CAP_FIELD_CURVE_1D,
@@ -312,6 +312,20 @@ impl super::Dataset {
                             // discovery must remain a metadata-only operation.
                             vec![0],
                             vec!["m/z".to_owned()],
+                            "line",
+                        ));
+                    }
+                }
+                for xic in &dataset.extracted_ion_chromatograms {
+                    let key = xic_key(xic.id);
+                    if let Some(id) = dataset.field_catalog.id_for_key(&key) {
+                        fields.push(descriptor(
+                            id,
+                            &key,
+                            &xic_title(&dataset.run, xic),
+                            capabilities(id, &[CAP_FIELD_MASS_CHROMATOGRAM]),
+                            vec![xic.intensity.len()],
+                            vec!["min".to_owned()],
                             "line",
                         ));
                     }
@@ -770,27 +784,9 @@ pub fn default_contour_base_kind(capabilities: &FieldCapabilities) -> &'static s
     }
 }
 
-pub fn default_contour_spec(
-    capabilities: &FieldCapabilities,
-    peak: PeakMagnitude<'_>,
-) -> ContourSpec {
-    let base = contour_base_policy(default_contour_base_kind(capabilities), peak)
-        .expect("default base kind is a known policy");
-    let level = ContourLevelSpec {
-        base,
-        count: 14,
-        ratio: PositiveFiniteF64::new(1.35).expect("literal ratio is valid"),
-    };
-    ContourSpec {
-        positive: level.clone(),
-        negative: capabilities.contains(CAP_FIELD_SIGNED).then_some(level),
-        style: ContourStyle {
-            positive_color: ColorSource::Explicit(plotx_figure::Color::TRACE),
-            negative_color: ColorSource::Explicit(plotx_figure::Color::rgb(0xd1, 0x24, 0x2a)),
-            ..ContourStyle::default()
-        },
-    }
-}
+#[path = "field_defaults.rs"]
+mod defaults;
+pub use defaults::default_contour_spec;
 
 #[cfg(test)]
 #[path = "field_tests.rs"]

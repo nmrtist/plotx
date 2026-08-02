@@ -1,4 +1,8 @@
 use super::{EntryReader, ProjectError, ProjectLoadLimits, Result};
+use crate::state::{
+    ExtractedIonChromatogram, ExtractedMassSpectrum, ExtractionId, IonChromatogramId,
+    MassSpecDataset, MassSpectrumExtractionMethod,
+};
 use plotx_io::{
     AcquisitionStream, AcquisitionStreamId, ChromatogramChannel, ChromatogramChannelId,
     ChromatogramKind, MassSpecRun, MassSpectrum, Polarity, Precursor, SpectrumId,
@@ -11,9 +15,23 @@ const MAGIC: &[u8; 8] = b"PLOTXMS\0";
 const VERSION: u16 = 1;
 const VALUES_PER_CHUNK: usize = 4096;
 
-pub(super) fn write(output: &mut impl Write, run: &MassSpecRun) -> Result<()> {
+pub(super) fn write(output: &mut impl Write, dataset: &MassSpecDataset) -> Result<()> {
+    let run = &dataset.run;
     run.validate()
         .map_err(|error| ProjectError::Invalid(format!("invalid LC–MS run: {error}")))?;
+    let mut extracted_spectra = dataset.extracted_spectra.clone();
+    let mut next_extraction_id = dataset.next_extraction_id;
+    MassSpecDataset::validate_extraction_state(
+        run,
+        &mut extracted_spectra,
+        &mut next_extraction_id,
+    )
+    .map_err(|error| ProjectError::Invalid(format!("invalid extracted mass spectra: {error}")))?;
+    let mut xics = dataset.extracted_ion_chromatograms.clone();
+    let mut next_xic_id = dataset.next_ion_chromatogram_id;
+    MassSpecDataset::validate_ion_chromatogram_state(run, &mut xics, &mut next_xic_id).map_err(
+        |error| ProjectError::Invalid(format!("invalid extracted ion chromatograms: {error}")),
+    )?;
     output.write_all(MAGIC)?;
     write_u16(output, VERSION)?;
     write_string(output, &run.source)?;
@@ -35,7 +53,43 @@ pub(super) fn write(output: &mut impl Write, run: &MassSpecRun) -> Result<()> {
     for channel in &run.chromatograms {
         write_channel(output, channel)?;
     }
+    write_u64(output, dataset.active_stream.get())?;
+    write_len(output, dataset.extracted_spectra.len())?;
+    for extraction in &dataset.extracted_spectra {
+        write_extraction(output, extraction)?;
+    }
+    write_u64(output, dataset.next_extraction_id.get())?;
+    write_len(output, dataset.extracted_ion_chromatograms.len())?;
+    for xic in &dataset.extracted_ion_chromatograms {
+        write_xic(output, xic)?;
+    }
+    write_u64(output, dataset.next_ion_chromatogram_id.get())?;
     Ok(())
+}
+
+fn write_extraction(output: &mut impl Write, extraction: &ExtractedMassSpectrum) -> Result<()> {
+    write_u64(output, extraction.id.get())?;
+    write_u64(output, extraction.stream.get())?;
+    write_f64(output, extraction.start_time_min)?;
+    write_f64(output, extraction.end_time_min)?;
+    write_u8(
+        output,
+        match extraction.method {
+            MassSpectrumExtractionMethod::NearestScan => 0,
+            MassSpectrumExtractionMethod::HighestTic => 1,
+            MassSpectrumExtractionMethod::Mean => 2,
+            MassSpectrumExtractionMethod::Sum => 3,
+        },
+    )
+}
+
+fn write_xic(output: &mut impl Write, xic: &ExtractedIonChromatogram) -> Result<()> {
+    write_u64(output, xic.id.get())?;
+    write_u64(output, xic.stream.get())?;
+    write_f64(output, xic.mz_min)?;
+    write_f64(output, xic.mz_max)?;
+    write_f64s(output, &xic.time_min)?;
+    write_f64s(output, &xic.intensity)
 }
 
 fn write_stream(output: &mut impl Write, stream: &AcquisitionStream) -> Result<()> {
@@ -120,7 +174,7 @@ fn write_channel(output: &mut impl Write, channel: &ChromatogramChannel) -> Resu
     write_f64s(output, &channel.values)
 }
 
-pub(super) fn decode<R: Read>(input: &mut EntryReader<'_, R>) -> Result<MassSpecRun> {
+pub(super) fn decode<R: Read>(input: &mut EntryReader<'_, R>) -> Result<MassSpecDataset> {
     let mut reader = Reader::new(input);
     if reader.read_array::<8>()? != *MAGIC {
         return Err(ProjectError::Invalid(
@@ -175,7 +229,29 @@ pub(super) fn decode<R: Read>(input: &mut EntryReader<'_, R>) -> Result<MassSpec
     };
     run.validate()
         .map_err(|error| ProjectError::Invalid(format!("invalid LC–MS run: {error}")))?;
-    Ok(run)
+    let active_stream = AcquisitionStreamId::new(reader.read_u64()?);
+    let extraction_count = reader.read_len()?;
+    reader.require_collection(extraction_count, "extracted-spectrum count")?;
+    let mut extracted_spectra = Vec::new();
+    for _ in 0..extraction_count {
+        extracted_spectra.push(reader.read_extraction()?);
+    }
+    let next_extraction_id = ExtractionId::new(reader.read_u64()?);
+    let xic_count = reader.read_len()?;
+    reader.require_collection(xic_count, "extracted-ion chromatogram count")?;
+    let mut extracted_ion_chromatograms = Vec::new();
+    for _ in 0..xic_count {
+        extracted_ion_chromatograms.push(reader.read_xic()?);
+    }
+    let next_ion_chromatogram_id = IonChromatogramId::new(reader.read_u64()?);
+    let mut dataset = MassSpecDataset::load(run);
+    dataset.active_stream = active_stream;
+    dataset.extracted_spectra = extracted_spectra;
+    dataset.next_extraction_id = next_extraction_id;
+    dataset.extracted_ion_chromatograms = extracted_ion_chromatograms;
+    dataset.next_ion_chromatogram_id = next_ion_chromatogram_id;
+    dataset.repair_selection().map_err(ProjectError::Invalid)?;
+    Ok(dataset)
 }
 
 fn write_u8(output: &mut impl Write, value: u8) -> Result<()> {
@@ -466,6 +542,38 @@ impl<'a, 'p, R: Read> Reader<'a, 'p, R> {
         }))
     }
 
+    fn read_extraction(&mut self) -> Result<ExtractedMassSpectrum> {
+        let id = ExtractionId::new(self.read_u64()?);
+        let stream = AcquisitionStreamId::new(self.read_u64()?);
+        let start_time_min = self.read_f64()?;
+        let end_time_min = self.read_f64()?;
+        let method = match self.read_u8()? {
+            0 => MassSpectrumExtractionMethod::NearestScan,
+            1 => MassSpectrumExtractionMethod::HighestTic,
+            2 => MassSpectrumExtractionMethod::Mean,
+            3 => MassSpectrumExtractionMethod::Sum,
+            tag => return Err(invalid_tag("mass-spectrum extraction method", tag)),
+        };
+        Ok(ExtractedMassSpectrum {
+            id,
+            stream,
+            start_time_min,
+            end_time_min,
+            method,
+        })
+    }
+
+    fn read_xic(&mut self) -> Result<ExtractedIonChromatogram> {
+        Ok(ExtractedIonChromatogram {
+            id: IonChromatogramId::new(self.read_u64()?),
+            stream: AcquisitionStreamId::new(self.read_u64()?),
+            mz_min: self.read_f64()?,
+            mz_max: self.read_f64()?,
+            time_min: self.read_f64s()?,
+            intensity: self.read_f64s()?,
+        })
+    }
+
     fn read_channel(&mut self) -> Result<ChromatogramChannel> {
         let id = ChromatogramChannelId(self.read_string()?);
         let kind = match self.read_u8()? {
@@ -532,7 +640,7 @@ fn invalid_tag(label: &str, tag: u8) -> ProjectError {
 #[cfg(test)]
 fn encode(run: &MassSpecRun) -> Result<Vec<u8>> {
     let mut output = Vec::new();
-    write(&mut output, run)?;
+    write(&mut output, &MassSpecDataset::load(run.clone()))?;
     Ok(output)
 }
 
@@ -548,8 +656,12 @@ fn decode_bytes(bytes: &[u8]) -> Result<MassSpecRun> {
     )?;
     let value = decode(&mut reader)?;
     reader.finish()?;
-    Ok(value)
+    Ok(value.run)
 }
+
+#[cfg(test)]
+#[path = "mass_spec_convert_project_tests.rs"]
+mod project_tests;
 
 #[cfg(test)]
 mod tests {
@@ -684,63 +796,5 @@ mod tests {
                 .to_string()
                 .contains("trailing data")
         );
-    }
-
-    #[test]
-    fn schema_v1_project_round_trip_preserves_stream_bindings_and_extractions() {
-        let mut app = crate::state::PlotxApp::new();
-        let mut dataset = crate::state::MassSpecDataset::load(crate::state::sample_mass_spec_run());
-        assert!(dataset.select_stream(AcquisitionStreamId::new(7)));
-        dataset
-            .add_extraction(
-                AcquisitionStreamId::new(7),
-                0.4,
-                1.4,
-                crate::state::MassSpectrumExtractionMethod::Mean,
-            )
-            .unwrap();
-        let expected_catalog = dataset.field_catalog.clone();
-        app.doc
-            .datasets
-            .push(crate::state::Dataset::MassSpec(Box::new(dataset)));
-        let path = std::env::temp_dir().join(format!(
-            "plotx-stream-round-trip-{}.plotx",
-            std::process::id()
-        ));
-        crate::project::save_project(&app, &path, false).unwrap();
-        let loaded = crate::project::load_project(&path).unwrap();
-        std::fs::remove_file(path).unwrap();
-        let loaded = loaded.doc.datasets[0].as_mass_spec().unwrap();
-        assert_eq!(loaded.active_stream, AcquisitionStreamId::new(7));
-        assert_eq!(
-            loaded.extracted_spectra[0].stream,
-            AcquisitionStreamId::new(7)
-        );
-        assert_eq!(loaded.field_catalog, expected_catalog);
-    }
-
-    #[test]
-    fn imported_mzml_run_survives_project_round_trip() {
-        let xml = r#"<mzML><run id="r"><spectrumList count="1"><spectrum id="scan=1" defaultArrayLength="1"><cvParam accession="MS:1000511" value="1"/><cvParam accession="MS:1000130"/><scanList><scan><cvParam accession="MS:1000016" value="30" unitAccession="UO:0000010"/></scan></scanList><binaryDataArrayList count="2"><binaryDataArray><cvParam accession="MS:1000514"/><cvParam accession="MS:1000523"/><cvParam accession="MS:1000576"/><binary>AAAAAAAA8D8=</binary></binaryDataArray><binaryDataArray><cvParam accession="MS:1000515"/><cvParam accession="MS:1000523"/><cvParam accession="MS:1000576"/><binary>AAAAAAAAAEA=</binary></binaryDataArray></binaryDataArrayList></spectrum></spectrumList></run></mzML>"#;
-        let run = plotx_io::mzml::parse(std::io::Cursor::new(xml), "roundtrip.mzML".into())
-            .expect("synthetic repository-owned mzML should import");
-        let mut app = crate::state::PlotxApp::new();
-        app.doc
-            .datasets
-            .push(crate::state::Dataset::MassSpec(Box::new(
-                crate::state::MassSpecDataset::load(run),
-            )));
-        let path = std::env::temp_dir().join(format!(
-            "plotx-mzml-round-trip-{}.plotx",
-            std::process::id()
-        ));
-        crate::project::save_project(&app, &path, false).unwrap();
-        let loaded = crate::project::load_project(&path).unwrap();
-        std::fs::remove_file(path).unwrap();
-        let spectrum = &loaded.doc.datasets[0].as_mass_spec().unwrap().run.streams[0].spectra[0];
-        assert_eq!(spectrum.source_native_id.as_deref(), Some("scan=1"));
-        assert_eq!(spectrum.retention_time_min, 0.5);
-        assert_eq!(spectrum.mz, [1.0]);
-        assert_eq!(spectrum.intensity, [2.0]);
     }
 }

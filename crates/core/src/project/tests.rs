@@ -126,6 +126,9 @@ pub(super) fn sample_app() -> PlotxApp {
         object: id,
         x_range: AxisRange::new(1.0, 2.0),
         y_range: None,
+        field: None,
+        unit: None,
+        source_stream: None,
     });
     if let Dataset::Nmr(n) = &mut app.doc.datasets[0] {
         n.peaks.marks.push(PeakMark {
@@ -295,15 +298,7 @@ fn project_roundtrip_preserves_data_recipe_and_view() {
         loaded.doc.canvases[0].selected_object,
         Some(loaded.doc.canvases[0].objects[0].id)
     );
-    assert_eq!(
-        loaded
-            .session
-            .ui
-            .analysis_selection
-            .as_ref()
-            .map(|s| s.x_range),
-        Some(AxisRange::new(1.0, 2.0))
-    );
+    assert!(loaded.session.ui.analysis_selection.is_none());
     assert_eq!(loaded.doc.canvases[0].name, "sample canvas");
     assert_eq!(loaded.doc.canvases[0].size_mm, [120.0, 80.0]);
     assert_eq!(loaded.doc.canvases[0].board_pos, [780.0, 123.0]);

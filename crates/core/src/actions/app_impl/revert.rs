@@ -206,6 +206,15 @@ impl PlotxApp {
                     before.1,
                 );
             }
+            Action::SetMassSpecIonChromatograms {
+                dataset, before, ..
+            } => {
+                self.set_mass_spec_ion_chromatograms_value(
+                    dataset_index!(*dataset),
+                    before.0.clone(),
+                    before.1,
+                );
+            }
             Action::SetCurveFitAnalyses {
                 dataset, before, ..
             } => {

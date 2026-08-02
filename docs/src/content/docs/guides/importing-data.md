@@ -76,20 +76,31 @@ extracted spectrum records its function, time range, and method. It does not
 change when the preview cursor moves and appears under **Analysis** in the Data
 browser.
 
-If the run contains several supported MS functions, use **MS function** under
-**Dataset tools → Mass spectrometry**. The initial active function is the first
-non-reference MS function. Function changes and spectrum extractions can be
-undone and redone with the standard Edit commands.
+To create an extracted ion chromatogram (XIC; also called an EIC), open
+**Dataset tools → Mass spectrometry** and choose **Select m/z range**. Drag
+across the current mass-spectrum plot, confirm the displayed m/z interval and
+acquisition stream, then choose **Extract ion chromatogram**.
+
+The resulting line plot contains one point per scan at its retention time in
+minutes. Each point is the sum of intensities within the selected m/z interval,
+including both endpoints. The result is saved and does not change when you move
+the scan preview or select another acquisition stream. XIC extraction does not
+integrate chromatographic peaks or calculate peak area.
+
+If the run contains several supported MS functions, use **Acquisition stream**
+under **Dataset tools → Mass spectrometry**. The initial stream is the first
+non-reference MS function. Stream changes, spectrum extractions, and XIC
+extractions can be undone and redone with the standard Edit commands.
 
 PlotX supports the low-resolution MassLynx encoding validated with SQD2 runs.
 If a required MS function uses another encoding, the import stops and
 identifies the function and instrument. Unsupported optional or reference
 functions produce an import warning when the rest of the run is readable.
 
-There is no LC–MS processing pipeline. The imported run, active function,
-detector channels, extracted spectra, and page layout are saved in the
-`.plotx` project. The scan preview is temporary and is cleared when the project
-is reopened.
+There is no LC–MS processing pipeline. The imported run, active acquisition
+stream, detector channels, extracted spectra, extracted ion chromatograms, and
+page layout are saved in the `.plotx` project. The scan preview is temporary
+and is cleared when the project is reopened.
 
 Tables can also be pasted straight from the clipboard with
 `Ctrl` + `Shift` + `V` — comma-, tab-, or semicolon-delimited text becomes a

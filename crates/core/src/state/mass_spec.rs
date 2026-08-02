@@ -1,4 +1,8 @@
-use super::{DatasetId, DatasetLineage, FieldCatalog, FieldId};
+use super::{
+    DatasetId, DatasetLineage, FieldCatalog, FieldId,
+    mass_spec_xic::{ExtractedIonChromatogram, IonChromatogramId, xic_key, xic_title},
+    point_ranges,
+};
 use plotx_figure::{Axis, Figure, Series, SeriesKind};
 use plotx_io::{
     AcquisitionStreamId, ChromatogramKind, MassSpecRun, MassSpectrum, SpectrumId, StreamRole,
@@ -72,6 +76,8 @@ pub struct MassSpecDataset {
     pub selected_spectrum: Option<SpectrumId>,
     pub extracted_spectra: Vec<ExtractedMassSpectrum>,
     pub next_extraction_id: ExtractionId,
+    pub extracted_ion_chromatograms: Vec<ExtractedIonChromatogram>,
+    pub next_ion_chromatogram_id: IonChromatogramId,
 }
 
 impl MassSpecDataset {
@@ -93,6 +99,23 @@ impl MassSpecDataset {
                     })
                     .then_some(self.active_stream)
             })
+            .or_else(|| {
+                self.extracted_ion_chromatograms.iter().find_map(|xic| {
+                    (self.field_catalog.id_for_key(&xic_key(xic.id)) == Some(field))
+                        .then_some(xic.stream)
+                })
+            })
+    }
+
+    /// The current-spectrum field is only meaningful for its active selected
+    /// scan; exposing that constraint here keeps interaction dispatch domain-local.
+    pub fn spectrum_stream_for_field(&self, field: FieldId) -> Option<AcquisitionStreamId> {
+        (self.selected_spectrum().is_some()
+            && self
+                .field_catalog
+                .id_for_key(&stream_spectrum_key(self.active_stream))
+                == Some(field))
+        .then_some(self.active_stream)
     }
     pub fn load(run: MassSpecRun) -> Self {
         let active_stream =
@@ -109,6 +132,8 @@ impl MassSpecDataset {
             selected_spectrum: None,
             extracted_spectra: Vec::new(),
             next_extraction_id: ExtractionId::new(1),
+            extracted_ion_chromatograms: Vec::new(),
+            next_ion_chromatogram_id: IonChromatogramId::new(1),
         }
     }
 
@@ -129,6 +154,7 @@ impl MassSpecDataset {
             self.selected_spectrum = None;
         }
         self.validate_extractions()?;
+        self.validate_ion_chromatograms()?;
         self.rebuild_field_catalog();
         Ok(())
     }
@@ -213,10 +239,12 @@ impl MassSpecDataset {
                 .id_for_key(&extracted_stream_spectrum_key(extraction.id))
                 == Some(id)
         }) || self
-            .run
-            .chromatograms
+            .extracted_ion_chromatograms
             .iter()
-            .any(|channel| self.field_catalog.id_for_key(&channel_key(&channel.id.0)) == Some(id))
+            .any(|xic| self.field_catalog.id_for_key(&xic_key(xic.id)) == Some(id))
+            || self.run.chromatograms.iter().any(|channel| {
+                self.field_catalog.id_for_key(&channel_key(&channel.id.0)) == Some(id)
+            })
         {
             Some(super::FieldRepresentation::Curve1D)
         } else {
@@ -340,6 +368,9 @@ impl MassSpecDataset {
         extractions.sort_by_key(|extraction| extraction.id);
         let mut previous = None;
         for extraction in extractions.iter() {
+            if extraction.id.get() == 0 {
+                return Err("LC–MS extraction has invalid id 0".to_owned());
+            }
             if previous == Some(extraction.id) {
                 return Err(format!(
                     "LC–MS project contains duplicate extraction id {}",
@@ -382,14 +413,20 @@ impl MassSpecDataset {
                     .checked_advance()
                     .ok_or_else(|| "LC–MS extraction identity overflow".to_owned())
             })?;
-        *next_id = (*next_id).max(minimum_next);
+        if *next_id < minimum_next {
+            return Err(
+                "LC–MS extraction identity allocator would reuse an existing identity".to_owned(),
+            );
+        }
         Ok(())
     }
 
-    fn rebuild_field_catalog(&mut self) {
-        let mut field_catalog = FieldCatalog::for_keys(mass_spec_dataset_field_keys(self));
-        field_catalog.attach_provenance(&self.run.source, None);
-        self.field_catalog = field_catalog;
+    pub(crate) fn rebuild_field_catalog(&mut self) {
+        self.field_catalog.reconcile_keys(
+            mass_spec_dataset_field_keys(self),
+            &self.run.source,
+            None,
+        );
     }
 
     pub fn field_figure(&self, id: FieldId) -> Option<Figure> {
@@ -492,6 +529,22 @@ impl MassSpecDataset {
                 true,
             ));
         }
+        for xic in &self.extracted_ion_chromatograms {
+            if self.field_catalog.id_for_key(&xic_key(xic.id)) == Some(id) {
+                return Some((
+                    xic_title(&self.run, xic),
+                    "Retention time (min)",
+                    "Extracted ion intensity".to_owned(),
+                    xic.time_min
+                        .iter()
+                        .copied()
+                        .zip(xic.intensity.iter().copied())
+                        .map(|(time, intensity)| [time, intensity])
+                        .collect(),
+                    false,
+                ));
+            }
+        }
         self.run.chromatograms.iter().find_map(|channel| {
             (self.field_catalog.id_for_key(&channel_key(&channel.id.0)) == Some(id)).then(|| {
                 (
@@ -541,6 +594,12 @@ pub(crate) fn mass_spec_dataset_field_keys(dataset: &MassSpecDataset) -> Vec<Str
                 .iter()
                 .map(|item| extracted_stream_spectrum_key(item.id)),
         )
+        .chain(
+            dataset
+                .extracted_ion_chromatograms
+                .iter()
+                .map(|item| xic_key(item.id)),
+        )
         .collect()
 }
 
@@ -564,7 +623,7 @@ pub fn channel_key(id: &str) -> String {
     format!("mass_spec.channel.{id}")
 }
 
-fn readable_ms_stream(stream: &plotx_io::AcquisitionStream) -> bool {
+pub(crate) fn readable_ms_stream(stream: &plotx_io::AcquisitionStream) -> bool {
     stream.role == StreamRole::Primary && !stream.spectra.is_empty()
 }
 
@@ -629,34 +688,6 @@ fn extracted_points(
         [extraction.start_time_min, extraction.end_time_min],
         aggregation,
     )
-}
-
-fn point_ranges(points: &[[f64; 2]], include_zero: bool) -> ([f64; 2], [f64; 2]) {
-    let mut x = [f64::INFINITY, f64::NEG_INFINITY];
-    let mut y = if include_zero {
-        [0.0, 0.0]
-    } else {
-        [f64::INFINITY, f64::NEG_INFINITY]
-    };
-    for point in points {
-        if point[0].is_finite() {
-            x = [x[0].min(point[0]), x[1].max(point[0])]
-        }
-        if point[1].is_finite() {
-            y = [y[0].min(point[1]), y[1].max(point[1])]
-        }
-    }
-    if !x[0].is_finite() || !x[1].is_finite() {
-        x = [0.0, 1.0]
-    } else if x[0] == x[1] {
-        x = [x[0], x[0] + 1.0]
-    }
-    if !y[0].is_finite() || !y[1].is_finite() {
-        y = [0.0, 1.0]
-    } else if y[0] == y[1] {
-        y = [y[0].min(0.0), y[0].max(0.0) + 1.0]
-    }
-    (x, y)
 }
 
 #[cfg(test)]
@@ -753,6 +784,9 @@ pub(crate) fn sample_mass_spec_run() -> MassSpecRun {
     }
 }
 
+#[cfg(test)]
+#[path = "mass_spec_interaction_tests.rs"]
+mod interaction_tests;
 #[cfg(test)]
 #[path = "mass_spec_tests.rs"]
 mod tests;

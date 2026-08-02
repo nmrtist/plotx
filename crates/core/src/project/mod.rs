@@ -114,12 +114,9 @@ impl WorkspaceSnapshot {
             active_canvas: app.session.active_canvas,
             primary_view: primary_view_to_str(app.session.view).to_owned(),
             tool: tool_to_str(app.session.tool).to_owned(),
-            analysis_selection: app
-                .session
-                .ui
-                .analysis_selection
-                .as_ref()
-                .map(SelectionDto::from_selection),
+            // Cursor and range gestures are transient interaction state, never
+            // part of a reproducible project document.
+            analysis_selection: None,
             primary_sidebar_width: app.session.primary_sidebar_width,
             primary_sidebar_visible: app.session.primary_sidebar_visible,
             secondary_sidebar_width: app.session.secondary_sidebar_width,
@@ -539,10 +536,7 @@ pub fn load_project(path: &Path) -> Result<PlotxApp> {
     app.session.view = primary_view_from_str(&workspace.primary_view);
     app.session.tool = tool_from_str(&workspace.tool);
     app.sync_selection_to_active_canvas();
-    app.session.ui.analysis_selection = workspace
-        .analysis_selection
-        .as_ref()
-        .and_then(SelectionDto::to_selection);
+    app.session.ui.analysis_selection = None;
     app.session.primary_sidebar_width = workspace.primary_sidebar_width;
     app.session.primary_sidebar_visible = workspace.primary_sidebar_visible;
     app.session.secondary_sidebar_width = workspace.secondary_sidebar_width;

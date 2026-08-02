@@ -441,6 +441,9 @@ fn transient_state_never_changes_ribbon_group_visibility() {
         object,
         x_range: range,
         y_range: None,
+        field: None,
+        unit: None,
+        source_stream: None,
     });
     assert_eq!(ribbon_groups(&app), expected);
 

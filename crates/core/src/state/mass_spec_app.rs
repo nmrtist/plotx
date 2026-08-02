@@ -6,6 +6,19 @@ const LCMS_CHROMATOGRAM_GESTURES: &[PlotInteractionGesture] = &[
     PlotInteractionGesture::Cursor,
     PlotInteractionGesture::Range,
 ];
+const LCMS_SPECTRUM_GESTURES: &[PlotInteractionGesture] = &[PlotInteractionGesture::Range];
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum MassSpecRangeSelection {
+    Chromatogram {
+        range: AxisRange,
+        stream: AcquisitionStreamId,
+    },
+    Spectrum {
+        range: AxisRange,
+        stream: AcquisitionStreamId,
+    },
+}
 
 impl PlotxApp {
     /// Returns the explicit semantic boundary for a plot that currently accepts
@@ -21,7 +34,12 @@ impl PlotxApp {
         let source = plot.binding.series.first()?.source;
         let dataset = self.doc.dataset_by_id(source.resource)?;
         let mass_spec = dataset.as_mass_spec()?;
-        mass_spec.chromatogram_stream_for_field(source.field)?;
+        let chromatogram_stream = mass_spec.chromatogram_stream_for_field(source.field);
+        let spectrum_stream = mass_spec.spectrum_stream_for_field(source.field);
+        if chromatogram_stream.is_none() && spectrum_stream.is_none() {
+            return None;
+        }
+        let source_stream = chromatogram_stream.or(spectrum_stream)?;
         let field = dataset.field_descriptor(source.field)?;
         let unit = field.units.first()?.clone();
         // A selection describes the whole overlaid plot.  Do not silently let
@@ -32,8 +50,12 @@ impl PlotxApp {
                     .doc
                     .dataset_by_id(series.source.resource)
                     .and_then(Dataset::as_mass_spec)
-                    .and_then(|dataset| dataset.chromatogram_stream_for_field(series.source.field))
-                    .is_none()
+                    .and_then(|dataset| {
+                        dataset
+                            .chromatogram_stream_for_field(series.source.field)
+                            .or_else(|| dataset.spectrum_stream_for_field(series.source.field))
+                    })
+                    != Some(source_stream)
                 || self
                     .doc
                     .dataset_by_id(series.source.resource)
@@ -52,7 +74,11 @@ impl PlotxApp {
                 object,
                 field: source.field,
                 axis: PlotInteractionAxis::X,
-                gestures: LCMS_CHROMATOGRAM_GESTURES,
+                gestures: if chromatogram_stream.is_some() {
+                    LCMS_CHROMATOGRAM_GESTURES
+                } else {
+                    LCMS_SPECTRUM_GESTURES
+                },
                 unit,
             },
         )
@@ -103,12 +129,14 @@ impl PlotxApp {
         else {
             return false;
         };
-        let Some(stream) = dataset.chromatogram_stream_for_field(target.field) else {
-            return false;
-        };
-        let stream_label = stream_display_label_for_id(&dataset.run, stream);
+        let chromatogram_stream = dataset.chromatogram_stream_for_field(target.field);
+        let spectrum_stream = dataset.spectrum_stream_for_field(target.field);
         match request {
             PlotInteractionRequest::Cursor { value, .. } => {
+                let Some(stream) = chromatogram_stream else {
+                    return false;
+                };
+                let stream_label = stream_display_label_for_id(&dataset.run, stream);
                 let selected = self.select_mass_spec_spectrum_near(target.dataset, stream, value);
                 if selected {
                     self.session.status =
@@ -117,21 +145,112 @@ impl PlotxApp {
                 selected
             }
             PlotInteractionRequest::Range { range, .. } => {
-                if target.unit != "min" || !range.is_valid() {
+                if !range.is_valid() {
                     return false;
                 }
+                let status = if chromatogram_stream.is_some() && target.unit == "min" {
+                    format!("Selected {:.3}-{:.3} min.", range.min, range.max)
+                } else if spectrum_stream.is_some() && target.unit == "m/z" {
+                    format!("Selected {:.4}-{:.4} m/z.", range.min, range.max)
+                } else {
+                    return false;
+                };
+                let Some(source_stream) = chromatogram_stream.or(spectrum_stream) else {
+                    return false;
+                };
                 self.session.ui.analysis_selection = Some(AnalysisSelection {
                     dataset: target.dataset,
                     canvas: target.canvas,
                     object: target.object,
                     x_range: range,
                     y_range: None,
+                    field: Some(target.field),
+                    unit: Some(target.unit.clone()),
+                    source_stream: Some(source_stream),
                 });
-                self.session.status = format!("Selected {:.3}-{:.3} min.", range.min, range.max);
+                self.session.status = status;
                 true
             }
         }
     }
+
+    /// Resolve a transient semantic gesture against its current binding. Dataset
+    /// identity alone is never sufficient: canvas, object, field, unit, and
+    /// source stream must still exactly match the gesture target.
+    pub fn mass_spec_range_selection(
+        &self,
+        dataset_id: DatasetId,
+    ) -> Option<MassSpecRangeSelection> {
+        let selection = self.session.ui.analysis_selection.as_ref()?;
+        let field = selection.field?;
+        let unit = selection.unit.as_deref()?;
+        let recorded_stream = selection.source_stream?;
+        if selection.dataset != dataset_id || !selection.x_range.is_valid() {
+            return None;
+        }
+        let canvas_index = self
+            .doc
+            .canvases
+            .iter()
+            .position(|canvas| canvas.resource_id == selection.canvas)?;
+        let descriptor = self.plot_interaction_descriptor(canvas_index, selection.object)?;
+        if descriptor.dataset != selection.dataset
+            || descriptor.canvas != selection.canvas
+            || descriptor.object != selection.object
+            || descriptor.field != field
+            || descriptor.unit != unit
+        {
+            return None;
+        }
+        let dataset = self.doc.dataset_by_id(dataset_id)?.as_mass_spec()?;
+        if descriptor.unit == "min" {
+            let stream = dataset.chromatogram_stream_for_field(field)?;
+            (stream == recorded_stream).then_some(MassSpecRangeSelection::Chromatogram {
+                range: selection.x_range,
+                stream,
+            })
+        } else if descriptor.unit == "m/z" {
+            let stream = dataset.spectrum_stream_for_field(field)?;
+            (stream == recorded_stream).then_some(MassSpecRangeSelection::Spectrum {
+                range: selection.x_range,
+                stream,
+            })
+        } else {
+            None
+        }
+    }
+
+    /// Consume only a currently valid chromatogram range for a saved spectrum.
+    /// The final resolution happens at invocation time so a transient gesture
+    /// cannot cross a stream or binding change between UI layout and action.
+    pub fn pin_mass_spectrum_extraction_from_selection(
+        &mut self,
+        dataset_id: DatasetId,
+        method: MassSpectrumExtractionMethod,
+    ) -> Result<ExtractionId, String> {
+        let Some(MassSpecRangeSelection::Chromatogram { range, stream }) =
+            self.mass_spec_range_selection(dataset_id)
+        else {
+            return Err("Select a current chromatogram retention-time range first.".to_owned());
+        };
+        self.pin_mass_spectrum_extraction_for_stream(
+            dataset_id, stream, range.min, range.max, method,
+        )
+    }
+
+    /// Consume only a currently valid current-spectrum m/z range for an XIC.
+    pub fn pin_ion_chromatogram_from_selection(
+        &mut self,
+        dataset_id: DatasetId,
+    ) -> Result<IonChromatogramId, String> {
+        let Some(MassSpecRangeSelection::Spectrum { range, stream }) =
+            self.mass_spec_range_selection(dataset_id)
+        else {
+            return Err("Select a current mass-spectrum m/z range first.".to_owned());
+        };
+        self.pin_ion_chromatogram(dataset_id, stream, range.min, range.max)
+    }
+
     pub fn pin_mass_spectrum_extraction(
         &mut self,
         dataset_id: DatasetId,
@@ -143,13 +262,34 @@ impl PlotxApp {
             .doc
             .dataset_index(dataset_id)
             .ok_or_else(|| "The LC–MS dataset is no longer available.".to_owned())?;
-        let canvas_index = self
-            .mass_spec_canvas_index(dataset_id)
-            .ok_or_else(|| "No canvas currently displays this LC–MS dataset.".to_owned())?;
         let stream = self.doc.datasets[dataset_index]
             .as_mass_spec()
             .ok_or_else(|| "The selected dataset is not LC–MS data.".to_owned())?
             .active_stream;
+        self.pin_mass_spectrum_extraction_for_stream(
+            dataset_id,
+            stream,
+            start_time_min,
+            end_time_min,
+            method,
+        )
+    }
+
+    pub fn pin_mass_spectrum_extraction_for_stream(
+        &mut self,
+        dataset_id: DatasetId,
+        stream: AcquisitionStreamId,
+        start_time_min: f64,
+        end_time_min: f64,
+        method: MassSpectrumExtractionMethod,
+    ) -> Result<ExtractionId, String> {
+        let dataset_index = self
+            .doc
+            .dataset_index(dataset_id)
+            .ok_or_else(|| "The LC–MS dataset is no longer available.".to_owned())?;
+        let canvas_index = self
+            .mass_spec_canvas_index(dataset_id)
+            .ok_or_else(|| "No canvas currently displays this LC–MS dataset.".to_owned())?;
         let (before, after, extraction_id, field, title) = {
             let dataset = self.doc.datasets[dataset_index]
                 .as_mass_spec()
@@ -240,6 +380,106 @@ impl PlotxApp {
         Ok(extraction_id)
     }
 
+    pub fn pin_ion_chromatogram(
+        &mut self,
+        dataset_id: DatasetId,
+        stream: AcquisitionStreamId,
+        first_mz: f64,
+        second_mz: f64,
+    ) -> Result<IonChromatogramId, String> {
+        let dataset_index = self
+            .doc
+            .dataset_index(dataset_id)
+            .ok_or_else(|| "The LC–MS dataset is no longer available.".to_owned())?;
+        let canvas_index = self
+            .mass_spec_canvas_index(dataset_id)
+            .ok_or_else(|| "No canvas currently displays this LC–MS dataset.".to_owned())?;
+        let (before, after, xic_id, field, title) = {
+            let dataset = self.doc.datasets[dataset_index]
+                .as_mass_spec()
+                .ok_or_else(|| "The selected dataset is not LC–MS data.".to_owned())?;
+            let before = (
+                dataset.extracted_ion_chromatograms.clone(),
+                dataset.next_ion_chromatogram_id,
+            );
+            let xic = dataset.plan_ion_chromatogram(stream, first_mz, second_mz)?;
+            let xic_id = xic.id;
+            let mut planned_catalog = dataset.field_catalog.clone();
+            let field = planned_catalog.ensure_key(xic_key(xic_id));
+            let title = xic_title(&dataset.run, &xic);
+            let next_id = xic_id
+                .checked_advance()
+                .ok_or_else(|| "LC–MS XIC identity overflow".to_owned())?;
+            let mut after_items = before.0.clone();
+            after_items.push(xic);
+            (before, (after_items, next_id), xic_id, field, title)
+        };
+        let [width, height] = self.doc.canvases[canvas_index].size_pt();
+        let object_id = self.doc.canvases[canvas_index].allocate_object_id();
+        let mut object = self.build_plot_object(
+            dataset_index,
+            ObjectFrame::new(0.0, 0.0, width, height),
+            object_id,
+            "Extracted ion chromatogram".to_owned(),
+        );
+        if let Some(plot) = object.plot_mut() {
+            plot.chart.type_id = "mass_chromatogram".to_owned();
+            if let Some(series) = plot.binding.series.first_mut() {
+                series.source.field = field;
+                series.encoding = plotx_figure::SeriesEncoding::default();
+            }
+            plot.panel.user_note = title;
+        }
+        let selection_before = self.session.ui.selection.clone();
+        let before_frames = self.doc.canvases[canvas_index]
+            .objects
+            .iter()
+            .filter_map(|object| {
+                object.plot().and_then(|plot| {
+                    plot.binding
+                        .dataset_ids()
+                        .contains(&dataset_id)
+                        .then_some((object.id, object.frame))
+                })
+            })
+            .collect::<Vec<_>>();
+        let row_height = height / (before_frames.len() + 1) as f32;
+        let mut after_frames = before_frames
+            .iter()
+            .enumerate()
+            .map(|(row, (id, _))| {
+                (
+                    *id,
+                    ObjectFrame::new(0.0, row as f32 * row_height, width, row_height),
+                )
+            })
+            .collect::<Vec<_>>();
+        after_frames.push((
+            object_id,
+            ObjectFrame::new(
+                0.0,
+                before_frames.len() as f32 * row_height,
+                width,
+                row_height,
+            ),
+        ));
+        self.execute_action(Action::Composite(vec![
+            Action::insert_object(canvas_index, object, selection_before),
+            Action::SetMassSpecIonChromatograms {
+                dataset: dataset_id,
+                before,
+                after,
+            },
+            Action::SetObjectFrames {
+                canvas: canvas_index,
+                before: before_frames,
+                after: after_frames,
+            },
+        ]));
+        self.session.ui.analysis_selection = None;
+        Ok(xic_id)
+    }
+
     fn mass_spec_canvas_index(&self, dataset_id: DatasetId) -> Option<usize> {
         self.session
             .active_canvas
@@ -319,6 +559,26 @@ impl PlotxApp {
         dataset
             .replace_extractions(extractions, next_extraction_id)
             .expect("validated mass-spectrum extraction action");
+        self.rebuild_canvases_for(index);
+    }
+
+    pub(crate) fn set_mass_spec_ion_chromatograms_value(
+        &mut self,
+        index: usize,
+        chromatograms: Vec<ExtractedIonChromatogram>,
+        next_id: IonChromatogramId,
+    ) {
+        let Some(dataset) = self
+            .doc
+            .datasets
+            .get_mut(index)
+            .and_then(Dataset::as_mass_spec_mut)
+        else {
+            return;
+        };
+        dataset
+            .replace_ion_chromatograms(chromatograms, next_id)
+            .expect("validated extracted-ion chromatogram action");
         self.rebuild_canvases_for(index);
     }
 

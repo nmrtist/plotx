@@ -257,7 +257,7 @@ pub fn write_dataset_blob(
             super::electrophysiology_convert::write_electrophysiology_blob(zip, recording)
         }
         DatasetBlob::Afm(data) => super::afm_convert::write_afm(zip, data),
-        DatasetBlob::MassSpec(run) => super::mass_spec_convert::write(zip, run),
+        DatasetBlob::MassSpec(dataset) => super::mass_spec_convert::write(zip, dataset),
     }
 }
 

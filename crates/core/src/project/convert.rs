@@ -11,7 +11,7 @@ pub enum DatasetBlob<'a> {
     Complex(&'a [Complex64]),
     Electrophysiology(&'a crate::state::ElectrophysiologyDataset),
     Afm(&'a plotx_io::AfmData),
-    MassSpec(&'a plotx_io::MassSpecRun),
+    MassSpec(&'a crate::state::MassSpecDataset),
 }
 
 pub struct DatasetObjects<'a> {
@@ -262,10 +262,6 @@ pub fn dataset_to_objects<'a>(
                     domain: "mass_spectrometry".to_owned(),
                 },
                 extensions: serde_json::json!({
-                    "plotx.mass_spec": {
-                        "active_stream": mass_spec.active_stream.get(),
-                        "extracted_spectra": &mass_spec.extracted_spectra
-                    },
                     "plotx.fields": &mass_spec.field_catalog
                 }),
             };
@@ -281,7 +277,7 @@ pub fn dataset_to_objects<'a>(
                 parameters: RecipeParameters::default(),
                 extensions: serde_json::Value::Null,
             };
-            DatasetObjects::primary(data, DatasetBlob::MassSpec(&mass_spec.run), recipe)
+            DatasetObjects::primary(data, DatasetBlob::MassSpec(mass_spec), recipe)
         }
     })
 }
@@ -300,38 +296,15 @@ pub fn object_to_dataset(
                 data.payload.storage
             )));
         }
-        let run = read_entry(
+        let mut dataset = read_entry(
             zip,
             &data.payload.blob,
             "LC–MS payload",
             ProjectLoadLimits::default().max_entry_bytes,
             |reader| super::mass_spec_convert::decode(reader),
         )?;
-        let mut dataset = crate::state::MassSpecDataset::load(run);
         dataset.field_catalog = read_field_catalog(data)?;
         dataset.name = data.label.clone();
-        if let Some(state) = data.extensions.get("plotx.mass_spec") {
-            if let Some(value) = state
-                .get("active_stream")
-                .and_then(serde_json::Value::as_u64)
-            {
-                let active_stream = plotx_io::AcquisitionStreamId::new(value);
-                if !dataset.supported_ms_streams().any(|id| id == active_stream) {
-                    return Err(ProjectError::Invalid(format!(
-                        "LC–MS active stream {active_stream} is missing or unreadable"
-                    )));
-                }
-                dataset.active_stream = active_stream;
-            }
-            if let Some(value) = state.get("extracted_spectra") {
-                dataset.extracted_spectra =
-                    serde_json::from_value(value.clone()).map_err(|error| {
-                        ProjectError::Invalid(format!(
-                            "LC–MS extracted-spectrum metadata is malformed: {error}"
-                        ))
-                    })?;
-            }
-        }
         dataset.repair_selection().map_err(ProjectError::Invalid)?;
         let dataset = Dataset::MassSpec(Box::new(dataset));
         dataset

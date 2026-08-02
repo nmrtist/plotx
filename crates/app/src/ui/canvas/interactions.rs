@@ -134,6 +134,9 @@ pub(crate) fn finish_selection_drag(
         object: object_id,
         x_range: x,
         y_range: y,
+        field: None,
+        unit: None,
+        source_stream: None,
     });
     let unit = if app.doc.datasets[dataset].as_mass_spec().is_some() {
         "min"
