@@ -50,6 +50,18 @@ impl SizePreset {
         [self.width_mm, self.default_height_mm]
     }
 
+    /// Page inset applied with this preset. Journal dimensions describe the
+    /// submitted artwork itself, while paper and slides describe a surface
+    /// whose content benefits from a surrounding safe area.
+    pub const fn default_margin_mm(&self) -> [f32; 4] {
+        let margin = match self.group {
+            SizePresetGroup::Journal => 0.0,
+            SizePresetGroup::Paper => 15.0,
+            SizePresetGroup::Presentation => 10.0,
+        };
+        [margin; 4]
+    }
+
     /// Fixed-rectangle presets compare both dimensions; journal presets are
     /// defined by their width alone (height is content-driven).
     pub fn is_fixed(&self) -> bool {
@@ -397,6 +409,13 @@ mod tests {
             size_display_name([210.0, 297.0], None).as_deref(),
             Some("A4 · Portrait")
         );
+    }
+
+    #[test]
+    fn preset_margins_follow_the_output_medium() {
+        assert_eq!(NATURE_SINGLE_COLUMN.default_margin_mm(), [0.0; 4]);
+        assert_eq!(PAPER_A4.default_margin_mm(), [15.0; 4]);
+        assert_eq!(PRESENTATION_16X9.default_margin_mm(), [10.0; 4]);
     }
 
     #[test]

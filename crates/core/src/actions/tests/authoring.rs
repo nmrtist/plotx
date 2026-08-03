@@ -17,6 +17,7 @@ fn new_canvas_from_template_sets_fields_and_is_undoable() {
     let created = app.doc.canvases.last().unwrap();
     assert_eq!(created.size_mm, [183.0, 120.0]);
     assert_eq!(created.layout.cols, 2);
+    assert_eq!(created.layout.margin_mm, [0.0; 4]);
     assert!(created.objects.is_empty());
     assert_eq!(app.session.active_canvas, Some(before_len));
     assert_eq!(
@@ -31,6 +32,32 @@ fn new_canvas_from_template_sets_fields_and_is_undoable() {
 
     app.redo();
     assert_eq!(app.doc.canvases[before_len].board_pos, created_pos);
+}
+
+#[test]
+fn canvas_templates_use_margins_for_pages_but_not_submitted_figures() {
+    use crate::templates::CanvasTemplate;
+
+    let templates = CanvasTemplate::all();
+    for name in ["Single-column figure", "Double-column figure"] {
+        let template = templates
+            .iter()
+            .find(|template| template.name.starts_with(name))
+            .expect("journal template");
+        assert_eq!(template.layout.margin_mm, [0.0; 4]);
+    }
+
+    let presentation = templates
+        .iter()
+        .find(|template| template.name == "Presentation 16:9")
+        .expect("presentation template");
+    assert_eq!(presentation.layout.margin_mm, [10.0; 4]);
+
+    let poster = templates
+        .iter()
+        .find(|template| template.name == "Poster panel")
+        .expect("poster template");
+    assert_eq!(poster.layout.margin_mm, [15.0; 4]);
 }
 
 #[test]

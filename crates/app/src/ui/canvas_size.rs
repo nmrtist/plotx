@@ -268,6 +268,20 @@ fn apply_size(
     after_size: [f32; 2],
     preset: Option<&'static SizePreset>,
 ) {
+    if let Some(action) = size_and_margin_action(app, ci, after_size, preset) {
+        app.execute_action(action);
+    }
+    if let Some(preset) = preset {
+        update_canvas_size_defaults(app, |d| d.note_recent(preset.id));
+    }
+}
+
+fn size_and_margin_action(
+    app: &PlotxApp,
+    ci: usize,
+    after_size: [f32; 2],
+    preset: Option<&'static SizePreset>,
+) -> Option<Action> {
     // Size and preset identity travel through the action together, so
     // undo/redo restores both and an ambiguous width (183 mm is Nature double
     // and Science full width) keeps the user's choice across history moves.
@@ -276,16 +290,27 @@ fn apply_size(
         size_mm: after_size,
         preset_id: preset.map(|p| p.id.to_owned()),
     };
+    let mut actions = Vec::new();
     if before != after {
         let action = if app.settings.canvas_size.scale_content {
             Action::set_canvas_size_scaling_content(app, ci, after)
         } else {
             Action::set_canvas_size(ci, before, after)
         };
-        app.execute_action(action);
+        actions.push(action);
     }
     if let Some(preset) = preset {
-        update_canvas_size_defaults(app, |d| d.note_recent(preset.id));
+        let before = app.doc.canvases[ci].layout;
+        let mut after = before;
+        after.margin_mm = preset.default_margin_mm();
+        if before != after {
+            actions.push(Action::set_page_layout(ci, before, after));
+        }
+    }
+    match actions.len() {
+        0 => None,
+        1 => actions.pop(),
+        _ => Some(Action::Composite(actions)),
     }
 }
 
@@ -482,5 +507,54 @@ fn set_scale_content_default(app: &mut PlotxApp, scale_content: bool) {
         Err(error) => {
             app.session.status = format!("Could not save the scale-content preference: {error}");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use plotx_core::state::{CanvasDocument, NATURE_SINGLE_COLUMN, PAPER_A4};
+
+    fn app_with_canvas(size_mm: [f32; 2], margin_mm: [f32; 4]) -> PlotxApp {
+        let mut app = PlotxApp::new_with_settings(plotx_core::settings::Settings::default());
+        let mut canvas = CanvasDocument::new("Canvas 1".to_owned(), size_mm);
+        canvas.layout.margin_mm = margin_mm;
+        app.doc.canvases.push(canvas);
+        app.session.active_canvas = Some(0);
+        app
+    }
+
+    #[test]
+    fn paper_preset_applies_size_and_safe_margin_as_one_undo_step() {
+        let mut app = app_with_canvas([89.0, 60.0], [0.0; 4]);
+        let action = size_and_margin_action(&app, 0, PAPER_A4.size_mm(), Some(&PAPER_A4))
+            .expect("paper preset action");
+
+        app.execute_action(action);
+        assert_eq!(app.doc.canvases[0].size_mm, PAPER_A4.size_mm());
+        assert_eq!(app.doc.canvases[0].layout.margin_mm, [15.0; 4]);
+        assert_eq!(app.session.undo_stack.len(), 1);
+
+        app.undo();
+        assert_eq!(app.doc.canvases[0].size_mm, [89.0, 60.0]);
+        assert_eq!(app.doc.canvases[0].layout.margin_mm, [0.0; 4]);
+    }
+
+    #[test]
+    fn journal_preset_clears_an_existing_page_margin_even_at_the_same_size() {
+        let mut app = app_with_canvas(NATURE_SINGLE_COLUMN.size_mm(), [15.0; 4]);
+        let action = size_and_margin_action(
+            &app,
+            0,
+            NATURE_SINGLE_COLUMN.size_mm(),
+            Some(&NATURE_SINGLE_COLUMN),
+        )
+        .expect("journal margin action");
+
+        app.execute_action(action);
+        assert_eq!(app.doc.canvases[0].layout.margin_mm, [0.0; 4]);
+
+        app.undo();
+        assert_eq!(app.doc.canvases[0].layout.margin_mm, [15.0; 4]);
     }
 }

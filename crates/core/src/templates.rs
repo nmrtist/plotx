@@ -23,7 +23,10 @@ impl CanvasTemplate {
             CanvasTemplate {
                 name: "Presentation 16:9",
                 size_mm: PRESENTATION_16X9.size_mm(),
-                layout: PageLayout::default(),
+                layout: PageLayout {
+                    margin_mm: PRESENTATION_16X9.default_margin_mm(),
+                    ..PageLayout::default()
+                },
                 background: white,
                 theme_id: None,
             },
@@ -32,7 +35,7 @@ impl CanvasTemplate {
                 size_mm: [89.0, 60.0],
                 layout: PageLayout {
                     spacing_mode: crate::layout::SpacingMode::Visual,
-                    margin_mm: [4.0, 4.0, 4.0, 4.0],
+                    margin_mm: [0.0; 4],
                     gutter_mm: 3.0,
                     rows: 1,
                     cols: 1,
@@ -46,7 +49,7 @@ impl CanvasTemplate {
                 size_mm: [183.0, 120.0],
                 layout: PageLayout {
                     spacing_mode: crate::layout::SpacingMode::Visual,
-                    margin_mm: [6.0, 6.0, 6.0, 6.0],
+                    margin_mm: [0.0; 4],
                     gutter_mm: 5.0,
                     rows: 1,
                     cols: 2,
@@ -60,7 +63,7 @@ impl CanvasTemplate {
                 size_mm: [300.0, 400.0],
                 layout: PageLayout {
                     spacing_mode: crate::layout::SpacingMode::Visual,
-                    margin_mm: [14.0, 14.0, 14.0, 14.0],
+                    margin_mm: [15.0; 4],
                     gutter_mm: 10.0,
                     rows: 3,
                     cols: 1,
