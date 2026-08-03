@@ -96,6 +96,7 @@ impl PlotxApp {
             canvas,
             self.session.active_canvas,
         ));
+        self.reveal_board_frame(crate::state::FrameRef::Page(index));
         self.session.status = format!("New canvas from the {} template.", template.name);
     }
 }

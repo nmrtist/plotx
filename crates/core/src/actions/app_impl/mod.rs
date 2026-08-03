@@ -192,7 +192,7 @@ impl PlotxApp {
             return;
         }
         if canvas.board_pos == [0.0, 0.0] {
-            canvas.board_pos = crate::state::next_page_board_pos(self);
+            canvas.board_pos = crate::state::next_board_frame_pos(self, canvas.size_pt());
         }
         self.doc.canvases.insert(index, canvas);
         self.session.active_canvas = Some(index);

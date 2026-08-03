@@ -25,8 +25,12 @@ float32、单/多记录通道、定长或变长 sweep、ADC 缩放、通道名�
 
 选中 recording，然后选择**分析** → **绘制区域**。在曲线上拖动，标出一个或
 多个时间窗；每个时间窗都会在所有已选 sweep 中测量。选择 Height、Area、Max、
-Min 或 Mean，再选择**继续到系列表**，即可为每个区域创建联动表格和颜色对应的
-点系列。
+Min 或 Mean，再选择 **View extracted curves**。PlotX 会选中散点图并自动缩放，
+图中每个区域对应一个同色系列。同步数据表仍列在 Data 浏览器的 recording 之下，
+但不会另占一个画板框架。在 Curve Fit 任务卡片中使用 **Fit curves**、
+**View data** 或 **Back to regions**。数据以只读方式打开；若要生成独立表，
+可在 Regions 任务卡片中选择 **Save Snapshot**，也可在数据表中选择
+**Save editable snapshot**。
 
 若要得到峰值、平均值和峰值时间，请打开 **Patch clamp**。PlotX 使用当前选中的
 区域；若未选中区域，则使用列表中的第一个区域。在 **Peak mode** 下选择

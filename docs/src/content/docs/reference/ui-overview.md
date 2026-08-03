@@ -14,8 +14,10 @@ introduces the same regions in walkthrough form.
   pages, and saved board views; its **Data** mode shows every dataset and the
   results derived from it.
 - **Canvas** / **the board** — the central area: an infinite board holding
-  your plots, arranged on grid-snapped pages. "Page" is one framed area of
-  the board that exports as one figure.
+  your plots and ordinary data sheets. "Page" is one framed area of the board
+  that exports as one figure. Drag a page or table-sheet header to place it;
+  near another frame, it snaps to that frame's edges and the standard gap.
+  Hold <kbd>Alt</kbd> while dragging to bypass snapping.
 - **Secondary Side Bar** — the right panel, holding the Object inspector and
   contextual analysis tools for the selection. It scrolls as one column, so a
   long inspector never pushes the tools below it out of reach. Processing is
@@ -74,7 +76,10 @@ introduces the same regions in walkthrough form.
   them: reach them with **Preferences…** in **View → Display**, from the
   command palette, or with <kbd>Ctrl</kbd>+<kbd>,</kbd>.
 - **Data sheet** — the spreadsheet view of a data table, opened by
-  double-clicking the table.
+  double-clicking the table. A synchronized region table remains in the Data
+  browser and opens read-only; its extracted-curves plot is the only board
+  frame created for it. Use **Save editable snapshot** when you need values
+  that can diverge from the source regions.
 - **Command palette** — the searchable list of commands, settings, and data on
   <kbd>Ctrl</kbd>+<kbd>K</kbd>; see
   [Command palette](/reference/command-palette/).

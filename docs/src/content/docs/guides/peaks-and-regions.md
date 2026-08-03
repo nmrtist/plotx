@@ -54,28 +54,31 @@ adjust its height. The regions remain on the plot and can be moved or resized.
 Choose Height, Area, Max, Min, or Mean as the default measurement;
 an individual region can override that choice. Enter a descriptive **Label**
 in a region card to replace its automatic axis-midpoint label everywhere,
-including the source figure, series table, fitted plot, and export.
+including the source figure, synchronized table, fitted plot, and export.
 With **Select** or **Regions** active, drag a region label to place it where it
 does not cover the trace. Its position is saved and used by figure exports.
 Double-click the label to return it to automatic placement.
 
 Each region has a stable color. The same color identifies its band on the
-source figure, its scatter series in the generated table, and any fit drawn for
-that series. A fitted point series and its curve share one legend entry with a
-combined point-and-line symbol. **Show regions on figure and export** is
+source figure, its point series in the extracted-curves plot, and any fit drawn
+for that series. A fitted point series and its curve share one legend entry
+with a combined point-and-line symbol. **Show regions on figure and export** is
 enabled by default. Turn it off to export the source figure without region
 annotations. SVG, PDF, bitmap, EMF, and vector clipboard output preserve the
 colored bands, boundaries, and labels; editing handles and drag previews are
 not exported.
 
-When the regions are ready, choose **Continue to Series Table** in the task
-card. Each region becomes a column in a live table that stays synchronized with
-later region changes. The **Series Table** button in the Ribbon opens the same
-table. Use **Save Snapshot** only when you need an independent copy that will
-not change with the regions.
+When the regions are ready, choose **View extracted curves** in the task card.
+PlotX selects and zooms to a scatter plot with one point series per region. Its
+synchronized data table is listed under the source in the Data browser, with
+one column per region, but does not add a second board frame. Use **Fit curves**,
+**View data**, or **Back to regions** in the Curve Fit task card. The data opens
+read-only because the next region edit recalculates it. To create an independent
+table, choose **Save Snapshot** in the Regions task card, or open **View data**
+and choose **Save editable snapshot**.
 
-To export either the linked table or a frozen Series in full, select that table
-and use **Export Data…** → **Complete typed table / series**.
+To export either the synchronized table or an editable snapshot in full, select
+that table and use **Export Data…** → **Complete typed table / series**.
 
 For pseudo-2D analysis, each region becomes one decay curve — see
 [Pseudo-2D analysis](/guides/pseudo-2d/). For patch-clamp recordings, each

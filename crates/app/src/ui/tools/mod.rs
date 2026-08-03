@@ -9,11 +9,12 @@ mod mass_spec;
 mod processing;
 mod pseudo;
 mod region_analysis;
+mod result_navigation;
 mod slice;
 mod statistics;
 mod statistics_config;
 mod symmetry;
-mod task_card;
+pub(crate) mod task_card;
 
 use cursors::cursor_group;
 use curve_fit::curve_fit_group;

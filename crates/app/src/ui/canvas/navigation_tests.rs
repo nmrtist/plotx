@@ -753,7 +753,7 @@ fn board_pan_clears_fit_and_moves_both_axes() {
     let mut app = PlotxApp::new();
     app.session.board.pan = [10.0, -4.0];
     app.session.board.auto_fit = true;
-    app.session.board_fit = Some(BoardFitTarget::Frame(FrameRef::Page(0)));
+    app.session.board_fit = Some(BoardFitTarget::Region([0.0, 0.0, 1.0, 1.0]));
 
     pan_board_view(&mut app, Vec2::new(7.0, -3.0));
 

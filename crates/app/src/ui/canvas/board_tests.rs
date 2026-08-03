@@ -117,6 +117,72 @@ fn request_board_fit_viewport_targets_exact_zoom_and_pan() {
     );
 }
 
+#[test]
+fn transient_reveal_is_consumed_into_the_fit_animation() {
+    let mut app = app_with_pages(&[[0.0, 0.0]]);
+    let ctx = egui::Context::default();
+    let page_id = app.doc.canvases[0].resource_id;
+    app.session.board_reveal = Some(plotx_core::state::BoardFrameId::Page(page_id));
+
+    consume_board_reveal(&mut app, &ctx);
+
+    assert_eq!(app.session.board_reveal, None);
+    assert_eq!(
+        app.session.board_fit,
+        Some(BoardFitTarget::Frame(
+            plotx_core::state::BoardFrameId::Page(page_id)
+        ))
+    );
+}
+
+#[test]
+fn reveal_and_fit_keep_target_identity_when_page_indices_shift() {
+    let mut app = app_with_pages(&[[0.0, 0.0], [500.0, 0.0]]);
+    let ctx = egui::Context::default();
+    let target_id = app.doc.canvases[1].resource_id;
+    app.session.board_reveal = Some(plotx_core::state::BoardFrameId::Page(target_id));
+
+    app.doc.canvases.swap(0, 1);
+    consume_board_reveal(&mut app, &ctx);
+
+    let target = plotx_core::state::BoardFrameId::Page(target_id);
+    assert_eq!(app.session.board_fit, Some(BoardFitTarget::Frame(target)));
+    assert_eq!(board_frame_ref(&app, target), Some(FrameRef::Page(0)));
+
+    app.doc.canvases.swap(0, 1);
+    assert_eq!(board_frame_ref(&app, target), Some(FrameRef::Page(1)));
+}
+
+#[test]
+fn reveal_of_a_removed_page_is_discarded_without_retargeting() {
+    let mut app = app_with_pages(&[[0.0, 0.0], [500.0, 0.0]]);
+    let ctx = egui::Context::default();
+    let removed_id = app.doc.canvases[0].resource_id;
+    app.session.board_reveal = Some(plotx_core::state::BoardFrameId::Page(removed_id));
+
+    app.doc.canvases.remove(0);
+    consume_board_reveal(&mut app, &ctx);
+
+    assert_eq!(app.session.board_reveal, None);
+    assert_eq!(app.session.board_fit, None);
+}
+
+#[test]
+fn fit_animation_cancels_when_its_stable_target_is_removed() {
+    let mut app = app_with_pages(&[[0.0, 0.0], [500.0, 0.0]]);
+    let ctx = egui::Context::default();
+    request_board_fit(&mut app, &ctx, FrameRef::Page(0));
+    assert!(app.session.board_fit.is_some());
+
+    app.doc.canvases.remove(0);
+    let rect = screen();
+    let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+        drive_board_fit(&mut app, ui, rect, rect);
+    });
+
+    assert_eq!(app.session.board_fit, None);
+}
+
 /// Presses the primary button at `p` with a right side bar covering x >= 800.
 /// The first pass registers the layers; only the second one carries the press.
 fn press_with_side_bar(app: &mut PlotxApp, p: Pos2) {

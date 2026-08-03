@@ -10,8 +10,8 @@ use plotx_core::state::{
     PhaseDrag, PhaseDragKind, PhaseOrient, PlotxApp, Region, RegionDrag, RegionDragKind, RegionId,
     RegionSelection, ResizeHandle, SHEET_COL_W_PT, SHEET_HEADER_H_PT, SHEET_MAX_ROWS,
     SHEET_ROW_H_PT, Selection, SelectionDrag, TableDataset, TextEditState, TileDropCacheKey,
-    TileDropPreview, Tool, ZoomAxis, ZoomDrag, board_frames, frame_board_pos, frame_board_rect,
-    set_frame_board_pos, toggle_frame_selection_synced,
+    TileDropPreview, Tool, ZoomAxis, ZoomDrag, board_frame_id, board_frame_ref, board_frames,
+    frame_board_pos, frame_board_rect, set_frame_board_pos, toggle_frame_selection_synced,
 };
 use plotx_core::{Integral2D, IntegralResult};
 use plotx_render::Rect as PlotRect;
@@ -125,7 +125,9 @@ pub fn render_central(app: &mut PlotxApp, ui: &mut Ui) {
     let rect = resp.rect;
     let chrome = ChromeStyle::from_visuals(ui.visuals(), app.settings.appearance.canvas_accent);
     ensure_board_view(app, rect);
-    drive_board_fit(app, ui, rect);
+    consume_board_reveal(app, ui.ctx());
+    let safe_fit = super::tools::task_card::safe_fit_rect(app, rect);
+    drive_board_fit(app, ui, rect, safe_fit);
 
     // Raw-pointer gestures must not start through UI layered over the canvas.
     let pointer_hits_canvas_layer = ui

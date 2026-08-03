@@ -124,7 +124,7 @@ pub(crate) fn render_task(app: &mut PlotxApp, host: &mut Ui) {
                             && count > 0
                             && ui
                                 .small_button(icon::TABLE)
-                                .on_hover_text("Continue to Series Table")
+                                .on_hover_text("View extracted curves")
                                 .clicked()
                         {
                             open_table = true;
@@ -347,11 +347,7 @@ fn region_task_body(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
     if drawing && ui.button("Done drawing").clicked() {
         app.set_tool(Tool::BrowseZoom);
     }
-    let next = if table.is_some() {
-        format!("Open Series Table {}", icon::ARROW_RIGHT)
-    } else {
-        format!("Continue to Series Table {}", icon::ARROW_RIGHT)
-    };
+    let next = format!("View extracted curves {}", icon::ARROW_RIGHT);
     if ui
         .add_enabled_ui(count > 0, |ui| {
             let text = egui::RichText::new(next)
@@ -416,7 +412,8 @@ fn finish_label_edit(app: &mut PlotxApp, dataset: plotx_core::state::DatasetId) 
 }
 
 pub(crate) fn open_region_table(app: &mut PlotxApp, di: usize) {
-    if app.region_table_index(di).is_none() {
+    let created = app.region_table_index(di).is_none();
+    if created {
         app.create_region_table(di);
     }
     let Some(tj) = app.region_table_index(di) else {
@@ -429,11 +426,13 @@ pub(crate) fn open_region_table(app: &mut PlotxApp, di: usize) {
         .iter()
         .position(|canvas| canvas.active_dataset() == Some(app.doc.datasets[tj].resource_id()))
     {
-        app.session.active_canvas = Some(ci);
-        app.sync_selection_to_active_canvas();
+        app.reveal_board_frame(plotx_core::state::FrameRef::Page(ci));
     }
     app.focus_single(tj);
     super::curve_fit::open_task(app, tj);
+    if !created {
+        app.session.status = "Viewing extracted region curves.".to_owned();
+    }
 }
 
 /// One summary line per fitted column of the linked series table. Computed

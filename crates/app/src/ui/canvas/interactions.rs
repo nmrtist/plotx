@@ -246,7 +246,8 @@ pub(crate) fn ensure_board_view(app: &mut PlotxApp, rect: egui::Rect) {
         return;
     }
     if let Some(bbox) = all_frames_bbox(app) {
-        app.session.board = board_fit_bbox_with_chrome(bbox, rect);
+        let safe = crate::ui::tools::task_card::safe_fit_rect(app, rect);
+        app.session.board = board_fit_bbox_with_chrome_in_rect(bbox, rect, safe);
     }
 }
 
@@ -602,7 +603,7 @@ pub(crate) fn arrange_context_menu(app: &mut PlotxApp, ci: usize, ui: &mut Ui) {
         app.set_show_grid(ci, show_grid);
     }
     let mut snap = app.settings.general.snap_enabled;
-    if ui.checkbox(&mut snap, "Snap to grid & objects").clicked() {
+    if ui.checkbox(&mut snap, "Snap objects & frames").clicked() {
         app.set_snap_enabled(snap);
     }
     // Channel 4: whatever the selection draws, its settings are one click from

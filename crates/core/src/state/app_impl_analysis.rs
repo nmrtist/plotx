@@ -563,9 +563,3 @@ pub(super) fn table_fit_plot_samples(
     }
     Ok(samples)
 }
-
-pub(super) fn next_sheet_pos_after_new_canvas(app: &PlotxApp) -> [f32; 2] {
-    let mut canvas = CanvasDocument::new(String::new(), DEFAULT_CANVAS_SIZE_MM);
-    canvas.board_pos = crate::state::next_page_board_pos(app);
-    crate::state::next_sheet_board_pos_after_page(app, canvas.board_rect_pt())
-}

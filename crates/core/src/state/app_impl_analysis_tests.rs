@@ -56,7 +56,13 @@ fn live_and_frozen_region_tables_record_lineage() {
     });
     source.region_analysis.next_region_id = RegionId::new(2);
     let mut app = PlotxApp::new();
-    app.doc.datasets.push(Dataset::Nmr2D(Box::new(source)));
+    let insert = Action::insert_dataset_with_default_canvas(
+        &app,
+        Dataset::Nmr2D(Box::new(source)),
+        "Source DOSY".to_owned(),
+        DEFAULT_CANVAS_SIZE_MM,
+    );
+    app.execute_action(insert);
 
     let source_figure = app.build_full_canvas_figure(
         0,
@@ -75,6 +81,42 @@ fn live_and_frozen_region_tables_record_lineage() {
     );
 
     app.create_region_table(0);
+    assert_eq!(app.session.active_canvas, Some(1));
+    assert_eq!(
+        app.session.board_reveal,
+        Some(BoardFrameId::Page(app.doc.canvases[1].resource_id))
+    );
+    assert!(!board_frames(&app).contains(&FrameRef::Sheet(1)));
+    let result_pos = app.doc.canvases[1].board_pos;
+    app.undo();
+    app.redo();
+    assert_eq!(app.doc.canvases[1].board_pos, result_pos);
+
+    let blank = crate::templates::CanvasTemplate::all()
+        .into_iter()
+        .find(|template| template.name.starts_with("Double-column"))
+        .unwrap();
+    app.new_canvas_from_template(&blank);
+    let blank_pos = app.doc.canvases[2].board_pos;
+    app.undo();
+    app.redo();
+    assert_eq!(app.doc.canvases[2].board_pos, blank_pos);
+    let rects = board_frames(&app)
+        .into_iter()
+        .filter_map(|frame| frame_board_rect(&app, frame))
+        .collect::<Vec<_>>();
+    for (index, left) in rects.iter().enumerate() {
+        for right in &rects[index + 1..] {
+            assert!(
+                left.right() <= right.left
+                    || right.right() <= left.left
+                    || left.bottom() <= right.top
+                    || right.bottom() <= left.top,
+                "visible board frames overlap: {left:?} and {right:?}"
+            );
+        }
+    }
+
     app.freeze_region_table(0);
     assert_eq!(app.doc.datasets.len(), 3, "{}", app.session.status);
 
@@ -93,6 +135,12 @@ fn live_and_frozen_region_tables_record_lineage() {
         ))
     );
     assert!(app.doc.datasets[1].as_table().unwrap().provenance.is_some());
+    assert!(
+        !app.doc.datasets[1]
+            .as_table()
+            .unwrap()
+            .board_sheet_visible()
+    );
     assert!(app.doc.datasets[2].as_table().unwrap().provenance.is_none());
 
     let table_figure = app.doc.datasets[1].as_table().unwrap().figure();

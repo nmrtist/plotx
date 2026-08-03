@@ -647,15 +647,21 @@ fn apply_browser_event(app: &mut PlotxApp, ui: &Ui, event: Option<BrowserEvent>)
 }
 
 fn select_dataset(app: &mut PlotxApp, ui: &Ui, di: usize, extend: bool) {
-    let is_table = app.doc.datasets[di].as_table().is_some();
+    let table_frame = app.doc.datasets[di].as_table().and_then(|table| {
+        if table.board_sheet_visible() {
+            Some(FrameRef::Sheet(di))
+        } else {
+            plotx_core::state::page_frame_showing_dataset(app, di)
+        }
+    });
     app.toggle_selection(di, extend);
     app.session.ui.data_browser_selected_node = Some(format!("dataset:{di}"));
-    if is_table {
+    if let Some(frame) = table_frame {
         if extend {
-            plotx_core::state::toggle_frame_selection(app, FrameRef::Sheet(di));
+            plotx_core::state::toggle_frame_selection(app, frame);
         } else {
-            app.session.ui.frame_selection = vec![FrameRef::Sheet(di)];
-            crate::ui::canvas::request_board_fit(app, ui.ctx(), FrameRef::Sheet(di));
+            app.session.ui.frame_selection = vec![frame];
+            crate::ui::canvas::request_board_fit(app, ui.ctx(), frame);
         }
     }
 }
@@ -708,7 +714,14 @@ fn select_analysis(app: &mut PlotxApp, ui: &Ui, di: usize, item: &AnalysisItem, 
             if open {
                 crate::ui::tools::open_curve_fit_task(app, di);
                 app.session.ui.sheet_open = Some(di);
-                jump_to_frame(app, ui, FrameRef::Sheet(di));
+                let frame = app.doc.datasets[di]
+                    .as_table()
+                    .filter(|table| table.board_sheet_visible())
+                    .map(|_| FrameRef::Sheet(di))
+                    .or_else(|| plotx_core::state::page_frame_showing_dataset(app, di));
+                if let Some(frame) = frame {
+                    jump_to_frame(app, ui, frame);
+                }
             }
             return;
         }
@@ -760,7 +773,8 @@ fn provenance_source_frame(app: &PlotxApp, di: usize) -> Option<FrameRef> {
         app.doc
             .datasets
             .get(src)
-            .filter(|d| d.as_table().is_some())
+            .and_then(|d| d.as_table())
+            .filter(|table| table.board_sheet_visible())
             .map(|_| FrameRef::Sheet(src))
     })
 }

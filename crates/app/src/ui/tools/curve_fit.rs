@@ -25,7 +25,6 @@ pub(super) fn curve_fit_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) -> boo
     false
 }
 
-/// Opens or activates Curve Fit without discarding sibling task state.
 pub(crate) fn open_task(app: &mut PlotxApp, di: usize) {
     if !matches!(app.doc.datasets.get(di), Some(Dataset::Table(_))) {
         return;
@@ -130,6 +129,7 @@ pub(crate) fn render_task(app: &mut PlotxApp, host: &mut Ui) {
 }
 
 fn curve_fit_task_body(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
+    super::result_navigation::show(app, di, ui);
     ui.small("Fit one or more x-y data curves with a mathematical model.");
     let col_count = fit_settings(app, di, ui);
     model_editor(app, ui);

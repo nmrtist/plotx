@@ -27,8 +27,12 @@ to a clear part of the plot; double-click it to restore automatic placement.
 Select the recording, then choose **Analyze** → **Draw Regions**. Drag across
 the trace to mark one or more time windows. Each window is measured in every
 selected sweep. Choose Height, Area, Max, Min, or Mean, then select
-**Continue to Series Table** to create a live table and a color-matched point
-series for each region.
+**View extracted curves**. PlotX selects and zooms to a scatter plot with one
+color-matched series per region. The synchronized data table stays under the
+recording in the Data browser without adding a second board frame. Use **Fit
+curves**, **View data**, or **Back to regions** in the Curve Fit task card.
+The data opens read-only; choose **Save Snapshot** in the Regions task card, or
+**Save editable snapshot** in the data sheet, to create an independent table.
 
 For peak, average, and peak-time values, open **Patch clamp**. PlotX uses the
 selected region, or the first region in the list when none is selected. Choose

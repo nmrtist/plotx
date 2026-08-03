@@ -13,10 +13,12 @@ as relaxation (T1 or T2 — which one is your choice of fit model).
 1. Import the pseudo-2D dataset.
 2. On the **Analyze** tab, choose **Draw Regions** in the **Regions** group,
    then draw over the peaks of interest.
-3. Choose **Continue to Series Table** in the Regions task card.
-4. The **Curve Fit** task card opens with the series table. Check the suggested
+3. Choose **View extracted curves** in the Regions task card. PlotX selects and
+   zooms to the new scatter plot, with one point series per region.
+4. The **Curve Fit** task card opens beside the result. Check the suggested
    model, choose whether to fit every curve or one selected curve, then choose
-   **Run Fit**.
+   **Run Fit**. Use **View data** for the synchronized read-only values or
+   **Back to regions** to return to the source.
 
 ## Fit models
 

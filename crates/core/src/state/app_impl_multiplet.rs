@@ -132,7 +132,6 @@ impl PlotxApp {
             "{} — multiplets",
             self.doc.datasets[dataset].display_name()
         ));
-        tds.board_pos = super::app_impl_analysis::next_sheet_pos_after_new_canvas(self);
         let insert = Action::insert_dataset_with_default_canvas(
             self,
             Dataset::Table(Box::new(tds)),

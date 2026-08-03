@@ -296,38 +296,43 @@ pub(crate) fn all_frames_bbox(app: &PlotxApp) -> Option<(f32, f32, f32, f32)> {
 const FIT_ZOOM_MAX: f32 = 6.0;
 
 /// The board viewport that fits world-pt `bbox` centered in `screen`.
+#[cfg(test)]
 pub(crate) fn board_fit_bbox(
     (min_x, min_y, max_x, max_y): (f32, f32, f32, f32),
     screen: egui::Rect,
 ) -> BoardViewport {
+    board_fit_bbox_in_rect((min_x, min_y, max_x, max_y), screen, screen)
+}
+
+fn board_fit_bbox_in_rect(
+    (min_x, min_y, max_x, max_y): (f32, f32, f32, f32),
+    viewport: egui::Rect,
+    safe: egui::Rect,
+) -> BoardViewport {
     let w = (max_x - min_x).max(1.0);
     let h = (max_y - min_y).max(1.0);
-    let zoom = ((screen.width() / w).min(screen.height() / h) * 0.9).clamp(0.1, FIT_ZOOM_MAX);
+    let safe_w = safe.width().max(1.0);
+    let safe_h = safe.height().max(1.0);
+    let zoom = ((safe_w / w).min(safe_h / h) * 0.9).clamp(0.1, FIT_ZOOM_MAX);
     BoardViewport {
         zoom,
         pan: [
-            (screen.width() - w * zoom) * 0.5 - min_x * zoom,
-            (screen.height() - h * zoom) * 0.5 - min_y * zoom,
+            safe.center().x - viewport.left() - (min_x + w * 0.5) * zoom,
+            safe.center().y - viewport.top() - (min_y + h * 0.5) * zoom,
         ],
         auto_fit: true,
     }
 }
 
-/// Like [`board_fit_bbox`], but fits the content into the band below
-/// [`FIT_CHROME_PX`] of reserved headroom, so the frame header and the size
-/// chip above the page stay on screen at fit zoom.
-pub(crate) fn board_fit_bbox_with_chrome(
+pub(crate) fn board_fit_bbox_with_chrome_in_rect(
     bbox: (f32, f32, f32, f32),
-    screen: egui::Rect,
+    viewport: egui::Rect,
+    safe: egui::Rect,
 ) -> BoardViewport {
-    let chrome = FIT_CHROME_PX.min(screen.height() * 0.5);
-    let inset =
-        egui::Rect::from_min_max(egui::pos2(screen.left(), screen.top() + chrome), screen.max);
-    let mut vp = board_fit_bbox(bbox, inset);
-    // `pan` positions content relative to the full viewport's origin, while the
-    // inset centered it assuming its own origin; shift down into the band.
-    vp.pan[1] += chrome;
-    vp
+    let safe = safe.intersect(viewport);
+    let chrome = FIT_CHROME_PX.min(safe.height() * 0.5);
+    let inset = egui::Rect::from_min_max(egui::pos2(safe.left(), safe.top() + chrome), safe.max);
+    board_fit_bbox_in_rect(bbox, viewport, inset)
 }
 
 pub(crate) fn x_to_screen(ppm: f64, plot: PlotRect, xmin: f64, xspan: f64, xrev: bool) -> f32 {
@@ -524,6 +529,27 @@ mod tests {
         let screen = egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(2400.0, 1300.0));
         let vp = board_fit_bbox((0.0, 0.0, 2.0, 2.0), screen);
         assert!((vp.zoom - FIT_ZOOM_MAX).abs() < 1e-6);
+    }
+
+    #[test]
+    fn board_fit_centers_the_target_inside_an_offset_safe_rect() {
+        let viewport = egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(1000.0, 700.0));
+        let safe = egui::Rect::from_min_max(Pos2::ZERO, Pos2::new(640.0, 700.0));
+        let bbox = (400.0, 200.0, 600.0, 300.0);
+        let vp = board_fit_bbox_with_chrome_in_rect(bbox, viewport, safe);
+        let target = egui::Rect::from_min_max(
+            Pos2::new(
+                viewport.left() + vp.pan[0] + bbox.0 * vp.zoom,
+                viewport.top() + vp.pan[1] + bbox.1 * vp.zoom,
+            ),
+            Pos2::new(
+                viewport.left() + vp.pan[0] + bbox.2 * vp.zoom,
+                viewport.top() + vp.pan[1] + bbox.3 * vp.zoom,
+            ),
+        );
+        assert!(safe.contains(target.min) && safe.contains(target.max));
+        assert!((target.center().x - safe.center().x).abs() < 0.01);
+        assert!(target.top() >= safe.top() + FIT_CHROME_PX - 0.01);
     }
 
     #[test]

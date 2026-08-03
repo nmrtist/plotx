@@ -46,6 +46,7 @@ impl PlotxApp {
                 board: BoardViewport::default(),
                 board_views: Vec::new(),
                 board_fit: None,
+                board_reveal: None,
                 view: PrimaryView::Canvas,
                 tool: Tool::Select,
                 primary_sidebar_width: 240.0,

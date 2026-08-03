@@ -1,6 +1,5 @@
 use super::app_impl_analysis::{
-    TableFitInputs, build_table_fit_inputs, next_sheet_pos_after_new_canvas,
-    resolve_table_fit_model, table_fit_plot_samples,
+    TableFitInputs, build_table_fit_inputs, resolve_table_fit_model, table_fit_plot_samples,
 };
 use super::*;
 
@@ -60,7 +59,7 @@ fn reduce_electrophysiology_region(
 
 impl PlotxApp {
     /// Create an empty editable data table from scratch: a small starter grid,
-    /// placed as a board sheet frame (right of the page grid), selected, with its
+    /// placed as a collision-free board sheet frame, selected, with its
     /// editable sheet window opened for immediate row/column authoring.
     pub fn new_table_dataset(&mut self) {
         let (mut x_schema, x) =
@@ -88,7 +87,8 @@ impl PlotxApp {
         )
         .expect("the fixed starter table is valid");
         tds.name = Some(format!("Table {}", sheet_index + 1));
-        tds.board_pos = next_sheet_pos_after_new_canvas(self);
+        let sheet = tds.board_rect_pt();
+        tds.board_pos = crate::state::next_board_frame_pos(self, [sheet.width, sheet.height]);
         self.doc.datasets.push(Dataset::Table(Box::new(tds)));
         let di = self.doc.datasets.len() - 1;
         self.focus_single(di);
@@ -120,8 +120,7 @@ impl PlotxApp {
         self.insert_table_dataset(dataset, name)
     }
 
-    fn insert_table_dataset(&mut self, mut dataset: TableDataset, name: String) -> usize {
-        dataset.board_pos = next_sheet_pos_after_new_canvas(self);
+    fn insert_table_dataset(&mut self, dataset: TableDataset, name: String) -> usize {
         let dataset_index = self.doc.datasets.len();
         let action = Action::insert_dataset_with_default_canvas(
             self,
@@ -350,17 +349,21 @@ impl PlotxApp {
             "{} — regions",
             self.doc.datasets[dataset].display_name()
         ));
-        tds.board_pos = next_sheet_pos_after_new_canvas(self);
         let ds = Dataset::Table(Box::new(tds));
 
         let action = Action::insert_dataset_with_default_canvas(
             self,
             ds,
-            format!("Canvas {} — Data table", self.doc.canvases.len() + 1),
+            format!("Canvas {} — Extracted curves", self.doc.canvases.len() + 1),
             DEFAULT_CANVAS_SIZE_MM,
         );
         self.execute_action(action);
-        self.session.status = format!("Created a live series table with {count} region(s).");
+        let result = self.doc.canvases.len() - 1;
+        self.reveal_board_frame(FrameRef::Page(result));
+        let regions = if count == 1 { "region" } else { "regions" };
+        self.session.status = format!(
+            "Created extracted curves for {count} {regions} with a synchronized data table."
+        );
     }
 
     /// Place an independent, unlinked snapshot of the current region values as a
@@ -382,7 +385,6 @@ impl PlotxApp {
             "{} — regions (frozen)",
             self.doc.datasets[dataset].display_name()
         ));
-        tds.board_pos = crate::state::next_sheet_board_pos(self);
         let ds = Dataset::Table(Box::new(tds));
         let action = Action::insert_dataset_with_default_canvas(
             self,

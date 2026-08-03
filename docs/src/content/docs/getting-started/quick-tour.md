@@ -9,8 +9,10 @@ flow from raw data to a finished figure.
 ## The window at a glance
 
 - **Primary Side Bar** (left) — datasets and project structure.
-- **Canvas** (center) — an infinite board holding your plots, arranged on
-  grid-snapped pages.
+- **Canvas** (center) — an infinite board holding your plots and data sheets.
+  Plot pages and table sheets are placed without overlap. Drag their headers to
+  move them freely; near another frame, they snap to its edges and the standard
+  gap between frames.
 - **Secondary Side Bar** (right) — the selected object's inspector and
   contextual analysis tools such as peaks and regions.
 - **Task dock** (upper right of the canvas) — a card holding the multi-step
@@ -62,8 +64,8 @@ multi-selection, and saved board views.
    choosing an import command on the **Data** Ribbon.
 2. **Process** it from the **Process** Ribbon tab — the pipeline applies steps
    in order and previews the result live.
-3. **Analyze** with the peak and region tools; extracted values appear in
-   linked tables.
+3. **Analyze** with the peak and region tools; region measurements appear in a
+   plot with a synchronized data table.
 4. **Arrange** plots on the board and **export** the figure.
 
 [Your first figure](/getting-started/first-figure/) walks through these four
@@ -84,3 +86,5 @@ Pan and zoom are always available, in any tool:
 - **Alt + drag** — rubber-band a box to zoom into, in any tool.
 - **Middle-drag** or **Space + drag** — pan.
 - **Double-click** — auto-range the axes.
+- **Alt + drag a page or table-sheet header** — move that frame without
+  snapping for the current drag.

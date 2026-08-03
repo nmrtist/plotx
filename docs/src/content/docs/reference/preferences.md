@@ -9,8 +9,10 @@ restores everything except your recent-files list.
 
 ## General
 
-- **Object snapping** — snap plots and shapes to guides while dragging (also
-  toggleable from the toolbar).
+- **Object snapping** — snap plots and shapes to page and object guides, and
+  snap whole pages and table sheets to nearby frame edges and the standard gap
+  between frames. You can also toggle this from the toolbar. Hold `Alt` to
+  bypass snapping for one drag.
 - **Equal scale for homonuclear 2D imports** — when both axes are frequency
   axes of the same nucleus, start an imported spectrum with equal F1/F2 scale
   if the wider range is no more than twice the narrower range. The imported

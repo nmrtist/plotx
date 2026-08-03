@@ -5,22 +5,20 @@ use super::*;
 /// live board zoom so the magnet feels the same at any zoom.
 const FRAME_SNAP_TOL_PX: f32 = 8.0;
 
-pub(crate) fn snap_board_pos(pos: [f32; 2], cell: f32) -> [f32; 2] {
-    if cell <= 0.0 {
-        return pos;
-    }
-    [
-        (pos[0] / cell).round() * cell,
-        (pos[1] / cell).round() * cell,
-    ]
-}
-
 /// The snapped resting position for a frame being dragged to `candidate` (its
-/// top-left, pt): edge/gutter magnetism against every other frame, with the
-/// coarse board grid as the per-axis fallback.
-pub(crate) fn snap_dragged_frame(app: &PlotxApp, frame: FrameRef, candidate: [f32; 2]) -> [f32; 2] {
+/// top-left, pt): edge/gutter magnetism against every other visible frame. An
+/// axis with no nearby magnetic target stays exactly at the candidate position.
+pub(crate) fn snap_dragged_frame(
+    app: &PlotxApp,
+    frame: FrameRef,
+    candidate: [f32; 2],
+    bypass: bool,
+) -> [f32; 2] {
+    if !app.settings.general.snap_enabled || bypass {
+        return candidate;
+    }
     let Some(r) = frame_board_rect(app, frame) else {
-        return snap_board_pos(candidate, BOARD_GRID_PT);
+        return candidate;
     };
     let size = [r.right() - r.left, r.bottom() - r.top];
     let others: Vec<PlotRect> = board_frames(app)
@@ -29,28 +27,19 @@ pub(crate) fn snap_dragged_frame(app: &PlotxApp, frame: FrameRef, candidate: [f3
         .filter_map(|f| frame_board_rect(app, f))
         .collect();
     let tol = FRAME_SNAP_TOL_PX / app.session.board.zoom.max(0.01);
-    snap_frame_pos(
-        candidate,
-        size,
-        &others,
-        BOARD_GUTTER_PT,
-        BOARD_GRID_PT,
-        tol,
-    )
+    snap_frame_pos(candidate, size, &others, BOARD_GUTTER_PT, tol)
 }
 
 /// Snap a dragged frame (top-left `candidate`, world `size`) to the `others`
 /// frames per axis: align to a neighbour's edge, or sit one `gutter` clear of it.
-/// An axis with no neighbour within `tol` falls back to the coarse board `grid`.
+/// An axis with no neighbour within `tol` remains at its candidate coordinate.
 fn snap_frame_pos(
     candidate: [f32; 2],
     size: [f32; 2],
     others: &[PlotRect],
     gutter: f32,
-    grid: f32,
     tol: f32,
 ) -> [f32; 2] {
-    let grid_pos = snap_board_pos(candidate, grid);
     let x = snap_edge(
         candidate[0],
         size[0],
@@ -65,7 +54,7 @@ fn snap_frame_pos(
         gutter,
         tol,
     );
-    [x.unwrap_or(grid_pos[0]), y.unwrap_or(grid_pos[1])]
+    [x.unwrap_or(candidate[0]), y.unwrap_or(candidate[1])]
 }
 
 /// The nearest snap target for a dragged frame's near edge `cand` (its extent
@@ -150,23 +139,58 @@ mod tests {
     use super::*;
 
     #[test]
-    fn snap_frame_pos_prefers_neighbour_gutter_then_grid() {
+    fn free_placement_keeps_the_candidate_without_a_magnetic_target() {
         let others = [PlotRect::new(0.0, 0.0, 100.0, 80.0)];
         let size = [100.0, 80.0];
-        let near = [100.0 + BOARD_GUTTER_PT + 3.0, 2.0];
-        let snapped = snap_frame_pos(near, size, &others, BOARD_GUTTER_PT, BOARD_GRID_PT, 8.0);
-        assert_eq!(snapped, [100.0 + BOARD_GUTTER_PT, 0.0]);
         let far = [1000.0 + 5.0, 700.0 + 5.0];
-        let g = snap_frame_pos(far, size, &others, BOARD_GUTTER_PT, BOARD_GRID_PT, 8.0);
-        assert_eq!(g, snap_board_pos(far, BOARD_GRID_PT));
+        assert_eq!(
+            snap_frame_pos(far, size, &others, BOARD_GUTTER_PT, 8.0),
+            far
+        );
     }
 
     #[test]
-    fn snap_board_pos_rounds_to_grid() {
-        assert_eq!(snap_board_pos([10.0, -10.0], 360.0), [0.0, 0.0]);
-        assert_eq!(snap_board_pos([190.0, 181.0], 360.0), [360.0, 360.0]);
-        assert_eq!(snap_board_pos([540.0, -540.0], 360.0), [720.0, -720.0]);
-        // A non-positive cell is a no-op guard, never a divide-by-zero.
-        assert_eq!(snap_board_pos([7.0, 3.0], 0.0), [7.0, 3.0]);
+    fn magnetic_edges_and_gutters_snap_within_tolerance() {
+        let others = [PlotRect::new(0.0, 0.0, 100.0, 80.0)];
+        let size = [100.0, 80.0];
+        let near = [100.0 + BOARD_GUTTER_PT + 3.0, 2.0];
+        assert_eq!(
+            snap_frame_pos(near, size, &others, BOARD_GUTTER_PT, 8.0),
+            [100.0 + BOARD_GUTTER_PT, 0.0]
+        );
+    }
+
+    fn app_with_two_pages() -> PlotxApp {
+        let mut app = PlotxApp::new();
+        for x in [0.0, 500.0] {
+            let mut page = CanvasDocument::new("p".to_owned(), [100.0, 80.0]);
+            page.board_pos = [x, 0.0];
+            app.doc.canvases.push(page);
+        }
+        app.session.board.zoom = 1.0;
+        app
+    }
+
+    #[test]
+    fn frame_snapping_respects_the_general_preference() {
+        let mut app = app_with_two_pages();
+        let width = app.doc.canvases[0].board_rect_pt().width;
+        let candidate = [width + BOARD_GUTTER_PT + 2.0, 3.0];
+        app.settings.general.snap_enabled = false;
+        assert_eq!(
+            snap_dragged_frame(&app, FrameRef::Page(1), candidate, false),
+            candidate
+        );
+    }
+
+    #[test]
+    fn alt_bypasses_frame_snapping_for_the_current_drag() {
+        let app = app_with_two_pages();
+        let width = app.doc.canvases[0].board_rect_pt().width;
+        let candidate = [width + BOARD_GUTTER_PT + 2.0, 3.0];
+        assert_eq!(
+            snap_dragged_frame(&app, FrameRef::Page(1), candidate, true),
+            candidate
+        );
     }
 }

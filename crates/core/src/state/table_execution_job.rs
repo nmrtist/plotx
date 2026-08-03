@@ -246,7 +246,6 @@ impl crate::state::PlotxApp {
             crate::state::DerivationKind::RelationalTransform,
             job.input_datasets.iter().copied(),
         ));
-        table.board_pos = crate::state::next_sheet_board_pos(self);
         let index = self.doc.datasets.len();
         let action = crate::actions::Action::insert_dataset_with_default_canvas(
             self,

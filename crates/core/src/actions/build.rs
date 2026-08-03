@@ -478,10 +478,22 @@ impl Action {
 
     pub fn insert_dataset_with_default_canvas(
         app: &PlotxApp,
-        dataset: Dataset,
+        mut dataset: Dataset,
         canvas_name: String,
         size_mm: [f32; 2],
     ) -> Self {
+        if let Some(table) = dataset.as_table_mut()
+            && table.board_sheet_visible()
+        {
+            let mut canvas = CanvasDocument::new(String::new(), size_mm);
+            canvas.board_pos = crate::state::next_board_frame_pos(app, canvas.size_pt());
+            let sheet = table.board_rect_pt();
+            table.board_pos = crate::state::next_board_frame_pos_with_extra(
+                app,
+                [sheet.width, sheet.height],
+                &[canvas.board_rect_pt()],
+            );
+        }
         Self::InsertDatasetWithCanvas {
             dataset_index: app.doc.datasets.len(),
             canvas_index: app.doc.canvases.len(),
@@ -498,7 +510,13 @@ impl Action {
 
     /// Insert a new dataset and place it as a plot object on an existing canvas
     /// (rather than minting a fresh canvas), as one undoable step.
-    pub fn insert_dataset_into_canvas(app: &PlotxApp, dataset: Dataset, canvas: usize) -> Self {
+    pub fn insert_dataset_into_canvas(app: &PlotxApp, mut dataset: Dataset, canvas: usize) -> Self {
+        if let Some(table) = dataset.as_table_mut()
+            && table.board_sheet_visible()
+        {
+            let sheet = table.board_rect_pt();
+            table.board_pos = crate::state::next_board_frame_pos(app, [sheet.width, sheet.height]);
+        }
         Self::InsertDatasetWithCanvas {
             dataset_index: app.doc.datasets.len(),
             canvas_index: app.doc.canvases.len(),

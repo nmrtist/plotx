@@ -1,10 +1,5 @@
 use super::*;
 
-/// Coarse board grid (pt) that whole page-frames fall back to when dragged clear
-/// of any neighbour — about half a default page width, so pages land in tidy
-/// columns/rows. Edge/gutter magnetism (see `snap_frame_pos`) takes priority.
-pub(crate) const BOARD_GRID_PT: f32 = 360.0;
-
 /// Height (screen px) of the grab-bar/label strip drawn just above each page on
 /// the board. Fixed in screen space so it stays readable and grabbable at any
 /// board zoom. Board chrome only — never part of the exported/presented page.
@@ -25,8 +20,21 @@ const FIT_SETTLE_EPS: f32 = 1e-3;
 /// springs from the live board so the animation starts where the view is now
 /// instead of snapping.
 pub(crate) fn request_board_fit(app: &mut PlotxApp, ctx: &egui::Context, frame: FrameRef) {
+    let Some(frame) = board_frame_id(app, frame) else {
+        return;
+    };
     app.session.board_fit = Some(BoardFitTarget::Frame(frame));
     seed_board_fit_springs(app, ctx);
+}
+
+/// Consume the transient core request once UI animation services are available.
+pub(crate) fn consume_board_reveal(app: &mut PlotxApp, ctx: &egui::Context) {
+    if let Some(frame) = app.session.board_reveal.take()
+        && board_frame_ref(app, frame).is_some()
+    {
+        app.session.board_fit = Some(BoardFitTarget::Frame(frame));
+        seed_board_fit_springs(app, ctx);
+    }
 }
 
 pub(crate) fn request_board_fit_region(app: &mut PlotxApp, ctx: &egui::Context, bbox: [f32; 4]) {
@@ -98,7 +106,7 @@ pub(crate) fn zoom_to_selection(app: &mut PlotxApp, ctx: &egui::Context) {
     }
 }
 
-pub(crate) fn drive_board_fit(app: &mut PlotxApp, ui: &Ui, screen: egui::Rect) {
+pub(crate) fn drive_board_fit(app: &mut PlotxApp, ui: &Ui, screen: egui::Rect, safe: egui::Rect) {
     if app.session.ui.gesture_active() {
         debug_assert!(
             app.session.board_fit.is_none(),
@@ -110,18 +118,24 @@ pub(crate) fn drive_board_fit(app: &mut PlotxApp, ui: &Ui, screen: egui::Rect) {
         return;
     };
     let (target_zoom, target_pan) = match fit {
-        BoardFitTarget::Frame(frame) => match frame_board_rect(app, frame) {
-            Some(r) => {
-                let vp = board_fit_bbox_with_chrome((r.left, r.top, r.right(), r.bottom()), screen);
-                (vp.zoom, vp.pan)
+        BoardFitTarget::Frame(frame) => {
+            match board_frame_ref(app, frame).and_then(|frame| frame_board_rect(app, frame)) {
+                Some(r) => {
+                    let vp = board_fit_bbox_with_chrome_in_rect(
+                        (r.left, r.top, r.right(), r.bottom()),
+                        screen,
+                        safe,
+                    );
+                    (vp.zoom, vp.pan)
+                }
+                None => {
+                    app.session.board_fit = None;
+                    return;
+                }
             }
-            None => {
-                app.session.board_fit = None;
-                return;
-            }
-        },
+        }
         BoardFitTarget::Region(b) => {
-            let vp = board_fit_bbox_with_chrome((b[0], b[1], b[2], b[3]), screen);
+            let vp = board_fit_bbox_with_chrome_in_rect((b[0], b[1], b[2], b[3]), screen, safe);
             (vp.zoom, vp.pan)
         }
         BoardFitTarget::Viewport { zoom, pan } => (zoom, pan),
@@ -316,6 +330,9 @@ pub(crate) fn paint_sheet_frames(
         let Some(t) = dataset.as_table() else {
             continue;
         };
+        if !t.board_sheet_visible() {
+            continue;
+        }
         let rect = bt.board_rect_screen(t.board_rect_pt());
         let strip = header_strip_rect(rect);
         if !screen.intersects(rect) && !screen.intersects(strip) {
@@ -563,13 +580,14 @@ pub(crate) fn dispatch_frame_gesture(app: &mut PlotxApp, rect: egui::Rect, ui: &
 }
 
 fn handle_frame_drag(app: &mut PlotxApp, rect: egui::Rect, ui: &Ui) -> bool {
-    let (hover, primary_down, primary_pressed, primary_released, esc) = ui.input(|i| {
+    let (hover, primary_down, primary_pressed, primary_released, esc, alt) = ui.input(|i| {
         (
             i.pointer.hover_pos(),
             i.pointer.primary_down(),
             i.pointer.primary_pressed(),
             i.pointer.primary_released(),
             i.key_pressed(egui::Key::Escape),
+            i.modifiers.alt,
         )
     });
 
@@ -607,7 +625,7 @@ fn handle_frame_drag(app: &mut PlotxApp, rect: egui::Rect, ui: &Ui) -> bool {
             drag.before[0] + (world.x - drag.start_world[0]),
             drag.before[1] + (world.y - drag.start_world[1]),
         ];
-        let snapped = snap_dragged_frame(app, drag.frame, candidate);
+        let snapped = snap_dragged_frame(app, drag.frame, candidate, alt);
         set_frame_board_pos(app, drag.frame, snapped);
         app.session.board_fit = None;
         app.session.board.auto_fit = false;

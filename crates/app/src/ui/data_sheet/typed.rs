@@ -19,15 +19,18 @@ pub(super) fn typed_table_sheet(ui: &mut Ui, table: &TableDataset, context: Tabl
     } = context;
     let typed = &table.typed_state;
     let snapshot = &typed.envelope.revision.snapshot;
-    toolbar(
-        ui,
-        table,
-        dataset,
-        transform_running,
-        transform,
-        refresh,
-        catalog,
-    );
+    let editable = table.provenance.is_none();
+    if editable {
+        toolbar(
+            ui,
+            table,
+            dataset,
+            transform_running,
+            transform,
+            refresh,
+            catalog,
+        );
+    }
     ui.separator();
     let codecs = plotx_core::data::CodecRegistry::with_arrow_ipc();
     let reader =
@@ -53,6 +56,7 @@ pub(super) fn typed_table_sheet(ui: &mut Ui, table: &TableDataset, context: Tabl
         &snapshot.row_id_chunks,
         &reader,
         &mut state,
+        editable,
         &mut |ui, column| {
             super::column_menu::column_header_menu(
                 ui,
@@ -64,7 +68,14 @@ pub(super) fn typed_table_sheet(ui: &mut Ui, table: &TableDataset, context: Tabl
             );
         },
     );
-    status_bar(ui, table, row_count, &state, outcome.error.as_deref());
+    status_bar(
+        ui,
+        table,
+        row_count,
+        &state,
+        outcome.error.as_deref(),
+        editable,
+    );
     ui.ctx().data_mut(|data| data.insert_temp(state_id, state));
     if let Some((row, column, before, after)) = outcome.edit {
         let mut delta = TableEditDelta::new_dataset(table);
@@ -119,6 +130,7 @@ fn status_bar(
     row_count: usize,
     state: &SheetState,
     error: Option<&str>,
+    editable: bool,
 ) {
     let schema = &table.typed_state.envelope.revision.snapshot.schema;
     let mut status = format!("{row_count} rows × {} columns", schema.columns.len());
@@ -128,6 +140,9 @@ fn status_bar(
         }
     } else if let Some(row) = state.row {
         status.push_str(&format!(" · Row {}", row + 1));
+    }
+    if !editable {
+        status.push_str(" · Read-only live values");
     }
     ui.horizontal(|ui| {
         ui.weak(status);

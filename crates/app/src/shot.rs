@@ -28,9 +28,10 @@ use plotx_core::actions::Action;
 use plotx_core::settings::Settings;
 use plotx_core::state::{
     AnalysisSelection, AxisRange, DEFAULT_CANVAS_SIZE_MM, Dataset, FrameRef, LineShapeKind,
-    Nmr2DDataset, NmrDataset, Peak2DOrigin, Peak2DPoint, Peak2DReview, PlotxApp, Tool,
+    Nmr2DDataset, NmrDataset, Peak2DOrigin, Peak2DPoint, Peak2DReview, PlotxApp, Region, RegionId,
+    Tool, region_color,
 };
-use plotx_io::{Domain, NmrData};
+use plotx_io::{AxisSource, Dim, Domain, NmrData, NmrData2D, PseudoAxis, PseudoKind, QuadMode};
 
 const FIT_LO: f64 = 1.4;
 const FIT_HI: f64 = 3.2;
@@ -83,6 +84,10 @@ enum Op {
     DeltaCursor,
     /// Pin a detected cross-diagonal pair after the background audit settles.
     PinSymmetry,
+    /// Build a live pseudo-2D region result and open its fit context.
+    RegionResult,
+    /// Open the result's synchronized read-only values.
+    RegionData,
     Zoom(f32),
     Resize(f32, f32),
 }
@@ -137,6 +142,10 @@ const SCENES: &[Scene] = &[
     shot(12, "ribbon_900"),
     act(2, Op::Resize(1440.0, 900.0)),
     shot(12, "ribbon_1440"),
+    act(2, Op::RegionResult),
+    shot(12, "region_result"),
+    act(2, Op::RegionData),
+    shot(6, "region_data"),
     act(2, Op::SymmetrySetup),
     act(2, Op::InspectCursor),
     shot(6, "cursor_inspect"),
@@ -319,6 +328,11 @@ fn run_op(op: Op, app: &mut PlotxApp, ctx: &egui::Context) -> Result<(), String>
         Op::InspectCursor => inspect_cursor(app)?,
         Op::DeltaCursor => delta_cursor(app)?,
         Op::PinSymmetry => pin_symmetry(app)?,
+        Op::RegionResult => region_result(app),
+        Op::RegionData => {
+            app.session.ui.sheet_open = Some(1);
+            app.session.ui.curve_fit_task_collapsed = true;
+        }
         Op::Zoom(factor) => ctx.set_zoom_factor(factor),
         Op::Resize(w, h) => {
             ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(w, h)));
@@ -411,6 +425,30 @@ fn symmetry_setup(app: &mut PlotxApp) -> Result<(), String> {
     app.start_symmetry_audit(0)
 }
 
+fn region_result(app: &mut PlotxApp) {
+    *app = PlotxApp::new_with_settings(Settings::default());
+    let mut dataset = Nmr2DDataset::load(synthetic_series());
+    dataset.region_analysis.regions.push(Region {
+        id: RegionId::new(0),
+        lo: 4.65,
+        hi: 5.35,
+        name: "Main signal".to_owned(),
+        label_position: None,
+        color: region_color(0),
+        metric: None,
+    });
+    dataset.region_analysis.next_region_id = RegionId::new(1);
+    let action = Action::insert_dataset_with_default_canvas(
+        app,
+        Dataset::Nmr2D(Box::new(dataset)),
+        "Canvas 1 — synthetic series".to_owned(),
+        DEFAULT_CANVAS_SIZE_MM,
+    );
+    app.execute_action(action);
+    app.create_region_table(0);
+    crate::ui::tools::open_curve_fit_task(app, 1);
+}
+
 fn pin_symmetry(app: &mut PlotxApp) -> Result<(), String> {
     app.poll_symmetry_audit();
     app.set_tool(Tool::Symmetry);
@@ -495,6 +533,48 @@ fn synthetic_fid() -> NmrData {
         nucleus: "1H".to_owned(),
         source: "synthetic".to_owned(),
         group_delay: 0.0,
+    }
+}
+
+fn synthetic_series() -> NmrData2D {
+    const ROWS: usize = 12;
+    const COLS: usize = 128;
+    let direct = Dim {
+        spectral_width_hz: 1_000.0,
+        observe_freq_mhz: 400.0,
+        carrier_ppm: 5.0,
+        nucleus: "1H".to_owned(),
+        group_delay: 0.0,
+    };
+    let data = (0..ROWS)
+        .flat_map(|row| {
+            (0..COLS).map(move |col| {
+                let x = (col as f64 - 64.0) / 8.0;
+                let amplitude = (-(row as f64) / 5.0).exp();
+                Complex64::new(amplitude * (-0.5 * x * x).exp(), 0.0)
+            })
+        })
+        .collect();
+    NmrData2D {
+        data,
+        rows: ROWS,
+        cols: COLS,
+        domain: Domain::Frequency,
+        direct: direct.clone(),
+        indirect: direct,
+        quad: QuadMode::Complex,
+        indirect_conjugate: false,
+        experiment: Some("synthetic relaxation".to_owned()),
+        pseudo_axis: Some(PseudoAxis {
+            name: "Delay".to_owned(),
+            kind: PseudoKind::Delay,
+            values: (0..ROWS).map(|index| index as f64 * 0.1).collect(),
+            unit: "s".to_owned(),
+            source: AxisSource::EmbeddedList,
+        }),
+        diffusion: None,
+        nus: None,
+        source: "synthetic series".to_owned(),
     }
 }
 
@@ -590,9 +670,9 @@ mod tests {
     #[test]
     fn expected_count_covers_every_scene_in_both_palettes() {
         let per_pass = SCENES.iter().filter(|s| s.shot.is_some()).count();
-        assert_eq!(per_pass, 8, "scene list should define 8 captures");
+        assert_eq!(per_pass, 10, "scene list should define 10 captures");
         // Default run (no PLOTX_SHOT_THEME) replays every scene in both palettes.
-        assert_eq!(per_pass * 2, 16);
+        assert_eq!(per_pass * 2, 20);
     }
 
     #[test]

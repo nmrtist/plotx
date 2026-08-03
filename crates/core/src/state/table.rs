@@ -207,6 +207,14 @@ pub struct TableSeriesBinding {
 }
 
 impl TableDataset {
+    /// Whether this table should occupy its own board sheet. A table with region
+    /// provenance is live calculated backing data whose generated plot page is
+    /// the visible result. Provenance is persisted in old and new projects, so
+    /// this rule needs no additional migration flag.
+    pub fn board_sheet_visible(&self) -> bool {
+        self.provenance.is_none()
+    }
+
     /// Construct a generic typed table with no implicit x/y assumptions.
     pub fn from_typed(typed_state: TypedTableState) -> Self {
         let mut field_catalog = crate::state::table_field_catalog();

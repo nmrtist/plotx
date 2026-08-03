@@ -46,6 +46,7 @@ enum CommitMove {
     Right,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn typed_table_grid(
     ui: &mut Ui,
     schema: &TableSchema,
@@ -53,11 +54,15 @@ pub(super) fn typed_table_grid(
     chunks: &[ChunkDescriptor],
     reader: &SnapshotReader<'_>,
     state: &mut SheetState,
+    editable: bool,
     column_menu: &mut dyn FnMut(&mut Ui, ColumnId),
 ) -> GridOutcome {
     let mut outcome = GridOutcome::default();
     sanitize_state(state, schema, row_count);
-    if let Some((row, column, seed)) = keyboard_navigation(ui, schema, row_count, state) {
+    if !editable {
+        state.edit = None;
+    }
+    if let Some((row, column, seed)) = keyboard_navigation(ui, schema, row_count, state, editable) {
         // Type-to-edit seeds the buffer with the typed character(s).
         start_edit(state, row, column, seed);
         state.scroll_to = Some(row);
@@ -102,7 +107,9 @@ pub(super) fn typed_table_grid(
                         ui.weak(detail);
                     });
                 });
-                response.context_menu(|ui| column_menu(ui, column.id));
+                if editable {
+                    response.context_menu(|ui| column_menu(ui, column.id));
+                }
             }
         })
         .body(|body| {
@@ -161,7 +168,7 @@ pub(super) fn typed_table_grid(
                         state.cell = Some((index, *column_id));
                         state.row = None;
                     }
-                    if response.double_clicked() {
+                    if editable && response.double_clicked() {
                         start_edit(state, index, *column_id, None);
                     }
                 }
@@ -196,13 +203,14 @@ fn no_widget_focused(ui: &Ui) -> bool {
     ui.ctx().memory(|memory| memory.focused().is_none())
 }
 
-/// Arrow-key navigation, Enter/F2 to edit, and type-to-edit. Returns
-/// Some((row, column, seed_text)) when an edit should start.
+/// Arrow-key navigation, plus Enter/F2 and type-to-edit when editing is
+/// allowed. Returns Some((row, column, seed_text)) when an edit should start.
 fn keyboard_navigation(
     ui: &mut Ui,
     schema: &TableSchema,
     row_count: usize,
     state: &mut SheetState,
+    editable: bool,
 ) -> Option<(usize, ColumnId, Option<String>)> {
     if state.edit.is_some() || row_count == 0 || schema.columns.is_empty() {
         return None;
@@ -233,25 +241,27 @@ fn keyboard_navigation(
                 moved = true;
             }
         }
-        if input.consume_key(Modifiers::NONE, Key::Enter)
-            || input.consume_key(Modifiers::NONE, Key::F2)
-        {
-            start = Some(None);
-        }
-        if start.is_none() {
-            let typed: String = input
-                .events
-                .iter()
-                .filter_map(|event| match event {
-                    Event::Text(text) => Some(text.as_str()),
-                    _ => None,
-                })
-                .collect();
-            if !typed.is_empty() {
-                start = Some(Some(typed));
-                input
+        if editable {
+            if input.consume_key(Modifiers::NONE, Key::Enter)
+                || input.consume_key(Modifiers::NONE, Key::F2)
+            {
+                start = Some(None);
+            }
+            if start.is_none() {
+                let typed: String = input
                     .events
-                    .retain(|event| !matches!(event, Event::Text(_)));
+                    .iter()
+                    .filter_map(|event| match event {
+                        Event::Text(text) => Some(text.as_str()),
+                        _ => None,
+                    })
+                    .collect();
+                if !typed.is_empty() {
+                    start = Some(Some(typed));
+                    input
+                        .events
+                        .retain(|event| !matches!(event, Event::Text(_)));
+                }
             }
         }
     });
@@ -506,6 +516,75 @@ fn editor_cell(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn two_column_schema() -> TableSchema {
+        TableSchema::new(vec![
+            plotx_core::data::ColumnSchema::new("x", plotx_core::data::LogicalType::Float64),
+            plotx_core::data::ColumnSchema::new("y", plotx_core::data::LogicalType::Float64),
+        ])
+        .unwrap()
+    }
+
+    fn key_event(key: Key) -> Event {
+        Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        }
+    }
+
+    #[test]
+    fn read_only_grid_keeps_arrow_navigation_without_starting_an_edit() {
+        let ctx = egui::Context::default();
+        let schema = two_column_schema();
+        let first = schema.columns[0].id;
+        let second = schema.columns[1].id;
+        let mut state = SheetState {
+            cell: Some((0, first)),
+            ..Default::default()
+        };
+        let input = egui::RawInput {
+            events: vec![
+                key_event(Key::ArrowRight),
+                key_event(Key::F2),
+                Event::Text("7".to_owned()),
+            ],
+            ..Default::default()
+        };
+        let mut edit_request = None;
+
+        let _ = ctx.run_ui(input, |ui| {
+            edit_request = keyboard_navigation(ui, &schema, 3, &mut state, false);
+        });
+
+        assert_eq!(state.cell, Some((0, second)));
+        assert!(state.edit.is_none());
+        assert!(edit_request.is_none());
+    }
+
+    #[test]
+    fn editable_grid_still_supports_type_to_edit() {
+        let ctx = egui::Context::default();
+        let schema = two_column_schema();
+        let first = schema.columns[0].id;
+        let mut state = SheetState {
+            cell: Some((0, first)),
+            ..Default::default()
+        };
+        let input = egui::RawInput {
+            events: vec![Event::Text("7".to_owned())],
+            ..Default::default()
+        };
+        let mut edit_request = None;
+
+        let _ = ctx.run_ui(input, |ui| {
+            edit_request = keyboard_navigation(ui, &schema, 3, &mut state, true);
+        });
+
+        assert_eq!(edit_request, Some((0, first, Some("7".to_owned()))));
+    }
 
     #[test]
     fn ten_million_row_lookup_lands_on_the_intersecting_chunk() {

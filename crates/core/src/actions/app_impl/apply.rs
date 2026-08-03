@@ -339,7 +339,7 @@ impl PlotxApp {
                         *size_mm,
                     );
                     canvas.resource_id.clone_from(canvas_resource_id);
-                    canvas.board_pos = crate::state::next_page_board_pos(self);
+                    canvas.board_pos = crate::state::next_board_frame_pos(self, canvas.size_pt());
                     for object in &mut canvas.objects {
                         if let Some(plot) = object.plot_mut() {
                             plot.set_figure_typography(self.doc.style_library.figure_typography);

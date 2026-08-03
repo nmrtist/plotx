@@ -19,6 +19,16 @@ pub(super) fn data_sheet_window(app: &mut PlotxApp, ctx: &egui::Context) {
     let mut commit: Option<plotx_core::state::TableEditDelta> = None;
     let mut transform = None;
     let mut refresh = None;
+    let live_region_source = app.doc.datasets[di]
+        .as_table()
+        .and_then(|table| table.provenance.as_ref())
+        .and_then(|provenance| {
+            app.doc
+                .datasets
+                .iter()
+                .position(|dataset| dataset.resource_id().to_string() == provenance.source_resource)
+        });
+    let mut freeze_source = None;
     let catalog = app
         .doc
         .datasets
@@ -55,6 +65,17 @@ pub(super) fn data_sheet_window(app: &mut PlotxApp, ctx: &egui::Context) {
                     ));
                     if ui.button("Cancel").clicked() {
                         app.cancel_table_transform();
+                    }
+                });
+                ui.separator();
+            }
+            if let Some(source) = live_region_source {
+                ui.horizontal_wrapped(|ui| {
+                    ui.weak(
+                        "Calculated from the source regions · Values are read-only and stay synchronized.",
+                    );
+                    if ui.button("Save editable snapshot").clicked() {
+                        freeze_source = Some(source);
                     }
                 });
                 ui.separator();
@@ -102,6 +123,9 @@ pub(super) fn data_sheet_window(app: &mut PlotxApp, ctx: &egui::Context) {
         && let Err(error) = app.start_table_refresh(dataset, inputs, 256 * 1024 * 1024)
     {
         app.session.status = error;
+    }
+    if let Some(source) = freeze_source {
+        app.freeze_region_table(source);
     }
     if !open {
         app.session.ui.sheet_open = None;

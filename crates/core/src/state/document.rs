@@ -130,7 +130,7 @@ impl Default for BoardViewport {
 
 /// Legacy fallback resting position on the board (pt) for a page loaded from an
 /// old `.plotx` that predates saved `board_pos`: a tidy index-keyed grid. Live
-/// creation uses the content-aware flow in `crate::state::next_page_board_pos`
+/// creation uses the collision-aware flow in `crate::state::next_board_frame_pos`
 /// instead; this only reconstructs positions for files that never stored one.
 pub fn default_board_layout(index: usize) -> [f32; 2] {
     const COLS: usize = 3;
@@ -150,11 +150,19 @@ pub enum FrameRef {
     Sheet(usize),
 }
 
+/// Stable identity for a board frame that may survive collection edits or a UI
+/// frame boundary. Resolve it to a [`FrameRef`] only for an immediate lookup.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum BoardFrameId {
+    Page(CanvasId),
+    Sheet(DatasetId),
+}
+
 /// What an in-flight board zoom-to-fit glides toward.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum BoardFitTarget {
     /// A single frame, re-read each tick so the glide tracks it if it moves.
-    Frame(FrameRef),
+    Frame(BoardFrameId),
     /// A fixed world-pt region `(min_x, min_y, max_x, max_y)` — e.g. the bounding
     /// box of a multi-frame selection.
     Region([f32; 4]),

@@ -19,10 +19,18 @@ fn new_canvas_from_template_sets_fields_and_is_undoable() {
     assert_eq!(created.layout.cols, 2);
     assert!(created.objects.is_empty());
     assert_eq!(app.session.active_canvas, Some(before_len));
+    assert_eq!(
+        app.session.board_reveal,
+        Some(crate::state::BoardFrameId::Page(created.resource_id))
+    );
+    let created_pos = created.board_pos;
 
     app.undo();
     assert_eq!(app.doc.canvases.len(), before_len);
     assert_eq!(app.session.active_canvas, Some(0));
+
+    app.redo();
+    assert_eq!(app.doc.canvases[before_len].board_pos, created_pos);
 }
 
 #[test]
