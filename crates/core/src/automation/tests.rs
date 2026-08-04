@@ -1,6 +1,6 @@
 use super::*;
 use crate::actions::Action;
-use crate::state::{CanvasDocument, Dataset, PlotxApp, TableDataset, TableSeriesBinding};
+use crate::state::{CanvasDocument, Dataset, FrameRef, PlotxApp, TableDataset, TableSeriesBinding};
 use std::collections::{BTreeMap, BTreeSet};
 
 fn app_with_table_and_canvas() -> PlotxApp {
@@ -63,6 +63,21 @@ fn request(
         expected_revision: DocumentRevision(revision),
         caller: CallerType::Agent,
     }
+}
+
+#[test]
+fn current_selection_preserves_multi_selected_canvases() {
+    let mut app = app_with_table_and_canvas();
+    app.doc
+        .canvases
+        .push(CanvasDocument::new("Figure 2".to_owned(), [120.0, 90.0]));
+    app.session.ui.frame_selection = vec![FrameRef::Page(0), FrameRef::Page(1)];
+
+    let selected = ProjectResourceProvider::new(&app).current_selection();
+
+    assert_eq!(selected.len(), 2);
+    assert_eq!(selected[0].id, app.doc.canvases[0].resource_id.to_string());
+    assert_eq!(selected[1].id, app.doc.canvases[1].resource_id.to_string());
 }
 
 #[test]

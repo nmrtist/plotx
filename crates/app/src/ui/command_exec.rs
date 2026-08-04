@@ -15,6 +15,19 @@ pub fn execute(
     clipboard: &mut ClipboardTablePaste,
     ctx: &egui::Context,
 ) {
+    execute_inner(id, app, Some(clipboard), ctx);
+}
+
+pub fn execute_without_clipboard(id: CommandId, app: &mut PlotxApp, ctx: &egui::Context) {
+    execute_inner(id, app, None, ctx);
+}
+
+fn execute_inner(
+    id: CommandId,
+    app: &mut PlotxApp,
+    clipboard: Option<&mut ClipboardTablePaste>,
+    ctx: &egui::Context,
+) {
     if matches!(id, CommandId::Undo | CommandId::Redo) {
         // Commit any debounced wheel zoom before the enabled gate, so the
         // pending zoom becomes the next undoable step and history is ordered
@@ -38,6 +51,9 @@ pub fn execute(
         CommandId::OpenFile => super::file_dialogs::open_file(app),
         CommandId::OpenFolder => super::file_dialogs::open_folder(app),
         CommandId::RunBatchWorkflow => super::batch_workflow::AutomationUi::request_open(ctx),
+        CommandId::RunScientificScript => {
+            super::batch_workflow::AutomationUi::request_run_script(ctx)
+        }
         CommandId::OpenRecent(index) => {
             if let Some(path) = app.session.recent_files.get(index).cloned() {
                 super::file_dialogs::open_recent_path(app, &path);
@@ -48,7 +64,11 @@ pub fn execute(
             ctx.open_url(egui::OpenUrl::new_tab(commands::MANUAL_URL));
         }
         CommandId::ImportTable => super::file_dialogs::import_delimited_table(app),
-        CommandId::PasteTable => clipboard.request(app, ctx),
+        CommandId::PasteTable => {
+            if let Some(clipboard) = clipboard {
+                clipboard.request(app, ctx);
+            }
+        }
         CommandId::SaveProject => app.request_save_project(),
         CommandId::NewTable => app.new_table_dataset(),
         CommandId::ExportData => {

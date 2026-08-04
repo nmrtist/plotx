@@ -7,6 +7,7 @@ use crate::state::{Dataset, PlotxApp};
 use std::collections::BTreeMap;
 
 mod mass_spec;
+mod selection;
 mod statistics;
 mod xps;
 mod xrd;
@@ -380,23 +381,7 @@ impl ResourceProvider for ProjectResourceProvider<'_> {
     }
 
     fn current_selection(&self) -> Vec<ResourceRef> {
-        let mut selected = Vec::new();
-        if let Some(dataset) = self
-            .app
-            .active_dataset()
-            .and_then(|index| self.app.doc.datasets.get(index))
-        {
-            selected.push(top_ref(dataset.resource_id(), KIND_DATASET));
-        }
-        if let Some(canvas) = self
-            .app
-            .session
-            .active_canvas
-            .and_then(|index| self.app.doc.canvases.get(index))
-        {
-            selected.push(top_ref(canvas.resource_id, KIND_CANVAS));
-        }
-        selected
+        selection::current(self.app)
     }
 
     fn preview(&self, target: &ResourceRef, limit: usize) -> Result<DataPreview, AutomationError> {

@@ -26,6 +26,7 @@ pub(crate) mod processing_templates;
 pub(crate) mod properties;
 mod ribbon;
 mod ribbon_chrome;
+mod scientific_script;
 mod secondary_sidebar;
 mod settings_dialog;
 mod shortcuts;

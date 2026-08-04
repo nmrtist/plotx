@@ -45,9 +45,10 @@ allow = [
 ]
 confidence-threshold = 0.8
 exceptions = [
-    # MPL is file-level copyleft. option-ext is used unmodified through
-    # directories and can be distributed in both PlotX license variants.
+    # MPL is file-level copyleft. These crates are used unmodified through
+    # their public APIs and can be distributed in both PlotX license variants.
     { crate = "option-ext", allow = ["MPL-2.0"] },
+    { crate = "smartstring", allow = ["MPL-2.0"] },
 ]
 
 [licenses.private]

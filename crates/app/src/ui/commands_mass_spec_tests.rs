@@ -90,3 +90,24 @@ fn extraction_uses_the_shared_command_and_tool_surfaces() {
         "reopening an extraction workflow keeps its range tool active"
     );
 }
+
+#[test]
+fn scientific_script_run_uses_the_shared_command_catalog() {
+    let mut app = app_with_mass_spec();
+    let command = describe(&app, CommandId::RunScientificScript);
+    assert!(command.enabled);
+    assert_eq!(command.id.stable_id(), "tools.run_scientific_script");
+    assert_eq!(command.execution_class, CommandExecutionClass::ToolEditor);
+
+    let ctx = egui::Context::default();
+    execute_without_clipboard(CommandId::RunScientificScript, &mut app, &ctx);
+
+    assert!(ctx.data(|data| {
+        data.get_temp::<bool>(egui::Id::new("automation_open_request"))
+            .unwrap_or(false)
+    }));
+    assert!(ctx.data(|data| {
+        data.get_temp::<bool>(egui::Id::new("automation_run_script_request"))
+            .unwrap_or(false)
+    }));
+}

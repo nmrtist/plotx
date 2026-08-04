@@ -45,6 +45,7 @@ pub(super) fn command_identity(
         CommandId::OpenFile => plain("Open File…", Some(icon::FILE)),
         CommandId::OpenFolder => plain("Open Folder…", Some(icon::FOLDER)),
         CommandId::RunBatchWorkflow => plain("Automation…", Some(icon::PLAY)),
+        CommandId::RunScientificScript => plain("Run Scientific Script", Some(icon::PLAY)),
         CommandId::OpenRecent(i) => (
             recent_label(app, i),
             Some(icon::CLOCK_COUNTER_CLOCKWISE),
@@ -341,6 +342,7 @@ fn simple_stable_id(id: CommandId) -> &'static str {
         CommandId::OpenFile => "file.open_file",
         CommandId::OpenFolder => "file.open_folder",
         CommandId::RunBatchWorkflow => "tools.automation",
+        CommandId::RunScientificScript => "tools.run_scientific_script",
         CommandId::ImportTable => "file.import_table",
         CommandId::PasteTable => "file.paste_table",
         CommandId::SaveProject => "file.save",

@@ -73,6 +73,7 @@ egui-phosphor = "0.12"
 fontdb = "0.23"
 muda = { version = "0.19.3", default-features = false }
 rfd = "0.17"
+rhai = { version = "1", features = ["serde", "sync"] }
 zip = { version = "8.6", default-features = false, features = ["deflate"] }
 quick-xml = { version = "0.41", default-features = false }
 base64 = "0.22"

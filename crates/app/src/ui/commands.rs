@@ -8,7 +8,7 @@ use plotx_core::layout::{Align, Distribute, GutterPreset, SpacingMode};
 use plotx_core::properties::PropertyStep;
 use plotx_core::state::{Dataset, ObjectId, PlotxApp, Tool, ToolGroup, WorkflowTab};
 
-pub use super::command_exec::execute;
+pub use super::command_exec::{execute, execute_without_clipboard};
 
 mod identity;
 use identity::command_identity;
@@ -47,6 +47,7 @@ pub enum CommandId {
     OpenFile,
     OpenFolder,
     RunBatchWorkflow,
+    RunScientificScript,
     /// Reopen the recent-list entry at this index (newest first). Registered
     /// per live entry, so the index always resolves against the current list.
     OpenRecent(usize),
@@ -155,7 +156,7 @@ impl CommandId {
 
     pub fn execution_class(self) -> CommandExecutionClass {
         match self {
-            Self::RunBatchWorkflow => CommandExecutionClass::ToolEditor,
+            Self::RunBatchWorkflow | Self::RunScientificScript => CommandExecutionClass::ToolEditor,
             Self::OperationHistory | Self::CommandPalette | Self::About => {
                 CommandExecutionClass::UiOnly
             }
@@ -191,6 +192,7 @@ pub fn catalog(app: &PlotxApp) -> Vec<CommandDescriptor> {
         CommandId::OpenFile,
         CommandId::OpenFolder,
         CommandId::RunBatchWorkflow,
+        CommandId::RunScientificScript,
         CommandId::ClearRecentFiles,
         CommandId::HelpManual,
         CommandId::ImportTable,
@@ -383,6 +385,13 @@ pub fn describe(app: &PlotxApp, id: CommandId) -> CommandDescriptor {
     // command can never be blocked by one requirement while explaining another.
     // `and_then` reports the first unmet requirement and skips the rest.
     let gate: Result<(), &'static str> = match id {
+        CommandId::RunScientificScript => requires(
+            app.doc
+                .datasets
+                .iter()
+                .any(|dataset| dataset.as_mass_spec().is_some()),
+            "Load an LC–MS dataset before running a scientific script.",
+        ),
         CommandId::CloseProject => requires(
             app.session.project_present
                 || app.doc.project_path.is_some()

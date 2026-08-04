@@ -11,6 +11,15 @@ use plotx_core::automation::{
 use plotx_core::state::PlotxApp;
 use std::collections::BTreeSet;
 use std::path::PathBuf;
+use std::sync::mpsc;
+
+use super::commands::{self, CommandId};
+
+mod script_support;
+use script_support::{
+    panic_message, prepare_selected_inputs, render_script_results, save_script_results,
+    selected_mass_spec_ids,
+};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum InputSource {
@@ -19,10 +28,24 @@ enum InputSource {
     ExternalInputs,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum CurrentProjectMode {
+    #[default]
+    ScientificScript,
+    RegisteredTool,
+}
+
+struct ScriptTask {
+    receiver: mpsc::Receiver<(String, String, Result<serde_json::Value, String>)>,
+    total: usize,
+    completed: usize,
+}
+
 #[derive(Default)]
 pub(crate) struct AutomationUi {
     open: bool,
     source: InputSource,
+    current_project_mode: CurrentProjectMode,
     query: String,
     selected: BTreeSet<String>,
     tool_id: String,
@@ -35,11 +58,20 @@ pub(crate) struct AutomationUi {
     workflow_error: Option<String>,
     events: Vec<TaskEvent>,
     cancellation: TaskCancellation,
+    script_path: Option<PathBuf>,
+    script_results: Vec<serde_json::Value>,
+    script_error: Option<String>,
+    script_task: Option<ScriptTask>,
 }
 
 impl AutomationUi {
     pub(crate) fn request_open(ctx: &egui::Context) {
         ctx.data_mut(|data| data.insert_temp(egui::Id::new("automation_open_request"), true));
+    }
+
+    pub(crate) fn request_run_script(ctx: &egui::Context) {
+        Self::request_open(ctx);
+        ctx.data_mut(|data| data.insert_temp(egui::Id::new("automation_run_script_request"), true));
     }
 
     pub(crate) fn is_open(&self) -> bool {
@@ -52,6 +84,13 @@ impl AutomationUi {
             .unwrap_or(false)
         {
             self.open = true;
+        }
+        if ctx
+            .data(|data| data.get_temp::<bool>(egui::Id::new("automation_run_script_request")))
+            .unwrap_or(false)
+        {
+            self.source = InputSource::CurrentProject;
+            self.current_project_mode = CurrentProjectMode::ScientificScript;
         }
         if !self.open {
             return;
@@ -92,6 +131,183 @@ impl AutomationUi {
         self.results(app, ui);
     }
 
+    fn scientific_script(&mut self, app: &mut PlotxApp, ui: &mut egui::Ui) {
+        self.poll_script_task(ui.ctx());
+        let running = self.script_task.is_some();
+        ui.heading("Run a read-only scientific script");
+        ui.small(
+            "Runs against selected datasets, including datasets referenced by selected canvases. Scripts return JSON and cannot modify the project.",
+        );
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(!running, egui::Button::new("Open script…"))
+                .clicked()
+                && let Some(path) = rfd::FileDialog::new()
+                    .add_filter("PlotX Scientific Script", &["plotxscript"])
+                    .pick_file()
+            {
+                self.script_path = Some(path);
+                self.script_error = None;
+            }
+            if let Some(path) = &self.script_path {
+                ui.monospace(path.display().to_string());
+            }
+        });
+        let compatible = selected_mass_spec_ids(app, &self.selected);
+        ui.label(format!(
+            "{} selected LC–MS dataset(s) will be processed.",
+            compatible.len()
+        ));
+        let descriptor = commands::describe(app, CommandId::RunScientificScript);
+        let runnable =
+            self.script_path.is_some() && !compatible.is_empty() && !running && descriptor.enabled;
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(runnable, egui::Button::new(descriptor.label))
+                .on_disabled_hover_text(
+                    "Choose a script and select at least one LC–MS dataset or canvas first.",
+                )
+                .clicked()
+            {
+                commands::execute_without_clipboard(CommandId::RunScientificScript, app, ui.ctx());
+            }
+            if ui
+                .add_enabled(
+                    !self.script_results.is_empty(),
+                    egui::Button::new("Save results…"),
+                )
+                .on_disabled_hover_text("Run the script before saving results.")
+                .clicked()
+                && let Some(path) = rfd::FileDialog::new()
+                    .add_filter("JSON", &["json"])
+                    .set_file_name("plotx-script-results.json")
+                    .save_file()
+                && let Err(error) = save_script_results(&path, &self.script_results)
+            {
+                self.script_error = Some(error);
+            }
+        });
+        if ui
+            .ctx()
+            .data_mut(|data| {
+                data.remove_temp::<bool>(egui::Id::new("automation_run_script_request"))
+            })
+            .unwrap_or(false)
+        {
+            if runnable {
+                self.start_scientific_script(app);
+            } else if self.script_path.is_none() {
+                self.script_error =
+                    Some("Choose a PlotX Scientific Script before running it.".to_owned());
+            } else if compatible.is_empty() {
+                self.script_error = Some(
+                    "Select at least one LC–MS dataset or canvas before running the script."
+                        .to_owned(),
+                );
+            }
+        }
+        if let Some(error) = &self.script_error {
+            ui.colored_label(ui.visuals().error_fg_color, error);
+        }
+        if let Some(task) = &self.script_task {
+            ui.add(
+                egui::ProgressBar::new(task.completed as f32 / task.total as f32)
+                    .text(format!("{} / {} inputs", task.completed, task.total)),
+            );
+        }
+        if !self.script_results.is_empty() {
+            ui.label(format!(
+                "Processed {} dataset(s)",
+                self.script_results.len()
+            ));
+            render_script_results(ui, &self.script_results);
+        }
+    }
+
+    fn start_scientific_script(&mut self, app: &PlotxApp) {
+        self.script_error = None;
+        self.script_results.clear();
+        let Some(path) = &self.script_path else {
+            return;
+        };
+        let source = match std::fs::read_to_string(path) {
+            Ok(source) => source,
+            Err(error) => {
+                self.script_error = Some(format!("Could not read {}: {error}", path.display()));
+                return;
+            }
+        };
+        let inputs = prepare_selected_inputs(app, &self.selected);
+        let total = inputs.len();
+        let (sender, receiver) = mpsc::channel();
+        std::thread::spawn(move || {
+            for (dataset_id, input, prepared) in inputs {
+                let result = prepared.and_then(|prepared| {
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        super::scientific_script::run_prepared(&source, prepared)
+                    }))
+                    .unwrap_or_else(|panic| {
+                        Err(format!(
+                            "The script engine panicked: {}",
+                            panic_message(panic)
+                        ))
+                    })
+                });
+                if sender.send((dataset_id, input, result)).is_err() {
+                    return;
+                }
+            }
+        });
+        self.script_task = Some(ScriptTask {
+            receiver,
+            total,
+            completed: 0,
+        });
+    }
+
+    fn poll_script_task(&mut self, ctx: &egui::Context) {
+        let Some(task) = &mut self.script_task else {
+            return;
+        };
+        loop {
+            match task.receiver.try_recv() {
+                Ok((dataset_id, input, result)) => {
+                    task.completed += 1;
+                    match result {
+                        Ok(value) => self.script_results.push(serde_json::json!({
+                            "dataset_id": dataset_id,
+                            "input": input,
+                            "result": value,
+                        })),
+                        Err(error) => {
+                            self.script_results.push(serde_json::json!({
+                                "dataset_id": dataset_id,
+                                "input": input,
+                                "error": error,
+                            }));
+                        }
+                    }
+                }
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    if task.completed < task.total {
+                        self.script_error = Some(format!(
+                            "The scientific script worker stopped after {} of {} datasets.",
+                            task.completed, task.total
+                        ));
+                    }
+                    task.completed = task.total;
+                    break;
+                }
+            }
+        }
+        if task.completed == task.total {
+            self.script_task = None;
+        } else {
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        }
+    }
+
     fn current_project(&mut self, app: &mut PlotxApp, ui: &mut egui::Ui) {
         ui.heading("Observe and select");
         ui.horizontal(|ui| {
@@ -116,6 +332,22 @@ impl AutomationUi {
         let found = search_resources(&ProjectResourceProvider::new(app), &query);
         self.resource_list(app, ui, &found);
         ui.separator();
+        ui.horizontal(|ui| {
+            ui.selectable_value(
+                &mut self.current_project_mode,
+                CurrentProjectMode::ScientificScript,
+                "Scientific Script",
+            );
+            ui.selectable_value(
+                &mut self.current_project_mode,
+                CurrentProjectMode::RegisteredTool,
+                "Registered Tool",
+            );
+        });
+        if self.current_project_mode == CurrentProjectMode::ScientificScript {
+            self.scientific_script(app, ui);
+            return;
+        }
         ui.heading("Plan a registered tool");
         let registry = ToolRegistry::built_in();
         let descriptors = registry.descriptors().collect::<Vec<_>>();
@@ -485,3 +717,7 @@ fn default_parameters(tool: &str) -> String {
     }
     .to_owned()
 }
+
+#[cfg(test)]
+#[path = "batch_workflow_tests.rs"]
+mod tests;
