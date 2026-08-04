@@ -24,7 +24,6 @@ plotx-figure.workspace = true
 plotx-processing.workspace = true
 plotx-render = { workspace = true, features = ["emf"] }
 egui.workspace = true
-eframe.workspace = true
 egui_extras.workspace = true
 egui-phosphor.workspace = true
 fontdb.workspace = true
@@ -36,8 +35,12 @@ serde_json.workspace = true
 uuid.workspace = true
 
 [target.'cfg(windows)'.dependencies]
+eframe = { workspace = true, features = ["glow"] }
 raw-window-handle.workspace = true
 windows-sys.workspace = true
+
+[target.'cfg(not(windows))'.dependencies]
+eframe.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true

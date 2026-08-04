@@ -51,8 +51,8 @@ const THEME_VARIANTS: &[EnumVariant] = &[
     EnumVariant::new(THEME_DARK, "Dark"),
 ];
 const GRAPHICS_VARIANTS: &[EnumVariant] = &[
-    EnumVariant::new(GRAPHICS_LOW_POWER, "Power saving (integrated GPU)"),
-    EnumVariant::new(GRAPHICS_HIGH_PERFORMANCE, "High performance (discrete GPU)"),
+    EnumVariant::new(GRAPHICS_LOW_POWER, "Power saving"),
+    EnumVariant::new(GRAPHICS_HIGH_PERFORMANCE, "High performance"),
 ];
 const UPDATE_VARIANTS: &[EnumVariant] = &[
     EnumVariant::new(UPDATE_AUTO, "Follow build"),
@@ -151,8 +151,8 @@ pub(crate) const DEFINITIONS: &[PropertyDefinition] = &[
             variants: GRAPHICS_VARIANTS,
         },
         DefaultPolicy::Fixed(PropertyValue::Enum(GRAPHICS_LOW_POWER)),
-        "Graphics processor",
-        &["GPU preference", "graphics power"],
+        "Graphics mode",
+        &["GPU preference", "graphics power", "graphics processor"],
     ),
     app_definition(
         ACCENT_COLOR,

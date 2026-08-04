@@ -4,21 +4,27 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod fonts;
+mod graphics;
 mod observability;
 mod scale;
 mod shot;
 mod typography;
 mod ui;
 
+#[cfg(windows)]
+use graphics::log_gl_adapter;
+use graphics::{
+    HIGH_PERFORMANCE_ARG, high_performance_requested, startup_renderer, wgpu_power_preference,
+};
+use plotx_core::settings::GraphicsPowerPreference;
 use plotx_core::state::PlotxApp;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 const RECOVERY_INTERVAL: Duration = Duration::from_secs(60);
 const RECOVERY_DEBOUNCE: Duration = Duration::from_secs(10);
 const RECOVERY_RETRY_INTERVAL: Duration = Duration::from_secs(15);
-
 /// Intended logical (point) size of a fresh main window; also the physical
 /// pixel size it is created at before the UI scale is known.
 pub(crate) const DEFAULT_WINDOW_PT: [f32; 2] = [1100.0, 700.0];
@@ -178,7 +184,19 @@ impl eframe::App for Shell {
         self.tick_recovery(&ctx);
     }
 
+    #[cfg(windows)]
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.shutdown();
+    }
+
+    #[cfg(not(windows))]
     fn on_exit(&mut self) {
+        self.shutdown();
+    }
+}
+
+impl Shell {
+    fn shutdown(&mut self) {
         if let Some(job) = self.manual_save_job.take() {
             match job.handle.join() {
                 Ok(Ok(_)) => {}
@@ -616,6 +634,15 @@ fn main() -> eframe::Result<()> {
     plotx_core::update::cleanup_after_restart();
     let shot_active = std::env::var_os("PLOTX_SHOT").is_some();
     let settings = plotx_core::settings::load();
+    let high_performance_override = high_performance_requested(std::env::args_os().skip(1));
+    let graphics_power = if high_performance_override {
+        log::warn!(
+            "using the one-shot {HIGH_PERFORMANCE_ARG} override; the saved graphics preference is unchanged"
+        );
+        GraphicsPowerPreference::HighPerformance
+    } else {
+        settings.appearance.graphics_power
+    };
     let inner = if shot_active {
         [1500.0, 1000.0]
     } else {
@@ -639,24 +666,27 @@ fn main() -> eframe::Result<()> {
         ..Default::default()
     };
     if let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &mut wgpu_options.wgpu_setup {
-        setup.power_preference = match settings.appearance.graphics_power {
-            plotx_core::settings::GraphicsPowerPreference::LowPower => {
-                eframe::wgpu::PowerPreference::LowPower
-            }
-            plotx_core::settings::GraphicsPowerPreference::HighPerformance => {
-                eframe::wgpu::PowerPreference::HighPerformance
-            }
-        };
+        setup.power_preference = wgpu_power_preference(graphics_power);
     }
+    let renderer = startup_renderer(graphics_power);
+    log::info!("graphics preference: {graphics_power:?}; renderer: {renderer}");
     let native_options = eframe::NativeOptions {
         viewport,
         wgpu_options,
+        renderer,
         ..Default::default()
     };
-    eframe::run_native(
+    let graphics_started = Arc::new(AtomicBool::new(false));
+    let graphics_started_in_app = Arc::clone(&graphics_started);
+    let run_result = eframe::run_native(
         "PlotX",
         native_options,
         Box::new(move |cc| {
+            graphics_started_in_app.store(true, Ordering::Relaxed);
+            #[cfg(windows)]
+            if graphics_power == GraphicsPowerPreference::LowPower {
+                log_gl_adapter(cc);
+            }
             #[cfg(windows)]
             apply_windows_frame_polish(cc);
             cc.egui_ctx.set_fonts(fonts::definitions());
@@ -740,7 +770,17 @@ fn main() -> eframe::Result<()> {
                 native_menu,
             }))
         }),
-    )?;
+    );
+    if let Err(error) = run_result {
+        if graphics::recover_startup_error(
+            &error,
+            graphics_power,
+            graphics_started.load(Ordering::Relaxed),
+        ) {
+            return Ok(());
+        }
+        return Err(error);
+    }
     if let Some(error) = SHOT_FAILURE.lock().unwrap().take() {
         log::error!("screenshot harness failed: {error}");
         log::logger().flush();

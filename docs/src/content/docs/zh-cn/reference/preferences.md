@@ -3,9 +3,9 @@ title: 偏好设置
 description: 偏好设置窗口中的每一项设置，按类别列出。
 ---
 
-用 `Ctrl` + `,`（macOS 为 `Cmd` + `,`）或从菜单打开偏好设置。修改立即
-生效并自动保存；**Reset to Defaults** 恢复全部默认值，但保留最近文件
-列表。
+用 `Ctrl` + `,`（macOS 为 `Cmd` + `,`）或从菜单打开偏好设置。修改会自动
+保存，通常立即生效；**Graphics processor** 的更改在重启后生效。
+**Reset to Defaults** 恢复全部默认值，但保留最近文件列表。
 
 ## General（通用）
 
@@ -35,8 +35,9 @@ description: 偏好设置窗口中的每一项设置，按类别列出。
 - **UI scale**——界面文字和控件的大小，按显示器分别设置。自动模式根据
   显示器报告的像素密度选择物理上可读的尺寸；手动选项和
   `Ctrl` + `+` / `Ctrl` + `-` 快捷键只覆盖当前显示器。
-- **Graphics processor**——PlotX 启动时申请的 GPU 类别；重启后生效。
-  仅在多 GPU 机器上出现渲染问题时才需要改动。
+- **Graphics processor**——决定 PlotX 启动时优先省电还是图形性能。默认选择
+  **Power saving**，适合大多数用户；如果出现显示问题，可以尝试
+  **High performance**。更改会在重启后生效。
 
 ## Processing（处理）
 

@@ -95,8 +95,8 @@ pub struct AppearanceSettings {
     pub canvas_accent: Option<[u8; 3]>,
 }
 
-/// GPU adapter class requested at the next application start. The platform may
-/// still choose another compatible adapter when the preferred class is absent.
+/// Graphics policy applied at the next application start. Platform-specific
+/// backends enforce the strongest available interpretation of this preference.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum GraphicsPowerPreference {
@@ -110,8 +110,8 @@ impl GraphicsPowerPreference {
 
     pub const fn label(self) -> &'static str {
         match self {
-            Self::LowPower => "Power saving (integrated GPU)",
-            Self::HighPerformance => "High performance (discrete GPU)",
+            Self::LowPower => "Power saving",
+            Self::HighPerformance => "High performance",
         }
     }
 }

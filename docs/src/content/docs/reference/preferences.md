@@ -4,8 +4,9 @@ description: Every setting in the Preferences window, by category.
 ---
 
 Open Preferences with `Ctrl` + `,` (`Cmd` + `,` on macOS) or from the menus.
-Changes apply immediately and are saved automatically; **Reset to Defaults**
-restores everything except your recent-files list.
+Changes are saved automatically and usually apply immediately; changes to
+**Graphics processor** apply after a restart. **Reset to Defaults** restores
+everything except your recent-files list.
 
 ## General
 
@@ -44,9 +45,10 @@ restores everything except your recent-files list.
   Automatic picks a physically legible size from the display's reported pixel
   density; the manual choices and the `Ctrl` + `+` / `Ctrl` + `-` shortcuts
   override it for the current display only.
-- **Graphics processor** — which GPU class PlotX requests at startup; takes
-  effect after a restart. Change it only if you see rendering problems on a
-  multi-GPU machine.
+- **Graphics processor** — decides whether PlotX prioritizes lower power use or
+  graphics performance when it starts. **Power saving** is the default and
+  suits most users. Try **High performance** if you see display problems.
+  Changes take effect after a restart.
 
 ## Processing
 

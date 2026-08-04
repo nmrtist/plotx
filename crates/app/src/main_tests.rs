@@ -23,6 +23,55 @@ fn frame_latency_matches_platform_presentation_requirements() {
 }
 
 #[test]
+fn startup_renderer_obeys_the_platform_policy() {
+    assert_eq!(
+        startup_renderer(GraphicsPowerPreference::HighPerformance),
+        eframe::Renderer::Wgpu
+    );
+
+    #[cfg(windows)]
+    assert_eq!(
+        startup_renderer(GraphicsPowerPreference::LowPower),
+        eframe::Renderer::Glow
+    );
+
+    #[cfg(not(windows))]
+    assert_eq!(
+        startup_renderer(GraphicsPowerPreference::LowPower),
+        eframe::Renderer::Wgpu
+    );
+}
+
+#[test]
+fn high_performance_override_is_exact_and_one_shot() {
+    assert!(high_performance_requested([HIGH_PERFORMANCE_ARG]));
+    assert!(high_performance_requested([
+        "project.plotx",
+        HIGH_PERFORMANCE_ARG
+    ]));
+    assert!(!high_performance_requested([
+        "--graphics",
+        "high-performance"
+    ]));
+    assert!(!high_performance_requested(["--graphics=low-power"]));
+}
+
+#[test]
+fn recovery_relaunch_preserves_other_arguments_and_adds_one_override() {
+    assert_eq!(
+        graphics::high_performance_relaunch_args(["project.plotx"]),
+        [
+            std::ffi::OsString::from("project.plotx"),
+            std::ffi::OsString::from(HIGH_PERFORMANCE_ARG)
+        ]
+    );
+    assert_eq!(
+        graphics::high_performance_relaunch_args([HIGH_PERFORMANCE_ARG]),
+        [std::ffi::OsString::from(HIGH_PERFORMANCE_ARG)]
+    );
+}
+
+#[test]
 fn macos_application_icon_has_dock_padding() {
     let icon = image::load_from_memory(MACOS_ICON_PNG)
         .expect("decode macOS icon")
