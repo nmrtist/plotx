@@ -11,6 +11,8 @@ use std::path::{Path, PathBuf};
 
 mod chromatograms;
 use chromatograms::parse_auxiliary_channels;
+mod inlet;
+pub use inlet::load as load_inlet_method;
 mod metadata;
 use metadata::{
     FunctionRecord, classify_function, parse_function_table, parse_header, parse_polarities,
@@ -702,10 +704,16 @@ fn unsupported(id: AcquisitionStreamId, layout: &Layout, instrument: Option<&str
 }
 
 fn provenance(bundle: &Bundle) -> Provenance {
-    let mut parameter_paths = ["_header.txt", "_functns.inf", "_extern.inf", "_chroms.inf"]
-        .into_iter()
-        .filter_map(|name| bundle.file(name).cloned())
-        .collect::<Vec<_>>();
+    let mut parameter_paths = [
+        "_header.txt",
+        "_functns.inf",
+        "_extern.inf",
+        "_chroms.inf",
+        "_inlet.inf",
+    ]
+    .into_iter()
+    .filter_map(|name| bundle.file(name).cloned())
+    .collect::<Vec<_>>();
     parameter_paths.sort();
     let mut companion_paths = bundle
         .functions

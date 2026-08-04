@@ -141,6 +141,86 @@ pub struct ChromatogramChannel {
     pub values: Vec<f64>,
 }
 
+/// One programmed composition in a liquid-chromatography gradient method.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LcGradientPoint {
+    pub time_min: f64,
+    pub flow_ml_min: f64,
+    pub percent_b: f64,
+}
+
+/// The method information needed to relate a chromatographic retention time to
+/// the programmed mobile-phase composition.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LiquidChromatographyMethod {
+    pub name: Option<String>,
+    pub run_time_min: f64,
+    pub solvent_a: Option<String>,
+    pub solvent_b: Option<String>,
+    pub gradient: Vec<LcGradientPoint>,
+    pub detector_wavelengths_nm: Vec<f64>,
+    pub column: Option<String>,
+}
+
+impl LiquidChromatographyMethod {
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.run_time_min.is_finite() || self.run_time_min <= 0.0 {
+            return Err("LC method has an invalid run time".to_owned());
+        }
+        if self.gradient.len() < 2 {
+            return Err("LC method needs at least two gradient points".to_owned());
+        }
+        let mut previous = f64::NEG_INFINITY;
+        for point in &self.gradient {
+            if !point.time_min.is_finite()
+                || point.time_min < 0.0
+                || point.time_min <= previous
+                || !point.flow_ml_min.is_finite()
+                || point.flow_ml_min <= 0.0
+                || !point.percent_b.is_finite()
+                || !(0.0..=100.0).contains(&point.percent_b)
+            {
+                return Err("LC method has an invalid gradient point".to_owned());
+            }
+            previous = point.time_min;
+        }
+        if self
+            .gradient
+            .last()
+            .is_some_and(|point| point.time_min > self.run_time_min)
+        {
+            return Err("LC method gradient extends past its run time".to_owned());
+        }
+        if self
+            .detector_wavelengths_nm
+            .iter()
+            .any(|value| !value.is_finite() || *value <= 0.0)
+        {
+            return Err("LC method has an invalid detector wavelength".to_owned());
+        }
+        Ok(())
+    }
+
+    /// Linearly interpolate the programmed B composition between time points.
+    pub fn percent_b_at(&self, time_min: f64) -> Option<f64> {
+        if !time_min.is_finite() || time_min < 0.0 {
+            return None;
+        }
+        let first = self.gradient.first()?;
+        if time_min <= first.time_min {
+            return Some(first.percent_b);
+        }
+        for pair in self.gradient.windows(2) {
+            let [left, right] = pair else { continue };
+            if time_min <= right.time_min {
+                let fraction = (time_min - left.time_min) / (right.time_min - left.time_min);
+                return Some(left.percent_b + fraction * (right.percent_b - left.percent_b));
+            }
+        }
+        self.gradient.last().map(|point| point.percent_b)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MassSpecRun {
     pub source: String,
