@@ -162,8 +162,11 @@ pub(crate) fn apply_apodization(buf: &mut [Complex64], apo: Apodization, dt: f64
 }
 
 // A group delay is a circular shift of the FID origin by `delay` samples, which
-// by the shift theorem appears as a linear phase ramp `X[m]·e^(+2πi·m·delay/N)`;
-// divide it out. No-op when `delay` is zero.
+// by the shift theorem appears as a linear phase ramp. Use signed FFT-bin
+// frequencies here: for a fractional delay, treating the upper half as positive
+// frequencies puts the phase wrap at DC after `fftshift`, creating a visible
+// discontinuity in the real spectrum. With signed bins the unavoidable wrap is
+// at the Nyquist boundary instead.
 fn remove_group_delay(spectrum: &mut [Complex64], delay: f64) {
     if delay == 0.0 || !delay.is_finite() {
         return;
@@ -172,9 +175,15 @@ fn remove_group_delay(spectrum: &mut [Complex64], delay: f64) {
     if n == 0 {
         return;
     }
-    let k = std::f64::consts::TAU * delay / n as f64;
+    let phase_per_bin = std::f64::consts::TAU * delay / n as f64;
+    let negative_start = n.div_ceil(2);
     for (m, c) in spectrum.iter_mut().enumerate() {
-        *c *= Complex64::from_polar(1.0, k * m as f64);
+        let signed_bin = if m < negative_start {
+            m as f64
+        } else {
+            m as f64 - n as f64
+        };
+        *c *= Complex64::from_polar(1.0, phase_per_bin * signed_bin);
     }
 }
 
@@ -279,6 +288,33 @@ mod tests {
             .map(|(x, y)| (x - y).abs())
             .fold(0.0f64, f64::max);
         assert!(max_err < 1e-9, "group delay not removed: max_err={max_err}");
+    }
+
+    #[test]
+    fn fractional_group_delay_uses_signed_fft_frequencies() {
+        let n = 16usize;
+        let delay = 3.25;
+        let negative_start = n.div_ceil(2);
+        let phase_per_bin = std::f64::consts::TAU * delay / n as f64;
+        let mut delayed: Vec<Complex64> = (0..n)
+            .map(|m| {
+                let signed_bin = if m < negative_start {
+                    m as f64
+                } else {
+                    m as f64 - n as f64
+                };
+                Complex64::from_polar(1.0, -phase_per_bin * signed_bin)
+            })
+            .collect();
+
+        remove_group_delay(&mut delayed, delay);
+
+        assert!(
+            delayed
+                .iter()
+                .all(|value| (*value - Complex64::new(1.0, 0.0)).norm() < 1e-12),
+            "fractional delay correction must not introduce a phase jump at DC"
+        );
     }
 
     #[test]
