@@ -3,15 +3,16 @@ use plotx_core::actions::{Action, PendingViewportEdit, PendingWheelPropertyEdit}
 use plotx_core::layout::{self, MovableEdges, SnapGuide, SnapTargets};
 use plotx_core::state::region_color;
 use plotx_core::state::{
-    AnalysisSelection, AuthorDrag, AxisRange, BOARD_GUTTER_PT, BoardFitTarget, BoardViewport,
-    CanvasDocument, CanvasObject, CanvasObjectKind, Dataset, FrameDrag, FrameRef, FurnitureDrag,
-    FurnitureTarget, Integral2DDrag, Integral2DDragKind, IntegralDrag, Interaction, MarqueeDrag,
-    ObjectDrag, ObjectDragKind, ObjectFrame, ObjectId, PanDrag, PanelLabelDrag, PanelNoteEditState,
-    PhaseDrag, PhaseDragKind, PhaseOrient, PlotxApp, Region, RegionDrag, RegionDragKind, RegionId,
-    RegionSelection, ResizeHandle, SHEET_COL_W_PT, SHEET_HEADER_H_PT, SHEET_MAX_ROWS,
-    SHEET_ROW_H_PT, Selection, SelectionDrag, TableDataset, TextEditState, TileDropCacheKey,
-    TileDropPreview, Tool, ZoomAxis, ZoomDrag, board_frame_id, board_frame_ref, board_frames,
-    frame_board_pos, frame_board_rect, set_frame_board_pos, toggle_frame_selection_synced,
+    AnalysisSelection, AuthorDrag, AxisRange, BOARD_GUTTER_PT, BoardFitTarget, BoardMarqueeDrag,
+    BoardViewport, CanvasDocument, CanvasObject, CanvasObjectKind, Dataset, FrameDrag, FrameRef,
+    FurnitureDrag, FurnitureTarget, Integral2DDrag, Integral2DDragKind, IntegralDrag, Interaction,
+    MarqueeDrag, ObjectDrag, ObjectDragKind, ObjectFrame, ObjectId, PanDrag, PanelLabelDrag,
+    PanelNoteEditState, PhaseDrag, PhaseDragKind, PhaseOrient, PlotxApp, Region, RegionDrag,
+    RegionDragKind, RegionId, RegionSelection, ResizeHandle, SHEET_COL_W_PT, SHEET_HEADER_H_PT,
+    SHEET_MAX_ROWS, SHEET_ROW_H_PT, Selection, SelectionDrag, TableDataset, TextEditState,
+    TileDropCacheKey, TileDropPreview, Tool, ZoomAxis, ZoomDrag, board_frame_id, board_frame_ref,
+    board_frames, frame_board_pos, frame_board_rect, set_frame_board_pos,
+    toggle_frame_selection_synced,
 };
 use plotx_core::{Integral2D, IntegralResult};
 use plotx_render::Rect as PlotRect;
@@ -29,6 +30,7 @@ const SNAP_PX: f32 = 6.0;
 
 mod authoring;
 mod board;
+mod board_marquee;
 mod board_notes;
 mod chrome;
 mod cursors;
@@ -123,6 +125,9 @@ pub fn render_central(app: &mut PlotxApp, ui: &mut Ui) {
     let avail = ui.available_rect_before_wrap();
     let (resp, painter) = ui.allocate_painter(avail.size(), Sense::click_and_drag());
     let rect = resp.rect;
+    ui.ctx().data_mut(|data| {
+        data.insert_temp(egui::Id::new("plotx.canvas.navigation_rect"), rect);
+    });
     let chrome = ChromeStyle::from_visuals(ui.visuals(), app.settings.appearance.canvas_accent);
     ensure_board_view(app, rect);
     consume_board_reveal(app, ui.ctx());
@@ -144,16 +149,12 @@ pub fn render_central(app: &mut PlotxApp, ui: &mut Ui) {
     let view_consumed = pointer_owned && handle_navigation(app, ci, rect, ui);
 
     // A live non-frame gesture cannot be interrupted by a frame switch.
-    let frame_consumed = if pointer_owned
-        && !view_consumed
-        && matches!(
-            app.session.ui.interaction,
-            Interaction::Idle | Interaction::Frame(_)
-        ) {
-        dispatch_frame_gesture(app, rect, ui)
-    } else {
-        false
-    };
+    let frame_consumed =
+        if pointer_owned && !view_consumed && app.session.ui.interaction.allows_frame_dispatch() {
+            dispatch_frame_gesture(app, rect, ui)
+        } else {
+            false
+        };
     // `dispatch_frame_gesture` may have switched the active frame.
     let ci = app.session.active_canvas.unwrap_or(ci);
 
@@ -595,6 +596,7 @@ fn resize_cursor(handle: ResizeHandle) -> egui::CursorIcon {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use plotx_core::state::{
         CanvasObject, CanvasObjectKind, CanvasViewport, PanelMeta, PlotObject, TextBox,
     };

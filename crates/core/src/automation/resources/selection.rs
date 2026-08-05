@@ -1,21 +1,17 @@
 use super::{KIND_CANVAS, KIND_DATASET, ResourceRef, top_ref};
-use crate::state::{FrameRef, PlotxApp};
+use crate::state::{BoardFrameId, PlotxApp};
 
 pub(super) fn current(app: &PlotxApp) -> Vec<ResourceRef> {
     let mut selected = Vec::new();
     if !app.session.ui.frame_selection.is_empty() {
         for frame in &app.session.ui.frame_selection {
             let target = match *frame {
-                FrameRef::Page(index) => app
-                    .doc
-                    .canvases
-                    .get(index)
-                    .map(|canvas| top_ref(canvas.resource_id, KIND_CANVAS)),
-                FrameRef::Sheet(index) => app
-                    .doc
-                    .datasets
-                    .get(index)
-                    .map(|dataset| top_ref(dataset.resource_id(), KIND_DATASET)),
+                BoardFrameId::Page(id) => {
+                    app.doc.canvas_index(id).map(|_| top_ref(id, KIND_CANVAS))
+                }
+                BoardFrameId::Sheet(id) => {
+                    app.doc.dataset_index(id).map(|_| top_ref(id, KIND_DATASET))
+                }
             };
             if let Some(target) = target
                 && !selected.contains(&target)
@@ -23,7 +19,9 @@ pub(super) fn current(app: &PlotxApp) -> Vec<ResourceRef> {
                 selected.push(target);
             }
         }
-        return selected;
+        if !selected.is_empty() {
+            return selected;
+        }
     }
     if let Some(dataset) = app
         .active_dataset()

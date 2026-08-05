@@ -76,7 +76,8 @@ pub(super) fn command_identity(
         CommandId::Quit => plain("Quit PlotX", None),
         CommandId::Undo => ("Undo".into(), Some(icon::ARROW_ARC_LEFT), None),
         CommandId::Redo => ("Redo".into(), Some(icon::ARROW_ARC_RIGHT), None),
-        CommandId::SelectAll => ("Select All Objects".into(), None, None),
+        CommandId::SelectAll => (selection_label(app, "Select All"), None, None),
+        CommandId::DeselectAll => (selection_label(app, "Deselect All"), None, None),
         CommandId::Group => ("Group Selection".into(), None, None),
         CommandId::Ungroup => ("Ungroup Selection".into(), None, None),
         CommandId::TogglePrimarySidebar => (
@@ -353,6 +354,7 @@ fn simple_stable_id(id: CommandId) -> &'static str {
         CommandId::Undo => "edit.undo",
         CommandId::Redo => "edit.redo",
         CommandId::SelectAll => "edit.select_all",
+        CommandId::DeselectAll => "edit.deselect_all",
         CommandId::Group => "edit.group",
         CommandId::Ungroup => "edit.ungroup",
         CommandId::TogglePrimarySidebar => "view.primary_sidebar",
@@ -399,6 +401,17 @@ fn simple_stable_id(id: CommandId) -> &'static str {
         CommandId::CycleCursor => "tool.next_cursor",
         _ => unreachable!("dynamic commands have formatted stable IDs"),
     }
+}
+
+fn selection_label(app: &PlotxApp, verb: &str) -> String {
+    use plotx_core::state::SelectionScope;
+    let noun = match app.session.ui.selection_scope {
+        SelectionScope::CanvasObjects | SelectionScope::Layers => "Objects",
+        SelectionScope::Board => "Frames",
+        SelectionScope::CanvasList => "Canvases",
+        SelectionScope::DataList => "Datasets",
+    };
+    format!("{verb} {noun}")
 }
 
 fn spacing_slug(mode: SpacingMode) -> &'static str {

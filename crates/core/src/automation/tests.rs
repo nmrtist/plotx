@@ -1,6 +1,8 @@
 use super::*;
 use crate::actions::Action;
-use crate::state::{CanvasDocument, Dataset, FrameRef, PlotxApp, TableDataset, TableSeriesBinding};
+use crate::state::{
+    BoardFrameId, CanvasDocument, Dataset, PlotxApp, TableDataset, TableSeriesBinding,
+};
 use std::collections::{BTreeMap, BTreeSet};
 
 fn app_with_table_and_canvas() -> PlotxApp {
@@ -71,13 +73,43 @@ fn current_selection_preserves_multi_selected_canvases() {
     app.doc
         .canvases
         .push(CanvasDocument::new("Figure 2".to_owned(), [120.0, 90.0]));
-    app.session.ui.frame_selection = vec![FrameRef::Page(0), FrameRef::Page(1)];
+    app.session.ui.frame_selection = app
+        .doc
+        .canvases
+        .iter()
+        .map(|canvas| BoardFrameId::Page(canvas.resource_id))
+        .collect();
 
     let selected = ProjectResourceProvider::new(&app).current_selection();
 
     assert_eq!(selected.len(), 2);
     assert_eq!(selected[0].id, app.doc.canvases[0].resource_id.to_string());
     assert_eq!(selected[1].id, app.doc.canvases[1].resource_id.to_string());
+}
+
+#[test]
+fn current_selection_ignores_removed_frame_ids_and_falls_back_to_active() {
+    let mut app = app_with_table_and_canvas();
+    app.doc
+        .canvases
+        .push(CanvasDocument::new("removed".to_owned(), [120.0, 90.0]));
+    let removed = app.doc.canvases[1].resource_id;
+    app.session.ui.frame_selection = vec![BoardFrameId::Page(removed)];
+    app.doc.canvases.pop();
+    app.session.active_canvas = Some(0);
+
+    let selected = ProjectResourceProvider::new(&app).current_selection();
+
+    assert!(
+        selected
+            .iter()
+            .all(|target| target.id != removed.to_string())
+    );
+    assert!(
+        selected
+            .iter()
+            .any(|target| target.id == app.doc.canvases[0].resource_id.to_string())
+    );
 }
 
 #[test]

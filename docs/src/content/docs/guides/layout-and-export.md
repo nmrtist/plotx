@@ -11,6 +11,13 @@ can be toggled off from the toolbar. The arrange menu in the toolbar offers
 alignment (with two or more frames selected), horizontal / vertical
 distribution (three or more), z-ordering, and a *Tidy up frames* command.
 
+Drag over empty board space to marquee-select page and sheet frames. Hold
+`Shift` to add the enclosed frames or `Ctrl` (`Cmd` on macOS) to toggle them.
+Dragging the header of any selected frame moves the whole selection; the move
+undoes as one step. In the Canvas list, `Shift`-click selects a continuous range
+and `Ctrl`-click adds or removes one canvas. `Ctrl` + `A` selects every frame or
+canvas according to the area you last used.
+
 ## Canvas size
 
 The active page shows a size chip above its top-left corner — the current

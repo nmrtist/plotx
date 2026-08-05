@@ -6,7 +6,7 @@ use std::fmt;
 use egui::Context;
 use plotx_core::export::{RasterError, RasterImage, RasterOptions, rasterize_canvas};
 use plotx_core::operation::{Diagnostic, DiagnosticCode, OperationKind, OperationReport, Severity};
-use plotx_core::state::{FrameRef, PlotxApp};
+use plotx_core::state::{BoardFrameId, PlotxApp};
 
 pub(super) fn copy_figure_to_clipboard(app: &mut PlotxApp, ctx: &Context) {
     match resolve_copy_target(app) {
@@ -32,16 +32,14 @@ pub(super) fn copy_figure_to_clipboard(app: &mut PlotxApp, ctx: &Context) {
 /// Selected page frame wins over the active canvas, matching what the user
 /// perceives as "the selected figure".
 pub(super) fn resolve_copy_target(app: &PlotxApp) -> Option<usize> {
-    app.session
-        .ui
-        .frame_selection
-        .iter()
-        .find_map(|frame| match frame {
-            FrameRef::Page(ci) => Some(*ci),
-            FrameRef::Sheet(_) => None,
-        })
-        .or(app.session.active_canvas)
-        .filter(|ci| *ci < app.doc.canvases.len())
+    match app.session.ui.frame_selection.as_slice() {
+        [BoardFrameId::Page(id)] => app.doc.canvas_index(*id),
+        [BoardFrameId::Sheet(_)] | [_, _, ..] => None,
+        [] => app
+            .session
+            .active_canvas
+            .filter(|ci| *ci < app.doc.canvases.len()),
+    }
 }
 
 pub(super) fn copy_canvas_figure(app: &mut PlotxApp, ctx: &Context, canvas_index: usize) {

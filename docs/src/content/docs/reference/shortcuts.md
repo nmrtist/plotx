@@ -74,14 +74,20 @@ layer you want from the Object inspector.
 | `Ctrl` + `S` | Open project save options |
 | `Ctrl` + `Z` | Undo |
 | `Ctrl` + `Shift` + `Z` or `Ctrl` + `Y` | Redo |
-| `Ctrl` + `A` | Select all objects on the page |
+| `Ctrl` + `A` | Select every item in the current context: page objects, board frames, canvases, or datasets |
+| `Ctrl` + `Shift` + `A` | Clear the selection in the current context |
+| `Shift` + click | Select a continuous range in the Canvas, Layers, or Data list |
+| `Ctrl` + click | Add or remove one item without clearing the rest |
+| `Ctrl` + `Shift` + click | Add a continuous range to the existing list selection |
+| `↑` / `↓`, `Home` / `End` | Move selection through the active Canvas, Layers, or Data list; hold `Shift` to extend |
+| `Space` | Add or remove the lead item in the active list |
 | `Ctrl` + `G` | Group the selected objects |
 | `Ctrl` + `Shift` + `G` | Ungroup |
 | `Delete` or `Backspace` | Delete the selected annotation objects; in Peaks or Integrate, delete the selected peak or region; in Symmetry review, delete the selected cross-peak mark |
 | `+` (or `=`) / `-` | Raise / lower the lowest contour level of the selected plot |
 | `F2` | Rename the selected dataset or canvas |
 | `Esc` | Cancel the active drag; further presses clear the Analysis Range and selections one at a time, then leave the active tool |
-| `Ctrl` + `C` | Copy the selected frame (or the active canvas) to the clipboard as bitmap + vector |
+| `Ctrl` + `C` | Copy the single selected page frame (or the active canvas) to the clipboard as bitmap + vector |
 | `Ctrl` + `Shift` + `V` | Paste a delimited table (comma, tab, or semicolon) from the clipboard as a new data table |
 | `Ctrl` + `,` | Open Preferences |
 | `Ctrl` + `K` or `Ctrl` + `Shift` + `P` | Open the [command palette](/reference/command-palette/) |

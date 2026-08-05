@@ -291,7 +291,8 @@ fn multi_selecting_pages_in_the_workspace_populates_data_for_stacking() {
         .push(Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()))));
     push_canvas(&mut app, 1, "second canvas", [120.0, 80.0]);
 
-    app.session.ui.frame_selection = vec![FrameRef::Page(0)];
+    app.session.ui.frame_selection =
+        vec![crate::state::board_frame_id(&app, FrameRef::Page(0)).unwrap()];
     crate::state::toggle_frame_selection_synced(&mut app, FrameRef::Page(1));
 
     // Both pages' datasets become the Data-list selection, so the stack command

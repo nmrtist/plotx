@@ -30,6 +30,7 @@ pub enum Interaction {
     Marquee(MarqueeDrag),
     PanelLabel(PanelLabelDrag),
     Frame(FrameDrag),
+    BoardMarquee(BoardMarqueeDrag),
     Author(AuthorDrag),
     Zoom(ZoomDrag),
     Selection(SelectionDrag),
@@ -54,6 +55,10 @@ pub enum GestureFamily {
 }
 
 impl Interaction {
+    pub fn allows_frame_dispatch(&self) -> bool {
+        matches!(self, Self::Idle | Self::Frame(_) | Self::BoardMarquee(_))
+    }
+
     pub fn is_active(&self) -> bool {
         !matches!(self, Interaction::Idle)
     }
@@ -65,6 +70,7 @@ impl Interaction {
             | Interaction::Marquee(_)
             | Interaction::PanelLabel(_)
             | Interaction::Frame(_)
+            | Interaction::BoardMarquee(_)
             | Interaction::Author(_) => GestureFamily::Layout,
             Interaction::Zoom(_)
             | Interaction::Selection(_)
@@ -96,7 +102,10 @@ impl Interaction {
             Interaction::Integral2D(d) => Some(d.canvas),
             Interaction::PeakThreshold(d) => Some(d.canvas),
             Interaction::PeakBand(d) => Some(d.canvas),
-            Interaction::Idle | Interaction::Frame(_) | Interaction::Phase(_) => None,
+            Interaction::Idle
+            | Interaction::Frame(_)
+            | Interaction::BoardMarquee(_)
+            | Interaction::Phase(_) => None,
         }
     }
 
@@ -119,7 +128,7 @@ impl Interaction {
             // A frame drag rides the board under any tool; other layout gestures
             // belong to the Select tool or an authoring create-tool.
             GestureFamily::Layout => {
-                matches!(self, Interaction::Frame(_))
+                matches!(self, Interaction::Frame(_) | Interaction::BoardMarquee(_))
                     || tool.is_layout_tool()
                     || tool.creates_object()
             }

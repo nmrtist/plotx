@@ -86,7 +86,8 @@ fn execute_inner(
         CommandId::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
         CommandId::Undo => app.undo(),
         CommandId::Redo => app.redo(),
-        CommandId::SelectAll => app.select_all_objects(),
+        CommandId::SelectAll => select_all_in_scope(app),
+        CommandId::DeselectAll => deselect_all_in_scope(app),
         CommandId::Group => app.group_selected(),
         CommandId::Ungroup => app.ungroup_selected(),
         CommandId::TogglePrimarySidebar => {
@@ -198,6 +199,66 @@ fn execute_inner(
         }
         CommandId::Tool(tool) => app.toggle_tool(tool),
     }
+}
+
+fn select_all_in_scope(app: &mut PlotxApp) {
+    use plotx_core::state::{Selection, SelectionScope, board_frame_id, board_frames};
+    match app.session.ui.selection_scope {
+        SelectionScope::Board => {
+            app.session.ui.frame_selection = board_frames(app)
+                .into_iter()
+                .filter_map(|frame| board_frame_id(app, frame))
+                .collect();
+            plotx_core::state::sync_frame_selection_to_data(app);
+        }
+        SelectionScope::CanvasList => {
+            app.session.ui.frame_selection = app
+                .doc
+                .canvases
+                .iter()
+                .map(|canvas| plotx_core::state::BoardFrameId::Page(canvas.resource_id))
+                .collect();
+            plotx_core::state::sync_frame_selection_to_data(app);
+        }
+        SelectionScope::DataList => {
+            app.session.ui.frame_selection.clear();
+            let indices = (0..app.doc.datasets.len()).collect::<Vec<_>>();
+            app.focus_datasets(&indices, app.active_dataset());
+        }
+        SelectionScope::CanvasObjects => app.select_all_objects(),
+        SelectionScope::Layers => {
+            if let Some(ci) = app.session.active_canvas {
+                let ids = app.doc.canvases[ci]
+                    .objects
+                    .iter()
+                    .map(|object| object.id)
+                    .collect::<Vec<_>>();
+                app.set_selection(if ids.is_empty() {
+                    Selection::None
+                } else {
+                    Selection::Objects(ids)
+                });
+            }
+        }
+    }
+    app.session.status = "Selected all items in the current context.".to_owned();
+}
+
+fn deselect_all_in_scope(app: &mut PlotxApp) {
+    use plotx_core::state::{Selection, SelectionScope};
+    match app.session.ui.selection_scope {
+        SelectionScope::Board | SelectionScope::CanvasList => {
+            app.session.ui.frame_selection.clear();
+        }
+        SelectionScope::DataList => {
+            app.session.ui.frame_selection.clear();
+            app.focus_datasets(&[], None);
+        }
+        SelectionScope::CanvasObjects | SelectionScope::Layers => {
+            app.set_selection(Selection::None)
+        }
+    }
+    app.session.status = "Cleared the current selection.".to_owned();
 }
 
 fn cycle_cursor(app: &mut PlotxApp) {

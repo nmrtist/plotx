@@ -72,7 +72,10 @@ fn frame_header_at_hits_strip_above_page() {
 fn toggle_frame_selection_adds_and_removes() {
     let mut app = app_with_pages(&[[0.0, 0.0]]);
     plotx_core::state::toggle_frame_selection(&mut app, FrameRef::Page(0));
-    assert_eq!(app.session.ui.frame_selection, vec![FrameRef::Page(0)]);
+    assert_eq!(
+        app.session.ui.frame_selection,
+        vec![plotx_core::state::board_frame_id(&app, FrameRef::Page(0)).unwrap()]
+    );
     plotx_core::state::toggle_frame_selection(&mut app, FrameRef::Page(0));
     assert!(app.session.ui.frame_selection.is_empty());
 }
@@ -82,7 +85,8 @@ fn zoom_to_selection_targets_selected_then_all_frames() {
     let mut app = app_with_pages(&[[0.0, 0.0], [1000.0, 0.0]]);
     let ctx = egui::Context::default();
 
-    app.session.ui.frame_selection = vec![FrameRef::Page(1)];
+    app.session.ui.frame_selection =
+        vec![plotx_core::state::board_frame_id(&app, FrameRef::Page(1)).unwrap()];
     zoom_to_selection(&mut app, &ctx);
     let r = app.doc.canvases[1].board_rect_pt();
     match app.session.board_fit {

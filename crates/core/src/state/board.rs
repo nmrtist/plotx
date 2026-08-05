@@ -1,4 +1,6 @@
-use crate::state::{BoardFrameId, CanvasDocument, Dataset, FrameRef, PlotxApp, TableDataset};
+use crate::state::{
+    BoardFrameId, CanvasDocument, Dataset, FrameRef, PlotxApp, SelectionScope, TableDataset,
+};
 use plotx_render::Rect as PlotRect;
 
 /// World-pt gap kept between board frames by auto-placement and Tidy Up — the
@@ -251,13 +253,18 @@ impl PlotxApp {
             FrameRef::Sheet(di) => self.focus_single(di),
         }
         self.session.view = crate::state::PrimaryView::Canvas;
-        self.session.ui.frame_selection = vec![frame];
+        self.session.ui.frame_selection = vec![frame_id];
+        self.session.ui.selection_scope = SelectionScope::Board;
+        self.session.ui.selection_anchors.frame = Some(frame_id);
         self.session.board_reveal = Some(frame_id);
     }
 }
 
 /// Add or remove a frame from the multi-select set (Shift/Ctrl-click).
 pub fn toggle_frame_selection(app: &mut PlotxApp, frame: FrameRef) {
+    let Some(frame) = board_frame_id(app, frame) else {
+        return;
+    };
     if let Some(pos) = app
         .session
         .ui
@@ -277,16 +284,19 @@ pub fn toggle_frame_selection(app: &mut PlotxApp, frame: FrameRef) {
 /// the Data list drives its own selection, so it toggles directly.
 pub fn toggle_frame_selection_synced(app: &mut PlotxApp, frame: FrameRef) {
     toggle_frame_selection(app, frame);
-    sync_data_selection_from_frames(app);
+    sync_frame_selection_to_data(app);
 }
 
 /// Rebuild the Data-list selection from the multi-selected frames (union of each
 /// page's datasets plus any sheets). The active dataset is the set's lead, so it
 /// can no longer point outside the multi-select the Stack command counts.
-fn sync_data_selection_from_frames(app: &mut PlotxApp) {
+pub fn sync_frame_selection_to_data(app: &mut PlotxApp) {
     let frames = app.session.ui.frame_selection.clone();
     let mut datasets: Vec<usize> = Vec::new();
-    for frame in frames {
+    for frame_id in frames {
+        let Some(frame) = board_frame_ref(app, frame_id) else {
+            continue;
+        };
         let indices = match frame {
             FrameRef::Page(ci) => app.doc.page_dataset_indices(ci),
             FrameRef::Sheet(di) => vec![di],
@@ -427,7 +437,10 @@ mod tests {
 
         assert_eq!(app.session.active_canvas, Some(1));
         assert_eq!(app.session.ui.selection, crate::state::Selection::None);
-        assert_eq!(app.session.ui.frame_selection, vec![FrameRef::Page(1)]);
+        assert_eq!(
+            app.session.ui.frame_selection,
+            vec![BoardFrameId::Page(app.doc.canvases[1].resource_id)]
+        );
         assert_eq!(
             app.session.board_reveal,
             Some(BoardFrameId::Page(result_id))

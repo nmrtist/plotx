@@ -23,9 +23,16 @@ clearing it restores your previous expanded and collapsed branches.
 
 ## Selecting and opening
 
-Click a dataset or reference to focus it. Hold `Shift`, `Ctrl`, or `Cmd` while
-clicking to extend the selection — a multi-selection is how you stack several
-spectra in one plot or apply a processing template to many datasets at once.
+Click a dataset or reference to select it. `Shift`-click selects the continuous
+range from the previous lead item; `Ctrl`-click (`Cmd` on macOS) adds or removes
+one item, and combining both modifiers adds a range without clearing the current
+selection. The same extended-selection model applies to the Canvas and Layers
+lists. A multi-selection is how you stack several spectra in one plot or apply a
+processing template to many datasets at once.
+
+When one of these lists is active, use `↑` / `↓` or `Home` / `End` to move the
+selection, hold `Shift` to extend it, and press `Space` to add or remove the lead
+item. `Ctrl` + `A` selects all datasets; `Ctrl` + `Shift` + `A` clears them.
 Double-click a dataset to open its data sheet. Click an analysis result to
 focus its dataset; double-click it to jump to the plot and the corresponding
 analysis tool.

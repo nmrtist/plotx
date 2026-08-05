@@ -1,5 +1,6 @@
 use super::{first_plot, push_canvas, sample_app};
 use crate::actions::Action;
+use crate::state::BoardFrameId;
 
 #[test]
 fn delete_canvas_resets_in_flight_interaction() {
@@ -24,9 +25,9 @@ fn delete_canvas_resets_in_flight_interaction() {
 #[test]
 fn gesture_active_covers_only_the_board_freezing_drags() {
     use crate::state::{
-        AuthorDrag, FrameDrag, FrameRef, Interaction, MarqueeDrag, ObjectDrag, ObjectDragKind,
-        ObjectFrame, PanDrag, PanelLabelDrag, PhaseAxis, PhaseDrag, PhaseDragKind, RegionDrag,
-        RegionDragKind, SelectionDrag, ZoomAxis, ZoomDrag,
+        AuthorDrag, FrameDrag, Interaction, MarqueeDrag, ObjectDrag, ObjectDragKind, ObjectFrame,
+        PanDrag, PanelLabelDrag, PhaseAxis, PhaseDrag, PhaseDragKind, RegionDrag, RegionDragKind,
+        SelectionDrag, ZoomAxis, ZoomDrag,
     };
     let mut app = sample_app();
     let object = app.doc.canvases[0].objects[0].id;
@@ -124,8 +125,11 @@ fn gesture_active_covers_only_the_board_freezing_drags() {
         ),
         (
             Interaction::Frame(FrameDrag {
-                frame: FrameRef::Page(0),
-                before: [0.0, 0.0],
+                frame: BoardFrameId::Page(app.doc.canvases[0].resource_id),
+                before: vec![(
+                    BoardFrameId::Page(app.doc.canvases[0].resource_id),
+                    [0.0, 0.0],
+                )],
                 start_world: [0.0, 0.0],
             }),
             false,
@@ -144,6 +148,18 @@ fn gesture_active_covers_only_the_board_freezing_drags() {
         app.set_interaction(interaction);
         assert_eq!(app.session.ui.gesture_active(), expected);
     }
+}
+
+#[test]
+fn active_board_marquee_remains_frame_dispatchable() {
+    use crate::state::{BoardMarqueeDrag, Interaction};
+    let marquee = Interaction::BoardMarquee(BoardMarqueeDrag {
+        start: [0.0, 0.0],
+        current: [1.0, 1.0],
+        additive: false,
+        toggle: false,
+    });
+    assert!(marquee.allows_frame_dispatch());
 }
 
 #[test]

@@ -98,6 +98,7 @@ pub(crate) fn zoom_to_selection(app: &mut PlotxApp, ctx: &egui::Context) {
             .frame_selection
             .clone()
             .into_iter()
+            .filter_map(|id| board_frame_ref(app, id))
             .filter_map(|f| frame_board_rect(app, f));
         bbox_of_rects(rects)
     };
@@ -497,7 +498,11 @@ fn paint_sheet_body(
 }
 
 fn activate_frame(app: &mut PlotxApp, frame: FrameRef) {
-    app.session.ui.frame_selection = vec![frame];
+    if let Some(id) = board_frame_id(app, frame) {
+        app.session.ui.frame_selection = vec![id];
+        app.session.ui.selection_scope = plotx_core::state::SelectionScope::Board;
+        app.session.ui.selection_anchors.frame = Some(id);
+    }
     match frame {
         FrameRef::Page(ci) => {
             activate_page(app, ci);
@@ -514,11 +519,7 @@ fn activate_frame(app: &mut PlotxApp, frame: FrameRef) {
 }
 
 pub(crate) fn frame_is_selected(app: &PlotxApp, frame: FrameRef) -> bool {
-    let is_active = match frame {
-        FrameRef::Page(ci) => app.session.active_canvas == Some(ci),
-        FrameRef::Sheet(di) => app.active_dataset() == Some(di),
-    };
-    is_active || app.session.ui.frame_selection.contains(&frame)
+    board_frame_id(app, frame).is_some_and(|id| app.session.ui.frame_selection.contains(&id))
 }
 
 fn activate_page(app: &mut PlotxApp, ci: usize) {
@@ -533,6 +534,9 @@ fn activate_page(app: &mut PlotxApp, ci: usize) {
 }
 
 pub(crate) fn dispatch_frame_gesture(app: &mut PlotxApp, rect: egui::Rect, ui: &Ui) -> bool {
+    if board_marquee::handle(app, rect, ui) {
+        return true;
+    }
     let (pressed, double, hover, extend) = ui.input(|i| {
         (
             i.pointer.primary_pressed(),
@@ -547,6 +551,7 @@ pub(crate) fn dispatch_frame_gesture(app: &mut PlotxApp, rect: egui::Rect, ui: &
         && let Some(p) = hover
         && let Some(frame) = frame_at(app, rect, p).or_else(|| frame_header_at(app, rect, p))
     {
+        app.session.ui.selection_scope = plotx_core::state::SelectionScope::Board;
         toggle_frame_selection_synced(app, frame);
         return true;
     }
@@ -569,6 +574,7 @@ pub(crate) fn dispatch_frame_gesture(app: &mut PlotxApp, rect: egui::Rect, ui: &
     if let (true, Some(p)) = (pressed, hover)
         && let Some(frame) = frame_at(app, rect, p)
     {
+        app.session.ui.selection_scope = plotx_core::state::SelectionScope::Board;
         activate_frame(app, frame);
     }
     if let (true, Some(p)) = (double, hover)
@@ -603,11 +609,30 @@ fn handle_frame_drag(app: &mut PlotxApp, rect: egui::Rect, ui: &Ui) -> bool {
         && let Some(p) = hover
         && let Some(frame) = frame_header_at(app, rect, p)
     {
+        let Some(frame_id) = board_frame_id(app, frame) else {
+            return false;
+        };
+        let preserve = app.session.ui.frame_selection.contains(&frame_id);
+        let selection = app.session.ui.frame_selection.clone();
+        let data_selection = app.session.ui.data_selection.clone();
         activate_frame(app, frame);
-        if let Some(before) = frame_board_pos(app, frame) {
+        if preserve {
+            app.session.ui.frame_selection = selection;
+            app.focus_datasets(&data_selection, app.active_dataset());
+        }
+        let before = app
+            .session
+            .ui
+            .frame_selection
+            .iter()
+            .filter_map(|id| {
+                board_frame_ref(app, *id).and_then(|f| frame_board_pos(app, f).map(|p| (*id, p)))
+            })
+            .collect::<Vec<_>>();
+        if !before.is_empty() {
             let start = BoardTransform::from_board(app.session.board, rect).screen_to_world(p);
             app.begin_interaction(Interaction::Frame(FrameDrag {
-                frame,
+                frame: frame_id,
                 before,
                 start_world: [start.x, start.y],
             }));
@@ -615,18 +640,33 @@ fn handle_frame_drag(app: &mut PlotxApp, rect: egui::Rect, ui: &Ui) -> bool {
     }
 
     let drag = match &app.session.ui.interaction {
-        Interaction::Frame(d) => *d,
+        Interaction::Frame(d) => d.clone(),
         _ => return false,
     };
 
     if primary_down && let Some(p) = hover {
         let world = BoardTransform::from_board(app.session.board, rect).screen_to_world(p);
+        let Some((_, primary_before)) = drag.before.iter().find(|(id, _)| *id == drag.frame) else {
+            return true;
+        };
         let candidate = [
-            drag.before[0] + (world.x - drag.start_world[0]),
-            drag.before[1] + (world.y - drag.start_world[1]),
+            primary_before[0] + (world.x - drag.start_world[0]),
+            primary_before[1] + (world.y - drag.start_world[1]),
         ];
-        let snapped = snap_dragged_frame(app, drag.frame, candidate, alt);
-        set_frame_board_pos(app, drag.frame, snapped);
+        let Some(primary_ref) = board_frame_ref(app, drag.frame) else {
+            return true;
+        };
+        let moving = drag.before.iter().map(|(id, _)| *id).collect::<Vec<_>>();
+        let snapped = snap_dragged_frame(app, primary_ref, &moving, candidate, alt);
+        let delta = [
+            snapped[0] - primary_before[0],
+            snapped[1] - primary_before[1],
+        ];
+        for (id, before) in &drag.before {
+            if let Some(frame) = board_frame_ref(app, *id) {
+                set_frame_board_pos(app, frame, [before[0] + delta[0], before[1] + delta[1]]);
+            }
+        }
         app.session.board_fit = None;
         app.session.board.auto_fit = false;
         ui.ctx().request_repaint();
@@ -634,19 +674,25 @@ fn handle_frame_drag(app: &mut PlotxApp, rect: egui::Rect, ui: &Ui) -> bool {
 
     if primary_released || !primary_down {
         app.reset_interaction();
-        if let Some(after) = frame_board_pos(app, drag.frame) {
-            let action = match drag.frame {
-                FrameRef::Page(ci) => Some(Action::move_canvas_on_board(ci, drag.before, after)),
-                FrameRef::Sheet(di) => app
-                    .doc
-                    .datasets
-                    .get(di)
-                    .map(plotx_core::state::Dataset::resource_id)
-                    .map(|id| Action::move_sheet_on_board(id, drag.before, after)),
-            };
-            if let Some(action) = action {
-                app.execute_action(action);
-            }
+        let actions = drag
+            .before
+            .into_iter()
+            .filter_map(|(id, before)| {
+                let frame = board_frame_ref(app, id)?;
+                let after = frame_board_pos(app, frame)?;
+                match frame {
+                    FrameRef::Page(ci) => Some(Action::move_canvas_on_board(ci, before, after)),
+                    FrameRef::Sheet(_) => match id {
+                        plotx_core::state::BoardFrameId::Sheet(dataset) => {
+                            Some(Action::move_sheet_on_board(dataset, before, after))
+                        }
+                        _ => None,
+                    },
+                }
+            })
+            .collect::<Vec<_>>();
+        if !actions.is_empty() {
+            app.execute_action(Action::Composite(actions));
         }
     }
 

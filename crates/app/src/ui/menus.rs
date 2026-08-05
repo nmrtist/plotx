@@ -81,6 +81,7 @@ pub(crate) fn menu_bar_spec() -> Vec<(&'static str, Vec<MenuEntry>)> {
                 Command(CommandId::Redo),
                 Separator,
                 Command(CommandId::SelectAll),
+                Command(CommandId::DeselectAll),
                 Command(CommandId::Group),
                 Command(CommandId::Ungroup),
                 Separator,

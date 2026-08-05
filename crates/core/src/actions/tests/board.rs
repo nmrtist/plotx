@@ -1,7 +1,7 @@
 use super::{dataset_id, sample_app, table_app};
 use crate::actions::Action;
-use crate::state::FrameRef;
 use crate::state::page_frame_showing_dataset;
+use crate::state::{BoardFrameId, FrameRef};
 
 #[test]
 fn new_table_dataset_adds_placed_starter_table() {
@@ -16,7 +16,10 @@ fn new_table_dataset_adds_placed_starter_table() {
     assert_eq!(t.series_bindings.len(), 1);
     assert_eq!(app.active_dataset(), Some(di));
     assert_eq!(app.session.ui.sheet_open, Some(di));
-    assert_eq!(app.session.ui.frame_selection, vec![FrameRef::Sheet(di)]);
+    assert_eq!(
+        app.session.ui.frame_selection,
+        vec![BoardFrameId::Sheet(app.doc.datasets[di].resource_id())]
+    );
     // Placed off the origin so it does not land on a page at [0, 0].
     assert_ne!(t.board_pos, [0.0, 0.0]);
 }

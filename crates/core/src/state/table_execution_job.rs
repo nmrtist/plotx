@@ -257,7 +257,9 @@ impl crate::state::PlotxApp {
         if reveal {
             self.focus_single(index);
             self.session.view = crate::state::PrimaryView::Data;
-            self.session.ui.frame_selection = vec![crate::state::FrameRef::Sheet(index)];
+            self.session.ui.frame_selection = vec![crate::state::BoardFrameId::Sheet(
+                self.doc.datasets[index].resource_id(),
+            )];
             self.session.ui.sheet_open = Some(index);
         }
         self.session.status = "Table transform completed.".into();
@@ -385,7 +387,9 @@ mod tests {
         app.doc.datasets.push(Dataset::Table(Box::new(source)));
         app.session.view = crate::state::PrimaryView::Canvas;
         app.session.ui.sheet_open = Some(0);
-        app.session.ui.frame_selection = vec![crate::state::FrameRef::Sheet(0)];
+        app.session.ui.frame_selection = vec![crate::state::BoardFrameId::Sheet(
+            app.doc.datasets[0].resource_id(),
+        )];
         app.start_table_transform(plan, vec![0], "Projected".into(), 16 * 1024 * 1024)
             .unwrap();
         let deadline = Instant::now() + Duration::from_secs(2);
@@ -399,7 +403,9 @@ mod tests {
         assert_eq!(app.session.ui.sheet_open, Some(0));
         assert_eq!(
             app.session.ui.frame_selection,
-            vec![crate::state::FrameRef::Sheet(0)]
+            vec![crate::state::BoardFrameId::Sheet(
+                app.doc.datasets[0].resource_id()
+            )]
         );
         assert_eq!(
             app.doc.datasets[1]

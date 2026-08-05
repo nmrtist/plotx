@@ -99,6 +99,7 @@ pub fn render(
         || app.session.ui.settings_dialog.is_some()
         || batch_workflow.is_open();
     if !modal_open {
+        primary_sidebar::selection::handle_keyboard_selection(app, &ctx);
         handle_command_shortcuts(app, clipboard_table_paste, &ctx);
         handle_escape_shortcut(app, &ctx);
         handle_rename_shortcut(app, &ctx);

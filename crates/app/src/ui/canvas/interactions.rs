@@ -344,11 +344,14 @@ pub(crate) fn handle_object_interactions(
         if let Some(hit) = hit {
             let id = hit.object;
             if shift {
+                app.session.ui.selection_scope = plotx_core::state::SelectionScope::CanvasObjects;
                 app.toggle_object_selection(ci, id);
             } else {
                 let keep_group = app.session.ui.selection.objects().len() > 1
                     && app.session.ui.selection.contains(id);
                 if !keep_group {
+                    app.session.ui.selection_scope =
+                        plotx_core::state::SelectionScope::CanvasObjects;
                     app.select_object(ci, id);
                 }
                 if matches!(app.interaction(), Interaction::PanelLabel(_)) {
@@ -393,6 +396,7 @@ pub(crate) fn handle_object_interactions(
             && !page_screen_rect(app.session.board, &app.doc.canvases[ci], rect)
                 .contains(screen_pos)
         {
+            app.session.ui.selection_scope = plotx_core::state::SelectionScope::Board;
             // An empty press on the board outside any page body clears the
             // selection; a press over the side bars/toolbar (global pointer, no
             // object hit) must not.
@@ -401,6 +405,7 @@ pub(crate) fn handle_object_interactions(
         } else if let Some(p) = page_pos.filter(|_| {
             page_screen_rect(app.session.board, &app.doc.canvases[ci], rect).contains(screen_pos)
         }) {
+            app.session.ui.selection_scope = plotx_core::state::SelectionScope::CanvasObjects;
             // Marquee is scoped to the frame it begins in: only start when the
             // press lands inside this page's body, never on empty board.
             freeze_board_for_gesture(app);

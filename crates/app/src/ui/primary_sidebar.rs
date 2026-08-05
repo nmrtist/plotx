@@ -9,8 +9,10 @@ use plotx_core::state::{
 
 mod board_views;
 mod data_browser;
+pub(crate) mod selection;
 use board_views::board_views_section;
 use data_browser::{AnalysisItem, AnalysisKind, DataTree, DatasetNode};
+use selection::*;
 
 pub fn render(app: &mut PlotxApp, ui: &mut Ui) {
     ui.add_space(6.0);
@@ -94,7 +96,7 @@ fn canvas_list(app: &mut PlotxApp, ui: &mut Ui) {
         return;
     }
 
-    let mut select: Option<(usize, bool)> = None;
+    let mut select: Option<(usize, SelectModifiers)> = None;
     let mut open_settings: Option<usize> = None;
     let mut delete: Option<usize> = None;
     let mut start_rename: Option<usize> = None;
@@ -120,8 +122,11 @@ fn canvas_list(app: &mut PlotxApp, ui: &mut Ui) {
         let selected = crate::ui::canvas::frame_is_selected(app, FrameRef::Page(ci));
         let resp = ui.selectable_label(selected, name);
         if resp.clicked() {
-            let extend = ui.input(|i| i.modifiers.shift || i.modifiers.command || i.modifiers.ctrl);
-            select = Some((ci, extend));
+            claim_list_keyboard_focus(ui, &resp);
+            select = Some((ci, select_modifiers(ui)));
+        } else if resp.secondary_clicked() && !selected {
+            claim_list_keyboard_focus(ui, &resp);
+            select = Some((ci, SelectModifiers::default()));
         }
         if resp.double_clicked() {
             start_rename = Some(ci);
@@ -165,14 +170,24 @@ fn canvas_list(app: &mut PlotxApp, ui: &mut Ui) {
     if cancel {
         app.session.ui.rename = None;
     }
-    if let Some((ci, extend)) = select {
-        if extend {
+    if let Some((ci, modifiers)) = select {
+        app.session.ui.selection_scope = plotx_core::state::SelectionScope::CanvasList;
+        let id = app.doc.canvases[ci].resource_id;
+        if modifiers.shift {
+            select_canvas_range(app, ci, modifiers.command);
+        } else if modifiers.command {
             plotx_core::state::toggle_frame_selection_synced(app, FrameRef::Page(ci));
+            app.session.ui.selection_anchors.canvas = Some(id);
+            app.session.ui.selection_anchors.canvas_lead = Some(id);
         } else {
             app.activate_canvas(ci);
             app.session.ui.panel_note_inline_edit = None;
             app.session.ui.panel_note_edit = None;
-            app.session.ui.frame_selection = vec![FrameRef::Page(ci)];
+            if let Some(id) = plotx_core::state::board_frame_id(app, FrameRef::Page(ci)) {
+                app.session.ui.frame_selection = vec![id];
+            }
+            app.session.ui.selection_anchors.canvas = Some(id);
+            app.session.ui.selection_anchors.canvas_lead = Some(id);
             crate::ui::canvas::request_board_fit(app, ui.ctx(), FrameRef::Page(ci));
         }
     }
@@ -242,8 +257,9 @@ fn object_list(app: &mut PlotxApp, ci: usize, ui: &mut Ui) {
             let selected = app.session.ui.selection.contains(object_id)
                 || app.session.ui.selection.object() == Some(object_id);
             let resp = ui.selectable_label(selected, app.doc.canvases[ci].objects[oi].name.clone());
-            if resp.clicked() {
-                select = Some(object_id);
+            if resp.clicked() || (resp.secondary_clicked() && !selected) {
+                claim_list_keyboard_focus(ui, &resp);
+                select = Some((object_id, select_modifiers(ui)));
             }
             resp.context_menu(|ui| {
                 object_transfer_menu(ui, object_id, &others, &mut transfer);
@@ -286,8 +302,9 @@ fn object_list(app: &mut PlotxApp, ci: usize, ui: &mut Ui) {
             });
         });
     }
-    if let Some(object_id) = select {
-        app.select_object(ci, object_id);
+    if let Some((object_id, modifiers)) = select {
+        app.session.ui.selection_scope = plotx_core::state::SelectionScope::Layers;
+        select_layer_range(app, ci, object_id, modifiers);
         let active = app.doc.canvases[ci]
             .object(object_id)
             .and_then(|object| object.dataset())
@@ -357,6 +374,7 @@ fn data_list(app: &mut PlotxApp, ui: &mut Ui) {
         return;
     }
 
+    let visible = tree.visible_datasets(app, filtering);
     let mut event = None;
     let mut rename_rendered = false;
     for node in &tree.roots {
@@ -370,12 +388,12 @@ fn data_list(app: &mut PlotxApp, ui: &mut Ui) {
             &mut event,
         );
     }
-    apply_browser_event(app, ui, event);
+    apply_browser_event(app, ui, &visible, event);
 }
 
 #[derive(Clone)]
 enum BrowserEvent {
-    SelectDataset(usize, bool),
+    SelectDataset(usize, SelectModifiers),
     OpenSheet(usize),
     StartRename(usize),
     RenameCommit(usize, String),
@@ -455,8 +473,11 @@ fn render_dataset_node(
             ));
         }
         if resp.clicked() {
-            let extend = ui.input(|i| i.modifiers.shift || i.modifiers.command || i.modifiers.ctrl);
-            *event = Some(BrowserEvent::SelectDataset(di, extend));
+            claim_list_keyboard_focus(ui, &resp);
+            *event = Some(BrowserEvent::SelectDataset(di, select_modifiers(ui)));
+        } else if resp.secondary_clicked() && !selected {
+            claim_list_keyboard_focus(ui, &resp);
+            *event = Some(BrowserEvent::SelectDataset(di, SelectModifiers::default()));
         }
         if resp.double_clicked() {
             *event = Some(BrowserEvent::OpenSheet(di));
@@ -603,7 +624,12 @@ fn render_derived_group(
     }
 }
 
-fn apply_browser_event(app: &mut PlotxApp, ui: &Ui, event: Option<BrowserEvent>) {
+fn apply_browser_event(
+    app: &mut PlotxApp,
+    ui: &Ui,
+    visible: &[usize],
+    event: Option<BrowserEvent>,
+) {
     match event {
         Some(BrowserEvent::RenameCommit(di, name)) => {
             let trimmed = name.trim();
@@ -617,7 +643,9 @@ fn apply_browser_event(app: &mut PlotxApp, ui: &Ui, event: Option<BrowserEvent>)
             app.session.ui.rename = None;
         }
         Some(BrowserEvent::RenameCancel) => app.session.ui.rename = None,
-        Some(BrowserEvent::SelectDataset(di, extend)) => select_dataset(app, ui, di, extend),
+        Some(BrowserEvent::SelectDataset(di, extend)) => {
+            selection::select_dataset(app, ui, visible, di, extend)
+        }
         Some(BrowserEvent::OpenSheet(di)) => {
             app.focus_single(di);
             app.session.ui.data_browser_selected_node = Some(format!("dataset:{di}"));
@@ -643,26 +671,6 @@ fn apply_browser_event(app: &mut PlotxApp, ui: &Ui, event: Option<BrowserEvent>)
             select_analysis(app, ui, di, &item, open)
         }
         None => {}
-    }
-}
-
-fn select_dataset(app: &mut PlotxApp, ui: &Ui, di: usize, extend: bool) {
-    let table_frame = app.doc.datasets[di].as_table().and_then(|table| {
-        if table.board_sheet_visible() {
-            Some(FrameRef::Sheet(di))
-        } else {
-            plotx_core::state::page_frame_showing_dataset(app, di)
-        }
-    });
-    app.toggle_selection(di, extend);
-    app.session.ui.data_browser_selected_node = Some(format!("dataset:{di}"));
-    if let Some(frame) = table_frame {
-        if extend {
-            plotx_core::state::toggle_frame_selection(app, frame);
-        } else {
-            app.session.ui.frame_selection = vec![frame];
-            crate::ui::canvas::request_board_fit(app, ui.ctx(), frame);
-        }
     }
 }
 
@@ -746,7 +754,9 @@ fn jump_to_frame(app: &mut PlotxApp, ui: &Ui, frame: FrameRef) {
         FrameRef::Page(ci) => app.session.active_canvas = Some(ci),
         FrameRef::Sheet(sdi) => app.focus_single(sdi),
     }
-    app.session.ui.frame_selection = vec![frame];
+    if let Some(id) = plotx_core::state::board_frame_id(app, frame) {
+        app.session.ui.frame_selection = vec![id];
+    }
     crate::ui::canvas::request_board_fit(app, ui.ctx(), frame);
     app.session.status = "Jumped to linked frame.".to_owned();
 }

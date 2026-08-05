@@ -93,7 +93,8 @@ impl PlotxApp {
         let di = self.doc.datasets.len() - 1;
         self.focus_single(di);
         self.session.view = PrimaryView::Data;
-        self.session.ui.frame_selection = vec![FrameRef::Sheet(di)];
+        self.session.ui.frame_selection =
+            vec![BoardFrameId::Sheet(self.doc.datasets[di].resource_id())];
         self.session.ui.sheet_open = Some(di);
         self.mark_document_dirty();
         self.session.status = "Created a data table.".to_owned();
@@ -131,7 +132,9 @@ impl PlotxApp {
         self.execute_action(action);
         self.focus_single(dataset_index);
         self.session.view = PrimaryView::Data;
-        self.session.ui.frame_selection = vec![FrameRef::Sheet(dataset_index)];
+        self.session.ui.frame_selection = vec![BoardFrameId::Sheet(
+            self.doc.datasets[dataset_index].resource_id(),
+        )];
         self.session.ui.sheet_open = Some(dataset_index);
         dataset_index
     }

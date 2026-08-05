@@ -134,6 +134,39 @@ impl DataTree {
                 .collect(),
         }
     }
+
+    /// Dataset rows in the exact order the current tree renders them. Linked
+    /// references are one logical selectable item and therefore appear once.
+    pub(super) fn visible_datasets(&self, app: &PlotxApp, filtering: bool) -> Vec<usize> {
+        fn visit(node: &DatasetNode, app: &PlotxApp, filtering: bool, out: &mut Vec<usize>) {
+            if !out.contains(&node.dataset) {
+                out.push(node.dataset);
+            }
+            let dataset_open = filtering
+                || !app
+                    .session
+                    .ui
+                    .data_browser_collapsed_datasets
+                    .contains(&node.dataset);
+            let derived_open = filtering
+                || !app
+                    .session
+                    .ui
+                    .data_browser_collapsed_derived
+                    .contains(&node.dataset);
+            if dataset_open && derived_open && !node.cycle_cut {
+                for child in &node.derived {
+                    visit(child, app, filtering, out);
+                }
+            }
+        }
+
+        let mut visible = Vec::new();
+        for root in &self.roots {
+            visit(root, app, filtering, &mut visible);
+        }
+        visible
+    }
 }
 
 fn mark_reachable(di: usize, children: &[Vec<usize>], seen: &mut HashSet<usize>) {
@@ -438,6 +471,22 @@ mod tests {
         assert_eq!(filtered.roots.len(), 1);
         assert_eq!(filtered.roots[0].dataset, 0);
         assert_eq!(filtered.roots[0].derived[0].dataset, 1);
+    }
+
+    #[test]
+    fn visible_dataset_order_follows_the_rendered_lineage_tree() {
+        let mut app = PlotxApp::new();
+        app.doc.datasets = vec![root("A"), root("B")];
+        let source = app.doc.datasets[0].resource_id();
+        app.doc
+            .datasets
+            .push(derived("A child", DerivationKind::Projection, &[source]));
+
+        let tree = DataTree::build(&app);
+        assert_eq!(tree.visible_datasets(&app, false), vec![0, 2, 1]);
+
+        app.session.ui.data_browser_collapsed_derived.insert(0);
+        assert_eq!(tree.visible_datasets(&app, false), vec![0, 1]);
     }
 
     #[test]

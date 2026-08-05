@@ -11,6 +11,7 @@ const FRAME_SNAP_TOL_PX: f32 = 8.0;
 pub(crate) fn snap_dragged_frame(
     app: &PlotxApp,
     frame: FrameRef,
+    moving: &[plotx_core::state::BoardFrameId],
     candidate: [f32; 2],
     bypass: bool,
 ) -> [f32; 2] {
@@ -23,7 +24,7 @@ pub(crate) fn snap_dragged_frame(
     let size = [r.right() - r.left, r.bottom() - r.top];
     let others: Vec<PlotRect> = board_frames(app)
         .into_iter()
-        .filter(|&f| f != frame)
+        .filter(|&f| f != frame && board_frame_id(app, f).is_none_or(|id| !moving.contains(&id)))
         .filter_map(|f| frame_board_rect(app, f))
         .collect();
     let tol = FRAME_SNAP_TOL_PX / app.session.board.zoom.max(0.01);
@@ -178,7 +179,7 @@ mod tests {
         let candidate = [width + BOARD_GUTTER_PT + 2.0, 3.0];
         app.settings.general.snap_enabled = false;
         assert_eq!(
-            snap_dragged_frame(&app, FrameRef::Page(1), candidate, false),
+            snap_dragged_frame(&app, FrameRef::Page(1), &[], candidate, false),
             candidate
         );
     }
@@ -189,7 +190,26 @@ mod tests {
         let width = app.doc.canvases[0].board_rect_pt().width;
         let candidate = [width + BOARD_GUTTER_PT + 2.0, 3.0];
         assert_eq!(
-            snap_dragged_frame(&app, FrameRef::Page(1), candidate, true),
+            snap_dragged_frame(&app, FrameRef::Page(1), &[], candidate, true),
+            candidate
+        );
+    }
+
+    #[test]
+    fn group_drag_does_not_snap_to_another_moving_page() {
+        let mut app = app_with_two_pages();
+        let width = app.doc.canvases[0].board_rect_pt().width;
+        app.doc.canvases[1].board_pos = [width, 0.0];
+        let moving = app
+            .doc
+            .canvases
+            .iter()
+            .map(|canvas| plotx_core::state::BoardFrameId::Page(canvas.resource_id))
+            .collect::<Vec<_>>();
+        let candidate = [3.0, 3.0];
+
+        assert_eq!(
+            snap_dragged_frame(&app, FrameRef::Page(0), &moving, candidate, false),
             candidate
         );
     }

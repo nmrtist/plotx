@@ -65,6 +65,7 @@ pub enum CommandId {
     Undo,
     Redo,
     SelectAll,
+    DeselectAll,
     Group,
     Ungroup,
     TogglePrimarySidebar,
@@ -205,6 +206,7 @@ pub fn catalog(app: &PlotxApp) -> Vec<CommandDescriptor> {
         CommandId::Undo,
         CommandId::Redo,
         CommandId::SelectAll,
+        CommandId::DeselectAll,
         CommandId::Group,
         CommandId::Ungroup,
         CommandId::TogglePrimarySidebar,
@@ -429,7 +431,10 @@ pub fn describe(app: &PlotxApp, id: CommandId) -> CommandDescriptor {
         ),
         CommandId::Undo => requires(app.can_undo(), "Nothing to undo yet."),
         CommandId::Redo => requires(app.can_redo(), "Nothing to redo yet."),
-        CommandId::SelectAll => requires(has_canvas, "Open a canvas before selecting objects."),
+        CommandId::SelectAll | CommandId::DeselectAll => requires(
+            has_canvas || !app.doc.datasets.is_empty(),
+            "Open a canvas or dataset before changing the selection.",
+        ),
         CommandId::Group => requires(
             selected >= 2,
             "Select at least two objects before grouping them.",

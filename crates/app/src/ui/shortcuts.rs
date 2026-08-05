@@ -106,6 +106,7 @@ static BINDINGS: &[CommandBinding] = &[
         menu_accelerator: false,
     },
     bound(commands::CommandId::SelectAll, cmd(egui::Key::A)),
+    bound(commands::CommandId::DeselectAll, cmd_shift(egui::Key::A)),
     bound(commands::CommandId::Group, cmd(egui::Key::G)),
     bound(commands::CommandId::Ungroup, cmd_shift(egui::Key::G)),
     bound(commands::CommandId::Preferences, cmd(egui::Key::Comma)),
@@ -335,6 +336,18 @@ fn handle_escape(app: &mut PlotxApp, now: f64) {
         return;
     }
 
+    if !app.session.ui.frame_selection.is_empty() {
+        app.session.ui.frame_selection.clear();
+        app.session.status = "Frame selection cleared.".to_owned();
+        return;
+    }
+
+    if !app.session.ui.data_selection.is_empty() {
+        app.focus_datasets(&[], None);
+        app.session.status = "Dataset selection cleared.".to_owned();
+        return;
+    }
+
     if !matches!(app.session.ui.selection, Selection::None) {
         exit_to_page(app, "Selection cleared.");
         return;
@@ -429,7 +442,7 @@ pub(super) fn handle_focus_shortcut(app: &mut PlotxApp, ctx: &egui::Context) {
         return;
     }
     let frame = match app.session.ui.frame_selection.as_slice() {
-        [only] => Some(*only),
+        [only] => plotx_core::state::board_frame_ref(app, *only),
         _ => app
             .session
             .active_canvas

@@ -50,43 +50,6 @@ pub struct AuthorDrag {
     pub current: [f32; 2],
 }
 
-/// The single source of truth for what is selected in the active canvas: one or
-/// more whole objects. `Objects` holds an ordered set whose first entry is the
-/// primary (drives active-plot resolution and serialization). A data tool acts
-/// on the primary plot directly. Sub-selections that are not whole objects (a
-/// title, an analysis region) live in their own `UiState` fields.
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
-pub enum Selection {
-    #[default]
-    None,
-    Objects(Vec<ObjectId>),
-}
-
-impl Selection {
-    pub fn single(id: ObjectId) -> Self {
-        Selection::Objects(vec![id])
-    }
-
-    pub fn object(&self) -> Option<ObjectId> {
-        match self {
-            Selection::None => None,
-            Selection::Objects(ids) => ids.first().copied(),
-        }
-    }
-
-    /// The page-space multi-selection, empty when nothing is selected.
-    pub fn objects(&self) -> &[ObjectId] {
-        match self {
-            Selection::Objects(ids) => ids,
-            _ => &[],
-        }
-    }
-
-    pub fn contains(&self, id: ObjectId) -> bool {
-        self.objects().contains(&id)
-    }
-}
-
 /// A rail row in the Preferences panel, mapping 1:1 to a `Settings` sub-struct.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum SettingsCategory {
@@ -326,6 +289,8 @@ pub struct UiState {
     pub spectrum_arithmetic_dialog: Option<SpectrumArithmeticDialogState>,
     pub align_spectra_dialog: Option<AlignSpectraDialogState>,
     pub selection: Selection,
+    pub selection_scope: SelectionScope,
+    pub selection_anchors: SelectionAnchors,
     /// A panel-letter sub-selection (canvas index, object id): its own page-space
     /// selection scope, distinct from the whole-object `selection`.
     pub panel_label_selection: Option<(usize, ObjectId)>,
@@ -336,7 +301,7 @@ pub struct UiState {
     pub tile_drop: Option<TileDropPreview>,
     /// Multi-frame board selection (pages and/or sheets) built with Shift/Ctrl
     /// click, used by zoom-to-selection. Transient; a plain click resets it.
-    pub frame_selection: Vec<FrameRef>,
+    pub frame_selection: Vec<BoardFrameId>,
     /// Multi-selection of datasets in the Data list (Shift/Ctrl click), the input
     /// to the "Stack selected data" command. Transient; a plain click resets it.
     pub data_selection: Vec<usize>,
@@ -528,6 +493,8 @@ impl Default for UiState {
             spectrum_arithmetic_dialog: None,
             align_spectra_dialog: None,
             selection: Selection::None,
+            selection_scope: SelectionScope::default(),
+            selection_anchors: SelectionAnchors::default(),
             panel_label_selection: None,
             tile_drop: None,
             frame_selection: Vec::new(),
@@ -763,11 +730,19 @@ pub struct ObjectDrag {
 /// header strip. `before` is the frame's `board_pos` (pt) at grab time and
 /// `start_world` the board-world (pt) pointer position then, so the live position
 /// is recomputed absolutely each frame (grid snapping never accumulates drift).
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct FrameDrag {
-    pub frame: FrameRef,
-    pub before: [f32; 2],
+    pub frame: BoardFrameId,
+    pub before: Vec<(BoardFrameId, [f32; 2])>,
     pub start_world: [f32; 2],
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct BoardMarqueeDrag {
+    pub start: [f32; 2],
+    pub current: [f32; 2],
+    pub additive: bool,
+    pub toggle: bool,
 }
 
 /// In-progress rubber-band selecting objects on empty page area. `start` and
