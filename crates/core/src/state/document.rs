@@ -228,9 +228,11 @@ pub struct DataBinding {
 
 impl DataBinding {
     pub fn single(dataset: &Dataset) -> Self {
-        Self {
-            series: SeriesBinding::from_dataset(dataset).into_iter().collect(),
+        let mut series = SeriesBinding::from_dataset_all(dataset);
+        for (index, binding) in series.iter_mut().enumerate() {
+            binding.id = SeriesId::new(index as u64);
         }
+        Self { series }
     }
 
     pub fn primary_dataset(&self) -> Option<DatasetId> {

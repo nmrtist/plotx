@@ -69,6 +69,11 @@ impl Nmr2DDataset {
         field: &FieldDescriptor,
         encoding: &SeriesEncoding,
     ) -> Option<Figure> {
+        if matches!(encoding, SeriesEncoding::Contour(_))
+            && matches!(field.local_id.as_str(), "nmr.dosy_map" | "nmr.ilt_map")
+        {
+            return self.map_contour_base(field.id);
+        }
         let Processed2D::Ft(spectrum) = &self.processed else {
             return None;
         };
@@ -101,6 +106,9 @@ impl Nmr2DDataset {
         geometry: &ContourGeometry,
         style: &ContourStyle,
     ) -> Option<Figure> {
+        if let Some(figure) = self.map_contour_base(field) {
+            return Some(apply_contour_geometry(figure, geometry, style));
+        }
         let Processed2D::Ft(spectrum) = &self.processed else {
             return None;
         };
@@ -116,6 +124,44 @@ impl Nmr2DDataset {
             geometry,
             style,
         ))
+    }
+
+    fn map_contour_base(&self, field: FieldId) -> Option<Figure> {
+        let map_axes = if self.field_catalog.id_for_key("nmr.dosy_map") == Some(field) {
+            let grid = dosy_scalar_grid(self.dosy_map.as_ref()?);
+            let bounds = |axis: &AxisSampling| match axis {
+                AxisSampling::Linear { start, end } => Some((*start, *end)),
+                AxisSampling::Explicit(values) => Some((*values.first()?, *values.last()?)),
+            };
+            let (x0, x1) = bounds(&grid.x)?;
+            let (y0, y1) = bounds(&grid.y)?;
+            Some(("DOSY", x0, x1, y0, y1))
+        } else if self.field_catalog.id_for_key("nmr.ilt_map") == Some(field) {
+            let map = self.ilt_map.as_ref()?;
+            Some((
+                "DOSY (ILT)",
+                *map.ppm.first()?,
+                *map.ppm.last()?,
+                map.d_grid.first()?.max(f64::MIN_POSITIVE).log10(),
+                map.d_grid.last()?.max(f64::MIN_POSITIVE).log10(),
+            ))
+        } else {
+            return None;
+        };
+        let (title, x0, x1, y0, y1) = map_axes?;
+        Some(
+            Figure::new(
+                format!("{title} — {}", self.data.source),
+                Axis::new(
+                    format!("{} chemical shift (ppm)", self.data.direct.nucleus),
+                    x0.min(x1),
+                    x0.max(x1),
+                )
+                .reversed(true),
+                Axis::new("log10(D / (m2/s))", y0.min(y1), y0.max(y1)).reversed(true),
+            )
+            .with_axis_frame(AxisFrame::Box),
+        )
     }
 }
 

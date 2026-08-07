@@ -148,6 +148,59 @@ fn rewrite_project(path: &Path, mut edit: impl FnMut(&str, &mut Vec<u8>) -> bool
     std::fs::rename(tmp, path).unwrap();
 }
 
+fn pseudo_project_with_view(name: &str) -> PathBuf {
+    let mut app = PlotxApp::new();
+    let dataset = Dataset::Nmr2D(Box::new(Nmr2DDataset::load(synthetic_dosy_2d())));
+    let canvas = crate::workflow::build_default_canvas(&dataset, "strict-pseudo");
+    app.doc.datasets.push(dataset);
+    app.doc.canvases.push(canvas);
+    let path = temp_project(name);
+    let _ = std::fs::remove_file(&path);
+    save_project(&app, &path, false).unwrap();
+    path
+}
+
+#[test]
+fn load_rejects_duplicate_series_ids_scalar_collections_and_unknown_source_fields() {
+    let cases = ["duplicate", "scalar", "unknown-field"];
+    for case in cases {
+        let path = pseudo_project_with_view(case);
+        rewrite_project(&path, |name, bytes| {
+            if !name.starts_with("views/") || !name.ends_with(".json") {
+                return true;
+            }
+            let mut view: serde_json::Value = serde_json::from_slice(bytes).unwrap();
+            let series = view["objects"][0]["series"].as_array_mut().unwrap();
+            match case {
+                "duplicate" => series.push(series[0].clone()),
+                "scalar" => {
+                    let source = series[0]["source"].as_object_mut().unwrap();
+                    source.insert("kind".into(), "field".into());
+                    source.remove("item");
+                }
+                "unknown-field" => {
+                    series[0]["source"]["unexpected"] = serde_json::json!(true);
+                }
+                _ => unreachable!(),
+            }
+            *bytes = serde_json::to_vec_pretty(&view).unwrap();
+            true
+        });
+        let error = match load_project(&path) {
+            Ok(_) => panic!("{case} project unexpectedly loaded"),
+            Err(error) => error.to_string(),
+        };
+        let _ = std::fs::remove_file(path);
+        let expected = match case {
+            "duplicate" => "duplicate series id",
+            "scalar" => "trace collection as a scalar field",
+            "unknown-field" => "unknown field",
+            _ => unreachable!(),
+        };
+        assert!(error.contains(expected), "{case}: {error}");
+    }
+}
+
 fn assert_f64_bits_equal(actual: &[f64], expected: &[f64]) {
     assert_eq!(
         actual
@@ -447,6 +500,13 @@ fn a_snapshot_is_not_replayed_when_the_stored_map_could_not_be_restored() {
         crate::state::DEFAULT_CANVAS_SIZE_MM,
     );
     app.execute_action(action);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    while app.compute_busy() && std::time::Instant::now() < deadline {
+        app.poll_compute();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    app.poll_compute();
+    assert!(!app.compute_busy(), "DOSY contour build did not settle");
 
     let path = temp_project("dosy-snapshot-bypass");
     let _ = std::fs::remove_file(&path);

@@ -1,5 +1,8 @@
 use super::axis_overrides::AxisOverridesDto;
 use super::*;
+#[path = "dto_series_source.rs"]
+mod dto_series_source;
+pub use dto_series_source::SeriesSourceDto;
 
 #[derive(Serialize, Deserialize)]
 pub struct Manifest {
@@ -414,13 +417,12 @@ fn caption_visible_default() -> bool {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct SeriesBindingDto {
     /// Owner-local series identity. It is mandatory because a persisted series
     /// is an addressable component, not a position in an overlay list.
     pub id: u64,
-    pub input: String,
-    /// Dataset-local stable field identity.
-    pub field: u64,
+    pub source: SeriesSourceDto,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
     /// The complete, concrete document encoding. Auto is creation-only and

@@ -84,7 +84,10 @@ pub struct ElectrophysiologyDataset {
     pub name: Option<String>,
     pub metadata: RecordingMetadata,
     pub processing: ElectrophysiologyProcessing,
-    pub selected_sweeps: Vec<bool>,
+    /// Per-invocation sweep selection. It is UI/runtime state, not part of a
+    /// recording or a saved project.
+    #[serde(skip, default)]
+    pub invocation: ElectrophysiologyInvocationState,
     pub selected_channel: usize,
     pub stimulus: Option<StimulusDefinition>,
     pub lineage: Option<DatasetLineage>,
@@ -92,9 +95,81 @@ pub struct ElectrophysiologyDataset {
     pub peak_mode: PeakMode,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct ElectrophysiologyInvocationState {
+    pub analysis_selection: Option<Vec<plotx_data::TraceItemId>>,
+}
+
+pub(crate) struct ResolvedAbfStimulus {
+    pub values: Vec<f64>,
+    pub quantity: ElectricalQuantity,
+    pub unit: String,
+    pub name: String,
+}
+
+pub(crate) fn command_level(command: &plotx_io::CommandWaveform) -> f64 {
+    command
+        .samples
+        .iter()
+        .copied()
+        .find(|value| value.is_finite() && (*value - command.holding_level).abs() > f64::EPSILON)
+        .unwrap_or(command.holding_level)
+}
+
+/// Resolve one experimental command level per sweep. Across multiple sweeps,
+/// the earliest sample that varies between sweeps identifies the test epoch;
+/// this deliberately skips fixed holding and prepulse epochs.
+pub(crate) fn resolve_abf_stimulus(data: &ElectrophysiologyData) -> Option<ResolvedAbfStimulus> {
+    let command_count = data.sweeps.iter().map(|sweep| sweep.commands.len()).min()?;
+    for command_index in 0..command_count {
+        let commands = data
+            .sweeps
+            .iter()
+            .map(|sweep| &sweep.commands[command_index])
+            .collect::<Vec<_>>();
+        let sample_count = commands.iter().map(|command| command.samples.len()).min()?;
+        if let Some(sample) = (0..sample_count).find(|&sample| {
+            let (lo, hi) =
+                commands
+                    .iter()
+                    .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), command| {
+                        let value = command.samples[sample];
+                        (lo.min(value), hi.max(value))
+                    });
+            lo.is_finite() && hi.is_finite() && hi - lo > f64::EPSILON * hi.abs().max(1.0)
+        }) {
+            let first = commands[0];
+            return Some(ResolvedAbfStimulus {
+                values: commands
+                    .iter()
+                    .map(|command| command.samples[sample])
+                    .collect(),
+                quantity: first.unit.quantity,
+                unit: first.unit.symbol.clone(),
+                name: first.name.clone(),
+            });
+        }
+    }
+
+    let commands = data
+        .sweeps
+        .iter()
+        .map(|sweep| sweep.commands.first())
+        .collect::<Option<Vec<_>>>()?;
+    let first = commands.first()?;
+    Some(ResolvedAbfStimulus {
+        values: commands
+            .iter()
+            .map(|command| command_level(command))
+            .collect(),
+        quantity: first.unit.quantity,
+        unit: first.unit.symbol.clone(),
+        name: first.name.clone(),
+    })
+}
+
 impl ElectrophysiologyDataset {
     pub fn load(data: ElectrophysiologyData) -> Self {
-        let selected_sweeps = vec![true; data.sweeps.len()];
         let stimulus = data
             .sweeps
             .iter()
@@ -117,6 +192,11 @@ impl ElectrophysiologyDataset {
         let field_keys = crate::state::electrophysiology_channel_keys(&data);
         let mut field_catalog = crate::state::electrophysiology_field_catalog_for_keys(&field_keys);
         field_catalog.attach_provenance(&data.source, None);
+        crate::state::attach_electrophysiology_trace_collections(
+            &mut field_catalog,
+            &data,
+            stimulus.as_ref(),
+        );
         Self {
             resource_id: new_resource_id(),
             field_catalog,
@@ -125,7 +205,7 @@ impl ElectrophysiologyDataset {
             name: None,
             metadata,
             processing: ElectrophysiologyProcessing::default(),
-            selected_sweeps,
+            invocation: ElectrophysiologyInvocationState::default(),
             selected_channel: 0,
             stimulus,
             lineage: None,
@@ -165,6 +245,74 @@ impl ElectrophysiologyDataset {
         .map_err(|source| ElectrophysiologyAnalysisError::Processing { sweep, source })
     }
 
+    pub fn trace_items(&self) -> &[plotx_data::TraceItemDescriptor] {
+        self.field_key(self.selected_channel)
+            .and_then(|key| self.field_catalog.id_for_key(key))
+            .and_then(|field| self.field_catalog.trace_collection(field))
+            .map(|collection| collection.items.as_slice())
+            .unwrap_or(&[])
+    }
+
+    pub fn selected_sweep_indices(&self) -> Vec<usize> {
+        match &self.invocation.analysis_selection {
+            None => (0..self.data.sweeps.len()).collect(),
+            Some(selected) => self
+                .trace_items()
+                .iter()
+                .enumerate()
+                .filter_map(|(index, item)| selected.contains(&item.id).then_some(index))
+                .collect(),
+        }
+    }
+
+    pub fn set_selected_channel(&mut self, channel: usize) {
+        if channel == self.selected_channel || channel >= self.data.channels.len() {
+            return;
+        }
+        let selected_indices = self.invocation.analysis_selection.as_ref().map(|selected| {
+            self.trace_items()
+                .iter()
+                .enumerate()
+                .filter_map(|(index, item)| selected.contains(&item.id).then_some(index))
+                .collect::<Vec<_>>()
+        });
+        self.selected_channel = channel;
+        self.invocation.analysis_selection = selected_indices.map(|indices| {
+            let items = self.trace_items();
+            indices
+                .into_iter()
+                .filter_map(|index| items.get(index).map(|item| item.id))
+                .collect()
+        });
+    }
+
+    pub fn refresh_trace_collections(&mut self) {
+        let fields = self
+            .field_keys()
+            .iter()
+            .filter_map(|key| key.as_deref())
+            .filter_map(|key| self.field_catalog.id_for_key(key))
+            .collect::<Vec<_>>();
+        let overrides = fields
+            .iter()
+            .filter_map(|field| self.field_catalog.trace_collection(*field))
+            .flat_map(|collection| collection.items.iter())
+            .filter_map(|item| item.label_override.clone().map(|label| (item.id, label)))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        crate::state::attach_electrophysiology_trace_collections(
+            &mut self.field_catalog,
+            &self.data,
+            self.stimulus.as_ref(),
+        );
+        for field in fields {
+            if let Some(collection) = self.field_catalog.trace_collection_mut(field) {
+                for item in &mut collection.items {
+                    item.label_override = overrides.get(&item.id).cloned();
+                }
+            }
+        }
+    }
+
     pub fn figure(&self) -> Figure {
         let channel = self.data.channels.get(self.selected_channel);
         let unit = channel.map(|c| c.unit.symbol.as_str()).unwrap_or("");
@@ -172,10 +320,7 @@ impl ElectrophysiologyDataset {
         let mut ymin = f64::INFINITY;
         let mut ymax = f64::NEG_INFINITY;
         let mut traces = Vec::new();
-        for (index, selected) in self.selected_sweeps.iter().copied().enumerate() {
-            if !selected {
-                continue;
-            }
+        for index in self.selected_sweep_indices() {
             // The chart builder contract has no error channel. A sweep that fails
             // to filter is dropped here, but the same failure is reported with its
             // cause the moment the user builds a statistics or IV table, and the
@@ -254,33 +399,9 @@ impl ElectrophysiologyDataset {
             .ok_or(ElectrophysiologyAnalysisError::UnconfirmedStimulus)?;
         match &definition.protocol {
             StimulusProtocol::FromAbf => {
-                let commands: Option<Vec<_>> = self
-                    .data
-                    .sweeps
-                    .iter()
-                    .map(|sweep| sweep.commands.first())
-                    .collect();
-                let commands =
-                    commands.ok_or(ElectrophysiologyAnalysisError::UnconfirmedStimulus)?;
-                let quantity = commands
-                    .first()
-                    .ok_or(ElectrophysiologyAnalysisError::UnconfirmedStimulus)?
-                    .unit
-                    .quantity;
-                Ok((
-                    commands
-                        .iter()
-                        .map(|command| {
-                            command
-                                .samples
-                                .iter()
-                                .copied()
-                                .find(|value| (*value - command.holding_level).abs() > f64::EPSILON)
-                                .unwrap_or(command.holding_level)
-                        })
-                        .collect(),
-                    quantity,
-                ))
+                let resolved = resolve_abf_stimulus(&self.data)
+                    .ok_or(ElectrophysiologyAnalysisError::UnconfirmedStimulus)?;
+                Ok((resolved.values, resolved.quantity))
             }
             StimulusProtocol::VoltageStep {
                 start_mv, step_mv, ..
@@ -351,10 +472,7 @@ pub fn build_window_statistics_table(
     let mut peaks = Vec::new();
     let mut means = Vec::new();
     let mut peak_times = Vec::new();
-    for (index, selected) in recording.selected_sweeps.iter().copied().enumerate() {
-        if !selected {
-            continue;
-        }
+    for index in recording.selected_sweep_indices() {
         let values = recording.processed_trace(index, channel)?;
         let stats = electrophysiology::window_statistics(
             &values,
@@ -404,12 +522,7 @@ pub fn build_iv_table(
         )?;
         *slot = trace;
     }
-    let selected: Vec<usize> = recording
-        .selected_sweeps
-        .iter()
-        .enumerate()
-        .filter_map(|(index, selected)| (*selected).then_some(index))
-        .collect();
+    let selected = recording.selected_sweep_indices();
     let result = electrophysiology::build_iv(
         &processed, channel, &selected, window, mode, &stimulus, quantity,
     )?;

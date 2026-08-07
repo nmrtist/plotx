@@ -635,6 +635,7 @@ mod tests {
                     Figure::new("plot", Axis::new("x", 0.0, 1.0), Axis::new("y", 0.0, 1.0));
                 let viewport = CanvasViewport::from_figure(&figure);
                 PlotObject::new(
+                    None,
                     plotx_core::state::SeriesId::new(1),
                     plotx_core::state::DataBinding { series: Vec::new() },
                     plotx_core::state::ChartSpec::default(),
@@ -669,6 +670,7 @@ mod tests {
                     Figure::new("plot", Axis::new("x", 0.0, 1.0), Axis::new("y", 0.0, 1.0));
                 let viewport = CanvasViewport::from_figure(&figure);
                 PlotObject::new(
+                    None,
                     plotx_core::state::SeriesId::new(1),
                     plotx_core::state::DataBinding { series: Vec::new() },
                     plotx_core::state::ChartSpec::default(),

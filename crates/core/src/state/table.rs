@@ -101,6 +101,9 @@ pub struct ModelInstanceBinding {
 pub struct TableProvenance {
     pub source_resource: String,
     pub source_field: FieldId,
+    /// Stable collection members captured by explicit table creation. `None`
+    /// means the source is not an item collection.
+    pub members: Option<Vec<plotx_data::TraceItemId>>,
     pub regions: Vec<RegionColumnProvenance>,
 }
 

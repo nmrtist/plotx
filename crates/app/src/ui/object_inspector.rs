@@ -17,7 +17,7 @@ use geometry::geometry_section;
 use plotx_core::actions::{Action, PendingInspectorEdit};
 use plotx_core::state::{
     CanvasObject, DataBinding, Dataset, MM_TO_PT, OVERLAY_PALETTE, ObjectFrame, ObjectId, PlotxApp,
-    SeriesBinding, StackSpec,
+    StackSpec,
 };
 use plotx_figure::Color;
 

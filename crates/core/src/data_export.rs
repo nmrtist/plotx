@@ -190,19 +190,14 @@ fn processed_data_available(dataset: &Dataset) -> bool {
                     .channels
                     .get(recording.selected_channel)
                     .is_some()
-                && recording
-                    .selected_sweeps
-                    .iter()
-                    .enumerate()
-                    .any(|(index, selected)| {
-                        *selected
-                            && recording.data.sweeps.get(index).is_some_and(|sweep| {
-                                sweep
-                                    .channels
-                                    .get(recording.selected_channel)
-                                    .is_some_and(|trace| !trace.is_empty())
-                            })
+                && recording.selected_sweep_indices().into_iter().any(|index| {
+                    recording.data.sweeps.get(index).is_some_and(|sweep| {
+                        sweep
+                            .channels
+                            .get(recording.selected_channel)
+                            .is_some_and(|trace| !trace.is_empty())
                     })
+                })
         }
         Dataset::Table(_) => false,
         Dataset::Afm(_) => false,
@@ -524,13 +519,11 @@ fn capture_processed(dataset: &Dataset) -> Result<SnapshotData, DataExportError>
                 format!("{} ({})", channel.name, channel.unit.symbol)
             };
             let mut traces = Vec::new();
-            for (index, selected) in recording.selected_sweeps.iter().copied().enumerate() {
-                if selected {
-                    traces.push((
-                        index + 1,
-                        recording.processed_trace(index, recording.selected_channel)?,
-                    ));
-                }
+            for index in recording.selected_sweep_indices() {
+                traces.push((
+                    index + 1,
+                    recording.processed_trace(index, recording.selected_channel)?,
+                ));
             }
             Ok(SnapshotData::Electrophysiology {
                 sample_rate_hz: recording.data.sample_rate_hz,

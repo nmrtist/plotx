@@ -123,7 +123,7 @@ fn guide_visibility_is_a_persistent_undoable_plot_override() {
             .unwrap()
             .figure()
             .guide_visibility,
-        plotx_figure::GuideVisibility::Auto
+        plotx_figure::GuideVisibility::Hide
     );
 }
 

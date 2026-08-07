@@ -255,6 +255,7 @@ impl Nmr2DDataset {
                 version: 1,
             }),
         );
+        attach_pseudo_trace_collection(&mut field_catalog, &data);
         let mut result = Self {
             resource_id: DatasetId::new(),
             field_catalog,
@@ -461,5 +462,7 @@ fn set_pipeline_pivot_frac(pipe: &mut AxisPipeline, frac: f64) {
     }
 }
 
+#[cfg(test)]
+mod pseudo_display_binding_tests;
 #[cfg(test)]
 mod pseudo_tests;

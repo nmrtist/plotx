@@ -3,6 +3,90 @@ use plotx_figure::{Color, Figure, RangeAnnotation};
 use std::sync::Arc;
 
 impl PlotxApp {
+    /// Project a live plot's persisted binding onto its current owner field.
+    ///
+    /// Alternate fields belonging to the owner remain persisted so switching
+    /// back restores their authored state. Series explicitly added from other
+    /// datasets are plot-owned and remain visible in encoding-compatible modes.
+    pub fn display_binding(&self, owner: Option<DatasetId>, binding: &DataBinding) -> DataBinding {
+        let Some((resource, field)) = self.live_display_source(owner) else {
+            return binding.clone();
+        };
+        let mut owner_series = binding
+            .series
+            .iter()
+            .filter(|series| series.source.resource == resource && series.source.field == field)
+            .cloned()
+            .collect::<Vec<_>>();
+        let recommended = self
+            .doc
+            .dataset_by_id(resource)
+            .and_then(|dataset| dataset.field_descriptor(field))
+            .and_then(|field| field.metadata.recommended_encoding().map(str::to_owned));
+        let owner_encoding = owner_series.first().map(|series| series.encoding.clone());
+        owner_series.extend(
+            binding
+                .series
+                .iter()
+                .filter(|series| series.source.resource != resource)
+                .filter(|series| {
+                    owner_encoding.as_ref().map_or_else(
+                        || {
+                            recommended.as_deref().is_some_and(|recommended| {
+                                encoding_matches_recommended(&series.encoding, recommended)
+                            })
+                        },
+                        |owner| same_encoding_kind(owner, &series.encoding),
+                    )
+                })
+                .cloned(),
+        );
+        DataBinding {
+            series: owner_series,
+        }
+    }
+
+    /// Merge edits made against [`Self::display_binding`] into the full
+    /// persisted binding without discarding inactive owner fields.
+    pub fn merge_display_binding(
+        &self,
+        owner: Option<DatasetId>,
+        persisted: &DataBinding,
+        displayed: DataBinding,
+    ) -> DataBinding {
+        let Some((_resource, _field)) = self.live_display_source(owner) else {
+            return displayed;
+        };
+        let previous_display = self.display_binding(owner, persisted);
+        let previous_ids = previous_display
+            .series
+            .iter()
+            .map(|series| series.id)
+            .collect::<std::collections::BTreeSet<_>>();
+        let allowed = self.display_binding(owner, &displayed);
+        let mut series = allowed.series.into_iter().collect::<Vec<_>>();
+        series.extend(
+            persisted
+                .series
+                .iter()
+                .filter(|series| !previous_ids.contains(&series.id))
+                .cloned(),
+        );
+        DataBinding { series }
+    }
+
+    fn live_display_source(&self, owner: Option<DatasetId>) -> Option<(DatasetId, FieldId)> {
+        let dataset = owner.and_then(|id| self.doc.dataset_by_id(id))?;
+        let field = match dataset {
+            Dataset::Nmr2D(data) if !data.is_true_2d() => dataset.default_field_id(),
+            Dataset::Electrophysiology(recording) => recording
+                .field_key(recording.selected_channel)
+                .and_then(|key| recording.field_catalog.id_for_key(key)),
+            _ => None,
+        }?;
+        Some((dataset.resource_id(), field))
+    }
+
     /// Build a dataset's figure through the chart registry: resolve `chart`'s
     /// type for the dataset's domain (falling back to the domain default when the
     /// recorded id doesn't apply), then dispatch to its builder. The default chart
@@ -55,23 +139,35 @@ impl PlotxApp {
         stack: &StackSpec,
         size_mm: [f32; 2],
     ) -> Figure {
+        if !binding.series.iter().any(|series| series.visible) {
+            return self.normalize_binding_figure(
+                Figure::new(
+                    "",
+                    plotx_figure::Axis::new("x", 0.0, 1.0),
+                    plotx_figure::Axis::new("y", 0.0, 1.0),
+                ),
+                size_mm,
+            );
+        }
         if binding.series.len() > 1 && self.series_stackable(binding) {
             self.build_stacked_figure(binding, stack, size_mm)
         } else {
             if let Some(series) = binding.series.first()
                 && self.series_uses_encoded_curve(series)
             {
-                let figure = self
+                let mut figure = self
                     .build_encoded_series_figure(series)
                     .unwrap_or_else(|| unsupported_series_figure(series));
+                self.apply_series_binding_style(&mut figure, series);
                 return self.normalize_binding_figure(figure, size_mm);
             }
             if let Some(series) = binding.series.first()
                 && !matches!(series.encoding, plotx_figure::SeriesEncoding::Line(_))
             {
-                let figure = self
+                let mut figure = self
                     .build_encoded_series_figure(series)
                     .unwrap_or_else(|| unsupported_series_figure(series));
+                self.apply_series_binding_style(&mut figure, series);
                 return self.normalize_binding_figure(figure, size_mm);
             }
             let Some(primary_id) = binding.primary_dataset() else {
@@ -94,53 +190,8 @@ impl PlotxApp {
             // recolours the built traces, so it survives figure rebuilds and export.
             // Applied before the line-fit overlays so those keep their own colours;
             // stacked figures never get overlays (each trace stays a single series).
-            if let Some(line) = binding
-                .series
-                .first()
-                .and_then(|series| match &series.encoding {
-                    plotx_figure::SeriesEncoding::Line(line) => Some(line),
-                    plotx_figure::SeriesEncoding::Contour(_)
-                    | plotx_figure::SeriesEncoding::Heatmap(_)
-                    | plotx_figure::SeriesEncoding::Image(_) => None,
-                })
-            {
-                let color = line.color.resolve();
-                let semantic_colors = fig.series_colors_are_semantic;
-                for series in &mut fig.series {
-                    if !semantic_colors {
-                        series.color = color;
-                    }
-                    series.width = line.width.get();
-                    for point in &mut series.points {
-                        point[1] *= line.scale;
-                    }
-                }
-                for error_bar in &mut fig.error_bars {
-                    if !semantic_colors {
-                        error_bar.color = color;
-                    }
-                    error_bar.center[1] *= line.scale;
-                    error_bar.negative *= line.scale.abs();
-                    error_bar.positive *= line.scale.abs();
-                }
-                // Bar/box bodies live in `polygons` and must follow the traces.
-                // Value-mapped figures (heatmap cells, colormap surfaces, pie
-                // wedges) keep their own colours — one override would erase the
-                // encoding they carry.
-                if !semantic_colors
-                    && fig.heatmap.is_none()
-                    && fig.axis_frame != plotx_figure::AxisFrame::Hidden
-                {
-                    let background = fig.background;
-                    for polygon in &mut fig.polygons {
-                        polygon.fill = color;
-                        if let Some((stroke, _)) = &mut polygon.stroke
-                            && *stroke != background
-                        {
-                            *stroke = color;
-                        }
-                    }
-                }
+            if let Some(series) = binding.series.first() {
+                self.apply_series_binding_style(&mut fig, series);
             }
             // Stored fits are curves in the table's native x/y space; every
             // other table chart (histogram, box, heatmap, …) draws in different
@@ -180,8 +231,55 @@ impl PlotxApp {
         figure
     }
 
+    pub(super) fn apply_series_binding_style(&self, figure: &mut Figure, binding: &SeriesBinding) {
+        let plotx_figure::SeriesEncoding::Line(line) = &binding.encoding else {
+            return;
+        };
+        let color = line.color.resolve();
+        let semantic_colors = figure.series_colors_are_semantic;
+        for series in &mut figure.series {
+            if let Some(label) = &binding.label {
+                series.name = label.clone();
+            }
+            if !semantic_colors {
+                series.color = color;
+            }
+            series.width = line.width.get();
+            for point in &mut series.points {
+                point[1] *= line.scale;
+            }
+        }
+        for error_bar in &mut figure.error_bars {
+            if !semantic_colors {
+                error_bar.color = color;
+            }
+            error_bar.width = line.width.get();
+            error_bar.center[1] *= line.scale;
+            error_bar.negative *= line.scale.abs();
+            error_bar.positive *= line.scale.abs();
+        }
+        if !semantic_colors
+            && figure.heatmap.is_none()
+            && figure.axis_frame != plotx_figure::AxisFrame::Hidden
+        {
+            let background = figure.background;
+            for polygon in &mut figure.polygons {
+                polygon.fill = color;
+                if let Some((stroke, width)) = &mut polygon.stroke
+                    && *stroke != background
+                {
+                    *stroke = color;
+                    *width = line.width.get();
+                }
+            }
+        }
+    }
+
     pub(super) fn build_encoded_series_figure(&mut self, series: &SeriesBinding) -> Option<Figure> {
         let dataset = self.doc.dataset_by_id(series.source.resource)?;
+        if let Some(item) = series.source.item {
+            return dataset.trace_item_figure(series.source.field, item);
+        }
         if !dataset.supports_encoding(series.source.field, &series.encoding) {
             return None;
         }
@@ -294,6 +392,9 @@ impl PlotxApp {
     }
 
     pub(super) fn series_uses_encoded_curve(&self, series: &SeriesBinding) -> bool {
+        if series.source.item.is_some() {
+            return true;
+        }
         self.doc
             .dataset_by_id(series.source.resource)
             .and_then(|dataset| dataset.field_descriptor(series.source.field))
@@ -320,6 +421,41 @@ impl PlotxApp {
         let snapshot = dataset.field_snapshot(field, version, Some(summary))?;
         Some(Arc::new(snapshot.payload.scalar_grid()?.clone()))
     }
+}
+
+fn same_encoding_kind(
+    left: &plotx_figure::SeriesEncoding,
+    right: &plotx_figure::SeriesEncoding,
+) -> bool {
+    matches!(
+        (left, right),
+        (
+            plotx_figure::SeriesEncoding::Line(_),
+            plotx_figure::SeriesEncoding::Line(_)
+        ) | (
+            plotx_figure::SeriesEncoding::Contour(_),
+            plotx_figure::SeriesEncoding::Contour(_)
+        ) | (
+            plotx_figure::SeriesEncoding::Heatmap(_),
+            plotx_figure::SeriesEncoding::Heatmap(_)
+        ) | (
+            plotx_figure::SeriesEncoding::Image(_),
+            plotx_figure::SeriesEncoding::Image(_)
+        )
+    )
+}
+
+fn encoding_matches_recommended(
+    encoding: &plotx_figure::SeriesEncoding,
+    recommended: &str,
+) -> bool {
+    matches!(
+        (encoding, recommended),
+        (plotx_figure::SeriesEncoding::Line(_), "line")
+            | (plotx_figure::SeriesEncoding::Contour(_), "contour")
+            | (plotx_figure::SeriesEncoding::Heatmap(_), "heatmap")
+            | (plotx_figure::SeriesEncoding::Image(_), "image")
+    )
 }
 
 /// What the user is told while a field's derived work is still running.

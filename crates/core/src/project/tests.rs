@@ -483,6 +483,43 @@ fn project_roundtrip_preserves_pseudo2d_metadata() {
 }
 
 #[test]
+fn project_roundtrip_preserves_trace_item_sources_and_visibility() {
+    let dataset = Dataset::Nmr2D(Box::new(Nmr2DDataset::load(synthetic_dosy_2d())));
+    let mut app = PlotxApp::new();
+    app.doc.canvases.push(crate::workflow::build_default_canvas(
+        &dataset,
+        "synthetic DOSY",
+    ));
+    app.doc.datasets.push(dataset);
+    let before = app.doc.canvases[0].objects[0].plot_mut().unwrap();
+    assert!(before.binding.series.len() > 1);
+    before.binding.series[1].visible = false;
+    let sources = before
+        .binding
+        .series
+        .iter()
+        .map(|series| series.source.item)
+        .collect::<Vec<_>>();
+
+    let path = temp_project("trace-item-sources");
+    let _ = std::fs::remove_file(&path);
+    save_project(&app, &path, false).unwrap();
+    let loaded = load_project(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    let after = loaded.doc.canvases[0].objects[0].plot().unwrap();
+    assert_eq!(
+        after
+            .binding
+            .series
+            .iter()
+            .map(|series| series.source.item)
+            .collect::<Vec<_>>(),
+        sources
+    );
+    assert!(!after.binding.series[1].visible);
+}
+
+#[test]
 fn project_roundtrip_preserves_authoring_objects() {
     use crate::state::{CanvasObject, CanvasObjectKind, ShapeKind, ShapeObject, TextBox};
 

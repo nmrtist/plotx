@@ -123,17 +123,20 @@ fn plot_context<'a>(
     let plot = object.plot().ok_or_else(|| {
         PropertyError::NotApplicable("This property belongs to a plot object.".to_owned())
     })?;
-    let series = plot.binding.series.first().ok_or_else(|| {
-        PropertyError::NotApplicable("The plot has no primary series.".to_owned())
-    })?;
+    let series = app
+        .display_binding(plot.display_owner, &plot.binding)
+        .series
+        .first()
+        .map(|series| series.source)
+        .ok_or_else(|| {
+            PropertyError::NotApplicable("The plot has no primary series.".to_owned())
+        })?;
     let dataset = app
         .doc
-        .dataset_by_id(series.source.resource)
-        .ok_or_else(|| {
-            PropertyError::UnknownTarget(format!("{canvas}/{}", series.source.resource))
-        })?;
+        .dataset_by_id(series.resource)
+        .ok_or_else(|| PropertyError::UnknownTarget(format!("{canvas}/{}", series.resource)))?;
     let capabilities = dataset
-        .field_descriptor(series.source.field)
+        .field_descriptor(series.field)
         .map(|field| field.capabilities)
         .unwrap_or_default();
     Ok((plot, dataset, dataset.domain(), capabilities))
@@ -222,12 +225,20 @@ fn plot_value(
     let schema = resolved_schema(definition, &capabilities);
     match definition.id {
         STACK_MODE | STACK_SPACING_Y | STACK_SHEAR_X | STACK_NORMALIZE => {
-            if plot.binding.series.len() <= 1 || !app.series_stackable(&plot.binding) {
+            let binding = app.display_binding(plot.display_owner, &plot.binding);
+            if binding.series.len() <= 1 || !app.series_stackable(&binding) {
                 return Err(PropertyError::NotApplicable(
                     "Stack settings require a stackable plot with multiple series.".to_owned(),
                 ));
             }
-            let kind = domain.stack_kind();
+            let kind =
+                if binding.series.iter().all(|series| {
+                    matches!(series.encoding, plotx_figure::SeriesEncoding::Contour(_))
+                }) {
+                    Some(StackKind::Field)
+                } else {
+                    Some(StackKind::Line)
+                };
             if definition.id != STACK_MODE
                 && (kind != Some(StackKind::Line) || plot.stack.mode != StackMode::Offset)
             {
@@ -335,13 +346,13 @@ fn read_series(
         .object(context.object)
         .and_then(|object| object.plot())
         .ok_or_else(|| PropertyError::UnknownTarget(address.target.describe()))?;
-    if plot.binding.series.len() <= 1 || !app.series_stackable(&plot.binding) {
+    let binding = app.display_binding(plot.display_owner, &plot.binding);
+    if binding.series.len() <= 1 || !app.series_stackable(&binding) {
         return Err(PropertyError::NotApplicable(
             "Series visibility is available only on stackable multi-series plots.".to_owned(),
         ));
     }
-    let visible = plot
-        .binding
+    let visible = binding
         .series
         .iter()
         .find(|series| series.id == context.series)
@@ -369,7 +380,8 @@ fn edit_series(
         .object(context.object)
         .and_then(|object| object.plot())
         .ok_or_else(|| PropertyError::UnknownTarget(address.target.describe()))?;
-    if plot.binding.series.len() <= 1 || !app.series_stackable(&plot.binding) {
+    let binding = app.display_binding(plot.display_owner, &plot.binding);
+    if binding.series.len() <= 1 || !app.series_stackable(&binding) {
         return Err(PropertyError::NotApplicable(
             "Series visibility is available only on stackable multi-series plots.".to_owned(),
         ));

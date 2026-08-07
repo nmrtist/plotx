@@ -94,12 +94,15 @@ fn field_overlay_stacks_two_2d_contours_in_distinct_colors() {
             signed_grid,
         ))));
     let (a, b) = (app.doc.datasets.len() - 2, app.doc.datasets.len() - 1);
-    let binding = DataBinding {
+    let mut binding = DataBinding {
         series: vec![
             SeriesBinding::from_dataset(&app.doc.datasets[a]).unwrap(),
             SeriesBinding::from_dataset(&app.doc.datasets[b]).unwrap(),
         ],
     };
+    for (index, series) in binding.series.iter_mut().enumerate() {
+        series.set_primary_color(crate::state::OVERLAY_PALETTE[index]);
+    }
     let chart = ChartSpec::default_for(DataDomain::Nmr2d);
     let stack = StackSpec {
         mode: StackMode::ColorOverlay,
@@ -134,8 +137,8 @@ fn field_overlay_stacks_two_2d_contours_in_distinct_colors() {
         "each signed dataset contributes both signs"
     );
     assert_ne!(
-        fig.contours[0].color, fig.contours[1].color,
-        "a signed field keeps its positive and negative contours distinct"
+        fig.contours[0].color, fig.contours[2].color,
+        "each dataset uses its persisted positive-contour color"
     );
 }
 
@@ -155,6 +158,19 @@ fn plain_then_ctrl_click_selects_two_datasets_for_stacking() {
     assert_eq!(app.stackable_selection(), Some(vec![0, 1]));
     assert!(app.stackable_selection().is_some(), "can_stack is true");
     assert_eq!(app.active_dataset(), Some(1));
+
+    app.stack_selected_data();
+    let plot = app.doc.canvases.last().unwrap().objects[0].plot().unwrap();
+    assert_ne!(
+        plot.binding.series[0].primary_color(),
+        plot.binding.series[1].primary_color(),
+        "stack creation persists a plot-position palette"
+    );
+    assert_ne!(
+        plot.figure().series[0].color,
+        plot.figure().series[1].color,
+        "the persisted palette reaches the rendered traces"
+    );
 }
 
 #[test]

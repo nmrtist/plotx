@@ -156,7 +156,7 @@ static CHART_TYPES: &[ChartDescriptor] = &[
         recommended_domains: &[DataDomain::Electrophysiology],
         required_capabilities: &[
             crate::automation::CAP_FIELD_CURVE_1D,
-            crate::automation::CAP_FIELD_SWEEP_COLLECTION,
+            crate::automation::CAP_FIELD_TRACE_COLLECTION,
         ],
         needs_column: false,
         build: build_electrophysiology,
@@ -189,7 +189,7 @@ static CHART_TYPES: &[ChartDescriptor] = &[
         recommended_domains: &[DataDomain::PseudoNmr],
         required_capabilities: &[
             crate::automation::CAP_FIELD_CURVE_1D,
-            crate::automation::CAP_FIELD_NMR_STACK,
+            crate::automation::CAP_FIELD_TRACE_COLLECTION,
         ],
         needs_column: false,
         build: build_nmr_2d,

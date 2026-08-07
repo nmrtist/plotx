@@ -370,7 +370,7 @@ fn electrophysiology_export_includes_only_selected_sweeps_and_pads_short_ones() 
     };
     let mut recording = crate::state::ElectrophysiologyDataset::load(data);
     recording.processing.gaussian_lowpass_enabled = false;
-    recording.selected_sweeps = vec![true, false];
+    recording.invocation.analysis_selection = Some(vec![recording.trace_items()[0].id]);
     let dataset = Dataset::Electrophysiology(Box::new(recording));
     let value = DataExportSnapshot::capture(
         &dataset,

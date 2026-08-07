@@ -1,6 +1,6 @@
 use super::{
-    Dataset, DatasetId, FieldId, PresentationProfile, RequestedChart, SeriesId, default_encoding,
-    field_peak_magnitude,
+    Dataset, DatasetId, FieldId, OVERLAY_PALETTE, PresentationProfile, RequestedChart, SeriesId,
+    default_encoding, field_peak_magnitude,
 };
 use plotx_figure::Color;
 
@@ -10,6 +10,7 @@ use plotx_figure::Color;
 pub struct SeriesSource {
     pub resource: DatasetId,
     pub field: FieldId,
+    pub item: Option<plotx_data::TraceItemId>,
 }
 
 /// One overlaid series and its concrete visual encoding. Encoding-specific
@@ -25,27 +26,59 @@ pub struct SeriesBinding {
 }
 
 impl SeriesBinding {
-    /// Materialize a complete source and encoding from the dataset's actual
-    /// default field. This is the only production constructor for a new series.
+    /// Materialize the first canonical source for callers that add one series.
     pub fn from_dataset(dataset: &Dataset) -> Option<Self> {
-        let field = dataset.default_field_id()?;
-        let descriptor = dataset.field_descriptor(field)?;
-        Some(Self {
-            id: SeriesId::default(),
-            source: SeriesSource {
-                resource: dataset.resource_id(),
-                field,
-            },
-            visible: true,
-            label: None,
-            encoding: default_encoding(
+        Self::from_dataset_all(dataset).into_iter().next()
+    }
+
+    /// Expand the dataset's default field into canonical item-addressed series.
+    pub fn from_dataset_all(dataset: &Dataset) -> Vec<Self> {
+        let Some(field) = dataset.default_field_id() else {
+            return Vec::new();
+        };
+        Self::from_field_all(dataset, field)
+    }
+
+    pub(crate) fn from_field_all(dataset: &Dataset, field: FieldId) -> Vec<Self> {
+        let Some(descriptor) = dataset.field_descriptor(field) else {
+            return Vec::new();
+        };
+        let make = |item, index: usize| {
+            let mut encoding = default_encoding(
                 &descriptor.capabilities,
                 &descriptor.metadata,
                 RequestedChart::Auto,
                 &PresentationProfile::default(),
                 &|| field_peak_magnitude(dataset, field),
-            ),
-        })
+            );
+            if let plotx_figure::SeriesEncoding::Line(line) = &mut encoding {
+                line.color = plotx_figure::ColorSource::Explicit(
+                    OVERLAY_PALETTE[index % OVERLAY_PALETTE.len()],
+                );
+            }
+            Self {
+                id: SeriesId::default(),
+                source: SeriesSource {
+                    resource: dataset.resource_id(),
+                    field,
+                    item,
+                },
+                visible: true,
+                label: None,
+                encoding,
+            }
+        };
+        dataset.trace_collection(field).map_or_else(
+            || vec![make(None, 0)],
+            |collection| {
+                collection
+                    .items
+                    .iter()
+                    .enumerate()
+                    .map(|(index, item)| make(Some(item.id), index))
+                    .collect()
+            },
+        )
     }
 
     pub fn with_source(source: SeriesSource) -> Self {

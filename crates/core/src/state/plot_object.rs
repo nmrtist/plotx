@@ -6,6 +6,9 @@ use plotx_figure::{Figure, FigureTypography};
 
 #[derive(Clone)]
 pub struct PlotObject {
+    /// Dataset whose current display/channel choice this default view follows.
+    /// Independent plots carry `None` and keep their item-addressed sources.
+    pub display_owner: Option<DatasetId>,
     /// Persistent high-water mark for owner-local series identities. This is
     /// deliberately outside `binding`, which actions may replace wholesale.
     pub next_series_id: SeriesId,
@@ -29,6 +32,7 @@ pub struct PlotObject {
 impl PlotObject {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
+        display_owner: Option<DatasetId>,
         next_series_id: SeriesId,
         binding: DataBinding,
         chart: ChartSpec,
@@ -41,6 +45,7 @@ impl PlotObject {
     ) -> Self {
         let derived_axes = DerivedAxes::from_figure(&figure);
         Self {
+            display_owner,
             next_series_id,
             binding,
             chart,
@@ -58,6 +63,7 @@ impl PlotObject {
     /// viewport state while retaining the separately rebuilt automatic axes.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn from_materialized_figure(
+        display_owner: Option<DatasetId>,
         next_series_id: SeriesId,
         binding: DataBinding,
         chart: ChartSpec,
@@ -70,6 +76,7 @@ impl PlotObject {
         panel: PanelMeta,
     ) -> Self {
         Self {
+            display_owner,
             next_series_id,
             binding,
             chart,

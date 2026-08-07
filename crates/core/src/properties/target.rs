@@ -169,6 +169,17 @@ pub(crate) fn series_context_unchecked<'a>(
         .object(object)
         .and_then(|object| object.plot())
         .ok_or_else(|| PropertyError::UnknownTarget(target.resource.id.clone()))?;
+    if !app
+        .display_binding(plot.display_owner, &plot.binding)
+        .series
+        .iter()
+        .any(|binding| binding.id == series)
+    {
+        return Err(PropertyError::UnknownTarget(format!(
+            "{}/series/{series}",
+            target.resource.id
+        )));
+    }
     let binding = plot
         .binding
         .series
@@ -270,9 +281,9 @@ pub(crate) fn series_targets(app: &PlotxApp, canvas: usize, object: ObjectId) ->
         .object(object)
         .and_then(|object| object.plot())
         .map(|plot| {
-            plot.binding
+            app.display_binding(plot.display_owner, &plot.binding)
                 .series
-                .iter()
+                .into_iter()
                 .map(|series| TargetRef {
                     resource: resource.clone(),
                     component: Some(ComponentRef::Series(series.id)),

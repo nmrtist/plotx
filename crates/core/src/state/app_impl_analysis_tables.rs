@@ -141,7 +141,11 @@ impl PlotxApp {
 
     /// Build a fresh series table from any field that exposes ordered 1D
     /// members. Rows follow the member ruler; every region becomes one column.
-    fn build_region_table(&self, dataset: usize) -> Result<TableDataset, String> {
+    fn build_region_table(
+        &self,
+        dataset: usize,
+        persisted_members: Option<(FieldId, &[plotx_data::TraceItemId])>,
+    ) -> Result<TableDataset, String> {
         let source = self
             .doc
             .datasets
@@ -187,12 +191,26 @@ impl PlotxApp {
                 )
             }
             Dataset::Electrophysiology(recording) => {
-                let selected = recording
-                    .selected_sweeps
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(index, selected)| (*selected).then_some(index))
-                    .collect::<Vec<_>>();
+                let selected = if let Some((member_field, members)) = persisted_members {
+                    let collection = recording
+                        .field_catalog
+                        .trace_collection(member_field)
+                        .ok_or_else(|| {
+                            "The recording channel is no longer available.".to_owned()
+                        })?;
+                    members
+                        .iter()
+                        .map(|member| {
+                            collection
+                                .items
+                                .iter()
+                                .position(|item| item.id == *member)
+                                .ok_or_else(|| "A linked sweep is no longer available.".to_owned())
+                        })
+                        .collect::<Result<Vec<_>, _>>()?
+                } else {
+                    recording.selected_sweep_indices()
+                };
                 let signal_unit = recording
                     .data
                     .channels
@@ -283,9 +301,30 @@ impl PlotxApp {
                 .as_ref()
                 .map(DiffusionConstants::from_meta);
         }
+        let members = match source {
+            Dataset::Electrophysiology(recording) => {
+                let collection = recording
+                    .field_key(recording.selected_channel)
+                    .and_then(|key| recording.field_catalog.id_for_key(key))
+                    .and_then(|field| recording.field_catalog.trace_collection(field));
+                collection.map(|collection| {
+                    let indices = if let Some((_, members)) = persisted_members {
+                        return members.to_vec();
+                    } else {
+                        recording.selected_sweep_indices()
+                    };
+                    indices
+                        .into_iter()
+                        .filter_map(|index| collection.items.get(index).map(|item| item.id))
+                        .collect()
+                })
+            }
+            _ => None,
+        };
         table.provenance = Some(TableProvenance {
             source_resource,
             source_field,
+            members,
             regions: region_provenance,
         });
         Ok(table)
@@ -308,7 +347,17 @@ impl PlotxApp {
         let Some(tj) = self.region_table_index(source) else {
             return;
         };
-        let table = match self.build_region_table(source) {
+        let provenance = self.doc.datasets[tj]
+            .as_table()
+            .and_then(|table| table.provenance.as_ref())
+            .cloned();
+        let persisted_members = provenance.as_ref().and_then(|provenance| {
+            provenance
+                .members
+                .as_deref()
+                .map(|members| (provenance.source_field, members))
+        });
+        let table = match self.build_region_table(source, persisted_members) {
             Ok(table) => table,
             Err(error) => {
                 self.session.status = error;
@@ -334,13 +383,13 @@ impl PlotxApp {
         }
         if self.doc.datasets[dataset]
             .as_electrophysiology()
-            .is_some_and(|recording| !recording.selected_sweeps.iter().any(|selected| *selected))
+            .is_some_and(|recording| recording.selected_sweep_indices().is_empty())
         {
             self.session.status =
                 "Select at least one sweep before building a region table.".to_owned();
             return;
         }
-        let table = match self.build_region_table(dataset) {
+        let table = match self.build_region_table(dataset, None) {
             Ok(table) => table,
             Err(error) => {
                 self.session.status = error;
@@ -377,7 +426,7 @@ impl PlotxApp {
     /// Place an independent, unlinked snapshot of the current region values as a
     /// new table (no provenance), so later region edits leave it untouched.
     pub fn freeze_region_table(&mut self, dataset: usize) {
-        let mut tds = match self.build_region_table(dataset) {
+        let mut tds = match self.build_region_table(dataset, None) {
             Ok(table) => table,
             Err(error) => {
                 self.session.status = error;

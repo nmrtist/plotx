@@ -51,6 +51,26 @@ uuid_id!(RevisionId);
 uuid_id!(RowId);
 uuid_id!(ColumnId);
 uuid_id!(OperationId);
+uuid_id!(TraceCollectionId);
+uuid_id!(TraceItemId);
+
+impl TraceCollectionId {
+    pub fn derived(source: &[u8], discriminator: &[u8]) -> Self {
+        Self(deterministic_uuid(
+            b"plotx.trace-collection.v1",
+            &[source, discriminator],
+        ))
+    }
+}
+
+impl TraceItemId {
+    pub fn derived(collection: TraceCollectionId, discriminator: &[u8]) -> Self {
+        Self(deterministic_uuid(
+            b"plotx.trace-item.v1",
+            &[collection.as_bytes(), discriminator],
+        ))
+    }
+}
 
 impl RowId {
     pub fn derived(operation: OperationId, inputs: &[RowId], discriminator: &[u8]) -> Self {

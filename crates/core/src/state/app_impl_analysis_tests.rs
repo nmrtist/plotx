@@ -204,10 +204,56 @@ fn electrophysiology_edits_keep_the_live_region_table_synchronized() {
         metric: Some(RegionMetric::Height),
     });
     recording.region_analysis.next_region_id = RegionId::new(1);
+    let dataset = Dataset::Electrophysiology(Box::new(recording));
+    let canvas = crate::workflow::build_default_canvas(&dataset, "synthetic.abf");
     let mut app = PlotxApp::new();
-    app.doc
-        .datasets
-        .push(Dataset::Electrophysiology(Box::new(recording)));
+    app.doc.datasets.push(dataset);
+    app.doc.canvases.push(canvas);
+    let channel_a_field = app.doc.datasets[0]
+        .as_electrophysiology()
+        .unwrap()
+        .field_key(0)
+        .and_then(|key| app.doc.datasets[0].field_catalog().id_for_key(key))
+        .unwrap();
+    let pinned = app.doc.canvases[0].objects[0]
+        .plot()
+        .unwrap()
+        .binding
+        .series
+        .iter()
+        .find(|series| series.source.field == channel_a_field)
+        .unwrap()
+        .clone();
+    let pinned_source = pinned.source;
+    let owner_id = app.doc.datasets[0].resource_id();
+    let live_a = app.display_binding(
+        Some(owner_id),
+        &app.doc.canvases[0].objects[0].plot().unwrap().binding,
+    );
+    assert!(
+        !live_a.series.is_empty()
+            && live_a
+                .series
+                .iter()
+                .all(|series| series.source.field == channel_a_field)
+    );
+    let channel_a_ids = live_a
+        .series
+        .iter()
+        .map(|series| series.id)
+        .collect::<Vec<_>>();
+    let pinned_id = app.doc.canvases[0].allocate_object_id();
+    let mut pinned_plot = app.build_plot_object(
+        0,
+        ObjectFrame::new(5.0, 5.0, 100.0, 60.0),
+        pinned_id,
+        "Pinned channel A".into(),
+    );
+    pinned_plot.plot_mut().unwrap().display_owner = None;
+    pinned_plot.plot_mut().unwrap().binding = DataBinding {
+        series: vec![pinned],
+    };
+    app.doc.canvases[0].objects.push(pinned_plot);
     app.create_region_table(0);
 
     let values = |app: &PlotxApp| {
@@ -223,30 +269,106 @@ fn electrophysiology_edits_keep_the_live_region_table_synchronized() {
         .unwrap()
         .selected_channel = 1;
     app.apply_dataset_edit(0);
+    assert_eq!(
+        app.doc.canvases[0].objects[1]
+            .plot()
+            .unwrap()
+            .binding
+            .series[0]
+            .source,
+        pinned_source,
+        "an independently addressed channel item must not follow the live channel"
+    );
     let channel_b = values(&app);
     assert_ne!(channel_a, channel_b);
+    let recording = app.doc.datasets[0].as_electrophysiology().unwrap();
+    let selected_field = recording
+        .field_key(1)
+        .and_then(|key| recording.field_catalog.id_for_key(key))
+        .unwrap();
+    let plot = app.doc.canvases[0].objects[0].plot().unwrap();
+    let binding_before_invocation = plot.binding.clone();
+    assert!(
+        plot.binding
+            .series
+            .iter()
+            .any(|series| series.source.field == selected_field)
+    );
+    let live_b = app.display_binding(Some(owner_id), &plot.binding);
+    assert!(
+        !live_b.series.is_empty()
+            && live_b
+                .series
+                .iter()
+                .all(|series| series.source.field == selected_field),
+        "the inspector/rendering projection follows only the selected channel"
+    );
+    assert_eq!(
+        plot.binding
+            .series
+            .iter()
+            .filter(|series| series.source.field == channel_a_field)
+            .map(|series| series.id)
+            .collect::<Vec<_>>(),
+        channel_a_ids,
+        "switching channels retains the inactive channel's stable authored identities"
+    );
 
+    let selected = app.doc.datasets[0]
+        .as_electrophysiology()
+        .unwrap()
+        .trace_items()[1]
+        .id;
     app.doc.datasets[0]
         .as_electrophysiology_mut()
         .unwrap()
-        .selected_sweeps[0] = false;
-    app.apply_dataset_edit(0);
-    assert_eq!(values(&app).len(), 1);
+        .invocation
+        .analysis_selection = Some(vec![selected]);
+    app.doc.dirty = false;
+    let table_before_invocation = values(&app);
+    let serialized_before =
+        serde_json::to_value(app.doc.datasets[0].as_electrophysiology().unwrap()).unwrap();
+    app.apply_electrophysiology_invocation_edit(0);
+    assert_eq!(values(&app), table_before_invocation);
+    assert_eq!(
+        serde_json::to_value(app.doc.datasets[0].as_electrophysiology().unwrap()).unwrap(),
+        serialized_before
+    );
+    assert_eq!(
+        app.doc.canvases[0].objects[0].plot().unwrap().binding,
+        binding_before_invocation
+    );
+    assert!(
+        !app.doc.dirty,
+        "changing a transient sweep selection must not dirty the document"
+    );
 
-    let raw = values(&app);
     let recording = app.doc.datasets[0].as_electrophysiology_mut().unwrap();
     recording.processing.gaussian_lowpass_enabled = true;
     recording.processing.cutoff_hz = 1.0;
     app.apply_dataset_edit(0);
-    assert_ne!(values(&app), raw);
+    let after_persistent_edit = values(&app);
+    assert_eq!(after_persistent_edit.len(), 2);
+    assert!(app.doc.dirty);
+    assert_eq!(
+        app.doc.canvases[0].objects[1]
+            .plot()
+            .unwrap()
+            .binding
+            .series[0]
+            .source,
+        pinned_source
+    );
 
     app.doc.datasets[0]
         .as_electrophysiology_mut()
         .unwrap()
-        .selected_sweeps
-        .fill(false);
-    app.apply_dataset_edit(0);
-    assert!(values(&app).is_empty());
+        .invocation
+        .analysis_selection = Some(Vec::new());
+    app.doc.dirty = false;
+    app.apply_electrophysiology_invocation_edit(0);
+    assert_eq!(values(&app), after_persistent_edit);
+    assert!(!app.doc.dirty);
 }
 
 fn electrophysiology_region_app(samples: Vec<f64>, metric: RegionMetric) -> PlotxApp {

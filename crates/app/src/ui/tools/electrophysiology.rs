@@ -21,6 +21,7 @@ pub(super) fn electrophysiology_group(app: &mut PlotxApp, di: usize, ui: &mut Ui
         return false;
     };
     let mut dirty = false;
+    let mut invocation_changed = false;
 
     ui.label(crate::typography::headline("Recording"));
     ui.label(format!(
@@ -37,6 +38,7 @@ pub(super) fn electrophysiology_group(app: &mut PlotxApp, di: usize, ui: &mut Ui
             ui.colored_label(ui.visuals().warn_fg_color, warning);
         }
     }
+    let mut selected_channel = recording.selected_channel;
     ComboBox::from_label("Recorded channel")
         .selected_text(
             recording
@@ -50,31 +52,54 @@ pub(super) fn electrophysiology_group(app: &mut PlotxApp, di: usize, ui: &mut Ui
             for (index, channel) in recording.data.channels.iter().enumerate() {
                 dirty |= ui
                     .selectable_value(
-                        &mut recording.selected_channel,
+                        &mut selected_channel,
                         index,
                         format!("{} ({})", channel.name, channel.unit.symbol),
                     )
                     .changed();
             }
         });
+    recording.set_selected_channel(selected_channel);
 
     ui.separator();
     ui.label(crate::typography::headline("Sweeps"));
+    let item_ids = recording
+        .trace_items()
+        .iter()
+        .map(|item| item.id)
+        .collect::<Vec<_>>();
+    let mut selected_ids = recording
+        .invocation
+        .analysis_selection
+        .clone()
+        .unwrap_or_else(|| item_ids.clone());
     ui.horizontal(|ui| {
         if ui.button("Select all").clicked() {
-            recording.selected_sweeps.fill(true);
-            dirty = true;
+            selected_ids.clone_from(&item_ids);
+            invocation_changed = true;
         }
         if ui.button("Clear").clicked() {
-            recording.selected_sweeps.fill(false);
-            dirty = true;
+            selected_ids.clear();
+            invocation_changed = true;
         }
     });
     ui.horizontal_wrapped(|ui| {
-        for (index, selected) in recording.selected_sweeps.iter_mut().enumerate() {
-            dirty |= ui.checkbox(selected, (index + 1).to_string()).changed();
+        for (index, item) in item_ids.iter().enumerate() {
+            let mut selected = selected_ids.contains(item);
+            if ui
+                .checkbox(&mut selected, (index + 1).to_string())
+                .changed()
+            {
+                if selected {
+                    selected_ids.push(*item);
+                } else {
+                    selected_ids.retain(|id| id != item);
+                }
+                invocation_changed = true;
+            }
         }
     });
+    recording.invocation.analysis_selection = Some(selected_ids);
 
     ui.separator();
     ui.label(crate::typography::headline("Processing"));
@@ -244,6 +269,9 @@ pub(super) fn electrophysiology_group(app: &mut PlotxApp, di: usize, ui: &mut Ui
             }
             Err(error) => app.session.status = error.to_string(),
         }
+    }
+    if invocation_changed {
+        app.apply_electrophysiology_invocation_edit(di);
     }
     dirty
 }

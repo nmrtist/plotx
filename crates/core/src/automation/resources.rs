@@ -43,6 +43,7 @@ pub const CAP_PROCESSING_SCHEME: &str = "processing.scheme";
 pub const CAP_PROPERTY_CATALOG: &str = "properties.catalog";
 pub const CAP_FIELD_SCALAR_GRID_2D_REGULAR: &str = "field.scalar_grid_2d.regular";
 pub const CAP_FIELD_CURVE_1D: &str = "field.curve_1d";
+pub const CAP_FIELD_TRACE_COLLECTION: &str = "field.trace_collection";
 pub const CAP_FIELD_COLORED_RASTER_2D: &str = "field.colored_raster_2d";
 pub const CAP_FIELD_SIGNED: &str = "field.signed";
 pub const CAP_FIELD_NOISE_SCALE: &str = "field.noise_scale";

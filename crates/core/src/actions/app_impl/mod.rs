@@ -153,6 +153,7 @@ impl PlotxApp {
         };
         o.frame = frame;
         if let Some(plot) = o.plot() {
+            let owner = plot.display_owner;
             let binding = plot.binding.clone();
             let chart = plot.chart.clone();
             let stack = plot.stack;
@@ -161,7 +162,7 @@ impl PlotxApp {
                 frame.width / crate::state::MM_TO_PT,
                 frame.height / crate::state::MM_TO_PT,
             ];
-            let fig = self.build_object_figure(&binding, &chart, &stack, &projections, size);
+            let fig = self.build_object_figure(owner, &binding, &chart, &stack, &projections, size);
             self.apply_viewport_to_plot_object(canvas, object, fig);
         }
     }
@@ -376,7 +377,7 @@ impl PlotxApp {
     }
 
     fn rebuild_plot_presentation(&mut self, canvas: usize, object: ObjectId) {
-        let Some((binding, chart, stack, projections, frame, previous_contours)) = self
+        let Some((owner, binding, chart, stack, projections, frame, previous_contours)) = self
             .doc
             .canvases
             .get(canvas)
@@ -384,6 +385,7 @@ impl PlotxApp {
             .and_then(|object| {
                 let plot = object.plot()?;
                 Some((
+                    plot.display_owner,
                     plot.binding.clone(),
                     plot.chart.clone(),
                     plot.stack,
@@ -399,7 +401,8 @@ impl PlotxApp {
             frame.width / crate::state::MM_TO_PT,
             frame.height / crate::state::MM_TO_PT,
         ];
-        let mut figure = self.build_object_figure(&binding, &chart, &stack, &projections, size);
+        let mut figure =
+            self.build_object_figure(owner, &binding, &chart, &stack, &projections, size);
         if figure.contours.len() < previous_contours.len() {
             figure.contours = previous_contours;
         }
@@ -433,6 +436,7 @@ impl PlotxApp {
             return;
         };
         plot.binding = binding.clone();
+        let owner = plot.display_owner;
         let chart = plot.chart.clone();
         let stack = plot.stack;
         let projections = plot.projections.clone();
@@ -441,7 +445,7 @@ impl PlotxApp {
             frame.width / crate::state::MM_TO_PT,
             frame.height / crate::state::MM_TO_PT,
         ];
-        let fig = self.build_object_figure(binding, &chart, &stack, &projections, size);
+        let fig = self.build_object_figure(owner, binding, &chart, &stack, &projections, size);
         if let Some(plot) = self
             .doc
             .canvases
@@ -477,6 +481,7 @@ impl PlotxApp {
             return;
         };
         plot.chart = chart.clone();
+        let owner = plot.display_owner;
         let binding = plot.binding.clone();
         let stack = plot.stack;
         let projections = plot.projections.clone();
@@ -485,7 +490,7 @@ impl PlotxApp {
             frame.width / crate::state::MM_TO_PT,
             frame.height / crate::state::MM_TO_PT,
         ];
-        let fig = self.build_object_figure(&binding, chart, &stack, &projections, size);
+        let fig = self.build_object_figure(owner, &binding, chart, &stack, &projections, size);
         if let Some(plot) = self
             .doc
             .canvases
@@ -517,6 +522,7 @@ impl PlotxApp {
             return;
         };
         plot.stack = *stack;
+        let owner = plot.display_owner;
         let binding = plot.binding.clone();
         let chart = plot.chart.clone();
         let projections = plot.projections.clone();
@@ -525,7 +531,7 @@ impl PlotxApp {
             frame.width / crate::state::MM_TO_PT,
             frame.height / crate::state::MM_TO_PT,
         ];
-        let fig = self.build_object_figure(&binding, &chart, stack, &projections, size);
+        let fig = self.build_object_figure(owner, &binding, &chart, stack, &projections, size);
         if let Some(plot) = self
             .doc
             .canvases
@@ -557,6 +563,7 @@ impl PlotxApp {
             return;
         };
         plot.projections = projections.clone();
+        let owner = plot.display_owner;
         let binding = plot.binding.clone();
         let chart = plot.chart.clone();
         let stack = plot.stack;
@@ -565,7 +572,7 @@ impl PlotxApp {
             frame.width / crate::state::MM_TO_PT,
             frame.height / crate::state::MM_TO_PT,
         ];
-        let fig = self.build_object_figure(&binding, &chart, &stack, projections, size);
+        let fig = self.build_object_figure(owner, &binding, &chart, &stack, projections, size);
         if let Some(plot) = self
             .doc
             .canvases

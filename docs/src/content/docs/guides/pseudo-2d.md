@@ -8,6 +8,16 @@ varies. PlotX reads that varying parameter from the acquisition parameters on
 import: a gradient-strength series marks the dataset as DOSY, a delay series
 as relaxation (T1 or T2 — which one is your choice of fit model).
 
+The initial stack contains one plot series per increment. Select the plot and
+use **Data** in the Object inspector to show or hide individual increments.
+Use **Choose trace…** to replace a series with another increment from the same
+dataset. **Add series…** adds every increment from a compatible dataset. Use
+**Show all**, **Hide all**, the row checkboxes, or remove buttons to keep the
+exact values you want to compare. To identify them on the plot, set
+**Visibility** to **Show** under **Legend & scales**. The legend labels each
+increment by its gradient strength, relaxation delay, or imported pseudo-axis
+value and display unit.
+
 ## Workflow
 
 1. Import the pseudo-2D dataset.

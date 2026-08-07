@@ -5,19 +5,52 @@ use super::*;
 /// Binding edits rebuild through `SetDataBinding`; stack-layout edits through
 /// `SetStackSpec`.
 pub(super) fn data_section(app: &mut PlotxApp, ci: usize, object: ObjectId, ui: &mut Ui) {
-    let Some((binding, stack)) = app.doc.canvases[ci]
+    let Some((persisted_binding, display_owner, stack)) = app.doc.canvases[ci]
         .object(object)
         .and_then(|o| o.plot())
-        .map(|p| (p.binding.clone(), p.stack))
+        .map(|p| (p.binding.clone(), p.display_owner, p.stack))
     else {
         return;
     };
+    let binding = app.display_binding(display_owner, &persisted_binding);
 
     let is_stack = binding.series.len() > 1 && app.series_stackable(&binding);
+    let multiple_datasets = binding.dataset_ids().len() > 1;
     let count = binding.series.len();
     let mut next_binding: Option<DataBinding> = None;
     let mut next_stack: Option<StackSpec> = None;
+    if is_stack {
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(
+                    binding.series.iter().any(|series| !series.visible),
+                    egui::Button::new("Show all"),
+                )
+                .clicked()
+            {
+                let mut b = binding.clone();
+                for series in &mut b.series {
+                    series.visible = true;
+                }
+                next_binding = Some(b);
+            }
+            if ui
+                .add_enabled(
+                    binding.series.iter().any(|series| series.visible),
+                    egui::Button::new("Hide all"),
+                )
+                .clicked()
+            {
+                let mut b = binding.clone();
+                for series in &mut b.series {
+                    series.visible = false;
+                }
+                next_binding = Some(b);
+            }
+        });
+    }
     for (i, sb) in binding.series.iter().enumerate() {
+        let item_options = app.series_item_options(sb);
         ui.horizontal(|ui| {
             if is_stack {
                 let mut visible = sb.visible;
@@ -39,12 +72,17 @@ pub(super) fn data_section(app: &mut PlotxApp, ci: usize, object: ObjectId, ui: 
                 .primary_color()
                 .unwrap_or(OVERLAY_PALETTE[i % OVERLAY_PALETTE.len()]);
             swatch(ui, color);
-            let name = app
-                .doc
-                .dataset_index(sb.source.resource)
-                .and_then(|index| app.doc.datasets.get(index))
-                .map(Dataset::display_name)
-                .unwrap_or_default();
+            let item_name = app.series_label(sb);
+            let name = if multiple_datasets {
+                let dataset = app
+                    .doc
+                    .dataset_by_id(sb.source.resource)
+                    .map(Dataset::display_name)
+                    .unwrap_or_default();
+                format!("{dataset} — {item_name}")
+            } else {
+                item_name
+            };
             let label = if i == 0 {
                 format!("{name} (primary)")
             } else {
@@ -63,6 +101,23 @@ pub(super) fn data_section(app: &mut PlotxApp, ci: usize, object: ObjectId, ui: 
                 }
             } else {
                 ui.label(label);
+            }
+            if item_options.len() > 1 {
+                egui::ComboBox::from_id_salt(("object_series_item", object, sb.id))
+                    .selected_text("Choose trace…")
+                    .show_ui(ui, |ui| {
+                        for (item, option_label) in &item_options {
+                            if ui
+                                .selectable_label(sb.source.item == Some(*item), option_label)
+                                .clicked()
+                            {
+                                let mut b = binding.clone();
+                                b.series[i].source.item = Some(*item);
+                                next_binding = Some(b);
+                                ui.close();
+                            }
+                        }
+                    });
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if count > 1 && ui.small_button(icon::X).on_hover_text("Remove").clicked() {
@@ -115,12 +170,7 @@ pub(super) fn data_section(app: &mut PlotxApp, ci: usize, object: ObjectId, ui: 
     }
 
     let candidates = app.stack_candidates(&binding);
-    if binding
-        .primary_dataset()
-        .and_then(|id| app.doc.dataset_by_id(id))
-        .map(Dataset::domain)
-        .is_some_and(|d| d.stack_kind().is_some())
-    {
+    if app.series_stackable(&binding) {
         if candidates.is_empty() {
             ui.weak("No other datasets to stack.");
         } else {
@@ -128,26 +178,33 @@ pub(super) fn data_section(app: &mut PlotxApp, ci: usize, object: ObjectId, ui: 
                 .selected_text("Add series…")
                 .show_ui(ui, |ui| {
                     for di in &candidates {
-                        let label = app.doc.datasets[*di].display_name();
+                        let dataset_name = app.doc.datasets[*di].display_name();
+                        let options = app.stack_candidate_series_options(&binding, *di);
+                        let label = if options.len() > 1 {
+                            format!("{dataset_name} — All traces ({})", options.len())
+                        } else {
+                            dataset_name
+                        };
                         if ui.selectable_label(false, label).clicked() {
                             let mut b = binding.clone();
-                            let Some(series_id) = app
-                                .doc
-                                .canvases
-                                .get_mut(ci)
-                                .and_then(|canvas| canvas.object_mut(object))
-                                .and_then(|object| object.plot_mut())
-                                .map(|plot| plot.allocate_series_id())
-                            else {
-                                continue;
-                            };
-                            if let Some(mut series) =
-                                SeriesBinding::from_dataset(&app.doc.datasets[*di])
-                            {
+                            for mut series in options {
+                                let color = app.next_stack_color(&b);
+                                let Some(series_id) = app
+                                    .doc
+                                    .canvases
+                                    .get_mut(ci)
+                                    .and_then(|canvas| canvas.object_mut(object))
+                                    .and_then(|object| object.plot_mut())
+                                    .map(|plot| plot.allocate_series_id())
+                                else {
+                                    continue;
+                                };
                                 series.id = series_id;
+                                series.set_primary_color(color);
                                 b.series.push(series);
-                                next_binding = Some(b);
                             }
+                            next_binding = Some(b);
+                            ui.close();
                         }
                     }
                 });
@@ -159,7 +216,13 @@ pub(super) fn data_section(app: &mut PlotxApp, ci: usize, object: ObjectId, ui: 
     if let Some(after) = next_binding
         && after != binding
     {
-        app.execute_action(Action::set_data_binding(ci, object, binding, after));
+        let after = app.merge_display_binding(display_owner, &persisted_binding, after);
+        app.execute_action(Action::set_data_binding(
+            ci,
+            object,
+            persisted_binding,
+            after,
+        ));
         app.session.status = "Updated plot data.".to_owned();
     } else if let Some(after) = next_stack
         && after != stack

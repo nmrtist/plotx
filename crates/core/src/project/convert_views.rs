@@ -1,5 +1,5 @@
 use super::axis_overrides::AxisOverridesDto;
-use super::field_catalog::validate_series;
+use super::field_catalog::validate_series_source;
 use super::*;
 use crate::state::SeriesId;
 use crate::state::{AxisProjection, AxisProjections, ProjectionSource};
@@ -148,11 +148,18 @@ pub fn canvas_to_view(
                         Dataset::Xrd(_) => "line_plot",
                         Dataset::Xps(_) => "line_plot",
                     };
+                    let mut ids = std::collections::BTreeSet::new();
                     let series = plot
                         .binding
                         .series
                         .iter()
                         .map(|sb| {
+                            if !ids.insert(sb.id) {
+                                return Err(ProjectError::Invalid(format!(
+                                    "view {view_id} plot {} has duplicate series id {}",
+                                    object.id, sb.id
+                                )));
+                            }
                             let dataset = datasets
                                 .iter()
                                 .find(|dataset| dataset.resource_id() == sb.source.resource)
@@ -162,16 +169,26 @@ pub fn canvas_to_view(
                                     object.id, sb.source.resource
                                 ))
                             })?;
-                            validate_series(
+                            validate_series_source(
                                 dataset,
                                 sb.source.field,
+                                sb.source.item,
                                 &sb.encoding,
                                 &format!("view {view_id} plot {} series {}", object.id, sb.id),
                             )?;
                             Ok(SeriesBindingDto {
                                 id: sb.id.get(),
-                                input: format!("recipe_{}", dataset.resource_id()),
-                                field: sb.source.field.get(),
+                                source: match sb.source.item {
+                                    Some(item) => SeriesSourceDto::TraceItem {
+                                        input: format!("recipe_{}", dataset.resource_id()),
+                                        field: sb.source.field.get(),
+                                        item,
+                                    },
+                                    None => SeriesSourceDto::Field {
+                                        input: format!("recipe_{}", dataset.resource_id()),
+                                        field: sb.source.field.get(),
+                                    },
+                                },
                                 label: sb.label.clone(),
                                 encoding: sb.encoding.clone(),
                                 visible: sb.visible,
@@ -181,7 +198,10 @@ pub fn canvas_to_view(
                     let stack = (plot.stack != StackSpec::default())
                         .then(|| StackDto::from_spec(&plot.stack));
                     Ok(ViewCanvasObject {
-                        input: format!("recipe_{}", primary_dataset.resource_id()),
+                        input: plot
+                            .display_owner
+                            .map(|owner| format!("recipe_{owner}"))
+                            .unwrap_or_default(),
                         next_series_id: plot.next_series_id.get(),
                         series,
                         chart_type: Some(plot.chart.type_id.clone()),
@@ -314,17 +334,26 @@ pub fn view_to_canvas(
                     )));
                 }
                 let mut series = Vec::with_capacity(view_object.series.len());
+                let mut ids = std::collections::BTreeSet::new();
                 for sb in &view_object.series {
-                    let index = resolve(&sb.input)?;
+                    if !ids.insert(sb.id) {
+                        return Err(ProjectError::Invalid(format!(
+                            "view {view_id} plot {} has duplicate series id {}",
+                            view_object.id, sb.id
+                        )));
+                    }
+                    let (input, stored_field, item) = sb.source.parts();
+                    let index = resolve(input)?;
                     let dataset = app.doc.datasets.get(index).ok_or_else(|| {
                         ProjectError::Invalid(format!(
                             "view {view_id} references unavailable dataset index {index}"
                         ))
                     })?;
-                    let field = crate::state::FieldId::new(sb.field);
-                    validate_series(
+                    let field = crate::state::FieldId::new(stored_field);
+                    validate_series_source(
                         dataset,
                         field,
+                        item,
                         &sb.encoding,
                         &format!("view {view_id} series {}", sb.id),
                     )?;
@@ -333,6 +362,7 @@ pub fn view_to_canvas(
                         source: crate::state::SeriesSource {
                             resource: dataset.resource_id(),
                             field,
+                            item,
                         },
                         label: sb.label.clone(),
                         encoding: sb.encoding.clone(),
@@ -340,6 +370,11 @@ pub fn view_to_canvas(
                     });
                 }
                 let binding = DataBinding { series };
+                let display_owner = if view_object.input.is_empty() {
+                    None
+                } else {
+                    Some(app.doc.datasets[resolve(&view_object.input)?].resource_id())
+                };
                 let stack = view_object
                     .stack
                     .clone()
@@ -405,9 +440,23 @@ pub fn view_to_canvas(
                 let mut figure = match &view_object.snapshot {
                     Some(snapshot) if !map_unavailable => read_json(zip, &snapshot.figure)
                         .unwrap_or_else(|_| {
-                            app.build_object_figure(&binding, &chart, &stack, &projections, size_mm)
+                            app.build_object_figure(
+                                display_owner,
+                                &binding,
+                                &chart,
+                                &stack,
+                                &projections,
+                                size_mm,
+                            )
                         }),
-                    _ => app.build_object_figure(&binding, &chart, &stack, &projections, size_mm),
+                    _ => app.build_object_figure(
+                        display_owner,
+                        &binding,
+                        &chart,
+                        &stack,
+                        &projections,
+                        size_mm,
+                    ),
                 };
                 let axis_overrides = view_object
                     .axis_overrides
@@ -420,8 +469,14 @@ pub fn view_to_canvas(
                 // here or the rebuilt figure would lose both.
                 let snapshot_backed = view_object.snapshot.is_some() && !map_unavailable;
                 let derived_axes = if snapshot_backed {
-                    let derived =
-                        app.build_object_figure(&binding, &chart, &stack, &projections, size_mm);
+                    let derived = app.build_object_figure(
+                        display_owner,
+                        &binding,
+                        &chart,
+                        &stack,
+                        &projections,
+                        size_mm,
+                    );
                     crate::state::DerivedAxes::from_figure(&derived)
                 } else {
                     crate::state::DerivedAxes::from_figure(&figure)
@@ -449,6 +504,7 @@ pub fn view_to_canvas(
                     .map(PanelDto::into_panel)
                     .unwrap_or_else(|| PanelMeta::new(app.default_plot_title(di), frame.width));
                 CanvasObjectKind::Plot(Box::new(PlotObject::from_materialized_figure(
+                    display_owner,
                     SeriesId::new(view_object.next_series_id),
                     binding,
                     chart,

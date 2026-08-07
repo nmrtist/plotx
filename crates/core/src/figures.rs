@@ -215,7 +215,7 @@ pub fn build_stack_figure(stack: &StackSpectrum) -> Figure {
     fig
 }
 
-fn axis_label(nucleus: &str) -> String {
+pub(crate) fn axis_label(nucleus: &str) -> String {
     let mut formatted = String::new();
     let mut chars = nucleus.chars().peekable();
     while chars.peek().is_some_and(char::is_ascii_digit) {

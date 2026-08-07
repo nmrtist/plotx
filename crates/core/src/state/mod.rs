@@ -86,6 +86,7 @@ mod peaks;
 mod peaks2d;
 mod plot_interaction;
 mod plot_object;
+mod pseudo_map_field;
 mod region;
 mod selection;
 mod series_binding;
@@ -104,6 +105,10 @@ mod table_fit;
 mod table_native;
 mod table_numeric;
 mod tile_drop;
+mod trace_provider;
+#[cfg(test)]
+#[path = "trace_provider_tests.rs"]
+mod trace_provider_tests;
 mod ui_drag;
 mod ui_state;
 mod units;
@@ -141,9 +146,10 @@ pub(crate) use field_catalog::{
     reset_afm_channel_key_computations,
 };
 pub(crate) use field_catalog::{
-    afm_channel_keys, afm_field_catalog_for_keys, electrophysiology_channel_key,
-    electrophysiology_channel_keys, electrophysiology_field_catalog_for_keys, nmr_field_catalog,
-    nmr2d_field_catalog, table_field_catalog,
+    afm_channel_keys, afm_field_catalog_for_keys, attach_electrophysiology_trace_collections,
+    attach_pseudo_trace_collection, electrophysiology_channel_key, electrophysiology_channel_keys,
+    electrophysiology_field_catalog_for_keys, nmr_field_catalog, nmr2d_field_catalog,
+    table_field_catalog,
 };
 pub use field_defaults::*;
 pub(crate) use field_payload::nmr_scalar_grid;
@@ -163,6 +169,7 @@ pub use peaks::*;
 pub use peaks2d::*;
 pub use plot_interaction::*;
 pub use plot_object::*;
+pub(crate) use pseudo_map_field::{DOSY_GRID_COLS, DOSY_GRID_ROWS, dosy_scalar_grid};
 pub use region::*;
 pub use selection::*;
 pub use series_binding::*;

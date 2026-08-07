@@ -1,4 +1,8 @@
 use super::{FieldAlgorithmProvenance, FieldId, FieldProvenance};
+use plotx_data::{
+    TraceCollectionCatalog, TraceCollectionId, TraceItemDescriptor, TraceItemId,
+    TraceItemParameter, TraceParameterValue,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -7,7 +11,7 @@ use std::sync::Arc;
 /// Dataset-owned allocator and persisted lookup table for field child resources.
 /// The key is supplied by the provider and identifies the actual channel/plane;
 /// the numeric `FieldId` is only an owner-local reference, never an array index.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FieldCatalog {
     next_id: u64,
     key_to_id: BTreeMap<String, FieldId>,
@@ -18,6 +22,7 @@ pub struct FieldCatalog {
     /// Persisted source and algorithm provenance for each stable child field.
     /// Runtime `FieldVersion` deliberately does not live here.
     provenance: BTreeMap<FieldId, FieldProvenance>,
+    trace_collections: BTreeMap<FieldId, TraceCollectionCatalog>,
 }
 
 impl FieldCatalog {
@@ -27,6 +32,7 @@ impl FieldCatalog {
             key_to_id: BTreeMap::new(),
             retired_key_to_id: BTreeMap::new(),
             provenance: BTreeMap::new(),
+            trace_collections: BTreeMap::new(),
         };
         for key in keys {
             catalog.activate_key(key);
@@ -36,6 +42,25 @@ impl FieldCatalog {
 
     pub fn id_for_key(&self, key: &str) -> Option<FieldId> {
         self.key_to_id.get(key).copied()
+    }
+
+    pub fn trace_collection(&self, field: FieldId) -> Option<&TraceCollectionCatalog> {
+        self.trace_collections.get(&field)
+    }
+
+    pub(crate) fn trace_collection_mut(
+        &mut self,
+        field: FieldId,
+    ) -> Option<&mut TraceCollectionCatalog> {
+        self.trace_collections.get_mut(&field)
+    }
+
+    pub(crate) fn set_trace_collection(
+        &mut self,
+        field: FieldId,
+        collection: TraceCollectionCatalog,
+    ) {
+        self.trace_collections.insert(field, collection);
     }
 
     pub(crate) fn provenance_for(&self, id: FieldId) -> Option<&FieldProvenance> {
@@ -158,7 +183,181 @@ impl FieldCatalog {
         {
             return Err("field catalog does not carry provenance for every field".to_owned());
         }
+        let mut collection_ids = BTreeSet::new();
+        for (field, collection) in &self.trace_collections {
+            if !ids.contains(field) {
+                return Err(format!("trace collection references unknown field {field}"));
+            }
+            if !collection_ids.insert(collection.id) {
+                return Err(format!(
+                    "field catalog contains duplicate trace collection id {}",
+                    collection.id
+                ));
+            }
+            collection.validate()?;
+        }
         Ok(())
+    }
+}
+
+pub(crate) fn pseudo_axis_display_scale(unit: &str) -> f64 {
+    match unit {
+        "ms" => 1e3,
+        "us" | "µs" => 1e6,
+        "ns" => 1e9,
+        "mT/m" => 1e3,
+        "G/cm" => 1e2,
+        "G/mm" => 10.0,
+        _ => 1.0,
+    }
+}
+
+pub(crate) fn attach_pseudo_trace_collection(
+    catalog: &mut FieldCatalog,
+    data: &plotx_io::NmrData2D,
+) {
+    let Some(field) = catalog.id_for_key("nmr.stack") else {
+        return;
+    };
+    let count = data.rows;
+    let collection = TraceCollectionId::derived(data.source.as_bytes(), b"nmr.stack");
+    let (quantity, unit) = data.pseudo_axis.as_ref().map_or(("Increment", ""), |axis| {
+        (
+            match axis.kind {
+                plotx_io::PseudoKind::Gradient => "Gradient strength",
+                plotx_io::PseudoKind::Delay => "Relaxation delay",
+                plotx_io::PseudoKind::Generic => axis.name.as_str(),
+            },
+            axis.unit.as_str(),
+        )
+    });
+    let scale = pseudo_axis_display_scale(unit);
+    let items = (0..count)
+        .map(|index| {
+            let value = data
+                .pseudo_axis
+                .as_ref()
+                .and_then(|axis| axis.values.get(index))
+                .copied()
+                .unwrap_or((index + 1) as f64)
+                * scale;
+            TraceItemDescriptor {
+                id: TraceItemId::derived(collection, &(index as u64).to_le_bytes()),
+                parameters: vec![TraceItemParameter {
+                    key: "axis_value".into(),
+                    name: quantity.into(),
+                    value: TraceParameterValue::Number {
+                        value,
+                        unit: unit.into(),
+                    },
+                }],
+                primary_label_parameter: "axis_value".into(),
+                label_override: None,
+            }
+        })
+        .collect();
+    catalog.set_trace_collection(
+        field,
+        TraceCollectionCatalog {
+            id: collection,
+            axis_quantity: quantity.into(),
+            axis_unit: unit.into(),
+            items,
+        },
+    );
+}
+
+pub(crate) fn attach_electrophysiology_trace_collections(
+    catalog: &mut FieldCatalog,
+    data: &plotx_io::ElectrophysiologyData,
+    stimulus: Option<&super::StimulusDefinition>,
+) {
+    let abf_stimulus = super::resolve_abf_stimulus(data);
+    let fields = (0..data.channels.len())
+        .filter_map(|channel| {
+            let key = electrophysiology_data_channel_key(data, channel)?;
+            Some((key.clone(), catalog.id_for_key(&key)?))
+        })
+        .collect::<Vec<_>>();
+    for (key, field) in fields {
+        let collection = TraceCollectionId::derived(data.source.as_bytes(), key.as_bytes());
+        let items = data
+            .sweeps
+            .iter()
+            .enumerate()
+            .map(|(index, _sweep)| {
+                let mut parameters = vec![TraceItemParameter {
+                    key: "sweep".into(),
+                    name: "Sweep".into(),
+                    value: TraceParameterValue::Text {
+                        value: format!("Sweep {}", index + 1),
+                    },
+                }];
+                let resolved_level = abf_stimulus
+                    .as_ref()
+                    .and_then(|resolved| {
+                        resolved
+                            .values
+                            .get(index)
+                            .map(|level| (resolved.name.clone(), resolved.unit.clone(), *level))
+                    })
+                    .or_else(|| {
+                        _sweep.commands.first().map(|command| {
+                            (
+                                command.name.clone(),
+                                command.unit.symbol.clone(),
+                                super::command_level(command),
+                            )
+                        })
+                    });
+                let primary = if let Some((name, unit, level)) = resolved_level {
+                    parameters.push(TraceItemParameter {
+                        key: "abf_stimulus".into(),
+                        name,
+                        value: TraceParameterValue::Number { value: level, unit },
+                    });
+                    "abf_stimulus"
+                } else if let Some((value, unit)) = stimulus
+                    .filter(|definition| definition.confirmed)
+                    .and_then(|definition| match definition.protocol {
+                        super::StimulusProtocol::VoltageStep {
+                            start_mv, step_mv, ..
+                        } => Some((start_mv + index as f64 * step_mv, "mV")),
+                        super::StimulusProtocol::CurrentStep {
+                            start_pa, step_pa, ..
+                        } => Some((start_pa + index as f64 * step_pa, "pA")),
+                        _ => None,
+                    })
+                {
+                    parameters.push(TraceItemParameter {
+                        key: "stimulus_template".into(),
+                        name: "Command".into(),
+                        value: TraceParameterValue::Number {
+                            value,
+                            unit: unit.into(),
+                        },
+                    });
+                    "stimulus_template"
+                } else {
+                    "sweep"
+                };
+                TraceItemDescriptor {
+                    id: TraceItemId::derived(collection, &(index as u64).to_le_bytes()),
+                    parameters,
+                    primary_label_parameter: primary.into(),
+                    label_override: None,
+                }
+            })
+            .collect();
+        catalog.set_trace_collection(
+            field,
+            TraceCollectionCatalog {
+                id: collection,
+                axis_quantity: "Sweep".into(),
+                axis_unit: String::new(),
+                items,
+            },
+        );
     }
 }
 
@@ -171,6 +370,8 @@ pub(crate) fn nmr2d_field_catalog() -> FieldCatalog {
         "nmr.real".to_owned(),
         "nmr.magnitude".to_owned(),
         "nmr.stack".to_owned(),
+        "nmr.dosy_map".to_owned(),
+        "nmr.ilt_map".to_owned(),
     ])
 }
 
@@ -373,5 +574,23 @@ mod tests {
         assert_eq!(catalog.id_for_key("first"), Some(first));
         assert_eq!(catalog.id_for_key("second"), Some(second));
         assert!(catalog.retired_key_to_id.is_empty());
+    }
+
+    #[test]
+    fn every_supported_pseudo_axis_unit_converts_from_si() {
+        let cases = [
+            ("s", 1.0),
+            ("ms", 1e3),
+            ("us", 1e6),
+            ("µs", 1e6),
+            ("ns", 1e9),
+            ("T/m", 1.0),
+            ("mT/m", 1e3),
+            ("G/cm", 1e2),
+            ("G/mm", 10.0),
+        ];
+        for (unit, expected) in cases {
+            assert_eq!(super::pseudo_axis_display_scale(unit), expected, "{unit}");
+        }
     }
 }

@@ -2,8 +2,8 @@ use super::*;
 use plotx_figure::{ErrorBar, Series};
 
 impl PlotxApp {
-    /// Whether every dataset in `binding` shares one stackable domain (hence one
-    /// [`StackKind`]), so they can be combined into a single overlay/stack figure.
+    /// Whether every series shares a domain and either that domain supports
+    /// generic stacking or every source is an item-addressed trace.
     pub fn series_stackable(&self, binding: &DataBinding) -> bool {
         let Some(domain) = binding
             .series
@@ -14,33 +14,47 @@ impl PlotxApp {
         else {
             return false;
         };
-        domain.stack_kind().is_some()
-            && binding.series.iter().all(|s| {
-                self.doc
-                    .dataset_index(s.source.resource)
-                    .and_then(|index| self.doc.datasets.get(index))
-                    .map(Dataset::domain)
-                    == Some(domain)
-            })
+        let same_domain = binding.series.iter().all(|s| {
+            self.doc
+                .dataset_index(s.source.resource)
+                .and_then(|index| self.doc.datasets.get(index))
+                .map(Dataset::domain)
+                == Some(domain)
+        });
+        let item_addressed = binding
+            .series
+            .iter()
+            .all(|series| series.source.item.is_some());
+        let all_lines = binding
+            .series
+            .iter()
+            .all(|series| matches!(series.encoding, plotx_figure::SeriesEncoding::Line(_)));
+        let all_contours = binding
+            .series
+            .iter()
+            .all(|series| matches!(series.encoding, plotx_figure::SeriesEncoding::Contour(_)));
+        same_domain
+            && ((all_lines && (domain.stack_kind() == Some(StackKind::Line) || item_addressed))
+                || all_contours)
     }
 
-    /// Combine a stackable binding into one figure. Dispatches on the primary's
-    /// [`StackKind`] and the stack `mode`: Line kinds overlay/offset traces; the
-    /// Field kind overlays each dataset's 2D contour in a distinct colour.
+    /// Combine a stackable binding into one figure. Concrete encodings decide
+    /// whether this is a contour overlay or a line stack; the enclosing domain
+    /// may expose both kinds of field.
     pub fn build_stacked_figure(
         &mut self,
         binding: &DataBinding,
         stack: &StackSpec,
         size_mm: [f32; 2],
     ) -> Figure {
-        let primary = binding
-            .primary_dataset()
-            .and_then(|id| self.doc.dataset_index(id))
-            .expect("validated data binding has a primary dataset");
-        let domain = self.doc.datasets[primary].domain();
-        match (domain.stack_kind(), stack.mode) {
-            (Some(StackKind::Field), _) => self.build_contour_overlay(binding, size_mm),
-            _ => self.build_line_stack(binding, stack, size_mm),
+        let contour_overlay = binding
+            .series
+            .iter()
+            .all(|series| matches!(series.encoding, plotx_figure::SeriesEncoding::Contour(_)));
+        if contour_overlay {
+            self.build_contour_overlay(binding, size_mm)
+        } else {
+            self.build_line_stack(binding, stack, size_mm)
         }
     }
 
@@ -90,25 +104,25 @@ impl PlotxApp {
                 continue;
             }
             let encoded_curve = self.series_uses_encoded_curve(sb);
-            let part = if encoded_curve {
+            let mut part = if encoded_curve {
                 self.build_encoded_series_figure(sb)
                     .map(|figure| self.normalize_binding_figure(figure, size_mm))
                     .unwrap_or_else(|| self.build_full_canvas_figure(dataset, &line_chart, size_mm))
             } else {
                 self.build_full_canvas_figure(dataset, &line_chart, size_mm)
             };
+            self.apply_series_binding_style(&mut part, sb);
             let mut series = part.series;
             let mut error_bars = part.error_bars;
             let peak = series
                 .iter()
                 .flat_map(|s| s.points.iter())
                 .fold(0.0f64, |m, p| m.max(p[1].abs()));
-            let factor = sb.line_scale()
-                * if stack.normalize && peak > 0.0 {
-                    1.0 / peak
-                } else {
-                    1.0
-                };
+            let factor = if stack.normalize && peak > 0.0 {
+                1.0 / peak
+            } else {
+                1.0
+            };
             let mut trace_peak = 0.0f64;
             for s in &mut series {
                 for p in &mut s.points {
@@ -129,11 +143,6 @@ impl PlotxApp {
         let (mut x_min, mut x_max) = (fig.x.min, fig.x.max);
         let (mut y_min, mut y_max) = (fig.y.min, fig.y.max);
         for (i, mut series, mut error_bars) in prepared {
-            let sb = &binding.series[i];
-            let color = sb
-                .primary_color()
-                .unwrap_or(OVERLAY_PALETTE[i % OVERLAY_PALETTE.len()]);
-            let label = self.series_label(sb);
             let x_off = if stacked {
                 i as f64 * stack.shear_x * x_span
             } else {
@@ -154,8 +163,6 @@ impl PlotxApp {
                     y_min = y_min.min(p[1]);
                     y_max = y_max.max(p[1]);
                 }
-                s.color = color;
-                s.name = label.clone();
                 if active {
                     s.width = s.width.max(1.0) * 2.0;
                 }
@@ -164,7 +171,6 @@ impl PlotxApp {
             for mut error_bar in error_bars.drain(..) {
                 error_bar.center[0] += x_off;
                 error_bar.center[1] += y_off;
-                error_bar.color = color;
                 if active {
                     error_bar.width = error_bar.width.max(1.0) * 2.0;
                 }
@@ -186,9 +192,9 @@ impl PlotxApp {
     }
 
     /// Field-kind stacking (`ColorOverlay`): overlay every selected 2D dataset's
-    /// contour on one canvas, each recoloured from the palette (or its per-series
-    /// override), merging the datasets' x/y ranges. The primary supplies the axis
-    /// labels and orientation; hidden series are skipped.
+    /// contour using its persisted per-series style, merging the datasets' x/y
+    /// ranges. The primary supplies the axis labels and orientation; hidden
+    /// series are skipped.
     fn build_contour_overlay(&mut self, binding: &DataBinding, size_mm: [f32; 2]) -> Figure {
         let chart = ChartSpec::default_for(DataDomain::Nmr2d);
         let primary = binding
@@ -250,30 +256,133 @@ impl PlotxApp {
         sb.label.clone().unwrap_or_else(|| {
             self.doc
                 .dataset_by_id(sb.source.resource)
-                .map(Dataset::display_name)
+                .map(|dataset| {
+                    sb.source
+                        .item
+                        .and_then(|item| dataset.trace_item_label(sb.source.field, item))
+                        .unwrap_or_else(|| dataset.display_name())
+                })
                 .unwrap_or_default()
         })
     }
 
     /// Dataset indices eligible to stack onto `binding`: other datasets of the
-    /// same stackable domain not already bound. Empty when the plot's primary is
-    /// not a stackable domain.
+    /// same stackable domain not already bound. Item-addressed trace collections
+    /// can be line-stacked across datasets even when their enclosing domain also
+    /// exposes non-line fields.
     pub fn stack_candidates(&self, binding: &DataBinding) -> Vec<usize> {
         let Some(domain) = binding
             .primary_dataset()
             .and_then(|id| self.doc.dataset_by_id(id))
             .map(Dataset::domain)
-            .filter(|d| d.stack_kind().is_some())
         else {
             return Vec::new();
         };
+        if domain.stack_kind().is_none()
+            && !binding
+                .series
+                .iter()
+                .all(|series| series.source.item.is_some())
+        {
+            return Vec::new();
+        }
         let bound = binding.dataset_ids();
+        let item_addressed = binding
+            .series
+            .iter()
+            .all(|series| series.source.item.is_some());
         (0..self.doc.datasets.len())
             .filter(|di| {
                 self.doc.datasets.get(*di).map(Dataset::domain) == Some(domain)
                     && !bound.contains(&self.doc.datasets[*di].resource_id())
+                    && (!item_addressed
+                        || trace_collection_field(&self.doc.datasets[*di]).is_some())
+                    && (item_addressed
+                        || binding.series.first().is_some_and(|source| {
+                            default_field_encoding_matches(
+                                &self.doc.datasets[*di],
+                                &source.encoding,
+                            )
+                        }))
             })
             .collect()
+    }
+
+    /// Materialize every source compatible with the binding being extended.
+    /// Item-addressed plots expose the whole trace collection even when that
+    /// dataset's own live display currently selects a scalar map.
+    pub fn stack_candidate_series_options(
+        &self,
+        binding: &DataBinding,
+        dataset: usize,
+    ) -> Vec<SeriesBinding> {
+        let Some(dataset) = self.doc.datasets.get(dataset) else {
+            return Vec::new();
+        };
+        if binding
+            .series
+            .iter()
+            .all(|series| series.source.item.is_some())
+        {
+            let Some(field) = trace_collection_field(dataset) else {
+                return Vec::new();
+            };
+            return SeriesBinding::from_field_all(dataset, field);
+        }
+        SeriesBinding::from_dataset_all(dataset)
+    }
+
+    /// Materialize the first compatible source for non-interactive callers.
+    pub fn stack_candidate_series(
+        &self,
+        binding: &DataBinding,
+        dataset: usize,
+    ) -> Option<SeriesBinding> {
+        self.stack_candidate_series_options(binding, dataset)
+            .into_iter()
+            .next()
+    }
+
+    /// Labels and stable IDs available when retargeting one item-addressed
+    /// series. The plot keeps its own ID and styling when its source item changes.
+    pub fn series_item_options(
+        &self,
+        series: &SeriesBinding,
+    ) -> Vec<(plotx_data::TraceItemId, String)> {
+        let Some(collection) = self
+            .doc
+            .dataset_by_id(series.source.resource)
+            .and_then(|dataset| dataset.trace_collection(series.source.field))
+        else {
+            return Vec::new();
+        };
+        collection
+            .items
+            .iter()
+            .enumerate()
+            .map(|(index, item)| {
+                let label = item
+                    .automatic_label()
+                    .unwrap_or_else(|| format!("{} {}", collection.axis_quantity, index + 1));
+                (item.id, label)
+            })
+            .collect()
+    }
+
+    /// Choose a default for a newly inserted series without changing any
+    /// existing authored colors. Prefer an unused palette entry; cycling is the
+    /// unavoidable fallback only after the plot already uses the full palette.
+    pub fn next_stack_color(&self, binding: &DataBinding) -> plotx_figure::Color {
+        OVERLAY_PALETTE
+            .iter()
+            .copied()
+            .find(|color| {
+                binding
+                    .series
+                    .iter()
+                    .all(|series| series.primary_color() != Some(*color))
+            })
+            .unwrap_or(OVERLAY_PALETTE[binding.series.len() % OVERLAY_PALETTE.len()])
     }
 
     /// The focused dataset: the lead (last) element of the selection set. Drives the
@@ -364,13 +473,15 @@ impl PlotxApp {
             return;
         };
         let domain = self.doc.datasets[sel[0]].domain();
-        let binding = DataBinding {
-            series: sel
-                .iter()
-                .filter_map(|&d| self.doc.datasets.get(d))
-                .filter_map(SeriesBinding::from_dataset)
-                .collect(),
-        };
+        let mut series = sel
+            .iter()
+            .filter_map(|&d| self.doc.datasets.get(d))
+            .flat_map(SeriesBinding::from_dataset_all)
+            .collect::<Vec<_>>();
+        for (index, series) in series.iter_mut().enumerate() {
+            series.set_primary_color(OVERLAY_PALETTE[index % OVERLAY_PALETTE.len()]);
+        }
+        let binding = DataBinding { series };
         let mode = match domain.stack_kind() {
             Some(StackKind::Field) => StackMode::ColorOverlay,
             _ => StackMode::Offset,
@@ -389,6 +500,7 @@ impl PlotxApp {
         let viewport = CanvasViewport::from_figure(&figure);
         let panel = PanelMeta::new(self.default_plot_title(sel[0]), frame.width);
         let mut plot = PlotObject::new(
+            None,
             SeriesId::new(0),
             binding,
             chart,
@@ -420,4 +532,34 @@ impl PlotxApp {
         self.clear_selection();
         self.session.status = format!("Stacked {} datasets on a new page.", sel.len());
     }
+}
+
+fn trace_collection_field(dataset: &Dataset) -> Option<FieldId> {
+    dataset
+        .default_field_id()
+        .filter(|field| dataset.trace_collection(*field).is_some())
+        .or_else(|| {
+            dataset
+                .field_descriptors()
+                .into_iter()
+                .map(|field| field.id)
+                .find(|field| dataset.trace_collection(*field).is_some())
+        })
+}
+
+fn default_field_encoding_matches(
+    dataset: &Dataset,
+    encoding: &plotx_figure::SeriesEncoding,
+) -> bool {
+    let recommended = dataset
+        .default_field_id()
+        .and_then(|field| dataset.field_descriptor(field))
+        .and_then(|field| field.metadata.recommended_encoding().map(str::to_owned));
+    matches!(
+        (encoding, recommended.as_deref()),
+        (plotx_figure::SeriesEncoding::Line(_), Some("line"))
+            | (plotx_figure::SeriesEncoding::Contour(_), Some("contour"))
+            | (plotx_figure::SeriesEncoding::Heatmap(_), Some("heatmap"))
+            | (plotx_figure::SeriesEncoding::Image(_), Some("image"))
+    )
 }

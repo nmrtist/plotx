@@ -47,6 +47,7 @@ pub(super) fn configure_fields(
                 let mut series = SeriesBinding::with_source(SeriesSource {
                     resource: dataset.resource_id(),
                     field: *field,
+                    item: None,
                 });
                 series.set_primary_color(palette[index % palette.len()]);
                 series.label = Some(label.clone());

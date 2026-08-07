@@ -280,6 +280,7 @@ mod tests {
             visible: true,
             group: None,
             kind: CanvasObjectKind::Plot(Box::new(PlotObject::new(
+                None,
                 crate::state::SeriesId::new(1),
                 DataBinding { series: Vec::new() },
                 ChartSpec::default(),
@@ -322,6 +323,7 @@ mod tests {
             visible: true,
             group: None,
             kind: CanvasObjectKind::Plot(Box::new(PlotObject::new(
+                None,
                 crate::state::SeriesId::new(1),
                 DataBinding { series: Vec::new() },
                 ChartSpec::default(),
@@ -364,6 +366,7 @@ mod tests {
             visible: true,
             group: None,
             kind: CanvasObjectKind::Plot(Box::new(PlotObject::new(
+                None,
                 crate::state::SeriesId::new(1),
                 DataBinding { series: Vec::new() },
                 ChartSpec::default(),

@@ -41,16 +41,65 @@ fn save_rejects_missing_primary_and_series_datasets() {
 
     let mut missing_series = sample_app();
     let missing = DatasetId::new();
-    first_plot_mut(&mut missing_series)
-        .binding
-        .series
-        .push(SeriesBinding::with_source(crate::state::SeriesSource {
-            resource: missing,
-            field: crate::state::FieldId::default(),
-        }));
+    let plot = first_plot_mut(&mut missing_series);
+    let mut series = SeriesBinding::with_source(crate::state::SeriesSource {
+        resource: missing,
+        field: crate::state::FieldId::default(),
+        item: None,
+    });
+    series.id = plot.allocate_series_id();
+    plot.binding.series.push(series);
     let error = save_error(&missing_series, "missing-series-dataset");
     assert!(
         error.contains(&format!("missing series dataset {missing}")),
+        "{error}"
+    );
+}
+
+#[test]
+fn save_rejects_unknown_items_and_duplicate_owner_local_series_ids() {
+    let mut unknown_item = sample_app();
+    let collection = plotx_data::TraceCollectionId::derived(b"missing", b"collection");
+    first_plot_mut(&mut unknown_item).binding.series[0]
+        .source
+        .item = Some(plotx_data::TraceItemId::derived(collection, b"item"));
+    let error = save_error(&unknown_item, "unknown-trace-item");
+    assert!(error.contains("unknown trace item"), "{error}");
+
+    let mut duplicate = sample_app();
+    let repeated = first_plot_mut(&mut duplicate).binding.series[0].clone();
+    first_plot_mut(&mut duplicate).binding.series.push(repeated);
+    let error = save_error(&duplicate, "duplicate-series-id");
+    assert!(error.contains("duplicate series id"), "{error}");
+
+    let recording = Dataset::Electrophysiology(Box::new(
+        crate::state::ElectrophysiologyDataset::load(plotx_io::ElectrophysiologyData {
+            abf_version: "test".into(),
+            sample_rate_hz: 1_000.0,
+            channels: vec![plotx_io::RecordedChannel {
+                name: "A".into(),
+                unit: plotx_io::ElectricalUnit::from_symbol("pA"),
+            }],
+            sweeps: vec![plotx_io::Sweep {
+                start_time_s: 0.0,
+                channels: vec![vec![0.0, 1.0]],
+                commands: Vec::new(),
+            }],
+            protocol: None,
+            source: "scalar-collection.abf".into(),
+            import_warnings: Vec::new(),
+        }),
+    ));
+    let canvas = crate::workflow::build_default_canvas(&recording, "scalar-collection.abf");
+    let mut scalar_collection = PlotxApp::new();
+    scalar_collection.doc.datasets.push(recording);
+    scalar_collection.doc.canvases.push(canvas);
+    first_plot_mut(&mut scalar_collection).binding.series[0]
+        .source
+        .item = None;
+    let error = save_error(&scalar_collection, "scalar-trace-collection");
+    assert!(
+        error.contains("trace collection as a scalar field"),
         "{error}"
     );
 }
@@ -167,8 +216,7 @@ fn loading_a_maximum_series_id_reports_exhaustion() {
             "input": recipe,
             "series": [{
                 "id": u64::MAX,
-                "input": recipe,
-                "field": 0,
+                "source": { "kind": "field", "input": recipe, "field": 0 },
                 "encoding": {"kind":"line","spec":{"color":{"explicit":{"r":15,"g":77,"b":146}},"scale":1.0,"width":1.0}}
             }],
             "frame": { "x": 0.0, "y": 0.0, "width": 100.0, "height": 80.0 },

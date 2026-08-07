@@ -69,11 +69,18 @@ fn project_roundtrip_preserves_raw_data_and_settings() {
             name: "Current".to_owned(),
             unit: plotx_io::ElectricalUnit::from_symbol("pA"),
         }],
-        sweeps: vec![plotx_io::Sweep {
-            start_time_s: 0.0,
-            channels: vec![vec![1.0, -2.0, -4.0, 1.0]],
-            commands: vec![command],
-        }],
+        sweeps: vec![
+            plotx_io::Sweep {
+                start_time_s: 0.0,
+                channels: vec![vec![1.0, -2.0, -4.0, 1.0]],
+                commands: vec![command.clone()],
+            },
+            plotx_io::Sweep {
+                start_time_s: 1.0,
+                channels: vec![vec![2.0, -3.0, -5.0, 2.0]],
+                commands: vec![command],
+            },
+        ],
         protocol: Some("vc".to_owned()),
         source: "cell1/test.abf".to_owned(),
         import_warnings: Vec::new(),
@@ -81,6 +88,8 @@ fn project_roundtrip_preserves_raw_data_and_settings() {
     let mut recording = crate::state::ElectrophysiologyDataset::load(data);
     recording.metadata.cell_id = "cell-42".to_owned();
     recording.processing.cutoff_hz = 750.0;
+    let selected_item = recording.trace_items()[1].id;
+    recording.invocation.analysis_selection = Some(vec![selected_item]);
     recording
         .region_analysis
         .regions
@@ -109,6 +118,8 @@ fn project_roundtrip_preserves_raw_data_and_settings() {
     assert_eq!(recording.data.sweeps[0].commands[0].samples[1], -90.0);
     assert_eq!(recording.metadata.cell_id, "cell-42");
     assert_eq!(recording.processing.cutoff_hz, 750.0);
+    assert!(recording.invocation.analysis_selection.is_none());
+    assert_eq!(recording.selected_sweep_indices(), vec![0, 1]);
     assert_eq!(recording.region_analysis.regions.len(), 1);
     assert_eq!(recording.region_analysis.regions[0].name, "transient");
     assert_eq!(

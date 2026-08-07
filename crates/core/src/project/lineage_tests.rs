@@ -68,6 +68,7 @@ fn region_provenance_without_lineage_stays_unlinked() {
     table.provenance = Some(TableProvenance {
         source_resource,
         source_field,
+        members: None,
         regions: vec![RegionColumnProvenance {
             region: RegionId::new(1),
             column,

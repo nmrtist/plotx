@@ -328,7 +328,9 @@ fn nmr_field_payload(dataset: &super::Nmr2DDataset, id: FieldId) -> Option<Field
                 values: Arc::from(values),
             }))
         }
-        plotx_processing::Processed2D::Stack(_) => None,
+        plotx_processing::Processed2D::Stack(_) => {
+            pseudo_map_grid(dataset, id).map(FieldPayload::ScalarGrid2D)
+        }
     }
 }
 
@@ -355,8 +357,47 @@ fn nmr_field_representation(
         {
             Some(FieldRepresentation::Curve1D)
         }
-        plotx_processing::Processed2D::Stack(_) => None,
+        plotx_processing::Processed2D::Stack(_) => {
+            pseudo_map_grid(dataset, id).map(|grid| FieldRepresentation::ScalarGrid2D {
+                rows: grid.rows,
+                cols: grid.cols,
+                values: grid.values.len(),
+                x_linear: matches!(grid.x, AxisSampling::Linear { .. }),
+                y_linear: matches!(grid.y, AxisSampling::Linear { .. }),
+            })
+        }
     }
+}
+
+fn pseudo_map_grid(dataset: &super::Nmr2DDataset, id: FieldId) -> Option<ScalarGrid2D> {
+    if dataset.field_catalog.id_for_key("nmr.ilt_map") == Some(id) {
+        let map = dataset.ilt_map.as_ref()?;
+        let rows = map.d_grid.len();
+        let cols = map.ppm.len();
+        let mut values = vec![0.0_f32; rows * cols];
+        for (column, amplitudes) in map.amp.iter().enumerate().take(cols) {
+            for (row, amplitude) in amplitudes.iter().enumerate().take(rows) {
+                values[row * cols + column] = *amplitude as f32;
+            }
+        }
+        return Some(ScalarGrid2D {
+            values: Arc::from(values),
+            rows,
+            cols,
+            x: axis_sampling(&map.ppm),
+            y: axis_sampling(
+                &map.d_grid
+                    .iter()
+                    .map(|value| value.max(f64::MIN_POSITIVE).log10())
+                    .collect::<Vec<_>>(),
+            ),
+        });
+    }
+    if dataset.field_catalog.id_for_key("nmr.dosy_map") == Some(id) {
+        let map = dataset.dosy_map.as_ref()?;
+        return Some(super::dosy_scalar_grid(map));
+    }
+    None
 }
 
 pub(crate) fn nmr_scalar_grid(

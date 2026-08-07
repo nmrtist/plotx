@@ -71,7 +71,7 @@ impl PlotxApp {
         after: &AxisOverrides,
     ) {
         let after = after.clone().normalized();
-        let Some((before, binding, chart, stack, projections, frame)) = self
+        let Some((before, owner, binding, chart, stack, projections, frame)) = self
             .doc
             .canvases
             .get(canvas)
@@ -80,6 +80,7 @@ impl PlotxApp {
                 object.plot().map(|plot| {
                     (
                         plot.axis_overrides.clone(),
+                        plot.display_owner,
                         plot.binding.clone(),
                         plot.chart.clone(),
                         plot.stack,
@@ -117,7 +118,7 @@ impl PlotxApp {
                 frame.width / crate::state::MM_TO_PT,
                 frame.height / crate::state::MM_TO_PT,
             ];
-            self.build_object_figure(&binding, &chart, &stack, &projections, size)
+            self.build_object_figure(owner, &binding, &chart, &stack, &projections, size)
         });
 
         let Some(plot) = self

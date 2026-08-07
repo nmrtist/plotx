@@ -6,6 +6,19 @@ use plotx_io::{
     AxisSource, DiffusionMeta, Dim, Domain, NmrData2D, PseudoAxis, PseudoKind, QuadMode,
 };
 
+pub(super) fn wait_for_compute(app: &mut PlotxApp) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    while app.compute_busy() && std::time::Instant::now() < deadline {
+        app.poll_compute();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    app.poll_compute();
+    assert!(
+        !app.compute_busy(),
+        "field job did not settle before deadline"
+    );
+}
+
 fn dim(nucleus: &str) -> Dim {
     Dim {
         spectral_width_hz: 4000.0,
@@ -18,7 +31,7 @@ fn dim(nucleus: &str) -> Dim {
 
 // A synthetic DOSY array: one decaying resonance whose amplitude follows a
 // Stejskal–Tanner decay with a known D across 16 linear gradient steps.
-fn synthetic_dosy(d_true: f64) -> NmrData2D {
+pub(super) fn synthetic_dosy(d_true: f64) -> NmrData2D {
     let (cols, rows) = (256usize, 16usize);
     let meta = DiffusionMeta {
         gamma: 2.675_222e8,
@@ -167,6 +180,43 @@ fn dataset_builds_ilt_dosy_map() {
     assert!(ds.ilt_map.is_some(), "ILT result should remain cached");
 }
 
+#[test]
+fn pseudo_map_fields_are_truthful_scalar_grids_with_map_encodings() {
+    let mut dataset = Nmr2DDataset::load(synthetic_dosy(1.2e-9));
+    assert!(dataset.build_dosy_map());
+    assert!(dataset.build_ilt_map(IltParams {
+        lambda: 1e-2,
+        d_min: 1e-10,
+        d_max: 1e-8,
+        n_grid: 32,
+    }));
+    let dataset = Dataset::Nmr2D(Box::new(dataset));
+    let fields = dataset.field_descriptors();
+    assert!(fields.iter().any(|field| field.local_id == "nmr.stack"));
+    for key in ["nmr.dosy_map", "nmr.ilt_map"] {
+        let field = fields.iter().find(|field| field.local_id == key).unwrap();
+        assert!(matches!(
+            dataset.field_payload(field.id),
+            Some(FieldPayload::ScalarGrid2D(ScalarGrid2D { rows, cols, ref values, .. }))
+                if rows > 1 && cols > 1 && values.len() == rows * cols
+        ));
+        let binding = SeriesBinding::from_field_all(&dataset, field.id);
+        assert!(matches!(
+            binding[0].encoding,
+            plotx_figure::SeriesEncoding::Contour(_)
+        ));
+        assert!(dataset.supports_encoding(field.id, &binding[0].encoding));
+        assert_eq!(
+            field
+                .metadata
+                .0
+                .get("recommended_encoding")
+                .map(String::as_str),
+            Some("contour")
+        );
+    }
+}
+
 /// Both maps can be cached at once, so the figure cache must be keyed by method.
 /// A single shared slot would serve whichever figure was built last for whichever
 /// method the display happens to select — an ILT contour labelled per-column DOSY.
@@ -247,6 +297,149 @@ fn persisted_display_and_method_changes_mark_the_document_dirty() {
     };
     app.set_pseudo_dosy_method(0, DosyMethod::Ilt(params));
     assert!(app.doc.dirty, "changing the persisted method must be dirty");
+}
+
+#[test]
+fn switching_an_existing_stack_canvas_to_dosy_rebuilds_it_as_a_map() {
+    let mut app = PlotxApp::new_with_settings(crate::settings::Settings::default());
+    let mut dataset = Nmr2DDataset::load(synthetic_dosy(1.2e-9));
+    assert!(dataset.build_dosy_map());
+    dataset.display = PseudoDisplay::Stack;
+    app.doc.datasets.push(Dataset::Nmr2D(Box::new(dataset)));
+
+    let mut canvas = CanvasDocument::new("DOSY".to_owned(), [120.0, 80.0]);
+    let [width, height] = canvas.size_pt();
+    let object = app.build_plot_object(
+        0,
+        ObjectFrame::new(0.0, 0.0, width, height),
+        canvas.allocate_object_id(),
+        "DOSY".to_owned(),
+    );
+    assert!(object.plot().unwrap().figure().heatmap.is_none());
+    canvas.objects.push(object);
+    app.doc.canvases.push(canvas);
+
+    {
+        let plot = app.doc.canvases[0].objects[0].plot_mut().unwrap();
+        plot.binding.series.swap(0, 1);
+        let series = &mut plot.binding.series[0];
+        series.label = Some("authored increment".to_owned());
+        if let plotx_figure::SeriesEncoding::Line(line) = &mut series.encoding {
+            line.scale = 1.75;
+            line.width = plotx_figure::PositiveFiniteF32::new(2.25).unwrap();
+            line.color = plotx_figure::ColorSource::Explicit(plotx_figure::Color::rgb(12, 34, 56));
+        }
+    }
+
+    let authored_stack = {
+        let plot = app.doc.canvases[0].objects[0].plot().unwrap();
+        let stack_field = app.doc.datasets[0]
+            .field_catalog()
+            .id_for_key("nmr.stack")
+            .unwrap();
+        DataBinding {
+            series: plot
+                .binding
+                .series
+                .iter()
+                .filter(|series| series.source.field == stack_field)
+                .cloned()
+                .collect(),
+        }
+    };
+    let extracted = DataBinding {
+        series: vec![authored_stack.series[0].clone()],
+    };
+    app.set_pseudo_display(0, PseudoDisplay::DosyMap);
+    wait_for_compute(&mut app);
+    let plot = app.doc.canvases[0].objects[0].plot().unwrap();
+    let display_field = app.doc.datasets[0]
+        .field_catalog()
+        .id_for_key("nmr.dosy_map")
+        .unwrap();
+    assert!(
+        plot.binding
+            .series
+            .iter()
+            .any(|series| { series.source.field == display_field && series.source.item.is_none() })
+    );
+    let figure = plot.figure();
+    assert!(
+        figure.heatmap.is_some() || !figure.contours.is_empty(),
+        "the rebuilt canvas must show the selected DOSY map"
+    );
+
+    let trace = app.build_binding_figure(
+        &extracted,
+        &ChartSpec::default_for(DataDomain::Nmr2d),
+        &StackSpec::default(),
+        [120.0, 80.0],
+    );
+    assert_eq!(trace.series.len(), 1, "an extracted item remains a trace");
+    assert!(trace.heatmap.is_none() && trace.contours.is_empty());
+
+    let independent_id = app.doc.canvases[0].allocate_object_id();
+    let mut independent = app.build_plot_object(
+        0,
+        ObjectFrame::new(4.0, 4.0, 100.0, 60.0),
+        independent_id,
+        "Extracted increment".to_owned(),
+    );
+    {
+        let plot = independent.plot_mut().unwrap();
+        plot.display_owner = None;
+        plot.binding = extracted.clone();
+    }
+    app.doc.canvases[0].objects.push(independent);
+    app.rebuild_canvas(0);
+    assert_eq!(
+        app.doc.canvases[0].objects[1]
+            .plot()
+            .unwrap()
+            .figure()
+            .series
+            .len(),
+        1
+    );
+
+    let default_binding_before_save = app.doc.canvases[0].objects[0]
+        .plot()
+        .unwrap()
+        .binding
+        .clone();
+    let path = std::env::temp_dir().join(format!(
+        "plotx-pseudo-extracted-{}.plotx",
+        uuid::Uuid::new_v4()
+    ));
+    crate::project::save_project(&app, &path, false).unwrap();
+    let loaded = crate::project::load_project(&path).unwrap();
+    let _ = std::fs::remove_file(path);
+    let loaded_plot = loaded.doc.canvases[0].objects[1].plot().unwrap();
+    assert_eq!(
+        loaded.doc.canvases[0].objects[0].plot().unwrap().binding,
+        default_binding_before_save,
+        "palette colors and all stack authoring state must round-trip"
+    );
+    assert_eq!(loaded_plot.display_owner, None);
+    assert_eq!(loaded_plot.binding, extracted);
+    assert_eq!(loaded_plot.figure().series.len(), 1);
+
+    app.set_pseudo_display(0, PseudoDisplay::Stack);
+    let plot = app.doc.canvases[0].objects[0].plot().unwrap();
+    let stack_field = app.doc.datasets[0]
+        .field_catalog()
+        .id_for_key("nmr.stack")
+        .unwrap();
+    let restored = DataBinding {
+        series: plot
+            .binding
+            .series
+            .iter()
+            .filter(|series| series.source.field == stack_field)
+            .cloned()
+            .collect(),
+    };
+    assert_eq!(restored, authored_stack);
 }
 
 #[test]

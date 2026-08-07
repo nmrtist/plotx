@@ -27,6 +27,7 @@ mod snapshot;
 mod source;
 #[doc(hidden)]
 pub mod storage;
+mod trace_collection;
 mod typecheck;
 mod unit_registry;
 
@@ -45,6 +46,7 @@ pub use schema::*;
 pub use snapshot::*;
 pub use source::*;
 pub use storage::*;
+pub use trace_collection::*;
 pub use typecheck::*;
 pub use unit_registry::*;
 

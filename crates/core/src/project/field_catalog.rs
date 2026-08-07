@@ -38,6 +38,26 @@ pub(super) fn validate_series(
     Ok(())
 }
 
+pub(super) fn validate_series_source(
+    dataset: &Dataset,
+    field: crate::state::FieldId,
+    item: Option<plotx_data::TraceItemId>,
+    encoding: &plotx_figure::SeriesEncoding,
+    context: &str,
+) -> Result<()> {
+    validate_series(dataset, field, encoding, context)?;
+    match (item, dataset.trace_collection(field)) {
+        (Some(item), Some(collection)) if collection.item(item).is_some() => Ok(()),
+        (Some(item), _) => Err(ProjectError::Invalid(format!(
+            "{context} references unknown trace item {item}"
+        ))),
+        (None, Some(_)) => Err(ProjectError::Invalid(format!(
+            "{context} addresses a trace collection as a scalar field"
+        ))),
+        (None, None) => Ok(()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

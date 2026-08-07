@@ -11,16 +11,30 @@ waveforms. ABF1 and compressed ABF2 data are not currently supported.
 ## Sweeps and filtering
 
 The default chart overlays every sweep from the selected channel against time.
-Use **Patch clamp** in Dataset tools to select or clear individual sweeps and
-choose the recorded channel. The optional zero-phase Gaussian low-pass is
-enabled at 1 kHz by default. It affects charts and analysis consistently; raw
-samples remain unchanged and the setting is saved in the project.
+Select the plot, then use **Data** in the Object inspector to show or hide
+individual sweeps. Use **Choose trace…** on a plot series to replace it with a
+different stimulus from the same recording. **Add series…** adds every sweep
+from the selected compatible recording. Use **Show all**, **Hide all**, the row
+checkboxes, or remove buttons to reduce the stack to the voltages or currents
+you want to compare. **Stack selected data** likewise starts with all sweeps
+from every selected recording. These changes affect only the plot. In Dataset
+tools, use **Patch clamp** to choose the recorded channel and the sweeps
+included in region measurements, window statistics, IV tables, and data
+exports. The optional zero-phase Gaussian low-pass is enabled at 1 kHz by
+default. It affects charts and analysis consistently; raw samples remain
+unchanged and the setting is saved in the project.
 
-Sweep names share the plot legend. To recover plot area, select the plot and
-set **Visibility** to **Hide** under **Legend & scales** in the Object
-inspector. **Legend size** and **Legend text color** under **Figure typography**
-style legends throughout the document. With **Select** active, drag the legend
-to a clear part of the plot; double-click it to restore automatic placement.
+The legend is hidden for a newly imported recording. To identify sweeps on the
+plot, set **Visibility** to **Show** under **Legend & scales**. A sweep with an
+ABF DAC waveform is labeled with its command value and unit. Otherwise, PlotX
+uses a confirmed voltage-step or current-step template when available, then
+falls back to `Sweep n`. The command unit does not depend on the recorded
+response channel. In a multi-epoch protocol, PlotX uses the command epoch that
+varies between sweeps, so a fixed prepulse does not replace the test-pulse
+value. **Legend size** and **Legend text color** under **Figure
+typography** style legends throughout the document. With **Select** active,
+drag the legend to a clear part of the plot; double-click it to restore
+automatic placement.
 
 ## Regions and window statistics
 
@@ -33,6 +47,8 @@ recording in the Data browser without adding a second board frame. Use **Fit
 curves**, **View data**, or **Back to regions** in the Curve Fit task card.
 The data opens read-only; choose **Save Snapshot** in the Regions task card, or
 **Save editable snapshot** in the data sheet, to create an independent table.
+The synchronized table keeps the sweep membership captured when you create it;
+changing the current analysis selection does not rewrite existing table rows.
 
 For peak, average, and peak-time values, open **Patch clamp**. PlotX uses the
 selected region, or the first region in the list when none is selected. Choose

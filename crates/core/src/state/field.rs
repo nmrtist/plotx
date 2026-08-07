@@ -9,8 +9,8 @@ use crate::automation::{
     CAP_FIELD_FORCE_CURVE, CAP_FIELD_LOCATION_SCALE, CAP_FIELD_MASS_CHROMATOGRAM,
     CAP_FIELD_MASS_SPECTRUM, CAP_FIELD_NMR_CONTOUR, CAP_FIELD_NMR_SIGNAL, CAP_FIELD_NMR_STACK,
     CAP_FIELD_NOISE_SCALE, CAP_FIELD_REGION_SERIES, CAP_FIELD_SCALAR_GRID_2D_REGULAR,
-    CAP_FIELD_SIGNED, CAP_FIELD_SWEEP_COLLECTION, CAP_FIELD_TABLE, CAP_FIELD_XPS_SPECTRUM,
-    CapabilityId,
+    CAP_FIELD_SIGNED, CAP_FIELD_SWEEP_COLLECTION, CAP_FIELD_TABLE, CAP_FIELD_TRACE_COLLECTION,
+    CAP_FIELD_XPS_SPECTRUM, CapabilityId,
 };
 use plotx_figure::{
     ContourBasePolicy, ContourStyle, EstimatorSelection, PositiveFiniteF64, SeriesEncoding,
@@ -19,9 +19,7 @@ use plotx_figure::{
 use std::collections::{BTreeMap, BTreeSet};
 
 impl super::Dataset {
-    /// Describes the stable child fields a dataset currently exposes. This is a
-    /// data adapter, not an encoding registry: callers decide applicability
-    /// solely from the returned capabilities.
+    /// Describes stable child fields and their encoding capabilities.
     pub fn field_descriptors(&self) -> Vec<FieldDescriptor> {
         let capabilities = |id: FieldId, extra: &[&str]| {
             // Capabilities are derived from the field's actual representation,
@@ -124,29 +122,61 @@ impl super::Dataset {
                 .flatten()
                 .collect()
             }
-            Self::Nmr2D(nmr) => nmr
-                .field_catalog
-                .id_for_key("nmr.stack")
-                .into_iter()
-                .map(|id| {
-                    descriptor(
+            Self::Nmr2D(nmr) => {
+                let plotx_processing::Processed2D::Stack(stack) = &nmr.processed else {
+                    unreachable!("pseudo 2D is stack")
+                };
+                let mut fields = Vec::new();
+                if let Some(id) = nmr.field_catalog.id_for_key("nmr.stack") {
+                    fields.push(descriptor(
                         id,
                         "nmr.stack",
                         "Stack",
-                        capabilities(id, &[CAP_FIELD_NMR_STACK, CAP_FIELD_REGION_SERIES]),
-                        vec![nmr.data.cols],
-                        vec![match &nmr.processed {
-                            plotx_processing::Processed2D::Stack(spectrum) => {
-                                domain_unit(spectrum.direct_domain)
-                            }
-                            plotx_processing::Processed2D::Ft(_) => {
-                                unreachable!("pseudo 2D is stack")
-                            }
-                        }],
+                        capabilities(
+                            id,
+                            &[
+                                CAP_FIELD_TRACE_COLLECTION,
+                                CAP_FIELD_NMR_STACK,
+                                CAP_FIELD_REGION_SERIES,
+                            ],
+                        ),
+                        vec![nmr.data.rows, nmr.data.cols],
+                        vec![String::new(), domain_unit(stack.direct_domain)],
                         "line",
-                    )
-                })
-                .collect(),
+                    ));
+                }
+                if let Some(id) = nmr.field_catalog.id_for_key("nmr.dosy_map") {
+                    let dimensions = nmr.dosy_map.as_ref().map_or_else(
+                        || vec![0, 0],
+                        |_| vec![super::DOSY_GRID_ROWS, super::DOSY_GRID_COLS],
+                    );
+                    fields.push(descriptor(
+                        id,
+                        "nmr.dosy_map",
+                        "DOSY map",
+                        capabilities(id, &[CAP_FIELD_BOUNDED, CAP_FIELD_SCALAR_GRID_2D_REGULAR]),
+                        dimensions,
+                        vec!["log10(m2/s)".to_owned(), domain_unit(stack.direct_domain)],
+                        "contour",
+                    ));
+                }
+                if let Some(id) = nmr.field_catalog.id_for_key("nmr.ilt_map") {
+                    let dimensions = nmr
+                        .ilt_map
+                        .as_ref()
+                        .map_or_else(|| vec![0, 0], |map| vec![map.d_grid.len(), map.ppm.len()]);
+                    fields.push(descriptor(
+                        id,
+                        "nmr.ilt_map",
+                        "ILT map",
+                        capabilities(id, &[CAP_FIELD_BOUNDED, CAP_FIELD_SCALAR_GRID_2D_REGULAR]),
+                        dimensions,
+                        vec!["log10(m2/s)".to_owned(), domain_unit(stack.direct_domain)],
+                        "contour",
+                    ));
+                }
+                fields
+            }
             Self::Table(table) => {
                 let Ok(row_count) =
                     usize::try_from(table.typed_state.envelope.revision.snapshot.row_count)
@@ -182,7 +212,14 @@ impl super::Dataset {
                         id,
                         &key,
                         &channel.name,
-                        capabilities(id, &[CAP_FIELD_SWEEP_COLLECTION, CAP_FIELD_REGION_SERIES]),
+                        capabilities(
+                            id,
+                            &[
+                                CAP_FIELD_TRACE_COLLECTION,
+                                CAP_FIELD_SWEEP_COLLECTION,
+                                CAP_FIELD_REGION_SERIES,
+                            ],
+                        ),
                         vec![recording.data.sweeps.len()],
                         vec![channel.unit.symbol.clone()],
                         "line",
@@ -363,6 +400,19 @@ impl super::Dataset {
     }
 
     pub fn default_field_id(&self) -> Option<FieldId> {
+        if let Self::Nmr2D(dataset) = self
+            && !dataset.is_true_2d()
+        {
+            let key = match dataset.display {
+                super::PseudoDisplay::Stack => "nmr.stack",
+                super::PseudoDisplay::DosyMap => match dataset.dosy_method {
+                    super::DosyMethod::MonoExp if dataset.dosy_map.is_some() => "nmr.dosy_map",
+                    super::DosyMethod::Ilt(_) if dataset.ilt_map.is_some() => "nmr.ilt_map",
+                    _ => "nmr.stack",
+                },
+            };
+            return dataset.field_catalog.id_for_key(key);
+        }
         self.field_descriptors().first().map(|field| field.id)
     }
 
@@ -480,7 +530,8 @@ impl super::Dataset {
     /// accepted, so a decoder change cannot silently retarget a series.
     pub fn validate_field_catalog(&self) -> Result<(), String> {
         let catalog = self.field_catalog();
-        catalog.validate_for_keys(self.all_field_keys())
+        catalog.validate_for_keys(self.all_field_keys())?;
+        self.validate_trace_collections()
     }
 
     pub(super) fn field_catalog(&self) -> &FieldCatalog {
@@ -505,6 +556,8 @@ impl super::Dataset {
                 "nmr.real".to_owned(),
                 "nmr.magnitude".to_owned(),
                 "nmr.stack".to_owned(),
+                "nmr.dosy_map".to_owned(),
+                "nmr.ilt_map".to_owned(),
             ],
             Self::Table(_) => vec!["table.default_series".to_owned()],
             Self::Electrophysiology(dataset) => (0..dataset.data.channels.len())

@@ -6,7 +6,8 @@ use crate::export::{
 use crate::state::{
     AxisOverrides, AxisProjections, CanvasDocument, CanvasObject, CanvasObjectKind, CanvasViewport,
     ChartSpec, DEFAULT_CANVAS_SIZE_MM, DataBinding, Dataset, MM_TO_PT, Nmr2DDataset, NmrDataset,
-    ObjectFrame, ObjectId, PanelMeta, PlotObject, PlotxApp, StackSpec, default_chart_type,
+    ObjectFrame, ObjectId, PanelMeta, PlotObject, PlotxApp, StackMode, StackSpec,
+    default_chart_type,
 };
 use plotx_figure::{Axis, Figure};
 use plotx_io::{Acquisition, DataFormat, Domain, LoadWarning, LoadWarningCode, Provenance};
@@ -15,6 +16,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 #[path = "workflow/mass_spec_layout.rs"]
 mod mass_spec_layout;
+#[path = "workflow/trace_collection.rs"]
+mod trace_collection;
 #[path = "workflow/xps.rs"]
 mod xps;
 pub const INSPECTION_SCHEMA: &str = "plotx.inspect.v1";
@@ -338,7 +341,26 @@ pub fn build_dataset_figure(dataset: &Dataset, chart: &ChartSpec, size_mm: [f32;
 }
 
 fn default_binding(dataset: &Dataset) -> DataBinding {
-    DataBinding::single(dataset)
+    let fields = match dataset {
+        Dataset::Nmr2D(data) if !data.is_true_2d() => ["nmr.stack", "nmr.dosy_map", "nmr.ilt_map"]
+            .into_iter()
+            .filter_map(|key| data.field_catalog.id_for_key(key))
+            .collect::<Vec<_>>(),
+        Dataset::Electrophysiology(_) => dataset
+            .field_descriptors()
+            .into_iter()
+            .map(|field| field.id)
+            .collect(),
+        _ => return DataBinding::single(dataset),
+    };
+    let mut series = fields
+        .into_iter()
+        .flat_map(|field| crate::state::SeriesBinding::from_field_all(dataset, field))
+        .collect::<Vec<_>>();
+    for (index, binding) in series.iter_mut().enumerate() {
+        binding.id = crate::state::SeriesId::new(index as u64);
+    }
+    DataBinding { series }
 }
 
 pub fn build_plot_object(
@@ -354,13 +376,33 @@ pub fn build_plot_object(
     {
         chart.type_id = "afm_force_curve".to_owned();
     }
-    let figure = build_dataset_figure(dataset, &chart, size_mm);
+    let binding = default_binding(dataset);
+    let figure = trace_collection::initial_figure(
+        dataset,
+        &binding,
+        size_mm,
+        build_dataset_figure(dataset, &chart, size_mm),
+    );
     let viewport = CanvasViewport::from_figure(&figure);
     let panel = PanelMeta::new(dataset_title(dataset), frame.width);
     let axis_overrides = AxisOverrides {
         lock_aspect: matches!(dataset, Dataset::Nmr2D(dataset) if dataset.is_true_2d())
             .then_some(figure.lock_aspect),
+        guide_visibility: (matches!(dataset, Dataset::Electrophysiology(_) | Dataset::Nmr2D(_)))
+            .then_some(plotx_figure::GuideVisibility::Hide),
         ..AxisOverrides::default()
+    };
+    let stack = if binding
+        .series
+        .iter()
+        .any(|series| series.source.item.is_some())
+    {
+        StackSpec {
+            mode: StackMode::Offset,
+            ..StackSpec::default()
+        }
+    } else {
+        StackSpec::default()
     };
     CanvasObject {
         id,
@@ -370,10 +412,11 @@ pub fn build_plot_object(
         visible: true,
         group: None,
         kind: CanvasObjectKind::Plot(Box::new(PlotObject::new(
-            crate::state::SeriesId::new(1),
-            default_binding(dataset),
+            Some(dataset.resource_id()),
+            crate::state::SeriesId::new(binding.series.len() as u64),
+            binding,
             chart,
-            StackSpec::default(),
+            stack,
             AxisProjections::default(),
             axis_overrides,
             figure,

@@ -1,4 +1,14 @@
 use super::*;
+
+type PlotRebuild = (
+    ObjectId,
+    Option<DatasetId>,
+    DataBinding,
+    ChartSpec,
+    StackSpec,
+    AxisProjections,
+    ObjectFrame,
+);
 use crate::operation::OperationHistory;
 use plotx_processing::{ProjectionMode, SliceKind};
 
@@ -103,13 +113,15 @@ impl PlotxApp {
     /// projections survive every rebuild.
     pub fn build_object_figure(
         &mut self,
+        display_owner: Option<DatasetId>,
         binding: &DataBinding,
         chart: &ChartSpec,
         stack: &StackSpec,
         projections: &AxisProjections,
         size_mm: [f32; 2],
     ) -> Figure {
-        let mut fig = self.build_binding_figure(binding, chart, stack, size_mm);
+        let effective = self.display_binding(display_owner, binding);
+        let mut fig = self.build_binding_figure(&effective, chart, stack, size_mm);
         if let Some(dataset) = binding
             .primary_dataset()
             .and_then(|id| self.doc.dataset_index(id))
@@ -214,7 +226,9 @@ impl PlotxApp {
         }) else {
             return object;
         };
-        let figure = self.build_object_figure(&binding, &chart, &stack, &projections, size_mm);
+        let owner = object.plot().and_then(|plot| plot.display_owner);
+        let figure =
+            self.build_object_figure(owner, &binding, &chart, &stack, &projections, size_mm);
         if let Some(plot) = object.plot_mut() {
             plot.adopt_rebuilt_figure(figure);
         }
@@ -252,10 +266,11 @@ impl PlotxApp {
                 })
                 .collect();
             for id in ids {
-                let (binding, chart, stack, projections, frame) = {
+                let (owner, binding, chart, stack, projections, frame) = {
                     let object = self.doc.canvases[ci].object(id).unwrap();
                     let plot = object.plot().unwrap();
                     (
+                        plot.display_owner,
                         plot.binding.clone(),
                         plot.chart.clone(),
                         plot.stack,
@@ -264,7 +279,8 @@ impl PlotxApp {
                     )
                 };
                 let size = [frame.width / MM_TO_PT, frame.height / MM_TO_PT];
-                let fig = self.build_object_figure(&binding, &chart, &stack, &projections, size);
+                let fig =
+                    self.build_object_figure(owner, &binding, &chart, &stack, &projections, size);
                 self.apply_viewport_to_plot_object(ci, id, fig);
             }
         }
@@ -587,9 +603,19 @@ impl PlotxApp {
             self.mark_document_dirty();
             return;
         }
+        if let Some(recording) = self.doc.datasets[dataset].as_electrophysiology_mut() {
+            recording.refresh_trace_collections();
+        }
         self.rebuild_canvases_for(dataset);
         self.sync_region_table(dataset);
         self.mark_document_dirty();
+    }
+
+    /// Refresh analysis products affected by a transient sweep selection
+    /// without treating that invocation input as a document edit.
+    pub fn apply_electrophysiology_invocation_edit(&mut self, _dataset: usize) {
+        // Invocation selection is session state. Linked tables are refreshed
+        // only by persistent source edits or explicit creation/export.
     }
 
     /// Like [`Self::apply_dataset_edit`] but re-runs the FFT first — the live path
@@ -609,20 +635,14 @@ impl PlotxApp {
     }
 
     pub fn rebuild_canvas(&mut self, ci: usize) {
-        let items: Vec<(
-            ObjectId,
-            DataBinding,
-            ChartSpec,
-            StackSpec,
-            AxisProjections,
-            ObjectFrame,
-        )> = self.doc.canvases[ci]
+        let items: Vec<PlotRebuild> = self.doc.canvases[ci]
             .objects
             .iter()
             .filter_map(|object| {
                 object.plot().map(|plot| {
                     (
                         object.id,
+                        plot.display_owner,
                         plot.binding.clone(),
                         plot.chart.clone(),
                         plot.stack,
@@ -632,9 +652,9 @@ impl PlotxApp {
                 })
             })
             .collect();
-        for (id, binding, chart, stack, projections, frame) in items {
+        for (id, owner, binding, chart, stack, projections, frame) in items {
             let size = [frame.width / MM_TO_PT, frame.height / MM_TO_PT];
-            let fig = self.build_object_figure(&binding, &chart, &stack, &projections, size);
+            let fig = self.build_object_figure(owner, &binding, &chart, &stack, &projections, size);
             self.apply_viewport_to_plot_object(ci, id, fig);
         }
     }
