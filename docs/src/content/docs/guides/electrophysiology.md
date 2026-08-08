@@ -16,9 +16,18 @@ individual sweeps. Use **Choose trace…** on a plot series to replace it with a
 different stimulus from the same recording. **Add series…** adds every sweep
 from the selected compatible recording. Use **Show all**, **Hide all**, the row
 checkboxes, or remove buttons to reduce the stack to the voltages or currents
-you want to compare. **Stack selected data** likewise starts with all sweeps
-from every selected recording. These changes affect only the plot. In Dataset
-tools, use **Patch clamp** to choose the recorded channel and the sweeps
+you want to compare.
+
+To compare recordings, select two or more compatible recordings in the Data
+browser and choose **Stack selected data**. The trace composer lists every
+sweep from each recording's selected channel and starts with all of them
+included. Search by dataset, sweep label, or parameter value, then use the row
+checkboxes or **Select all**, **Clear all**, **Select filtered**, and **Clear
+filtered** to choose the comparison. **Create stack** adds one plot containing
+the selected sweeps; **Cancel** leaves the project unchanged.
+
+These changes affect only the plot. In Dataset tools, use **Patch clamp** to
+choose the recorded channel and the sweeps
 included in region measurements, window statistics, IV tables, and data
 exports. The optional zero-phase Gaussian low-pass is enabled at 1 kHz by
 default. It affects charts and analysis consistently; raw samples remain

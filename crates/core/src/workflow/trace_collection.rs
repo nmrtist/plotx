@@ -7,12 +7,9 @@ pub(super) fn initial_figure(
     size_mm: [f32; 2],
     fallback: Figure,
 ) -> Figure {
-    let field = match dataset {
-        Dataset::Electrophysiology(recording) => recording
-            .field_key(recording.selected_channel)
-            .and_then(|key| recording.field_catalog.id_for_key(key)),
-        _ => dataset.default_field_id(),
-    };
+    let field = dataset
+        .active_trace_collection_field()
+        .or_else(|| dataset.default_field_id());
     let Some(field) = field else {
         return fallback;
     };

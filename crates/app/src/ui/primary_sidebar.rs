@@ -502,9 +502,11 @@ fn render_dataset_node(
             ui.separator();
             if ui
                 .add_enabled(can_stack, egui::Button::new("Stack selected data"))
-                .on_hover_text("Build a new page stacking the selected datasets")
+                .on_hover_text(
+                    "Build a new page from compatible datasets. Trace collections such as electrophysiology require compatible axes and units.",
+                )
                 .on_disabled_hover_text(
-                    "Select 2 or more datasets of the same type (1D NMR, data tables, or 2D NMR).",
+                    "Select at least two compatible datasets. Trace collections such as electrophysiology require compatible axes and units.",
                 )
                 .clicked()
             {

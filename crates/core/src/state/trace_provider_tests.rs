@@ -116,6 +116,42 @@ fn recording(response_unit: &str, command_unit: Option<&str>) -> Dataset {
     )))
 }
 
+fn multichannel_recording(
+    response_units: [&str; 2],
+    selected_channel: usize,
+    source: &str,
+) -> Dataset {
+    let mut recording = ElectrophysiologyDataset::load(plotx_io::ElectrophysiologyData {
+        abf_version: "2.9".into(),
+        sample_rate_hz: 10_000.0,
+        channels: response_units
+            .into_iter()
+            .enumerate()
+            .map(|(index, unit)| plotx_io::RecordedChannel {
+                name: format!("Channel {}", index + 1),
+                unit: plotx_io::ElectricalUnit::from_symbol(unit),
+            })
+            .collect(),
+        sweeps: vec![
+            plotx_io::Sweep {
+                start_time_s: 0.0,
+                channels: vec![vec![1.0, 2.0], vec![10.0, 20.0]],
+                commands: Vec::new(),
+            },
+            plotx_io::Sweep {
+                start_time_s: 1.0,
+                channels: vec![vec![3.0, 4.0], vec![30.0, 40.0]],
+                commands: Vec::new(),
+            },
+        ],
+        protocol: None,
+        source: source.into(),
+        import_warnings: Vec::new(),
+    });
+    recording.selected_channel = selected_channel;
+    Dataset::Electrophysiology(Box::new(recording))
+}
+
 #[test]
 fn electrophysiology_trace_labels_prefer_dac_and_fall_back_to_sweep() {
     let dataset = recording("pA", Some("mV"));
@@ -228,7 +264,26 @@ fn stacked_trace_collections_expand_all_items_and_round_trip_visibility() {
     app.doc.datasets.push(recording("pA", Some("mV")));
     app.doc.datasets.push(recording("pA", Some("mV")));
     app.focus_datasets(&[0, 1], None);
+    app.session.ui.selection_scope = SelectionScope::DataList;
+    app.session.ui.selection_anchors.dataset = Some(app.doc.datasets[0].resource_id());
+    app.session.ui.selection_anchors.dataset_lead = Some(app.doc.datasets[1].resource_id());
+    app.session.ui.selection_anchors.layer = Some(ObjectId::new(91));
+    app.session.ui.selection_anchors.layer_lead = Some(ObjectId::new(92));
+    assert_eq!(app.stackable_selection(), Some(vec![0, 1]));
     app.stack_selected_data();
+
+    let composer = app.session.ui.trace_composer.as_mut().unwrap();
+    assert_eq!(composer.selected_count(), 4);
+    assert_eq!(composer.items[0].dataset_name, "pA.abf (1)");
+    assert_eq!(composer.items[2].dataset_name, "pA.abf (2)");
+    composer.set_all(false);
+    composer.items[1].selected = true;
+    composer.items[3].selected = true;
+    let expected_sources = vec![
+        composer.items[1].series.source,
+        composer.items[3].series.source,
+    ];
+    app.create_trace_composer_stack();
 
     let canvas = app.doc.canvases.len() - 1;
     let object = app.doc.canvases[canvas].objects[0].id;
@@ -237,11 +292,64 @@ fn stacked_trace_collections_expand_all_items_and_round_trip_visibility() {
         .unwrap()
         .binding
         .clone();
-    assert_eq!(before.series.len(), 4);
-    assert_eq!(app.series_label(&before.series[0]), "-60 mV");
-    assert_eq!(app.series_label(&before.series[1]), "Sweep 2");
-    assert_eq!(app.series_label(&before.series[2]), "-60 mV");
-    assert_eq!(app.series_label(&before.series[3]), "Sweep 2");
+    assert_eq!(before.series.len(), 2);
+    assert_eq!(
+        before
+            .series
+            .iter()
+            .map(|series| series.source)
+            .collect::<Vec<_>>(),
+        expected_sources
+    );
+    assert!(
+        before
+            .series
+            .iter()
+            .all(|series| app.series_label(series) == "Sweep 2")
+    );
+    assert_ne!(before.series[0].id, before.series[1].id);
+    assert!(
+        app.doc.canvases[canvas].objects[0]
+            .plot()
+            .unwrap()
+            .next_series_id
+            .get()
+            > before
+                .series
+                .iter()
+                .map(|series| series.id.get())
+                .max()
+                .unwrap()
+    );
+    assert_ne!(
+        before.series[0].primary_color(),
+        before.series[1].primary_color()
+    );
+    assert!(
+        app.doc.canvases[canvas].objects[0]
+            .plot()
+            .unwrap()
+            .display_owner
+            .is_none()
+    );
+    assert_eq!(app.session.active_canvas, Some(canvas));
+    assert_eq!(app.session.ui.selection, Selection::single(object));
+    assert_eq!(app.doc.canvases[canvas].selected_object, Some(object));
+    let frame = BoardFrameId::Page(app.doc.canvases[canvas].resource_id);
+    assert_eq!(app.session.ui.frame_selection, vec![frame]);
+    assert_eq!(app.session.board_reveal, Some(frame));
+    assert_eq!(
+        app.session.ui.selection_scope,
+        SelectionScope::CanvasObjects
+    );
+    assert!(app.session.ui.selection_anchors.dataset.is_none());
+    assert!(app.session.ui.selection_anchors.dataset_lead.is_none());
+    assert!(app.session.ui.selection_anchors.layer.is_none());
+    assert!(app.session.ui.selection_anchors.layer_lead.is_none());
+    assert_eq!(
+        app.session.ui.requested_inspector_section.as_deref(),
+        Some("inspector.data")
+    );
     assert_eq!(
         app.doc.canvases[canvas].objects[0]
             .plot()
@@ -249,42 +357,20 @@ fn stacked_trace_collections_expand_all_items_and_round_trip_visibility() {
             .figure()
             .series
             .len(),
-        4
+        2
     );
-
-    let options = app.stack_candidate_series_options(&before, 1);
-    assert_eq!(options.len(), 2);
-    assert_eq!(app.series_label(&options[1]), "Sweep 2");
-    assert_eq!(app.series_item_options(&before.series[2]).len(), 2);
-    let mut after = before.clone();
-    for series in &mut after.series {
-        series.visible = app.series_label(series) == "Sweep 2";
-    }
-    app.execute_action(crate::actions::Action::set_data_binding(
-        canvas,
-        object,
-        before.clone(),
-        after.clone(),
-    ));
-
-    let plot = app.doc.canvases[canvas].objects[0].plot().unwrap();
-    assert_eq!(plot.figure().series.len(), 2);
-    assert!(
-        plot.figure()
-            .series
-            .iter()
-            .all(|series| series.name == "Sweep 2")
-    );
+    app.session.ui.selection = Selection::None;
+    app.sync_selection_to_active_canvas();
+    assert_eq!(app.session.ui.selection, Selection::single(object));
 
     app.undo();
+    assert_eq!(app.doc.canvases.len(), canvas);
+    app.redo();
+    app.sync_selection_to_active_canvas();
+    assert_eq!(app.session.ui.selection, Selection::single(object));
     assert_eq!(
         app.doc.canvases[canvas].objects[0].plot().unwrap().binding,
         before
-    );
-    app.redo();
-    assert_eq!(
-        app.doc.canvases[canvas].objects[0].plot().unwrap().binding,
-        after
     );
 
     let path = std::env::temp_dir().join(format!(
@@ -295,8 +381,272 @@ fn stacked_trace_collections_expand_all_items_and_round_trip_visibility() {
     let loaded = crate::project::load_project(&path).unwrap();
     let _ = std::fs::remove_file(path);
     let loaded_plot = loaded.doc.canvases[canvas].objects[0].plot().unwrap();
-    assert_eq!(loaded_plot.binding, after);
+    assert_eq!(loaded_plot.binding, before);
     assert_eq!(loaded_plot.figure().series.len(), 2);
+}
+
+#[test]
+fn trace_composer_uses_each_recordings_selected_channel() {
+    let mut app = PlotxApp::new();
+    app.doc
+        .datasets
+        .push(multichannel_recording(["mV", "pA"], 1, "before.abf"));
+    app.doc
+        .datasets
+        .push(multichannel_recording(["mV", "pA"], 1, "after.abf"));
+    let expected_fields = app
+        .doc
+        .datasets
+        .iter()
+        .map(|dataset| dataset.active_trace_collection_field().unwrap())
+        .collect::<Vec<_>>();
+    app.focus_datasets(&[0, 1], None);
+    app.stack_selected_data();
+
+    let composer = app.session.ui.trace_composer.as_ref().unwrap();
+    assert_eq!(composer.items.len(), 4);
+    assert!(
+        composer.items[..2]
+            .iter()
+            .all(|item| item.dataset_name == "before.abf")
+    );
+    assert!(
+        composer.items[2..]
+            .iter()
+            .all(|item| item.dataset_name == "after.abf")
+    );
+    let query = "before.abf";
+    assert_eq!(composer.visible_count(query), 2);
+    assert!(
+        composer.items[..2]
+            .iter()
+            .all(|item| item.series.source.field == expected_fields[0])
+    );
+    assert!(
+        composer.items[2..]
+            .iter()
+            .all(|item| item.series.source.field == expected_fields[1])
+    );
+}
+
+#[test]
+fn pseudo_map_display_composes_the_stable_stack_collection() {
+    let mut app = PlotxApp::new();
+    for _ in 0..2 {
+        let mut dataset = Nmr2DDataset::load(pseudo_data());
+        dataset.display = PseudoDisplay::DosyMap;
+        app.doc.datasets.push(Dataset::Nmr2D(Box::new(dataset)));
+    }
+    let stack_fields = app
+        .doc
+        .datasets
+        .iter()
+        .map(|dataset| dataset.field_catalog().id_for_key("nmr.stack").unwrap())
+        .collect::<Vec<_>>();
+    app.focus_datasets(&[0, 1], None);
+    assert_eq!(app.stackable_selection(), Some(vec![0, 1]));
+    app.stack_selected_data();
+
+    let composer = app.session.ui.trace_composer.as_ref().unwrap();
+    assert_eq!(composer.items.len(), 8);
+    assert!(
+        composer.items[..4]
+            .iter()
+            .all(|item| item.series.source.field == stack_fields[0])
+    );
+    assert!(
+        composer.items[4..]
+            .iter()
+            .all(|item| item.series.source.field == stack_fields[1])
+    );
+}
+
+#[test]
+fn cancelling_trace_composer_leaves_document_and_selection_unchanged() {
+    let mut app = PlotxApp::new();
+    app.doc.datasets.push(recording("pA", Some("mV")));
+    app.doc.datasets.push(recording("pA", Some("mV")));
+    app.focus_datasets(&[0, 1], None);
+    let before = (
+        app.doc.canvases.len(),
+        app.doc.dirty,
+        app.doc.edit_generation,
+        app.doc.project_revision.clone(),
+        app.session.undo_stack.len(),
+        app.session.ui.data_selection.clone(),
+    );
+    app.stack_selected_data();
+    assert_eq!(
+        app.session
+            .ui
+            .trace_composer
+            .as_ref()
+            .unwrap()
+            .selected_count(),
+        4
+    );
+    app.session
+        .ui
+        .trace_composer
+        .as_mut()
+        .unwrap()
+        .set_all(false);
+    app.create_trace_composer_stack();
+    assert!(app.session.ui.trace_composer.is_some());
+    assert!(app.session.status.contains("Select at least one trace"));
+    app.cancel_trace_composer();
+    assert!(app.session.ui.trace_composer.is_none());
+    assert_eq!(
+        before,
+        (
+            app.doc.canvases.len(),
+            app.doc.dirty,
+            app.doc.edit_generation,
+            app.doc.project_revision.clone(),
+            app.session.undo_stack.len(),
+            app.session.ui.data_selection.clone(),
+        )
+    );
+}
+
+#[test]
+fn stale_trace_composer_source_fails_atomically_and_keeps_the_draft() {
+    let mut app = PlotxApp::new();
+    app.doc.datasets.push(recording("pA", Some("mV")));
+    app.doc.datasets.push(recording("pA", Some("mV")));
+    app.focus_datasets(&[0, 1], None);
+    app.stack_selected_data();
+    app.session.ui.trace_composer.as_mut().unwrap().items[0]
+        .series
+        .source
+        .field = FieldId::new(u64::MAX);
+    let before = (
+        app.doc.canvases.len(),
+        app.doc.dirty,
+        app.doc.edit_generation,
+        app.doc.project_revision.clone(),
+        app.session.undo_stack.len(),
+        app.session.ui.data_selection.clone(),
+    );
+    app.create_trace_composer_stack();
+    assert!(app.session.ui.trace_composer.is_some());
+    assert!(app.session.status.contains("no longer available"));
+    assert_eq!(
+        before,
+        (
+            app.doc.canvases.len(),
+            app.doc.dirty,
+            app.doc.edit_generation,
+            app.doc.project_revision.clone(),
+            app.session.undo_stack.len(),
+            app.session.ui.data_selection.clone(),
+        )
+    );
+}
+
+#[test]
+fn trace_composer_rejects_incompatible_field_units() {
+    let mut app = PlotxApp::new();
+    app.doc
+        .datasets
+        .push(multichannel_recording(["pA", "pA"], 0, "current.abf"));
+    app.doc
+        .datasets
+        .push(multichannel_recording(["mV", "mV"], 0, "voltage.abf"));
+    app.focus_datasets(&[0, 1], None);
+    app.stack_selected_data();
+
+    assert!(app.session.ui.trace_composer.is_none());
+    assert!(app.doc.canvases.is_empty());
+    assert!(app.stackable_selection().is_none());
+    assert_eq!(app.session.ui.data_selection, vec![0, 1]);
+}
+
+#[test]
+fn trace_contract_uses_capabilities_concrete_encoding_and_units_not_domain_policy() {
+    let electrophysiology = recording("pA", Some("mV"));
+    let electrophysiology_field = electrophysiology.active_trace_collection_field().unwrap();
+    let electrophysiology_binding =
+        SeriesBinding::from_field_all(&electrophysiology, electrophysiology_field)
+            .into_iter()
+            .next()
+            .unwrap();
+    let mut electrophysiology_descriptor = electrophysiology
+        .field_descriptor(electrophysiology_field)
+        .unwrap();
+    electrophysiology_descriptor.metadata = FieldMetadata::default();
+
+    let pseudo = Dataset::Nmr2D(Box::new(Nmr2DDataset::load(pseudo_data())));
+    let pseudo_field = pseudo.active_trace_collection_field().unwrap();
+    let pseudo_binding = SeriesBinding::from_field_all(&pseudo, pseudo_field)
+        .into_iter()
+        .next()
+        .unwrap();
+    let mut pseudo_descriptor = pseudo.field_descriptor(pseudo_field).unwrap();
+    pseudo_descriptor.units = electrophysiology_descriptor.units.clone();
+    pseudo_descriptor
+        .metadata
+        .0
+        .insert("recommended_encoding".into(), "contour".into());
+
+    let mut units = None;
+    assert!(super::trace_composer::trace_field_contract_matches(
+        &electrophysiology_descriptor,
+        &electrophysiology_binding.encoding,
+        &mut units,
+    ));
+    assert!(super::trace_composer::trace_field_contract_matches(
+        &pseudo_descriptor,
+        &pseudo_binding.encoding,
+        &mut units,
+    ));
+
+    let mut app = PlotxApp::new();
+    app.doc.datasets.push(electrophysiology);
+    app.doc.datasets.push(pseudo);
+    let binding = DataBinding {
+        series: vec![electrophysiology_binding, pseudo_binding],
+    };
+    assert!(
+        app.series_stackable(&binding),
+        "item-addressed line applicability must not use enclosing domains"
+    );
+}
+
+#[test]
+fn trace_stack_forces_offset_even_when_the_primary_domain_is_field_stacked() {
+    let mut true_2d = pseudo_data();
+    true_2d.pseudo_axis = None;
+    let mut app = PlotxApp::new();
+    app.doc
+        .datasets
+        .push(Dataset::Nmr2D(Box::new(Nmr2DDataset::load(true_2d))));
+    app.doc.datasets.push(recording("pA", Some("mV")));
+    assert_eq!(
+        app.doc.datasets[0].domain().stack_kind(),
+        Some(StackKind::Field)
+    );
+    let field = app.doc.datasets[1].active_trace_collection_field().unwrap();
+    let descriptor = app.doc.datasets[1].field_descriptor(field).unwrap();
+    assert!(descriptor.capabilities.supports(&[
+        crate::automation::CAP_FIELD_TRACE_COLLECTION,
+        crate::automation::CAP_FIELD_CURVE_1D,
+    ]));
+    let series = SeriesBinding::from_field_all(&app.doc.datasets[1], field);
+    assert!(
+        series
+            .iter()
+            .all(|series| matches!(series.encoding, plotx_figure::SeriesEncoding::Line(_)))
+    );
+
+    assert!(app.insert_stack_canvas(&[0, 1], series, true));
+    let plot = app.doc.canvases[0].objects[0].plot().unwrap();
+    assert_eq!(plot.stack.mode, StackMode::Offset);
+    assert_eq!(plot.figure().series.len(), 2);
+    assert!(
+        plot.figure().series[1].points[0][1] > 3.0,
+        "the second raw trace starts at 3.0 and must receive a vertical offset"
+    );
 }
 
 #[test]

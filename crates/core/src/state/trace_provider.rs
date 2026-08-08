@@ -14,6 +14,25 @@ impl Dataset {
         }
     }
 
+    /// The trace collection currently represented by this dataset's live
+    /// display. Providers resolve their own display ownership; generic trace
+    /// workflows only consume the resulting field identity.
+    pub fn active_trace_collection_field(&self) -> Option<FieldId> {
+        if let Self::Electrophysiology(recording) = self {
+            return recording
+                .field_key(recording.selected_channel)
+                .and_then(|key| recording.field_catalog.id_for_key(key));
+        }
+        self.default_field_id()
+            .filter(|field| self.trace_collection(*field).is_some())
+            .or_else(|| {
+                self.field_descriptors()
+                    .into_iter()
+                    .map(|field| field.id)
+                    .find(|field| self.trace_collection(*field).is_some())
+            })
+    }
+
     pub(super) fn validate_trace_collections(&self) -> Result<(), String> {
         let catalog = self.field_catalog();
         match self {

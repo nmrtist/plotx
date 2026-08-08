@@ -40,45 +40,55 @@ impl SeriesBinding {
     }
 
     pub(crate) fn from_field_all(dataset: &Dataset, field: FieldId) -> Vec<Self> {
-        let Some(descriptor) = dataset.field_descriptor(field) else {
-            return Vec::new();
-        };
-        let make = |item, index: usize| {
-            let mut encoding = default_encoding(
-                &descriptor.capabilities,
-                &descriptor.metadata,
-                RequestedChart::Auto,
-                &PresentationProfile::default(),
-                &|| field_peak_magnitude(dataset, field),
-            );
-            if let plotx_figure::SeriesEncoding::Line(line) = &mut encoding {
-                line.color = plotx_figure::ColorSource::Explicit(
-                    OVERLAY_PALETTE[index % OVERLAY_PALETTE.len()],
-                );
-            }
-            Self {
-                id: SeriesId::default(),
-                source: SeriesSource {
-                    resource: dataset.resource_id(),
-                    field,
-                    item,
-                },
-                visible: true,
-                label: None,
-                encoding,
-            }
-        };
         dataset.trace_collection(field).map_or_else(
-            || vec![make(None, 0)],
+            || {
+                Self::from_field_item(dataset, field, None, 0)
+                    .into_iter()
+                    .collect()
+            },
             |collection| {
                 collection
                     .items
                     .iter()
                     .enumerate()
-                    .map(|(index, item)| make(Some(item.id), index))
+                    .filter_map(|(index, item)| {
+                        Self::from_field_item(dataset, field, Some(item.id), index)
+                    })
                     .collect()
             },
         )
+    }
+
+    pub(crate) fn from_field_item(
+        dataset: &Dataset,
+        field: FieldId,
+        item: Option<plotx_data::TraceItemId>,
+        palette_index: usize,
+    ) -> Option<Self> {
+        let descriptor = dataset.field_descriptor(field)?;
+        let mut encoding = default_encoding(
+            &descriptor.capabilities,
+            &descriptor.metadata,
+            RequestedChart::Auto,
+            &PresentationProfile::default(),
+            &|| field_peak_magnitude(dataset, field),
+        );
+        if let plotx_figure::SeriesEncoding::Line(line) = &mut encoding {
+            line.color = plotx_figure::ColorSource::Explicit(
+                OVERLAY_PALETTE[palette_index % OVERLAY_PALETTE.len()],
+            );
+        }
+        Some(Self {
+            id: SeriesId::default(),
+            source: SeriesSource {
+                resource: dataset.resource_id(),
+                field,
+                item,
+            },
+            visible: true,
+            label: None,
+            encoding,
+        })
     }
 
     pub fn with_source(source: SeriesSource) -> Self {

@@ -13,9 +13,16 @@ float32、单/多记录通道、定长或变长 sweep、ADC 缩放、通道名�
 **Data** 中逐条显示或隐藏 sweep。通过某个绘图系列的 **Choose trace…**，可将其
 替换为同一 recording 中的另一种刺激；**Add series…** 会一次加入所选兼容
 recording 的全部 sweep。可用 **Show all**、**Hide all**、每行的复选框或删除按钮，
-把 stack 缩减到需要比较的电压或电流。**Stack selected data** 同样会从每个所选
-recording 的全部 sweep 开始。这些操作只改变图形。在 Dataset tools 的
-**Patch clamp** 中选择记录通道，以及参与区域测量、时间窗统计、IV 表和
+把 stack 缩减到需要比较的电压或电流。
+
+若要比较多个 recording，请在 Data 浏览器中选择两个或更多兼容的 recording，
+然后选择 **Stack selected data**。trace composer 会列出每个 recording 当前所选
+通道中的全部 sweep，并默认全部纳入。可按数据集、sweep 标签或参数值搜索，再用
+每行的复选框或 **Select all**、**Clear all**、**Select filtered** 和
+**Clear filtered** 确定要比较的曲线。选择 **Create stack** 会生成一张包含所选
+sweep 的图；选择 **Cancel** 不会修改项目。
+
+这些操作只改变图形。在 Dataset tools 的 **Patch clamp** 中选择记录通道，以及参与区域测量、时间窗统计、IV 表和
 数据导出的 sweep。零相位 Gaussian 低通默认启用，截止频率为 1 kHz。
 绘图和分析使用同一处理结果；原始样本不改变，设置会随项目保存。
 

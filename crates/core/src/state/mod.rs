@@ -105,6 +105,7 @@ mod table_fit;
 mod table_native;
 mod table_numeric;
 mod tile_drop;
+mod trace_composer;
 mod trace_provider;
 #[cfg(test)]
 #[path = "trace_provider_tests.rs"]

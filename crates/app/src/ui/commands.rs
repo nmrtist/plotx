@@ -485,7 +485,7 @@ pub fn describe(app: &PlotxApp, id: CommandId) -> CommandDescriptor {
         ),
         CommandId::StackData => requires(
             app.stackable_selection().is_some(),
-            "Select at least two compatible datasets before stacking them.",
+            "Select at least two compatible datasets. Trace collections such as electrophysiology require compatible axes and units.",
         ),
         CommandId::ExtractMassSpectrum => requires(
             dataset().is_some_and(|dataset| {
@@ -668,6 +668,7 @@ pub fn describe(app: &PlotxApp, id: CommandId) -> CommandDescriptor {
             && app.session.ui.processing_template_dialog.is_none()
             && app.session.ui.spectrum_arithmetic_dialog.is_none()
             && app.session.ui.align_spectra_dialog.is_none()
+            && app.session.ui.trace_composer.is_none()
             && !app.session.ui.interaction.is_active());
     // Activation requirements must not trap an already-active tool after the
     // dataset context changes: its command remains available for deactivation.

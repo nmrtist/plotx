@@ -18,6 +18,15 @@ exact values you want to compare. To identify them on the plot, set
 increment by its gradient strength, relaxation delay, or imported pseudo-axis
 value and display unit.
 
+To compare increments from multiple compatible datasets, select the datasets
+in the Data browser and choose **Stack selected data**. The trace composer
+starts with every increment included. Search by dataset, increment label, or
+parameter value and adjust the row checkboxes, or use the global and filtered
+selection controls. **Create stack** creates one plot from the chosen
+increments; **Cancel** leaves the project unchanged. This remains available
+while a dataset displays a DOSY map because the composer selects stable stack
+increments rather than copying data from the displayed map.
+
 ## Workflow
 
 1. Import the pseudo-2D dataset.

@@ -2,8 +2,9 @@ use super::*;
 use plotx_figure::{ErrorBar, Series};
 
 impl PlotxApp {
-    /// Whether every series shares a domain and either that domain supports
-    /// generic stacking or every source is an item-addressed trace.
+    /// Whether a binding has one stackable representation. Item-addressed line
+    /// traces use their field contracts and may cross enclosing data domains;
+    /// ordinary fields retain the legacy same-domain rules.
     pub fn series_stackable(&self, binding: &DataBinding) -> bool {
         let Some(domain) = binding
             .series
@@ -33,9 +34,12 @@ impl PlotxApp {
             .series
             .iter()
             .all(|series| matches!(series.encoding, plotx_figure::SeriesEncoding::Contour(_)));
-        same_domain
-            && ((all_lines && (domain.stack_kind() == Some(StackKind::Line) || item_addressed))
-                || all_contours)
+        if item_addressed {
+            all_lines
+        } else {
+            same_domain
+                && ((all_lines && domain.stack_kind() == Some(StackKind::Line)) || all_contours)
+        }
     }
 
     /// Combine a stackable binding into one figure. Concrete encodings decide
@@ -447,44 +451,97 @@ impl PlotxApp {
         }
     }
 
-    /// The selected datasets in the Data list if they form a valid stack (≥2 and
-    /// sharing one stackable domain), in selection order. Drives the "Stack
-    /// selected data" command's enablement.
+    /// The selected datasets in the Data list if they form a valid stack (at
+    /// least two in one domain), in selection order. Trace collections derive
+    /// applicability from their concrete fields rather than the domain's
+    /// legacy stack kind.
     pub fn stackable_selection(&self) -> Option<Vec<usize>> {
         let sel = &self.session.ui.data_selection;
         if sel.len() < 2 {
             return None;
         }
-        let domain = self
-            .doc
-            .datasets
-            .get(*sel.first()?)
-            .map(Dataset::domain)
-            .filter(|d| d.stack_kind().is_some())?;
-        sel.iter()
-            .all(|&d| self.doc.datasets.get(d).map(Dataset::domain) == Some(domain))
+        let trace_count = sel
+            .iter()
+            .filter_map(|index| self.doc.datasets.get(*index))
+            .filter(|dataset| dataset.active_trace_collection_field().is_some())
+            .count();
+        if trace_count > 0 {
+            (trace_count == sel.len() && self.trace_selection_compatible(sel)).then(|| sel.clone())
+        } else {
+            let domain = self.doc.datasets.get(*sel.first()?).map(Dataset::domain)?;
+            (domain.stack_kind().is_some()
+                && sel
+                    .iter()
+                    .all(|&d| self.doc.datasets.get(d).map(Dataset::domain) == Some(domain)))
             .then(|| sel.clone())
+        }
     }
 
     /// Build a new page whose single plot stacks the currently multi-selected
-    /// datasets, as one undoable step. No-op unless the selection is a valid stack.
+    /// datasets, as one undoable step. Item-addressed sources first open the
+    /// trace composer; non-trace stacks retain the immediate command behavior.
     pub fn stack_selected_data(&mut self) {
         let Some(sel) = self.stackable_selection() else {
             return;
         };
-        let domain = self.doc.datasets[sel[0]].domain();
-        let mut series = sel
+        let trace_source_count = sel
+            .iter()
+            .filter_map(|index| self.doc.datasets.get(*index))
+            .filter(|dataset| dataset.active_trace_collection_field().is_some())
+            .count();
+        if trace_source_count > 0 {
+            if trace_source_count == sel.len()
+                && let Some(composer) = self.trace_composer_for_selection(&sel)
+            {
+                let item_count = composer.items.len();
+                self.session.ui.trace_composer = Some(composer);
+                self.session.status = format!(
+                    "Choose traces for the new stack. {item_count} items selected by default."
+                );
+            } else {
+                self.session.status =
+                    "The selected trace collections do not have compatible axes and units."
+                        .to_owned();
+            }
+            return;
+        }
+        let series = sel
             .iter()
             .filter_map(|&d| self.doc.datasets.get(d))
             .flat_map(SeriesBinding::from_dataset_all)
             .collect::<Vec<_>>();
+        self.insert_stack_canvas(&sel, series, false);
+    }
+
+    pub(super) fn insert_stack_canvas(
+        &mut self,
+        selection: &[usize],
+        mut series: Vec<SeriesBinding>,
+        trace_items: bool,
+    ) -> bool {
+        let Some(&primary) = selection.first() else {
+            return false;
+        };
+        let domain = self.doc.datasets[primary].domain();
         for (index, series) in series.iter_mut().enumerate() {
             series.set_primary_color(OVERLAY_PALETTE[index % OVERLAY_PALETTE.len()]);
         }
         let binding = DataBinding { series };
-        let mode = match domain.stack_kind() {
-            Some(StackKind::Field) => StackMode::ColorOverlay,
-            _ => StackMode::Offset,
+        let series_count = binding.series.len();
+        let mode = if trace_items {
+            if !binding
+                .series
+                .iter()
+                .all(|series| matches!(series.encoding, plotx_figure::SeriesEncoding::Line(_)))
+            {
+                return false;
+            }
+            StackMode::Offset
+        } else {
+            match domain.stack_kind() {
+                Some(StackKind::Field) => StackMode::ColorOverlay,
+                _ => StackMode::Offset,
+            }
         };
         let stack = StackSpec {
             mode,
@@ -498,7 +555,7 @@ impl PlotxApp {
         let frame = ObjectFrame::new(0.0, 0.0, page[0], page[1]);
         let figure = self.build_binding_figure(&binding, &chart, &stack, canvas.size_mm);
         let viewport = CanvasViewport::from_figure(&figure);
-        let panel = PanelMeta::new(self.default_plot_title(sel[0]), frame.width);
+        let panel = PanelMeta::new(self.default_plot_title(primary), frame.width);
         let mut plot = PlotObject::new(
             None,
             SeriesId::new(0),
@@ -524,27 +581,43 @@ impl PlotxApp {
             kind: CanvasObjectKind::Plot(Box::new(plot)),
         });
         let index = self.doc.canvases.len();
+        let canvas_count = self.doc.canvases.len();
         self.execute_action(Action::insert_canvas(
             index,
             canvas,
             self.session.active_canvas,
         ));
+        if self.doc.canvases.len() != canvas_count + 1 {
+            return false;
+        }
+        if trace_items {
+            self.reveal_board_frame(FrameRef::Page(index));
+            self.session.ui.selection_scope = SelectionScope::CanvasObjects;
+            self.session.ui.selection_anchors = SelectionAnchors::default();
+            self.set_selection(Selection::single(id));
+            self.session.ui.requested_inspector_section = Some("inspector.data".to_owned());
+        }
         self.clear_selection();
-        self.session.status = format!("Stacked {} datasets on a new page.", sel.len());
+        self.session.status = if trace_items {
+            let trace_word = if series_count == 1 { "trace" } else { "traces" };
+            let dataset_word = if selection.len() == 1 {
+                "dataset"
+            } else {
+                "datasets"
+            };
+            format!(
+                "Stacked {series_count} {trace_word} from {} {dataset_word} on a new page.",
+                selection.len(),
+            )
+        } else {
+            format!("Stacked {} datasets on a new page.", selection.len())
+        };
+        true
     }
 }
 
 fn trace_collection_field(dataset: &Dataset) -> Option<FieldId> {
-    dataset
-        .default_field_id()
-        .filter(|field| dataset.trace_collection(*field).is_some())
-        .or_else(|| {
-            dataset
-                .field_descriptors()
-                .into_iter()
-                .map(|field| field.id)
-                .find(|field| dataset.trace_collection(*field).is_some())
-        })
+    dataset.active_trace_collection_field()
 }
 
 fn default_field_encoding_matches(

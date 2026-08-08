@@ -12,6 +12,9 @@ pub use xps::{PropertyTextEditState, XpsWorkbenchTab};
 mod task_dock;
 pub use task_dock::TaskDockTab;
 
+mod trace_composer;
+pub use trace_composer::{TraceComposerItem, TraceComposerState};
+
 /// Which sidebar entry an in-progress inline rename targets.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum RenameTarget {
@@ -288,6 +291,7 @@ pub struct UiState {
     pub processing_template_dialog: Option<ProcessingTemplateDialogState>,
     pub spectrum_arithmetic_dialog: Option<SpectrumArithmeticDialogState>,
     pub align_spectra_dialog: Option<AlignSpectraDialogState>,
+    pub trace_composer: Option<TraceComposerState>,
     pub selection: Selection,
     pub selection_scope: SelectionScope,
     pub selection_anchors: SelectionAnchors,
@@ -492,6 +496,7 @@ impl Default for UiState {
             processing_template_dialog: None,
             spectrum_arithmetic_dialog: None,
             align_spectra_dialog: None,
+            trace_composer: None,
             selection: Selection::None,
             selection_scope: SelectionScope::default(),
             selection_anchors: SelectionAnchors::default(),

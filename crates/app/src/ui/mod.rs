@@ -34,6 +34,7 @@ mod switcher;
 #[cfg(not(target_os = "macos"))]
 mod title_bar;
 pub(crate) mod tools;
+mod trace_composer;
 mod windows;
 
 use data_sheet::*;
@@ -90,6 +91,7 @@ pub fn render(
         || app.session.ui.processing_template_dialog.is_some()
         || app.session.ui.spectrum_arithmetic_dialog.is_some()
         || app.session.ui.align_spectra_dialog.is_some()
+        || app.session.ui.trace_composer.is_some()
         || app.session.ui.command_palette.is_some()
         || app.session.ui.save_project_options
         || app.session.ui.project_transition.is_some()
@@ -170,6 +172,7 @@ pub fn render(
     processing_templates::processing_template_window(app, &ctx);
     arithmetic::spectrum_arithmetic_window(app, &ctx);
     align::align_spectra_window(app, &ctx);
+    trace_composer::trace_composer_window(app, &ctx);
     batch_workflow.show(app, &ctx);
 
     handle_file_drop(app, &ctx);
