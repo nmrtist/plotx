@@ -9,7 +9,9 @@ pub(super) fn geometry_section(app: &mut PlotxApp, ci: usize, ids: &[ObjectId], 
         return;
     };
     let enabled = !o.locked;
-    let frame = o.frame;
+    let Some(frame) = app.doc.canvases[ci].layout_frame(primary) else {
+        return;
+    };
     let mut x = frame.x / MM_TO_PT;
     let mut y = frame.y / MM_TO_PT;
     let mut w = frame.width / MM_TO_PT;

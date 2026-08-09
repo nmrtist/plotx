@@ -22,7 +22,6 @@ fn zoomed_plot_fixture() -> (PlotxApp, ObjectId, PlotRect) {
         frame: ObjectFrame::new(10.0, 10.0, 180.0, 100.0),
         locked: false,
         visible: true,
-        group: None,
         kind: CanvasObjectKind::Plot(Box::new(PlotObject::new(
             None,
             plotx_core::state::SeriesId::new(1),

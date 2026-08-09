@@ -532,7 +532,7 @@ pub(crate) fn paint_document(app: &PlotxApp, ci: usize, rect: egui::Rect, painte
     };
     let zoom = app.session.board.zoom;
     let bp = canvas.board_pos;
-    plotx_render::screen::paint_document(
+    plotx_render::screen::paint_document_for_editor(
         painter,
         PlotRect::new(rect.left(), rect.top(), rect.width(), rect.height()),
         &document,

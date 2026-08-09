@@ -250,7 +250,10 @@ fn object_list(app: &mut PlotxApp, ci: usize, ui: &mut Ui) {
             }
             ui.weak(kind_glyph(&app.doc.canvases[ci].objects[oi].kind))
                 .on_hover_text(kind_label(&app.doc.canvases[ci].objects[oi].kind));
-            if app.doc.canvases[ci].objects[oi].group.is_some() {
+            if app.doc.canvases[ci]
+                .content_group(app.doc.canvases[ci].objects[oi].id)
+                .is_some()
+            {
                 ui.weak(egui::RichText::new("⛓").small())
                     .on_hover_text("Grouped");
             }
@@ -346,7 +349,7 @@ fn kind_glyph(kind: &CanvasObjectKind) -> &'static str {
         CanvasObjectKind::Plot(_) => icon::CHART_LINE,
         CanvasObjectKind::Text(_) => "T",
         CanvasObjectKind::Shape(_) => icon::SHAPES,
-        CanvasObjectKind::PanelLabel(_) => icon::TAG,
+        CanvasObjectKind::RasterImage(_) => icon::FILE,
     }
 }
 
@@ -355,7 +358,7 @@ fn kind_label(kind: &CanvasObjectKind) -> &'static str {
         CanvasObjectKind::Plot(_) => "Plot",
         CanvasObjectKind::Text(_) => "Text",
         CanvasObjectKind::Shape(_) => "Shape",
-        CanvasObjectKind::PanelLabel(_) => "Panel label",
+        CanvasObjectKind::RasterImage(_) => "Image",
     }
 }
 

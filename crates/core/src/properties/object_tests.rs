@@ -17,7 +17,6 @@ fn object_app(kind: CanvasObjectKind) -> (PlotxApp, TargetRef, ObjectId) {
         frame: ObjectFrame::new(1.0, 2.0, 30.0, 20.0),
         locked: false,
         visible: true,
-        group: None,
         kind,
     });
     app.doc.canvases.push(canvas);
@@ -54,6 +53,10 @@ fn table_app() -> (PlotxApp, TargetRef, ObjectId) {
         id,
         "Plot".to_owned(),
     ));
+    let panel = canvas.create_panel("Panel a".to_owned(), canvas.objects[0].frame);
+    canvas.objects[0].frame.x = 0.0;
+    canvas.objects[0].frame.y = 0.0;
+    canvas.panel_mut(panel).unwrap().item_order.push(id);
     app.doc.canvases.push(canvas);
     app.session.active_canvas = Some(0);
     let target = app.object_target(0, id).expect("plot target");
@@ -87,6 +90,10 @@ fn stack_app() -> (PlotxApp, ObjectId) {
         id,
         "Plot".to_owned(),
     ));
+    let panel = canvas.create_panel("Panel a".to_owned(), canvas.objects[0].frame);
+    canvas.objects[0].frame.x = 0.0;
+    canvas.objects[0].frame.y = 0.0;
+    canvas.panel_mut(panel).unwrap().item_order.push(id);
     let plot = canvas.object_mut(id).unwrap().plot_mut().unwrap();
     let mut second = SeriesBinding::from_dataset(&app.doc.datasets[1]).expect("series");
     second.id = plot.allocate_series_id();

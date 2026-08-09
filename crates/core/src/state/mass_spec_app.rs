@@ -328,7 +328,7 @@ impl PlotxApp {
                 series.source.field = field;
                 series.encoding = plotx_figure::SeriesEncoding::default();
             }
-            plot.panel.user_note = title;
+            object.name = title;
         }
         let selection_before = self.session.ui.selection.clone();
         let before_frames = self.doc.canvases[canvas_index]
@@ -428,7 +428,7 @@ impl PlotxApp {
                 series.source.field = field;
                 series.encoding = plotx_figure::SeriesEncoding::default();
             }
-            plot.panel.user_note = title;
+            object.name = title;
         }
         let selection_before = self.session.ui.selection.clone();
         let before_frames = self.doc.canvases[canvas_index]
@@ -669,7 +669,7 @@ impl PlotxApp {
                         && (Some(series.source.field) == new_tic
                             || Some(series.source.field) == new_bpi)
                 }) {
-                    plot.panel.user_note = tic_note.clone();
+                    object.name.clone_from(&tic_note);
                 }
             }
         }

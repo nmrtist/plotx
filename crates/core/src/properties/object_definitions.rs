@@ -143,7 +143,7 @@ pub(crate) const DEFINITIONS: &[PropertyDefinition] = &[
     definition(CHART_COLORMAP, ValueSchema::Enum { variants: COLORMAPS }, DefaultPolicy::Fixed(PropertyValue::Enum("viridis")), "Chart colormap", &["colour map"]),
     definition(CHART_VIEW_AZIMUTH, ValueSchema::Float { bounds: FloatBounds::inclusive(-180.0_f64.to_radians(), 180.0_f64.to_radians()), display: FloatDisplay::Degrees, drag_step: Some(1.0) }, DefaultPolicy::Fixed(PropertyValue::Float(-50.0_f64.to_radians())), "Surface azimuth", &["view azimuth"]),
     definition(CHART_VIEW_ELEVATION, ValueSchema::Float { bounds: FloatBounds::inclusive(5.0_f64.to_radians(), 90.0_f64.to_radians()), display: FloatDisplay::Degrees, drag_step: Some(1.0) }, DefaultPolicy::Fixed(PropertyValue::Float(30.0_f64.to_radians())), "Surface elevation", &["view elevation"]),
-    definition(PANEL_USER_NOTE, ValueSchema::Text, DefaultPolicy::Fixed(PropertyValue::Text(String::new())), "Panel note", &["figure note"]),
+    definition(PANEL_USER_NOTE, ValueSchema::Text, DefaultPolicy::Fixed(PropertyValue::Text(String::new())), "Panel description", &["panel note", "figure note", "caption entry"]),
     definition(PANEL_VISIBLE, ValueSchema::Bool, DefaultPolicy::Fixed(PropertyValue::Bool(true)), "Show panel letter", &["panel label visible"]),
     PropertyDefinition { id: SERIES_VISIBLE, scope_kind: ScopeKind::Object, value_schema: ValueSchema::Bool, access: PropertyAccess::ReadWrite, applicability: SERIES, default_policy: DefaultPolicy::Fixed(PropertyValue::Bool(true)), tier: Tier::Essential, copies: ValueCopies::PerTarget, canonical_label: "Series visibility", canonical_aliases: &["show series"] },
     definition(TEXT, ValueSchema::Text, DefaultPolicy::Derived, "Text", &["label text"]),

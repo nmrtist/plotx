@@ -46,6 +46,21 @@ fn canonical_conversion_and_default_canvas_share_dataset_identity() {
     let canvas = build_default_canvas(&dataset, &source);
     assert_eq!(canvas.dataset_ids(), vec![dataset.resource_id()]);
     assert_eq!(canvas.objects.len(), 1);
+    assert_eq!(canvas.panels.len(), 1);
+    assert_eq!(canvas.panels[0].item_order, vec![canvas.objects[0].id]);
+    assert_eq!(
+        canvas.panel_letter(canvas.objects[0].id).as_deref(),
+        Some("a")
+    );
+    assert_eq!(canvas.panels[0].note, dataset_title(&dataset));
+    assert_ne!(canvas.panels[0].note, "Plot 1");
+    assert_eq!(canvas.panel_notes().len(), 1);
+    assert!(crate::state::document_items(&canvas).iter().any(|item| {
+        matches!(
+            item,
+            plotx_render::DocumentItem::PanelLabel { visible: true, .. }
+        )
+    }));
 }
 
 #[test]

@@ -40,7 +40,7 @@ impl PlotxApp {
         let after = crate::layout::arrange_grid(page, &after_layout, &refined_items);
         let before: Vec<(ObjectId, ObjectFrame)> = after
             .iter()
-            .filter_map(|(id, _)| canvas.object(*id).map(|o| (*id, o.frame)))
+            .filter_map(|(id, _)| canvas.layout_frame(*id).map(|frame| (*id, frame)))
             .collect();
         let placed = after.len();
         let total = ids.len();
@@ -80,7 +80,11 @@ impl PlotxApp {
             .objects
             .iter()
             .filter(|object| object.plot().is_some())
-            .map(|object| (object.id, object.frame))
+            .filter_map(|object| {
+                canvas
+                    .layout_frame(object.id)
+                    .map(|frame| (object.id, frame))
+            })
             .collect();
         if frames.len() < 2 {
             self.session.status =
@@ -151,7 +155,7 @@ impl PlotxApp {
             .iter()
             .filter_map(|&id| c.object(id))
             .filter(|o| !o.locked)
-            .map(|o| (o.id, o.frame))
+            .filter_map(|o| c.layout_frame(o.id).map(|frame| (o.id, frame)))
             .collect()
     }
 
@@ -195,7 +199,11 @@ impl PlotxApp {
         let group = self.doc.canvases[ci].allocate_group_id();
         let before: Vec<(ObjectId, Option<crate::state::GroupId>)> = ids
             .iter()
-            .filter_map(|&id| self.doc.canvases[ci].object(id).map(|o| (id, o.group)))
+            .filter_map(|&id| {
+                self.doc.canvases[ci]
+                    .object(id)
+                    .map(|_| (id, self.doc.canvases[ci].content_group(id)))
+            })
             .collect();
         let after: Vec<(ObjectId, Option<crate::state::GroupId>)> =
             ids.iter().map(|&id| (id, Some(group))).collect();
@@ -218,7 +226,11 @@ impl PlotxApp {
         }
         let before: Vec<(ObjectId, Option<crate::state::GroupId>)> = ids
             .iter()
-            .filter_map(|&id| self.doc.canvases[ci].object(id).map(|o| (id, o.group)))
+            .filter_map(|&id| {
+                self.doc.canvases[ci]
+                    .object(id)
+                    .map(|_| (id, self.doc.canvases[ci].content_group(id)))
+            })
             .filter(|(_, g)| g.is_some())
             .collect();
         if before.is_empty() {
@@ -312,7 +324,7 @@ fn layout_items(
             let frame = frames
                 .iter()
                 .find_map(|(candidate, frame)| (*candidate == id).then_some(*frame))
-                .unwrap_or(object.frame);
+                .or_else(|| canvas.layout_frame(id))?;
             if let Some(change) = axis_changes.iter().find(|change| change.id == id) {
                 let mut figure = plot.figure().clone();
                 change.after.apply_to(&mut figure);

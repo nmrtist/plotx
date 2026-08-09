@@ -224,6 +224,7 @@ pub fn render_central(app: &mut PlotxApp, ui: &mut Ui) {
         color: Color32::from_black_alpha(if ui.visuals().dark_mode { 110 } else { 36 }),
     };
     let clip = painter.clip_rect();
+    let board_transform = BoardTransform::from_board(app.session.board, rect);
     for other in (0..app.doc.canvases.len())
         .filter(|&other| other != ci)
         .chain(std::iter::once(ci))
@@ -233,11 +234,12 @@ pub fn render_central(app: &mut PlotxApp, ui: &mut Ui) {
         if finite_rect_intersects(card.expand(12.0), clip) {
             painter.add(page_shadow.as_shape(card, header_corner_radius()));
         }
-        if finite_rect_intersects(other_page, clip) {
+        let editor_bounds = board_transform.canvas_editor_screen_rect(&app.doc.canvases[other]);
+        if finite_rect_intersects(editor_bounds, clip) {
             paint_document(app, other, rect, &painter);
-            if other != ci {
-                painter.rect_stroke(other_page, 0.0, frame_stroke, StrokeKind::Inside);
-            }
+        }
+        if finite_rect_intersects(other_page, clip) && other != ci {
+            painter.rect_stroke(other_page, 0.0, frame_stroke, StrokeKind::Inside);
         }
     }
     paint_frame_headers(app, rect, ui, &painter);
@@ -522,11 +524,10 @@ fn canvas_breadcrumb(app: &PlotxApp, ci: usize, ui: &mut Ui) {
             let title = app.doc.canvases[ci]
                 .object(id)
                 .map(|object| {
-                    object
-                        .plot()
-                        .and_then(|plot| plot.panel.user_note.lines().next())
+                    app.doc.canvases[ci]
+                        .panel_meta_for_content(object.id)
+                        .and_then(|panel| panel.user_note.lines().next().map(str::to_owned))
                         .filter(|line| !line.trim().is_empty())
-                        .map(str::to_owned)
                         .unwrap_or_else(|| object.name.clone())
                 })
                 .unwrap_or_default();
@@ -611,7 +612,6 @@ mod tests {
             frame: ObjectFrame::new(20.0, 20.0, 100.0, 30.0),
             locked: false,
             visible: true,
-            group: None,
             kind: CanvasObjectKind::Text(TextBox::label("hi".to_owned())),
         });
 
@@ -629,7 +629,6 @@ mod tests {
             frame: ObjectFrame::new(-30.0, 20.0, 50.0, 40.0),
             locked: false,
             visible: true,
-            group: None,
             kind: CanvasObjectKind::Plot(Box::new({
                 let figure =
                     Figure::new("plot", Axis::new("x", 0.0, 1.0), Axis::new("y", 0.0, 1.0));
@@ -664,7 +663,6 @@ mod tests {
             frame: ObjectFrame::new(10.0, 10.0, 80.0, 60.0),
             locked: false,
             visible: true,
-            group: None,
             kind: CanvasObjectKind::Plot(Box::new({
                 let figure =
                     Figure::new("plot", Axis::new("x", 0.0, 1.0), Axis::new("y", 0.0, 1.0));

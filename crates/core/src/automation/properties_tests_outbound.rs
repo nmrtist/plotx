@@ -35,7 +35,6 @@ fn automation_reports_new_object_color_and_enum_values_and_schemas() {
         frame: ObjectFrame::new(0.0, 0.0, 40.0, 20.0),
         locked: false,
         visible: true,
-        group: None,
         kind: CanvasObjectKind::Text(text),
     });
     let resource = format!("{}/{id}", canvas.resource_id);

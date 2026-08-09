@@ -33,7 +33,7 @@ fn gesture_active_covers_only_the_board_freezing_drags() {
     let object = app.doc.canvases[0].objects[0].id;
     let frame = ObjectFrame::new(0.0, 0.0, 10.0, 10.0);
     let viewport = first_plot(&app).viewport.clone();
-    let title = first_plot(&app).panel.clone();
+    let title = crate::state::PanelMeta::new("title".to_owned(), frame.width);
 
     let cases: [(Interaction, bool); 11] = [
         (Interaction::Idle, false),

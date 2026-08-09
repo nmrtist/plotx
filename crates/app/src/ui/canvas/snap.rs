@@ -102,8 +102,11 @@ pub(crate) fn snap_object_frame(
     for object in &canvas.objects {
         let moving =
             object.id == drag.object || drag.others.iter().any(|(oid, _)| *oid == object.id);
-        if !moving && object.visible {
-            targets.push_object(object.frame);
+        if !moving
+            && object.visible
+            && let Some(frame) = canvas.layout_frame(object.id)
+        {
+            targets.push_object(frame);
         }
     }
     match drag.kind {

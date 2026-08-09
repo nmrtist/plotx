@@ -16,6 +16,9 @@ impl PlotxApp {
             };
         }
         match action {
+            Action::ReplacePanelState { canvas, after, .. } => {
+                self.set_panel_state(*canvas, after);
+            }
             Action::Composite(actions) => {
                 for (index, action) in actions.iter().enumerate() {
                     if let Err(error) = self.apply_action(action) {
@@ -321,7 +324,7 @@ impl PlotxApp {
                     };
                     let page = canvas.size_pt();
                     let offset = 18.0 * canvas.objects.len() as f32;
-                    let object_name = format!("Plot {}", canvas.objects.len() + 1);
+                    let object_name = crate::workflow::dataset_title(dataset.as_ref());
                     let frame = ObjectFrame::new(
                         24.0 + offset,
                         24.0 + offset,
@@ -333,6 +336,9 @@ impl PlotxApp {
                     let canvas = self.doc.canvases.get_mut(*ci).unwrap();
                     canvas.next_object_id = canvas.next_object_id.max(id.checked_advance(1));
                     canvas.objects.push(object);
+                    canvas
+                        .create_panel_for_plot(id)
+                        .expect("the inserted dataset object is a plot");
                     self.session.active_canvas = Some(*ci);
                 } else {
                     if *canvas_index != self.doc.canvases.len() {

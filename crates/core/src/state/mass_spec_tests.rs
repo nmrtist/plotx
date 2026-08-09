@@ -36,9 +36,9 @@ fn default_lcms_canvas_shows_uv_and_tic_with_distinct_semantic_notes() {
     assert_eq!(top.chart.type_id, "mass_chromatogram");
     assert_eq!(top.binding.series.len(), 2);
     assert_eq!(bottom.chart.type_id, "mass_chromatogram");
-    assert!(top.panel.user_note.starts_with("UV chromatograms"));
-    assert!(bottom.panel.user_note.starts_with("Total ion chromatogram"));
-    assert_ne!(top.panel.user_note, bottom.panel.user_note);
+    assert!(canvas.objects[0].name.starts_with("UV chromatograms"));
+    assert!(canvas.objects[1].name.starts_with("Total ion chromatogram"));
+    assert_ne!(canvas.objects[0].name, canvas.objects[1].name);
 
     let mut app = PlotxApp::new();
     app.doc.canvases.push(canvas);
@@ -67,7 +67,7 @@ fn default_lcms_canvas_without_optical_data_contains_only_tic() {
     assert_eq!(canvas.objects.len(), 1);
     let plot = canvas.objects[0].plot().unwrap();
     assert_eq!(plot.chart.type_id, "mass_chromatogram");
-    assert!(plot.panel.user_note.starts_with("Total ion chromatogram"));
+    assert!(canvas.objects[0].name.starts_with("Total ion chromatogram"));
 }
 
 #[test]
@@ -108,8 +108,12 @@ fn stream_and_retention_time_selection_retarget_all_linked_plots() {
             .id_for_key(&stream_tic_key(AcquisitionStreamId::new(7)))
             .unwrap()
     );
-    assert!(bottom.panel.user_note.contains("Function 7"));
-    assert!(bottom.panel.user_note.contains("negative polarity"));
+    assert!(app.doc.canvases[0].objects[1].name.contains("Function 7"));
+    assert!(
+        app.doc.canvases[0].objects[1]
+            .name
+            .contains("negative polarity")
+    );
 
     app.undo();
     let dataset = app.doc.datasets[0].as_mass_spec().unwrap();
@@ -317,28 +321,14 @@ fn stream_switch_uses_the_shared_undo_history() {
         app.doc.datasets[0].as_mass_spec().unwrap().active_stream,
         AcquisitionStreamId::new(7)
     );
-    assert!(
-        app.doc.canvases[0].objects[1]
-            .plot()
-            .unwrap()
-            .panel
-            .user_note
-            .contains("Function 7")
-    );
+    assert!(app.doc.canvases[0].objects[1].name.contains("Function 7"));
 
     app.undo();
     assert_eq!(
         app.doc.datasets[0].as_mass_spec().unwrap().active_stream,
         AcquisitionStreamId::new(3)
     );
-    assert!(
-        app.doc.canvases[0].objects[1]
-            .plot()
-            .unwrap()
-            .panel
-            .user_note
-            .contains("Function 3")
-    );
+    assert!(app.doc.canvases[0].objects[1].name.contains("Function 3"));
 
     app.redo();
     assert_eq!(
@@ -401,7 +391,11 @@ fn extracted_spectrum_is_pinned_and_does_not_follow_preview_cursor() {
     let spectrum = app.doc.canvases[0].objects[2].plot().unwrap();
     assert_eq!(spectrum.chart.type_id, "mass_spectrum");
     assert_eq!(spectrum.figure().series[0].kind, SeriesKind::Stick);
-    assert!(spectrum.panel.user_note.contains("0.400–1.000 min"));
+    assert!(
+        app.doc.canvases[0].objects[2]
+            .name
+            .contains("0.400–1.000 min")
+    );
     let before = spectrum.figure().series[0].points.clone();
 
     assert!(app.select_mass_spec_spectrum_near(dataset_id, AcquisitionStreamId::new(3), 0.5));

@@ -76,6 +76,15 @@ impl PanelMeta {
             visible: true,
         }
     }
+
+    pub fn from_panel(panel: &Panel) -> Self {
+        Self {
+            user_note: panel.note.clone(),
+            position: panel.label.position,
+            font_size: panel.label.font_size,
+            visible: panel.label.visible,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -457,178 +466,6 @@ impl Default for StyleLibrary {
 }
 
 #[derive(Clone)]
-pub enum CanvasObjectKind {
-    /// Boxed so a page of light authoring objects doesn't pay the plot's size.
-    Plot(Box<PlotObject>),
-    Text(TextBox),
-    Shape(ShapeObject),
-    PanelLabel(TextBox),
-}
-
-#[derive(Clone)]
-pub struct CanvasObject {
-    pub id: ObjectId,
-    pub name: String,
-    pub frame: ObjectFrame,
-    pub locked: bool,
-    pub visible: bool,
-    /// Flat, non-nested grouping tag: members of one group select and move
-    /// together. `None` is ungrouped.
-    pub group: Option<GroupId>,
-    pub kind: CanvasObjectKind,
-}
-
-impl CanvasObject {
-    pub fn plot(&self) -> Option<&PlotObject> {
-        match &self.kind {
-            CanvasObjectKind::Plot(plot) => Some(plot.as_ref()),
-            _ => None,
-        }
-    }
-
-    pub fn plot_mut(&mut self) -> Option<&mut PlotObject> {
-        match &mut self.kind {
-            CanvasObjectKind::Plot(plot) => Some(plot.as_mut()),
-            _ => None,
-        }
-    }
-
-    /// The editable text of a `Text` or `PanelLabel` object.
-    pub fn text(&self) -> Option<&TextBox> {
-        match &self.kind {
-            CanvasObjectKind::Text(t) | CanvasObjectKind::PanelLabel(t) => Some(t),
-            _ => None,
-        }
-    }
-
-    pub fn text_mut(&mut self) -> Option<&mut TextBox> {
-        match &mut self.kind {
-            CanvasObjectKind::Text(t) | CanvasObjectKind::PanelLabel(t) => Some(t),
-            _ => None,
-        }
-    }
-
-    pub fn shape(&self) -> Option<&ShapeObject> {
-        match &self.kind {
-            CanvasObjectKind::Shape(s) => Some(s),
-            _ => None,
-        }
-    }
-
-    pub fn shape_mut(&mut self) -> Option<&mut ShapeObject> {
-        match &mut self.kind {
-            CanvasObjectKind::Shape(s) => Some(s),
-            _ => None,
-        }
-    }
-
-    pub fn is_panel_label(&self) -> bool {
-        matches!(self.kind, CanvasObjectKind::PanelLabel(_))
-    }
-
-    /// A snapshot of this object's editable style, or `None` for a plot object.
-    pub fn style(&self) -> Option<ObjectStyle> {
-        match &self.kind {
-            CanvasObjectKind::Text(t) | CanvasObjectKind::PanelLabel(t) => {
-                Some(ObjectStyle::Text(t.clone()))
-            }
-            CanvasObjectKind::Shape(s) => Some(ObjectStyle::Shape(s.clone())),
-            CanvasObjectKind::Plot(_) => None,
-        }
-    }
-
-    /// Restore a style snapshot, preserving the object's kind (a `Text` style
-    /// applies to both `Text` and `PanelLabel`; mismatched kinds are ignored).
-    pub fn set_style(&mut self, style: &ObjectStyle) {
-        match (&mut self.kind, style) {
-            (CanvasObjectKind::Text(t) | CanvasObjectKind::PanelLabel(t), ObjectStyle::Text(v)) => {
-                *t = v.clone()
-            }
-            (CanvasObjectKind::Shape(s), ObjectStyle::Shape(v)) => *s = v.clone(),
-            _ => {}
-        }
-    }
-
-    pub fn dataset(&self) -> Option<DatasetId> {
-        self.plot().and_then(|plot| plot.primary_dataset())
-    }
-
-    /// Every dataset this object binds (all series of a plot; empty for non-plots).
-    /// Drives mirroring a board selection into the Data list.
-    pub fn dataset_ids(&self) -> Vec<DatasetId> {
-        self.plot()
-            .map(|plot| plot.binding.dataset_ids())
-            .unwrap_or_default()
-    }
-}
-
-/// Map a canvas object into one render item. The item list order == z-order
-/// (index 0 back, last front), so both back-ends paint in a single ordered pass.
-pub fn document_item(
-    object: &CanvasObject,
-    letter: Option<String>,
-) -> plotx_render::DocumentItem<'_> {
-    match &object.kind {
-        CanvasObjectKind::Plot(plot) => {
-            plotx_render::DocumentItem::Plot(plotx_render::DocumentObject {
-                id: format!("object_{}", object.id),
-                frame: object.frame.rect(),
-                figure: plot.figure(),
-                visible: object.visible,
-                title: plot.panel.visible.then_some(letter).flatten().map(|text| {
-                    plotx_render::DocumentText {
-                        text,
-                        position: plot.panel.position,
-                        font_size: plot.panel.font_size,
-                    }
-                }),
-            })
-        }
-        CanvasObjectKind::Text(t) | CanvasObjectKind::PanelLabel(t) => {
-            plotx_render::DocumentItem::Overlay(plotx_render::DocumentOverlay {
-                frame: object.frame.rect(),
-                visible: object.visible,
-                kind: plotx_render::OverlayKind::Text(plotx_render::OverlayText {
-                    text: &t.text,
-                    font_size: t.font_size,
-                    color: t.color,
-                    align: t.align.to_render(),
-                    bold: t.bold,
-                }),
-            })
-        }
-        CanvasObjectKind::Shape(s) => {
-            plotx_render::DocumentItem::Overlay(plotx_render::DocumentOverlay {
-                frame: object.frame.rect(),
-                visible: object.visible,
-                kind: plotx_render::OverlayKind::Shape(plotx_render::OverlayShape {
-                    shape: s.shape.to_render(),
-                    stroke: s.stroke,
-                    stroke_width: s.stroke_width,
-                    fill: s.fill,
-                }),
-            })
-        }
-    }
-}
-
-/// The render items for a whole page in `objects` (z) order.
-pub fn document_items(canvas: &CanvasDocument) -> Vec<plotx_render::DocumentItem<'_>> {
-    let order = canvas.plot_reading_order();
-    canvas
-        .objects
-        .iter()
-        .map(|object| {
-            let letter = order
-                .iter()
-                .position(|&id| id == object.id)
-                .map(|i| canvas.panel_label_style.format(i));
-            document_item(object, letter)
-        })
-        .collect()
-}
-
-#[derive(Clone)]
 pub struct CanvasDocument {
     /// Stable identity used by project bindings, automation and run manifests.
     pub resource_id: CanvasId,
@@ -643,6 +480,12 @@ pub struct CanvasDocument {
     pub auto_height: bool,
     pub background: Color,
     pub objects: Vec<CanvasObject>,
+    /// Semantic panels in stable page order. Content not referenced by any
+    /// `item_order` is page-level loose content.
+    pub panels: Vec<Panel>,
+    /// Ordinary, non-semantic groups. A group contains either same-scope
+    /// content or panels, never a mixture.
+    pub groups: Vec<LayoutGroup>,
     pub selected_object: Option<ObjectId>,
     /// Top-left of this page on the board, in world (pt) space.
     pub board_pos: [f32; 2],
@@ -657,6 +500,8 @@ pub struct CanvasDocument {
     pub layout: crate::layout::PageLayout,
     pub next_object_id: ObjectId,
     pub next_group_id: GroupId,
+    /// Stable automatic label slots are never implicitly reclaimed.
+    pub next_panel_label_slot: u64,
 }
 
 impl CanvasDocument {
@@ -669,6 +514,8 @@ impl CanvasDocument {
             auto_height: false,
             background: Color::rgb(255, 255, 255),
             objects: Vec::new(),
+            panels: Vec::new(),
+            groups: Vec::new(),
             selected_object: None,
             board_pos: [0.0, 0.0],
             caption: String::new(),
@@ -677,6 +524,7 @@ impl CanvasDocument {
             layout: crate::layout::PageLayout::default(),
             next_object_id: ObjectId::new(1),
             next_group_id: 1,
+            next_panel_label_slot: 0,
         }
     }
 
@@ -725,18 +573,188 @@ impl CanvasDocument {
         id
     }
 
+    pub fn create_panel(&mut self, name: String, frame: ObjectFrame) -> PanelId {
+        let slot = self.next_panel_label_slot;
+        self.next_panel_label_slot = self.next_panel_label_slot.saturating_add(1);
+        let panel = Panel::new(name, frame, slot);
+        let id = panel.id;
+        self.panels.push(panel);
+        id
+    }
+
+    pub fn panel(&self, id: PanelId) -> Option<&Panel> {
+        self.panels.iter().find(|panel| panel.id == id)
+    }
+
+    pub fn panel_mut(&mut self, id: PanelId) -> Option<&mut Panel> {
+        self.panels.iter_mut().find(|panel| panel.id == id)
+    }
+
+    pub fn parent_panel(&self, content: ContentId) -> Option<PanelId> {
+        self.panels
+            .iter()
+            .find(|panel| panel.item_order.contains(&content))
+            .map(|panel| panel.id)
+    }
+
+    pub fn panel_meta_for_content(&self, content: ContentId) -> Option<PanelMeta> {
+        self.parent_panel(content)
+            .and_then(|id| self.panel(id))
+            .map(PanelMeta::from_panel)
+    }
+
+    pub fn set_panel_meta_for_content(&mut self, content: ContentId, meta: PanelMeta) -> bool {
+        let Some(id) = self.parent_panel(content) else {
+            return false;
+        };
+        let Some(panel) = self.panel_mut(id) else {
+            return false;
+        };
+        panel.note = meta.user_note;
+        panel.label.position = meta.position;
+        panel.label.font_size = meta.font_size;
+        panel.label.visible = meta.visible;
+        true
+    }
+
+    pub fn content_page_frame(&self, content: ContentId) -> Option<ObjectFrame> {
+        let item = self.object(content)?;
+        let Some(panel) = self
+            .parent_panel(content)
+            .and_then(|panel| self.panel(panel))
+        else {
+            return Some(item.frame);
+        };
+        Some(ObjectFrame {
+            x: panel.frame.x + item.frame.x,
+            y: panel.frame.y + item.frame.y,
+            ..item.frame
+        })
+    }
+
+    pub fn validate_structure(&self) -> Result<(), String> {
+        let mut ids = std::collections::BTreeSet::new();
+        for item in &self.objects {
+            if !ids.insert(item.id) {
+                return Err(format!("duplicate content id {}", item.id));
+            }
+            validate_frame(item.frame, "content")?;
+            if let ContentKind::RasterImage(image) = &item.kind {
+                image.validate()?;
+            }
+        }
+        if self.panels.iter().any(|panel| {
+            matches!(panel.label.mode, PanelLabelMode::Auto { slot } if slot >= self.next_panel_label_slot)
+        }) {
+            return Err("next panel label slot must exceed every allocated auto slot".to_owned());
+        }
+        validate_panel_structure(&self.panels, ids, &self.groups)
+    }
+
+    pub fn structure_warnings(&self) -> Vec<String> {
+        let mut labels = std::collections::BTreeMap::<&str, Vec<PanelId>>::new();
+        for panel in &self.panels {
+            if let PanelLabelMode::Manual { value } = &panel.label.mode {
+                labels.entry(value.as_str()).or_default().push(panel.id);
+            }
+        }
+        labels
+            .into_iter()
+            .filter(|(_, panels)| panels.len() > 1)
+            .map(|(label, panels)| {
+                format!(
+                    "manual panel label {label:?} is used by {} panels",
+                    panels.len()
+                )
+            })
+            .collect()
+    }
+
     /// The ids of `id`'s group in list order, or just `[id]` when ungrouped.
     /// Clicking any member selects the whole group.
     pub fn group_members(&self, id: ObjectId) -> Vec<ObjectId> {
-        match self.object(id).and_then(|object| object.group) {
-            Some(group) => self
-                .objects
+        self.groups
+            .iter()
+            .find(|group| group.members.contains(&GroupMember::Content(id)))
+            .map(|group| {
+                group
+                    .members
+                    .iter()
+                    .filter_map(|member| match member {
+                        GroupMember::Content(id) => Some(*id),
+                        GroupMember::Panel(_) => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_else(|| vec![id])
+    }
+
+    pub fn content_group(&self, id: ContentId) -> Option<GroupId> {
+        self.groups
+            .iter()
+            .find(|group| group.members.contains(&GroupMember::Content(id)))
+            .map(|group| group.id)
+    }
+
+    pub(crate) fn reconcile_content_group_scopes(&mut self) {
+        let groups = std::mem::take(&mut self.groups);
+        for group in groups {
+            if group
+                .members
                 .iter()
-                .filter(|object| object.group == Some(group))
-                .map(|object| object.id)
-                .collect(),
-            None => vec![id],
+                .all(|member| matches!(member, GroupMember::Content(_)))
+            {
+                let mut scopes =
+                    std::collections::BTreeMap::<Option<PanelId>, Vec<GroupMember>>::new();
+                for member in group.members {
+                    let GroupMember::Content(id) = member else {
+                        unreachable!()
+                    };
+                    scopes
+                        .entry(self.parent_panel(id))
+                        .or_default()
+                        .push(GroupMember::Content(id));
+                }
+                let mut first = true;
+                for members in scopes.into_values().filter(|members| members.len() >= 2) {
+                    let id = if first {
+                        group.id
+                    } else {
+                        self.allocate_group_id()
+                    };
+                    first = false;
+                    self.groups.push(LayoutGroup { id, members });
+                }
+            } else {
+                self.groups.push(group);
+            }
         }
+    }
+
+    pub(crate) fn apply_content_group_assignments(
+        &mut self,
+        assignments: &[(ContentId, Option<GroupId>)],
+    ) {
+        let changed: std::collections::BTreeSet<_> =
+            assignments.iter().map(|(id, _)| *id).collect();
+        for group in &mut self.groups {
+            group.members.retain(
+                |member| !matches!(member, GroupMember::Content(id) if changed.contains(id)),
+            );
+        }
+        self.groups.retain(|group| group.members.len() >= 2);
+        for &(id, group_id) in assignments {
+            let Some(group_id) = group_id else { continue };
+            if let Some(group) = self.groups.iter_mut().find(|group| group.id == group_id) {
+                group.members.push(GroupMember::Content(id));
+            } else {
+                self.groups.push(LayoutGroup {
+                    id: group_id,
+                    members: vec![GroupMember::Content(id)],
+                });
+            }
+        }
+        self.groups.retain(|group| group.members.len() >= 2);
     }
 
     pub fn object(&self, id: ObjectId) -> Option<&CanvasObject> {

@@ -3,6 +3,9 @@ use super::*;
 #[path = "dto_series_source.rs"]
 mod dto_series_source;
 pub use dto_series_source::SeriesSourceDto;
+#[path = "dto_panel.rs"]
+mod dto_panel;
+pub use dto_panel::*;
 
 #[derive(Serialize, Deserialize)]
 pub struct Manifest {
@@ -16,6 +19,7 @@ pub struct Manifest {
     pub save_profile: SaveProfile,
     pub objects: Vec<Entry>,
     pub views: Vec<Entry>,
+    pub assets: Vec<AssetEntry>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub runs: Vec<Entry>,
     pub workspace: String,
@@ -266,6 +270,7 @@ pub struct DiffusionMetaDto {
 }
 
 #[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ViewObject {
     pub id: String,
     pub role: String,
@@ -274,15 +279,17 @@ pub struct ViewObject {
     pub inputs: Vec<String>,
     pub name: String,
     pub next_object_id: u64,
+    pub next_panel_label_slot: u64,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub caption: String,
     #[serde(default = "caption_visible_default")]
     pub caption_visible: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub panel_label_style: Option<String>,
+    pub panel_label_style: String,
     pub layout: ViewLayout,
-    #[serde(default)]
     pub objects: Vec<ViewCanvasObject>,
+    pub panels: Vec<ViewPanel>,
+    pub loose_item_order: Vec<String>,
+    pub groups: Vec<ViewGroup>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub viewport: Option<ViewportDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -345,6 +352,7 @@ impl PageLayoutDto {
 mod tests;
 
 #[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ViewCanvasObject {
     pub id: String,
     pub name: String,
@@ -380,22 +388,20 @@ pub struct ViewCanvasObject {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub projections: Option<ProjectionsDto>,
     pub frame: FrameDto,
+    /// Required in final schema v1. `null` means page-level loose content.
+    pub parent_panel: ParentPanelDto,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub viewport: Option<ViewportDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub axis_overrides: Option<AxisOverridesDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub panel: Option<PanelDto>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub title: Option<PanelDto>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<TextBoxDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shape: Option<ShapeDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image: Option<RasterImageDto>,
     pub locked: bool,
     pub visible: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub group: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub snapshot: Option<ViewSnapshot>,
 }
@@ -583,46 +589,6 @@ impl ShapeDto {
             fill: self.fill.map(|c| Color::rgb(c[0], c[1], c[2])),
         }
     }
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct PanelDto {
-    #[serde(default, alias = "text")]
-    pub note: String,
-    #[serde(default = "default_panel_label_position", alias = "position")]
-    pub label_position: [f32; 2],
-    #[serde(default = "default_panel_label_font_size", alias = "font_size")]
-    pub label_font_size: f32,
-    #[serde(default = "bool_true", alias = "visible")]
-    pub label_visible: bool,
-}
-
-impl PanelDto {
-    pub fn from_panel(panel: &PanelMeta) -> Self {
-        Self {
-            note: panel.user_note.clone(),
-            label_position: panel.position,
-            label_font_size: panel.font_size,
-            label_visible: panel.visible,
-        }
-    }
-
-    pub fn into_panel(self) -> PanelMeta {
-        PanelMeta {
-            user_note: self.note,
-            position: self.label_position,
-            font_size: self.label_font_size,
-            visible: self.label_visible,
-        }
-    }
-}
-
-fn default_panel_label_position() -> [f32; 2] {
-    [6.0, 5.0]
-}
-
-fn default_panel_label_font_size() -> f32 {
-    8.0
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy)]

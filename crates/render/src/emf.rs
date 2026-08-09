@@ -98,6 +98,20 @@ pub fn export_document_emf(doc: &Document<'_>) -> Result<Vec<u8>, EmfError> {
                             write_overlay(&mut dc, overlay);
                         }
                     }
+                    DocumentItem::PanelLabel {
+                        frame,
+                        text,
+                        visible,
+                    } => {
+                        if *visible {
+                            write_panel_letter(
+                                &mut dc,
+                                &text.text,
+                                [frame.left + text.position[0], frame.top + text.position[1]],
+                                text.font_size,
+                            );
+                        }
+                    }
                 }
             }
         }

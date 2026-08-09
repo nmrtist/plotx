@@ -47,15 +47,18 @@ impl PlotxApp {
     }
 
     pub(super) fn set_panel_meta(&mut self, canvas: usize, object: ObjectId, panel: PanelMeta) {
-        let Some(plot) = self
-            .doc
-            .canvases
-            .get_mut(canvas)
-            .and_then(|canvas| canvas.object_mut(object))
-            .and_then(|object| object.plot_mut())
-        else {
+        let Some(page) = self.doc.canvases.get_mut(canvas) else {
             return;
         };
-        plot.panel = panel;
+        let Some(panel_id) = page.parent_panel(object) else {
+            return;
+        };
+        let Some(target) = page.panel_mut(panel_id) else {
+            return;
+        };
+        target.note = panel.user_note;
+        target.label.position = panel.position;
+        target.label.font_size = panel.font_size;
+        target.label.visible = panel.visible;
     }
 }

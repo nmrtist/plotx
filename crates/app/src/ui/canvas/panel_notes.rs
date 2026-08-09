@@ -32,7 +32,7 @@ pub(crate) fn handle_panel_label_interactions(
     let id = ui.id().with(("panel_label", ci, object_id));
     let resp = ui
         .interact(label_rect, id, Sense::click_and_drag())
-        .on_hover_text("Double-click to edit this panel note");
+        .on_hover_text("Double-click to edit this panel description");
     let mut consumed =
         label_hovered || resp.hovered() || matches!(app.interaction(), Interaction::PanelLabel(_));
 
@@ -41,13 +41,11 @@ pub(crate) fn handle_panel_label_interactions(
         if matches!(app.interaction(), Interaction::Object(_)) {
             app.reset_interaction();
         }
-        app.session.status = "Panel letter selected. Double-click to edit its note.".to_owned();
+        app.session.status =
+            "Panel letter selected. Double-click to edit its description.".to_owned();
         if let (Some(pointer), Some(panel)) = (
             hover,
-            app.doc.canvases[ci]
-                .object(object_id)
-                .and_then(|object| object.plot())
-                .map(|plot| plot.panel.clone()),
+            app.doc.canvases[ci].panel_meta_for_content(object_id),
         ) {
             freeze_board_for_gesture(app);
             app.begin_interaction(Interaction::PanelLabel(PanelLabelDrag {
@@ -67,7 +65,7 @@ pub(crate) fn handle_panel_label_interactions(
 
     resp.context_menu(|ui| {
         app.select_panel_label(ci, object_id);
-        if ui.button("Edit panel note").clicked() {
+        if ui.button("Edit panel description").clicked() {
             open_panel_note_editor(app, ci, object_id);
             ui.close();
         }
@@ -86,10 +84,7 @@ pub(crate) fn handle_panel_label_interactions(
             let zoom = app.session.board.zoom.max(0.01);
             let max_x = panel_label_max_x(app, ci, object_id);
             let max_y = panel_label_max_y(app, ci, object_id);
-            if let Some(panel) = app.doc.canvases[ci]
-                .object_mut(object_id)
-                .and_then(|object| object.plot_mut())
-                .map(|plot| &mut plot.panel)
+            if let Some(mut panel) = app.doc.canvases[ci].panel_meta_for_content(object_id)
                 && let Some(pointer) = hover
             {
                 let delta =
@@ -98,6 +93,7 @@ pub(crate) fn handle_panel_label_interactions(
                     (drag.before.position[0] + delta.x).clamp(0.0, max_x),
                     (drag.before.position[1] + delta.y).clamp(0.0, max_y),
                 ];
+                app.doc.canvases[ci].set_panel_meta_for_content(object_id, panel);
                 app.mark_document_dirty();
             }
         }
@@ -112,24 +108,20 @@ pub(crate) fn handle_panel_label_interactions(
 
 pub(crate) fn panel_label_max_x(app: &PlotxApp, ci: usize, object_id: ObjectId) -> f32 {
     app.doc.canvases[ci]
-        .object(object_id)
-        .map(|object| object.frame.width)
+        .layout_frame(object_id)
+        .map(|frame| frame.width)
         .unwrap_or(1.0)
 }
 
 pub(crate) fn panel_label_max_y(app: &PlotxApp, ci: usize, object_id: ObjectId) -> f32 {
     app.doc.canvases[ci]
-        .object(object_id)
-        .map(|object| object.frame.height)
+        .layout_frame(object_id)
+        .map(|frame| frame.height)
         .unwrap_or(1.0)
 }
 
 pub(crate) fn open_panel_note_editor(app: &mut PlotxApp, ci: usize, object_id: ObjectId) {
-    let Some(panel) = app.doc.canvases[ci]
-        .object(object_id)
-        .and_then(|object| object.plot())
-        .map(|plot| plot.panel.clone())
-    else {
+    let Some(panel) = app.doc.canvases[ci].panel_meta_for_content(object_id) else {
         return;
     };
     app.select_panel_label(ci, object_id);
@@ -143,11 +135,7 @@ pub(crate) fn open_panel_note_editor(app: &mut PlotxApp, ci: usize, object_id: O
 }
 
 pub(crate) fn hide_panel_label(app: &mut PlotxApp, ci: usize, object_id: ObjectId) {
-    let Some(before) = app.doc.canvases[ci]
-        .object(object_id)
-        .and_then(|object| object.plot())
-        .map(|plot| plot.panel.clone())
-    else {
+    let Some(before) = app.doc.canvases[ci].panel_meta_for_content(object_id) else {
         return;
     };
     let mut after = before.clone();
@@ -168,11 +156,7 @@ pub(crate) fn finish_panel_label_drag(app: &mut PlotxApp, ci: usize, object_id: 
     if drag.canvas != ci || drag.object != object_id {
         return;
     }
-    let Some(after) = app.doc.canvases[ci]
-        .object(object_id)
-        .and_then(|object| object.plot())
-        .map(|plot| plot.panel.clone())
-    else {
+    let Some(after) = app.doc.canvases[ci].panel_meta_for_content(object_id) else {
         return;
     };
     app.execute_action(Action::set_panel_meta(ci, object_id, drag.before, after));
@@ -185,8 +169,7 @@ pub(crate) fn panel_label_screen_rect(
     screen: egui::Rect,
 ) -> Option<egui::Rect> {
     let frame = object_screen_rect(board, canvas, object_id, screen)?;
-    let object = canvas.object(object_id)?;
-    let panel = &object.plot()?.panel;
+    let panel = canvas.panel_meta_for_content(object_id)?;
     if !panel.visible {
         return None;
     }

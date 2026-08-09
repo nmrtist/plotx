@@ -534,9 +534,6 @@ fn activate_page(app: &mut PlotxApp, ci: usize) {
 }
 
 pub(crate) fn dispatch_frame_gesture(app: &mut PlotxApp, rect: egui::Rect, ui: &Ui) -> bool {
-    if board_marquee::handle(app, rect, ui) {
-        return true;
-    }
     let (pressed, double, hover, extend) = ui.input(|i| {
         (
             i.pointer.primary_pressed(),
@@ -546,6 +543,18 @@ pub(crate) fn dispatch_frame_gesture(app: &mut PlotxApp, rect: egui::Rect, ui: &
             i.modifiers.shift || i.modifiers.command || i.modifiers.ctrl,
         )
     });
+    if pressed
+        && let Some(point) = hover
+        && let Some((canvas, _)) = object_at_screen(app, rect, point)
+    {
+        if app.session.active_canvas != Some(canvas) {
+            activate_frame(app, FrameRef::Page(canvas));
+        }
+        return false;
+    }
+    if board_marquee::handle(app, rect, ui) {
+        return true;
+    }
     if extend
         && pressed
         && let Some(p) = hover

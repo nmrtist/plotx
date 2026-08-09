@@ -12,6 +12,9 @@ impl PlotxApp {
             };
         }
         match action {
+            Action::ReplacePanelState { canvas, before, .. } => {
+                self.set_panel_state(*canvas, before);
+            }
             Action::Composite(actions) => {
                 for action in actions.iter().rev() {
                     self.revert_action(action);
@@ -348,6 +351,15 @@ impl PlotxApp {
                     if let Some(canvas) = self.doc.canvases.get_mut(*ci)
                         && let Some(id) = inserted_object_id
                     {
+                        if let Some(panel) = canvas.parent_panel(*id) {
+                            canvas.panels.retain(|candidate| candidate.id != panel);
+                            canvas.groups.retain_mut(|group| {
+                                group.members.retain(|member| {
+                                    !matches!(member, crate::state::GroupMember::Panel(candidate) if *candidate == panel)
+                                });
+                                group.members.len() >= 2
+                            });
+                        }
                         canvas.objects.retain(|object| object.id != *id);
                         if canvas.selected_object == Some(*id) {
                             canvas.selected_object = None;

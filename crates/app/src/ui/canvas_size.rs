@@ -455,7 +455,15 @@ pub(crate) fn scale_content_to_fit(app: &mut PlotxApp, ci: usize) {
     let extent_w = (max_x - offset_x).max(1.0);
     let extent_h = (max_y - offset_y).max(1.0);
     let scale = (page_w / extent_w).min(page_h / extent_h).min(1.0);
-    let before: Vec<_> = canvas.objects.iter().map(|o| (o.id, o.frame)).collect();
+    let before: Vec<_> = canvas
+        .objects
+        .iter()
+        .filter_map(|object| {
+            canvas
+                .layout_frame(object.id)
+                .map(|frame| (object.id, frame))
+        })
+        .collect();
     let after: Vec<_> = before
         .iter()
         .map(|&(id, f)| {

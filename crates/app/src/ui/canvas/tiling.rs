@@ -7,11 +7,11 @@ fn drag_is_tileable(app: &PlotxApp, drag: &ObjectDrag) -> bool {
     if app.session.ui.selection.objects().len() > 1 {
         return false;
     }
-    app.doc
-        .canvases
-        .get(drag.canvas)
-        .and_then(|c| c.object(drag.object))
-        .is_some_and(|o| o.group.is_none() && o.plot().is_some())
+    app.doc.canvases.get(drag.canvas).is_some_and(|canvas| {
+        canvas
+            .object(drag.object)
+            .is_some_and(|o| canvas.content_group(o.id).is_none() && o.plot().is_some())
+    })
 }
 
 pub(crate) fn update_tile_drop(
@@ -72,9 +72,7 @@ pub(crate) fn update_tile_drop(
         if let Some(preview) = app.session.ui.tile_drop.as_mut() {
             preview.pointer_screen = [p.x, p.y];
         }
-        if let Some(object) = app.doc.canvases[drag.canvas].object_mut(drag.object) {
-            object.frame = drag.before;
-        }
+        app.doc.canvases[drag.canvas].set_layout_frame(drag.object, drag.before);
         return true;
     }
     let existing_items: Vec<_> = existing_ids
@@ -110,9 +108,7 @@ pub(crate) fn update_tile_drop(
     } else {
         "Hold Alt to keep the empty source canvas.".into()
     };
-    if let Some(object) = app.doc.canvases[drag.canvas].object_mut(drag.object) {
-        object.frame = drag.before;
-    }
+    app.doc.canvases[drag.canvas].set_layout_frame(drag.object, drag.before);
     true
 }
 
@@ -143,7 +139,7 @@ fn layout_item(canvas: &CanvasDocument, id: ObjectId) -> Option<plotx_core::layo
     Some(plotx_core::layout::layout_item(
         id,
         plot.figure(),
-        object.frame,
+        canvas.layout_frame(id)?,
     ))
 }
 

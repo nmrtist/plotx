@@ -96,7 +96,6 @@ fn every_derived_default_read_reports_a_reset_target() {
         frame: ObjectFrame::new(0.0, 0.0, 20.0, 10.0),
         locked: false,
         visible: true,
-        group: None,
         kind: CanvasObjectKind::Text(TextBox::label("derived default".to_owned())),
     });
     let object = crate::automation::TargetRef::resource(series.resource.clone());

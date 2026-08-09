@@ -585,7 +585,7 @@ fn write_projection(
     );
 }
 
-fn write_panel_letter(s: &mut String, text: &str, position: [f32; 2], font_size: f32) {
+pub(crate) fn write_panel_letter(s: &mut String, text: &str, position: [f32; 2], font_size: f32) {
     if text.trim().is_empty() {
         return;
     }

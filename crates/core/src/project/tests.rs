@@ -257,9 +257,6 @@ fn project_roundtrip_preserves_data_recipe_and_view() {
             pan: [-5.0, -8.0],
         },
     ];
-    first_plot_mut(&mut app).panel.user_note = "custom title\nHSQC summary".to_owned();
-    first_plot_mut(&mut app).panel.position = [33.0, 14.0];
-    first_plot_mut(&mut app).panel.visible = false;
     let axis_overrides = AxisOverrides {
         x_label: Some("Chemical shift".to_owned()),
         y_label: Some("Response".to_owned()),
@@ -343,11 +340,6 @@ fn project_roundtrip_preserves_data_recipe_and_view() {
         first_plot(&loaded).viewport.view_x,
         first_plot(&app).viewport.view_x
     );
-    assert_eq!(
-        first_plot(&loaded).panel.user_note,
-        "custom title\nHSQC summary"
-    );
-    assert_eq!(first_plot(&loaded).panel.position, [33.0, 14.0]);
     assert_eq!(first_plot(&loaded).axis_overrides, axis_overrides);
     assert_eq!(first_plot(&loaded).figure().x.label, "Chemical shift");
     assert_eq!(first_plot(&loaded).figure().y.label, "Response");
@@ -360,7 +352,6 @@ fn project_roundtrip_preserves_data_recipe_and_view() {
         AxisRange::new(-2.0, 12.0)
     );
     assert!(!first_plot(&loaded).viewport.auto_y);
-    assert!(!first_plot(&loaded).panel.visible);
 
     let Dataset::Nmr(n) = &loaded.doc.datasets[0] else {
         panic!("expected 1D NMR dataset");
@@ -531,7 +522,6 @@ fn project_roundtrip_preserves_authoring_objects() {
         frame: ObjectFrame::new(10.0, 12.0, 160.0, 36.0),
         locked: false,
         visible: true,
-        group: None,
         kind: CanvasObjectKind::Text(TextBox::label("Caption".to_owned())),
     });
     let id_shape = app.doc.canvases[0].allocate_object_id();
@@ -544,7 +534,6 @@ fn project_roundtrip_preserves_authoring_objects() {
         frame: ObjectFrame::new(40.0, 50.0, 80.0, 20.0),
         locked: false,
         visible: false,
-        group: None,
         kind: CanvasObjectKind::Shape(shape),
     });
 
@@ -582,7 +571,6 @@ fn project_roundtrip_preserves_zorder() {
             frame: ObjectFrame::new(10.0, 10.0, 40.0, 20.0),
             locked: false,
             visible: true,
-            group: None,
             kind: CanvasObjectKind::Text(TextBox::label(name.to_owned())),
         });
     }

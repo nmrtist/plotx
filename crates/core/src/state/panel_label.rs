@@ -37,11 +37,16 @@ impl PanelLabelStyle {
     }
 
     pub fn from_key(key: &str) -> Self {
+        Self::try_from_key(key).unwrap_or_default()
+    }
+
+    pub fn try_from_key(key: &str) -> Option<Self> {
         match key {
-            "upper_alpha" => PanelLabelStyle::UpperAlpha,
-            "lower_roman" => PanelLabelStyle::LowerRoman,
-            "arabic" => PanelLabelStyle::Arabic,
-            _ => PanelLabelStyle::LowerAlpha,
+            "lower_alpha" => Some(PanelLabelStyle::LowerAlpha),
+            "upper_alpha" => Some(PanelLabelStyle::UpperAlpha),
+            "lower_roman" => Some(PanelLabelStyle::LowerRoman),
+            "arabic" => Some(PanelLabelStyle::Arabic),
+            _ => None,
         }
     }
 
@@ -98,17 +103,13 @@ fn roman_label(mut n: usize) -> String {
 }
 
 impl CanvasDocument {
-    /// Plot object ids in publication reading order: row-major by frame top
+    /// Panel ids in publication reading order: row-major by frame top
     /// (bucketed so a near-aligned row reads left-to-right), then by left edge,
     /// with the object id as a stable final tie-break. Drives panel lettering.
-    pub fn plot_reading_order(&self) -> Vec<ObjectId> {
+    pub fn panel_reading_order(&self) -> Vec<PanelId> {
         const ROW_BUCKET_PT: f32 = 8.0;
-        let mut plots: Vec<&CanvasObject> = self
-            .objects
-            .iter()
-            .filter(|object| object.plot().is_some())
-            .collect();
-        plots.sort_by(|a, b| {
+        let mut panels: Vec<&Panel> = self.panels.iter().collect();
+        panels.sort_by(|a, b| {
             let ra = (a.frame.y / ROW_BUCKET_PT).round() as i32;
             let rb = (b.frame.y / ROW_BUCKET_PT).round() as i32;
             ra.cmp(&rb)
@@ -120,25 +121,49 @@ impl CanvasDocument {
                 )
                 .then(a.id.cmp(&b.id))
         });
-        plots.iter().map(|object| object.id).collect()
+        panels.iter().map(|panel| panel.id).collect()
+    }
+
+    pub fn plot_reading_order(&self) -> Vec<ObjectId> {
+        self.panel_reading_order()
+            .into_iter()
+            .filter_map(|id| self.panel(id))
+            .flat_map(|panel| panel.item_order.iter().copied())
+            .filter(|id| self.object(*id).is_some_and(|item| item.plot().is_some()))
+            .collect()
     }
 
     /// `None` if `object_id` is not a plot on this page.
     pub fn panel_letter(&self, object_id: ObjectId) -> Option<String> {
-        self.plot_reading_order()
-            .iter()
-            .position(|&id| id == object_id)
-            .map(|i| self.panel_label_style.format(i))
+        let panel = self.parent_panel(object_id).and_then(|id| self.panel(id))?;
+        if !panel.label.visible {
+            return None;
+        }
+        match &panel.label.mode {
+            PanelLabelMode::Auto { slot } => Some(self.panel_label_style.format(*slot as usize)),
+            PanelLabelMode::LockedAuto { value } | PanelLabelMode::Manual { value } => {
+                Some(value.clone())
+            }
+        }
     }
 
     /// Skips empty notes.
     pub fn panel_note_entries(&self) -> Vec<(ObjectId, String, String)> {
-        self.plot_reading_order()
-            .into_iter()
-            .enumerate()
-            .filter_map(|(i, id)| {
-                let note = self.object(id)?.plot()?.panel.user_note.trim();
-                (!note.is_empty()).then(|| (id, self.panel_label_style.format(i), note.to_owned()))
+        self.panels
+            .iter()
+            .filter_map(|panel| {
+                let id = *panel.item_order.first()?;
+                let note = panel.note.trim();
+                if !panel.label.visible {
+                    return None;
+                }
+                let letter = match &panel.label.mode {
+                    PanelLabelMode::Auto { slot } => self.panel_label_style.format(*slot as usize),
+                    PanelLabelMode::LockedAuto { value } | PanelLabelMode::Manual { value } => {
+                        value.clone()
+                    }
+                };
+                (!note.is_empty()).then(|| (id, letter, note.to_owned()))
             })
             .collect()
     }

@@ -12,9 +12,10 @@ pub(crate) fn hit_object(canvas: &CanvasDocument, p: Pos2, zoom: f32) -> Option<
         if !object.visible {
             return None;
         }
+        let frame = canvas.layout_frame(object.id)?;
         let r = egui::Rect::from_min_size(
-            Pos2::new(object.frame.x, object.frame.y),
-            egui::vec2(object.frame.width, object.frame.height),
+            Pos2::new(frame.x, frame.y),
+            egui::vec2(frame.width, frame.height),
         );
         let handles = [
             (r.left_top(), ResizeHandle::TopLeft),
@@ -34,6 +35,27 @@ pub(crate) fn hit_object(canvas: &CanvasDocument, p: Pos2, zoom: f32) -> Option<
             object: object.id,
             kind: ObjectDragKind::Move,
         })
+    })
+}
+
+/// Topmost canvas object under a screen point, including objects outside their
+/// owning page. The active page wins ties, matching page/frame hit ordering.
+pub(crate) fn object_at_screen(
+    app: &PlotxApp,
+    screen: egui::Rect,
+    point: Pos2,
+) -> Option<(usize, ObjectHit)> {
+    let mut canvases: Vec<_> = (0..app.doc.canvases.len()).rev().collect();
+    if let Some(active) = app.session.active_canvas
+        && canvases.contains(&active)
+    {
+        canvases.retain(|candidate| *candidate != active);
+        canvases.insert(0, active);
+    }
+    let transform = BoardTransform::from_board(app.session.board, screen);
+    canvases.into_iter().find_map(|canvas| {
+        let page = transform.screen_to_page(&app.doc.canvases[canvas], point);
+        hit_object(&app.doc.canvases[canvas], page, app.session.board.zoom).map(|hit| (canvas, hit))
     })
 }
 
@@ -160,13 +182,24 @@ impl BoardTransform {
         object_id: ObjectId,
     ) -> Option<PlotRect> {
         let page = self.page_screen_rect(canvas);
-        let object = canvas.object(object_id)?;
+        let frame = canvas.layout_frame(object_id)?;
         Some(PlotRect::new(
-            page.left() + object.frame.x * self.zoom,
-            page.top() + object.frame.y * self.zoom,
-            object.frame.width * self.zoom,
-            object.frame.height * self.zoom,
+            page.left() + frame.x * self.zoom,
+            page.top() + frame.y * self.zoom,
+            frame.width * self.zoom,
+            frame.height * self.zoom,
         ))
+    }
+
+    pub fn canvas_editor_screen_rect(&self, canvas: &CanvasDocument) -> egui::Rect {
+        let mut bounds = self.page_screen_rect(canvas);
+        for object in &canvas.objects {
+            let Some(frame) = self.object_screen_rect(canvas, object.id) else {
+                continue;
+            };
+            bounds = bounds.union(plot_rect(frame));
+        }
+        bounds
     }
 
     /// Screen px → board world (pt), before any per-page `board_pos` offset.
@@ -415,7 +448,6 @@ mod tests {
             frame,
             locked: false,
             visible: true,
-            group: None,
             kind: CanvasObjectKind::Text(TextBox::label("x".to_owned())),
         }
     }
@@ -651,5 +683,77 @@ mod tests {
             .push(text_object(2, ObjectFrame::new(20.0, 20.0, 50.0, 50.0)));
         let hit = hit_object(&canvas, Pos2::new(35.0, 35.0), 1.0).unwrap();
         assert_eq!(hit.object, ObjectId::new(2));
+    }
+
+    #[test]
+    fn panel_local_content_hits_and_moves_by_distinct_page_frames() {
+        let mut canvas = CanvasDocument::new("t".to_owned(), [100.0, 100.0]);
+        let a = ObjectId::new(1);
+        let b = ObjectId::new(2);
+        canvas
+            .objects
+            .push(text_object(1, ObjectFrame::new(0.0, 0.0, 40.0, 30.0)));
+        canvas
+            .objects
+            .push(text_object(2, ObjectFrame::new(0.0, 0.0, 40.0, 30.0)));
+        let panel_a = canvas.create_panel("a".into(), ObjectFrame::new(5.0, 10.0, 40.0, 30.0));
+        let panel_b = canvas.create_panel("b".into(), ObjectFrame::new(55.0, 10.0, 40.0, 30.0));
+        canvas.panel_mut(panel_a).unwrap().item_order.push(a);
+        canvas.panel_mut(panel_b).unwrap().item_order.push(b);
+
+        assert_eq!(
+            hit_object(&canvas, Pos2::new(20.0, 20.0), 1.0)
+                .unwrap()
+                .object,
+            a
+        );
+        assert_eq!(
+            hit_object(&canvas, Pos2::new(70.0, 20.0), 1.0)
+                .unwrap()
+                .object,
+            b
+        );
+
+        canvas.set_layout_frame(b, ObjectFrame::new(55.0, 50.0, 40.0, 30.0));
+        assert_eq!(canvas.layout_frame(a).unwrap().y, 10.0);
+        assert_eq!(canvas.layout_frame(b).unwrap().y, 50.0);
+        assert_eq!(
+            hit_object(&canvas, Pos2::new(70.0, 60.0), 1.0)
+                .unwrap()
+                .object,
+            b
+        );
+    }
+
+    #[test]
+    fn outside_page_object_remains_in_editor_bounds_and_hit_testing() {
+        let mut app = PlotxApp::new();
+        let mut canvas = CanvasDocument::new("t".to_owned(), [20.0, 20.0]);
+        canvas.board_pos = [30.0, 40.0];
+        let [page_width, _] = canvas.size_pt();
+        let id = ObjectId::new(1);
+        canvas.objects.push(text_object(
+            1,
+            ObjectFrame::new(page_width + 15.0, 10.0, 40.0, 30.0),
+        ));
+        app.doc.canvases.push(canvas);
+        app.session.active_canvas = Some(0);
+        app.session.board = BoardViewport {
+            zoom: 1.0,
+            pan: [0.0, 0.0],
+            auto_fit: false,
+        };
+        let screen = egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(500.0, 400.0));
+        let transform = BoardTransform::from_board(app.session.board, screen);
+        let page = transform.page_screen_rect(&app.doc.canvases[0]);
+        let point = Pos2::new(page.left() + page_width + 25.0, page.top() + 20.0);
+
+        assert!(!page.contains(point));
+        assert!(
+            transform
+                .canvas_editor_screen_rect(&app.doc.canvases[0])
+                .contains(point)
+        );
+        assert_eq!(object_at_screen(&app, screen, point).unwrap().1.object, id);
     }
 }

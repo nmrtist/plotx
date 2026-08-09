@@ -38,7 +38,6 @@ fn automation_writes_new_object_text_color_and_enum_properties() {
         frame: ObjectFrame::new(0.0, 0.0, 40.0, 20.0),
         locked: false,
         visible: true,
-        group: None,
         kind: CanvasObjectKind::Text(TextBox::label(String::new())),
     });
     let resource = format!("{}/{id}", canvas.resource_id);

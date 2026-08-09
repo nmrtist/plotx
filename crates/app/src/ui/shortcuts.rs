@@ -505,9 +505,7 @@ pub(super) fn handle_delete_shortcut(app: &mut PlotxApp, ctx: &egui::Context) {
         .doc
         .canvases
         .get(ci)
-        .and_then(|canvas| canvas.object(object_id))
-        .and_then(|object| object.plot())
-        .map(|plot| plot.panel.clone())
+        .and_then(|canvas| canvas.panel_meta_for_content(object_id))
     else {
         app.session.ui.panel_label_selection = None;
         return;

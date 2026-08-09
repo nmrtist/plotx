@@ -1,6 +1,60 @@
 use super::{MAX_LINE_COLUMNS, MIN_LINE_COLUMNS, line_columns, screen_line_points};
 
 #[test]
+fn editor_keeps_outside_page_items_visible_while_document_rendering_clips() {
+    use plotx_figure::Color;
+    let document = crate::Document {
+        width: 100.0,
+        height: 80.0,
+        background: Color::rgb(255, 255, 255),
+        items: vec![crate::DocumentItem::Overlay(crate::DocumentOverlay {
+            frame: crate::Rect::new(120.0, 10.0, 30.0, 20.0),
+            visible: true,
+            kind: crate::OverlayKind::Shape(crate::OverlayShape {
+                shape: crate::OverlayShapeKind::Rect,
+                stroke: Color::BLACK,
+                stroke_width: 1.0,
+                fill: Some(Color::BLACK),
+            }),
+        })],
+    };
+    let render = |editor| {
+        let ctx = egui::Context::default();
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(300.0, 200.0),
+                )),
+                ..Default::default()
+            },
+            |ui| {
+                let screen = crate::Rect::new(0.0, 0.0, 300.0, 200.0);
+                let viewport = crate::DocumentViewport {
+                    zoom: 1.0,
+                    pan: [0.0, 0.0],
+                };
+                if editor {
+                    super::paint_document_for_editor(ui.painter(), screen, &document, viewport);
+                } else {
+                    super::paint_document(ui.painter(), screen, &document, viewport);
+                }
+            },
+        );
+        output
+            .shapes
+            .iter()
+            .filter(|shape| matches!(shape.shape, egui::Shape::Rect(_)))
+            .map(|shape| shape.clip_rect.max.x)
+            .next_back()
+            .unwrap()
+    };
+
+    assert_eq!(render(false), 100.0);
+    assert!(render(true) >= 150.0);
+}
+
+#[test]
 fn hidden_axis_text_keeps_screen_axis_and_tick_shapes() {
     use plotx_figure::{Axis, Figure};
     let mut fig = Figure::new(

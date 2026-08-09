@@ -2,10 +2,10 @@ use crate::layout::PageLayout;
 use crate::state::{
     AxisOverrides, AxisProjections, CanvasDocument, CanvasObject, CanvasViewport, ChartSpec,
     CurveFitReference, DataBinding, Dataset, DatasetId, ExtractedIonChromatogram,
-    ExtractedMassSpectrum, ExtractionId, IonChromatogramId, NamedView, ObjectFrame, ObjectId,
-    ObjectStyle, PanelLabelStyle, PanelMeta, PlotxApp, PrimaryView, Region, Selection, StackSpec,
-    StatAnalysis, StoredCurveFitAnalysis, StoredLineFit, StoredMultiplet, TableEditDelta, TextBox,
-    TypedTableState,
+    ExtractedMassSpectrum, ExtractionId, IonChromatogramId, LayoutGroup, NamedView, ObjectFrame,
+    ObjectId, ObjectStyle, Panel, PanelLabelStyle, PanelMeta, PlotxApp, PrimaryView, Region,
+    Selection, StackSpec, StatAnalysis, StoredCurveFitAnalysis, StoredLineFit, StoredMultiplet,
+    TableEditDelta, TextBox, TypedTableState,
 };
 use crate::theme::ThemeSnapshot;
 use crate::{Integral2D, IntegralResult};
@@ -15,13 +15,18 @@ use plotx_processing::{AxisPipeline, Params2D, Preset2D};
 
 mod app_impl;
 mod arrange;
+mod panel;
 mod processing_state;
 mod transfer;
 mod zorder;
 
+pub use panel::PanelActionError;
 pub use processing_state::{ProcessingRebuild, ProcessingStateError};
 pub use zorder::*;
 
+#[cfg(test)]
+#[path = "tests/panel.rs"]
+mod panel_tests;
 #[cfg(test)]
 mod tests;
 
@@ -166,8 +171,36 @@ pub struct PendingSeriesPresentationEdit {
 }
 
 #[derive(Clone)]
+pub struct PanelState {
+    pub objects: Vec<CanvasObject>,
+    pub panels: Vec<Panel>,
+    pub groups: Vec<LayoutGroup>,
+    pub next_object_id: ObjectId,
+    pub next_group_id: crate::state::GroupId,
+    pub next_panel_label_slot: u64,
+}
+
+impl PanelState {
+    pub fn of(canvas: &CanvasDocument) -> Self {
+        Self {
+            objects: canvas.objects.clone(),
+            panels: canvas.panels.clone(),
+            groups: canvas.groups.clone(),
+            next_object_id: canvas.next_object_id,
+            next_group_id: canvas.next_group_id,
+            next_panel_label_slot: canvas.next_panel_label_slot,
+        }
+    }
+}
+
+#[derive(Clone)]
 pub enum Action {
     Composite(Vec<Action>),
+    ReplacePanelState {
+        canvas: usize,
+        before: PanelState,
+        after: PanelState,
+    },
     UpdateDatasetProcessing {
         dataset: DatasetId,
         before: DatasetProcessingState,
@@ -486,6 +519,18 @@ pub enum Action {
         to: usize,
         removed: Vec<(usize, CanvasObject)>,
         inserted: Vec<CanvasObject>,
+        source_groups_before: Vec<crate::state::LayoutGroup>,
+        source_groups_after: Vec<crate::state::LayoutGroup>,
+        target_groups_before: Vec<crate::state::LayoutGroup>,
+        target_groups_after: Vec<crate::state::LayoutGroup>,
+        source_panels_before: Vec<crate::state::Panel>,
+        source_panels_after: Vec<crate::state::Panel>,
+        target_panels_before: Vec<crate::state::Panel>,
+        target_panels_after: Vec<crate::state::Panel>,
+        source_label_slot_before: u64,
+        source_label_slot_after: u64,
+        target_label_slot_before: u64,
+        target_label_slot_after: u64,
         active_before: Option<usize>,
         selection_before: Selection,
     },
@@ -501,6 +546,18 @@ pub enum Action {
         source_canvas_before: Option<Box<CanvasDocument>>,
         removed: Vec<(usize, CanvasObject)>,
         inserted: Vec<CanvasObject>,
+        source_groups_before: Vec<crate::state::LayoutGroup>,
+        source_groups_after: Vec<crate::state::LayoutGroup>,
+        target_groups_before: Vec<crate::state::LayoutGroup>,
+        target_groups_after: Vec<crate::state::LayoutGroup>,
+        source_panels_before: Vec<crate::state::Panel>,
+        source_panels_after: Vec<crate::state::Panel>,
+        target_panels_before: Vec<crate::state::Panel>,
+        target_panels_after: Vec<crate::state::Panel>,
+        source_label_slot_before: u64,
+        source_label_slot_after: u64,
+        target_label_slot_before: u64,
+        target_label_slot_after: u64,
         existing_before: Vec<(ObjectId, ObjectFrame)>,
         existing_after: Vec<(ObjectId, ObjectFrame)>,
         active_before: Option<usize>,
@@ -513,6 +570,7 @@ mod build;
 impl Action {
     pub fn undo_label(&self) -> &'static str {
         match self {
+            Self::ReplacePanelState { .. } => "edit panel structure",
             Self::Composite(actions) => actions
                 .iter()
                 .find(|action| !action.is_noop())
@@ -539,6 +597,7 @@ impl Action {
     fn is_noop(&self) -> bool {
         match self {
             Self::Composite(actions) => actions.iter().all(Self::is_noop),
+            Self::ReplacePanelState { .. } => false,
             Self::UpdateDatasetProcessing { before, after, .. } => before == after,
             Self::SetObjectViewport { before, after, .. } => before == after,
             Self::SetMassSpecStream { before, after, .. } => before == after,

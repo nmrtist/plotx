@@ -153,7 +153,12 @@ fn loading_a_maximum_object_id_reports_exhaustion() {
         },
         "name": "Maximum object id",
         "next_object_id": 1,
+        "next_panel_label_slot": 0,
+        "panel_label_style": "lower_alpha",
         "layout": { "size_mm": [120.0, 80.0] },
+        "panels": [],
+        "loose_item_order": [u64::MAX.to_string()],
+        "groups": [],
         "objects": [{
             "id": u64::MAX.to_string(),
             "name": "Label",
@@ -161,6 +166,7 @@ fn loading_a_maximum_object_id_reports_exhaustion() {
             "next_series_id": 0,
             "series": [],
             "frame": { "x": 0.0, "y": 0.0, "width": 10.0, "height": 10.0 },
+            "parent_panel": {"kind":"loose"},
             "locked": false,
             "visible": true
         }]
@@ -208,7 +214,12 @@ fn loading_a_maximum_series_id_reports_exhaustion() {
         "classification": { "domain": "visualization", "object": "page" },
         "name": "Maximum series id",
         "next_object_id": 2,
+        "next_panel_label_slot": 0,
+        "panel_label_style": "lower_alpha",
         "layout": { "size_mm": [120.0, 80.0] },
+        "panels": [],
+        "loose_item_order": ["1"],
+        "groups": [],
         "objects": [{
             "id": "1",
             "name": "Plot",
@@ -220,6 +231,7 @@ fn loading_a_maximum_series_id_reports_exhaustion() {
                 "encoding": {"kind":"line","spec":{"color":{"explicit":{"r":15,"g":77,"b":146}},"scale":1.0,"width":1.0,"x_shift":0.0}}
             }],
             "frame": { "x": 0.0, "y": 0.0, "width": 100.0, "height": 80.0 },
+            "parent_panel": {"kind":"loose"},
             "locked": false,
             "visible": true
         }]

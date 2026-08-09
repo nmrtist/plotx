@@ -1,4 +1,6 @@
-use super::{Document, DocumentItem, Rect, write_document_object, write_overlay};
+use super::{
+    Document, DocumentItem, Rect, write_document_object, write_overlay, write_panel_letter,
+};
 use std::fmt::Write as _;
 
 /// Render a page document to SVG using page points as the geometry space.
@@ -75,6 +77,20 @@ fn export_document_with_page(
                     write_overlay(&mut s, overlay);
                 }
             }
+            DocumentItem::PanelLabel {
+                frame,
+                text,
+                visible,
+            } => {
+                if *visible {
+                    write_panel_letter(
+                        &mut s,
+                        &text.text,
+                        [frame.left + text.position[0], frame.top + text.position[1]],
+                        text.font_size,
+                    );
+                }
+            }
         }
     }
     let _ = write!(s, "</svg>");
@@ -84,7 +100,7 @@ fn export_document_with_page(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::DocumentObject;
+    use crate::{DocumentObject, DocumentText};
     use plotx_figure::{Axis, AxisFrame, Color, Figure};
 
     #[test]
@@ -121,5 +137,42 @@ mod tests {
             ..matching_doc
         };
         assert!(export_document_for_bounds(&contrasting_doc).contains("fill=\"#010203\""));
+    }
+
+    #[test]
+    fn panel_label_uses_panel_frame_and_escapes_text() {
+        let document = Document {
+            width: 100.0,
+            height: 80.0,
+            background: Color::rgb(255, 255, 255),
+            items: vec![DocumentItem::PanelLabel {
+                frame: Rect::new(10.0, 20.0, 50.0, 40.0),
+                text: DocumentText {
+                    text: "a<&".to_owned(),
+                    position: [3.0, 4.0],
+                    font_size: 9.0,
+                },
+                visible: true,
+            }],
+        };
+
+        let svg = export_document(&document);
+        assert!(svg.contains(r#"x="13.00" y="33.00""#));
+        assert!(svg.contains("a&lt;&amp;"));
+        assert!(!svg.contains("a<&"));
+
+        let hidden = Document {
+            items: vec![DocumentItem::PanelLabel {
+                frame: Rect::new(10.0, 20.0, 50.0, 40.0),
+                text: DocumentText {
+                    text: "HIDDEN_PANEL_LABEL".to_owned(),
+                    position: [3.0, 4.0],
+                    font_size: 9.0,
+                },
+                visible: false,
+            }],
+            ..document
+        };
+        assert!(!export_document(&hidden).contains("HIDDEN_PANEL_LABEL"));
     }
 }

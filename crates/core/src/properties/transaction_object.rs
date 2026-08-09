@@ -232,7 +232,18 @@ impl PropertyTransaction {
         {
             index
         } else {
-            let current = plot(app, canvas, object)?.panel.clone();
+            let page = app.doc.canvases.get(canvas).ok_or_else(|| {
+                crate::properties::PropertyError::UnknownTarget(format!("canvas {canvas}"))
+            })?;
+            let panel = page
+                .parent_panel(object)
+                .and_then(|id| page.panel(id))
+                .ok_or_else(|| {
+                    crate::properties::PropertyError::NotApplicable(
+                        "The plot is not inside a panel.".to_owned(),
+                    )
+                })?;
+            let current = PanelMeta::from_panel(panel);
             self.objects
                 .panels
                 .push((canvas, object, current.clone(), current));

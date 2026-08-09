@@ -10,6 +10,17 @@ pub use validate::ActionApplyError;
 use validate::{ValidationShape, validate_action};
 
 impl PlotxApp {
+    fn set_panel_state(&mut self, canvas: usize, state: &PanelState) {
+        if let Some(canvas) = self.doc.canvases.get_mut(canvas) {
+            canvas.objects.clone_from(&state.objects);
+            canvas.panels.clone_from(&state.panels);
+            canvas.groups.clone_from(&state.groups);
+            canvas.next_object_id = state.next_object_id;
+            canvas.next_group_id = state.next_group_id;
+            canvas.next_panel_label_slot = state.next_panel_label_slot;
+        }
+    }
+
     pub fn execute_action(&mut self, action: Action) {
         self.finish_series_presentation_edit();
         self.finish_axis_overrides_edit();
@@ -147,15 +158,13 @@ impl PlotxApp {
         }
     }
     pub fn set_object_frame(&mut self, canvas: usize, object: ObjectId, frame: ObjectFrame) {
-        let Some(o) = self
-            .doc
-            .canvases
-            .get_mut(canvas)
-            .and_then(|canvas| canvas.object_mut(object))
-        else {
+        let Some(page) = self.doc.canvases.get_mut(canvas) else {
             return;
         };
-        o.frame = frame;
+        if !page.set_layout_frame(object, frame) {
+            return;
+        }
+        let Some(o) = page.object(object) else { return };
         if let Some(plot) = o.plot() {
             let owner = plot.display_owner;
             let binding = plot.binding.clone();
@@ -179,11 +188,7 @@ impl PlotxApp {
         let Some(c) = self.doc.canvases.get_mut(canvas) else {
             return;
         };
-        for &(id, group) in groups {
-            if let Some(object) = c.object_mut(id) {
-                object.group = group;
-            }
-        }
+        c.apply_content_group_assignments(groups);
     }
 
     fn reorder_objects_value(&mut self, canvas: usize, order: &[ObjectId]) {
@@ -288,13 +293,34 @@ impl PlotxApp {
         let id = object.id;
         if let Some(c) = self.doc.canvases.get_mut(canvas) {
             c.next_object_id = c.next_object_id.max(id.checked_advance(1));
+            let is_plot = object.plot().is_some();
             c.objects.push(object);
+            if is_plot {
+                c.create_panel_for_plot(id)
+                    .expect("the inserted object was checked as a plot");
+            }
         }
         self.select_object(canvas, id);
     }
 
     pub(super) fn remove_object_value(&mut self, canvas: usize, id: ObjectId) {
         if let Some(c) = self.doc.canvases.get_mut(canvas) {
+            if let Some(panel) = c.parent_panel(id) {
+                let remove_panel = c
+                    .panel(panel)
+                    .is_some_and(|candidate| candidate.item_order.len() == 1);
+                if remove_panel {
+                    c.panels.retain(|candidate| candidate.id != panel);
+                    c.groups.retain_mut(|group| {
+                        group.members.retain(|member| {
+                            !matches!(member, crate::state::GroupMember::Panel(candidate) if *candidate == panel)
+                        });
+                        group.members.len() >= 2
+                    });
+                } else if let Some(panel) = c.panel_mut(panel) {
+                    panel.item_order.retain(|candidate| *candidate != id);
+                }
+            }
             c.objects.retain(|o| o.id != id);
             if c.selected_object == Some(id) {
                 c.selected_object = None;

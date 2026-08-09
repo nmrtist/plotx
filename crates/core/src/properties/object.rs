@@ -3,6 +3,7 @@
 use super::provider::PropertyProvider;
 use super::target::{require_object_target, resolved_schema, series_context_unchecked};
 use super::*;
+use crate::state::ObjectId;
 use crate::state::{
     DataDomain, FieldCapabilities, ObjectStyle, PlotObject, PlotxApp, ShapeKind, StackKind,
     StackMode, TextAlign, default_chart_type,
@@ -209,13 +210,23 @@ fn object_value(
         }
         _ => {
             let (plot, _, domain, capabilities) = plot_context(app, canvas, object)?;
-            plot_value(app, definition, plot, domain, capabilities)
+            plot_value(
+                app,
+                canvas,
+                object.id,
+                definition,
+                plot,
+                domain,
+                capabilities,
+            )
         }
     }
 }
 
 fn plot_value(
     app: &PlotxApp,
+    canvas: usize,
+    object: ObjectId,
     definition: &'static PropertyDefinition,
     plot: &PlotObject,
     domain: DataDomain,
@@ -306,9 +317,20 @@ fn plot_value(
         }
         PANEL_USER_NOTE | PANEL_VISIBLE => Ok((
             if definition.id == PANEL_USER_NOTE {
-                PropertyValue::Text(plot.panel.user_note.clone())
+                PropertyValue::Text(
+                    app.doc.canvases[canvas]
+                        .parent_panel(object)
+                        .and_then(|id| app.doc.canvases[canvas].panel(id))
+                        .map(|panel| panel.note.clone())
+                        .unwrap_or_default(),
+                )
             } else {
-                PropertyValue::Bool(plot.panel.visible)
+                PropertyValue::Bool(
+                    app.doc.canvases[canvas]
+                        .parent_panel(object)
+                        .and_then(|id| app.doc.canvases[canvas].panel(id))
+                        .is_some_and(|panel| panel.label.visible),
+                )
             },
             fixed,
             None,

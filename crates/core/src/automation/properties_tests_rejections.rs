@@ -73,7 +73,6 @@ fn an_object_without_components_is_skipped_by_the_shared_gate() {
         frame: ObjectFrame::new(0.0, 0.0, 20.0, 10.0),
         locked: false,
         visible: true,
-        group: None,
         kind: CanvasObjectKind::Text(TextBox::label("hello".to_owned())),
     });
     let text_id = format!("{}/{id}", app.doc.canvases[0].resource_id);

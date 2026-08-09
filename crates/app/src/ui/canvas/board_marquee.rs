@@ -15,6 +15,7 @@ pub(super) fn handle(app: &mut PlotxApp, rect: egui::Rect, ui: &Ui) -> bool {
         && pressed
         && let Some(point) = hover
         && rect.contains(point)
+        && object_at_screen(app, rect, point).is_none()
         && frame_at(app, rect, point).is_none()
         && frame_header_at(app, rect, point).is_none()
     {

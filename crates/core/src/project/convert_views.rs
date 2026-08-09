@@ -2,7 +2,15 @@ use super::axis_overrides::AxisOverridesDto;
 use super::field_catalog::validate_series_source;
 use super::*;
 use crate::state::SeriesId;
+use crate::state::{AssetId, ImageFit, ImageInterpolation, QuarterTurn, RasterImageContent};
+#[path = "convert_views_panel.rs"]
+mod panel_convert;
 use crate::state::{AxisProjection, AxisProjections, ProjectionSource};
+use crate::state::{
+    GroupMember, LayoutGroup, Panel, PanelId, PanelLabelMode, PanelLabelSpec, PanelLayout,
+};
+use panel_convert::*;
+
 fn projections_to_dto(p: &AxisProjections, datasets: &[Dataset]) -> Result<Option<ProjectionsDto>> {
     if p.is_empty() {
         return Ok(None);
@@ -107,15 +115,17 @@ pub fn canvas_to_view(
                 stack: None,
                 projections: None,
                 frame: FrameDto::from_frame(object.frame),
+                parent_panel: canvas
+                    .parent_panel(object.id)
+                    .map(|id| ParentPanelDto::Panel { id: id.to_string() })
+                    .unwrap_or(ParentPanelDto::Loose),
                 viewport: None,
                 axis_overrides: None,
-                panel: None,
-                title: None,
                 text: None,
                 shape: None,
+                image: None,
                 locked: object.locked,
                 visible: object.visible,
-                group: object.group,
                 snapshot: None,
             };
             match &object.kind {
@@ -217,7 +227,6 @@ pub fn canvas_to_view(
                         projections: projections_to_dto(&plot.projections, datasets)?,
                         viewport: Some(ViewportDto::from_viewport(&plot.viewport)),
                         axis_overrides: AxisOverridesDto::from_overrides(&plot.axis_overrides),
-                        panel: Some(PanelDto::from_panel(&plot.panel)),
                         ..base(kind)
                     })
                 }
@@ -225,13 +234,36 @@ pub fn canvas_to_view(
                     text: Some(TextBoxDto::from_text_box(t)),
                     ..base("text")
                 }),
-                CanvasObjectKind::PanelLabel(t) => Ok(ViewCanvasObject {
-                    text: Some(TextBoxDto::from_text_box(t)),
-                    ..base("panel_label")
-                }),
                 CanvasObjectKind::Shape(s) => Ok(ViewCanvasObject {
                     shape: Some(ShapeDto::from_shape(s)),
                     ..base("shape")
+                }),
+                CanvasObjectKind::RasterImage(image) => Ok(ViewCanvasObject {
+                    image: Some(RasterImageDto {
+                        asset: image.asset.to_string(),
+                        crop: image.crop,
+                        fit: match image.fit {
+                            ImageFit::Contain => "contain",
+                            ImageFit::Cover => "cover",
+                            ImageFit::Stretch => "stretch",
+                        }
+                        .to_owned(),
+                        rotation: match image.rotation {
+                            QuarterTurn::Zero => 0,
+                            QuarterTurn::Clockwise90 => 90,
+                            QuarterTurn::Clockwise180 => 180,
+                            QuarterTurn::Clockwise270 => 270,
+                        },
+                        opacity: image.opacity,
+                        interpolation: match image.interpolation {
+                            ImageInterpolation::Auto => "auto",
+                            ImageInterpolation::Nearest => "nearest",
+                            ImageInterpolation::Linear => "linear",
+                        }
+                        .to_owned(),
+                        preserve_aspect: image.preserve_aspect,
+                    }),
+                    ..base("raster_image")
                 }),
             }
         })
@@ -251,9 +283,18 @@ pub fn canvas_to_view(
             .collect(),
         name: canvas.name.clone(),
         next_object_id: canvas.next_object_id.get(),
+        next_panel_label_slot: canvas.next_panel_label_slot,
         caption: canvas.caption.clone(),
         caption_visible: canvas.caption_visible,
-        panel_label_style: Some(canvas.panel_label_style.as_key().to_owned()),
+        panel_label_style: canvas.panel_label_style.as_key().to_owned(),
+        panels: canvas.panels.iter().map(panel_to_dto).collect(),
+        loose_item_order: canvas
+            .objects
+            .iter()
+            .filter(|item| canvas.parent_panel(item.id).is_none())
+            .map(|item| item.id.to_string())
+            .collect(),
+        groups: canvas.groups.iter().map(group_to_dto).collect(),
         layout: ViewLayout {
             size_mm: canvas.size_mm,
             size_preset: canvas.size_preset_id.clone(),
@@ -271,6 +312,7 @@ pub fn canvas_to_view(
         snapshot: None,
     })
 }
+
 pub fn view_to_canvas(
     app: &mut PlotxApp,
     zip: &mut zip::ZipArchive<File>,
@@ -288,11 +330,13 @@ pub fn view_to_canvas(
         .unwrap_or_else(|| crate::state::default_board_layout(index));
     canvas.caption = view.caption.clone();
     canvas.caption_visible = view.caption_visible;
-    canvas.panel_label_style = view
-        .panel_label_style
-        .as_deref()
-        .map(crate::state::PanelLabelStyle::from_key)
-        .unwrap_or_default();
+    canvas.panel_label_style = crate::state::PanelLabelStyle::try_from_key(&view.panel_label_style)
+        .ok_or_else(|| {
+            ProjectError::Invalid(format!(
+                "unknown panel label style {}",
+                view.panel_label_style
+            ))
+        })?;
     canvas.layout = view
         .layout
         .grid
@@ -302,7 +346,7 @@ pub fn view_to_canvas(
         canvas.background = plotx_figure::Color::rgb(r, g, b);
     }
     let mut max_id = 0;
-    let mut max_group = 0;
+    let mut declared_parents = std::collections::BTreeMap::new();
     for view_object in &view.objects {
         let object_id = view_object
             .id
@@ -311,7 +355,6 @@ pub fn view_to_canvas(
         let frame = view_object.frame.into_frame();
         let mut kind = match view_object.kind.as_str() {
             "text" => CanvasObjectKind::Text(text_box_from(view_object, false)),
-            "panel_label" => CanvasObjectKind::PanelLabel(text_box_from(view_object, true)),
             "shape" => CanvasObjectKind::Shape(
                 view_object
                     .shape
@@ -319,6 +362,53 @@ pub fn view_to_canvas(
                     .map(ShapeDto::into_shape)
                     .unwrap_or_else(|| ShapeObject::new(ShapeKind::Rect)),
             ),
+            "raster_image" => {
+                let image = view_object.image.as_ref().ok_or_else(|| {
+                    ProjectError::Invalid(format!(
+                        "view {view_id} raster content {} has no image parameters",
+                        view_object.id
+                    ))
+                })?;
+                CanvasObjectKind::RasterImage(RasterImageContent {
+                    asset: image.asset.parse::<AssetId>().map_err(|_| {
+                        ProjectError::Invalid(format!("invalid asset id {}", image.asset))
+                    })?,
+                    crop: image.crop,
+                    fit: match image.fit.as_str() {
+                        "contain" => ImageFit::Contain,
+                        "cover" => ImageFit::Cover,
+                        "stretch" => ImageFit::Stretch,
+                        other => {
+                            return Err(ProjectError::Invalid(format!(
+                                "unknown image fit {other}"
+                            )));
+                        }
+                    },
+                    rotation: match image.rotation {
+                        0 => QuarterTurn::Zero,
+                        90 => QuarterTurn::Clockwise90,
+                        180 => QuarterTurn::Clockwise180,
+                        270 => QuarterTurn::Clockwise270,
+                        other => {
+                            return Err(ProjectError::Invalid(format!(
+                                "invalid image rotation {other}"
+                            )));
+                        }
+                    },
+                    opacity: image.opacity,
+                    interpolation: match image.interpolation.as_str() {
+                        "auto" => ImageInterpolation::Auto,
+                        "nearest" => ImageInterpolation::Nearest,
+                        "linear" => ImageInterpolation::Linear,
+                        other => {
+                            return Err(ProjectError::Invalid(format!(
+                                "unknown image interpolation {other}"
+                            )));
+                        }
+                    },
+                    preserve_aspect: image.preserve_aspect,
+                })
+            }
             "line_plot" | "contour_plot" | "stack_plot" | "plot" => {
                 let resolve = |input: &str| {
                     recipe_to_dataset.get(input).copied().ok_or_else(|| {
@@ -497,12 +587,6 @@ pub fn view_to_canvas(
                     viewport.apply_to(&mut figure);
                 }
                 figure.title.clear();
-                let panel = view_object
-                    .panel
-                    .clone()
-                    .or_else(|| view_object.title.clone())
-                    .map(PanelDto::into_panel)
-                    .unwrap_or_else(|| PanelMeta::new(app.default_plot_title(di), frame.width));
                 CanvasObjectKind::Plot(Box::new(PlotObject::from_materialized_figure(
                     display_owner,
                     SeriesId::new(view_object.next_series_id),
@@ -514,10 +598,14 @@ pub fn view_to_canvas(
                     derived_axes,
                     figure,
                     viewport,
-                    panel,
+                    PanelMeta::new(app.default_plot_title(di), frame.width),
                 )))
             }
-            _ => continue,
+            other => {
+                return Err(ProjectError::Invalid(format!(
+                    "view {view_id} has unknown content kind {other}"
+                )));
+            }
         };
         if let CanvasObjectKind::Plot(plot) = &mut kind {
             plot.repair_series_allocator().ok_or_else(|| {
@@ -533,17 +621,95 @@ pub fn view_to_canvas(
             frame,
             locked: view_object.locked,
             visible: view_object.visible,
-            group: view_object.group,
             kind,
         });
+        let parent = match &view_object.parent_panel {
+            ParentPanelDto::Loose => None,
+            ParentPanelDto::Panel { id } => Some(id.parse::<PanelId>().map_err(|_| {
+                ProjectError::Invalid(format!(
+                    "invalid parent panel id for content {}",
+                    view_object.id
+                ))
+            })?),
+        };
+        if declared_parents.insert(object_id, parent).is_some() {
+            return Err(ProjectError::Invalid(format!(
+                "duplicate content id {}",
+                view_object.id
+            )));
+        }
         max_id = max_id.max(object_id.get());
-        max_group = max_group.max(view_object.group.unwrap_or(0));
     }
     let repaired_next = ObjectId::new(max_id)
         .try_advance(1)
         .ok_or_else(|| ProjectError::Invalid("object id space exhausted".to_owned()))?;
     canvas.next_object_id = ObjectId::new(view.next_object_id).max(repaired_next);
-    canvas.next_group_id = max_group + 1;
+    canvas.panels = view
+        .panels
+        .iter()
+        .map(panel_from_dto)
+        .collect::<Result<Vec<_>>>()?;
+    canvas.groups = view
+        .groups
+        .iter()
+        .map(group_from_dto)
+        .collect::<Result<Vec<_>>>()?;
+    canvas.next_group_id = canvas
+        .groups
+        .iter()
+        .map(|group| group.id)
+        .max()
+        .unwrap_or(0)
+        .saturating_add(1);
+    let loose: Vec<ObjectId> = view
+        .loose_item_order
+        .iter()
+        .map(|id| {
+            id.parse::<ObjectId>()
+                .map_err(|_| ProjectError::Invalid(format!("invalid loose content id {id}")))
+        })
+        .collect::<Result<_>>()?;
+    let mut seen_loose = std::collections::BTreeSet::new();
+    for id in &loose {
+        if !seen_loose.insert(*id) || canvas.object(*id).is_none() {
+            return Err(ProjectError::Invalid(format!(
+                "invalid or duplicate loose content id {id}"
+            )));
+        }
+    }
+    for item in &canvas.objects {
+        let actual = canvas.parent_panel(item.id);
+        let declared = declared_parents.get(&item.id).copied().flatten();
+        if actual != declared {
+            return Err(ProjectError::Invalid(format!(
+                "content {} parent does not match panel order",
+                item.id
+            )));
+        }
+        if actual.is_none() != seen_loose.contains(&item.id) {
+            return Err(ProjectError::Invalid(format!(
+                "content {} loose order is inconsistent",
+                item.id
+            )));
+        }
+    }
+    let minimum_label_slot = canvas
+        .panels
+        .iter()
+        .filter_map(|panel| match panel.label.mode {
+            PanelLabelMode::Auto { slot } => slot.checked_add(1),
+            _ => None,
+        })
+        .max()
+        .unwrap_or(0);
+    if view.next_panel_label_slot < minimum_label_slot {
+        return Err(ProjectError::Invalid(format!(
+            "next panel label slot {} does not exceed allocated auto slots",
+            view.next_panel_label_slot
+        )));
+    }
+    canvas.next_panel_label_slot = view.next_panel_label_slot;
+    canvas.validate_structure().map_err(ProjectError::Invalid)?;
     Ok(canvas)
 }
 fn text_box_from(view_object: &ViewCanvasObject, panel: bool) -> TextBox {

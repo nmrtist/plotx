@@ -1,4 +1,5 @@
 use super::*;
+use crate::DocumentText;
 use plotx_figure::{Axis, ErrorBar, Figure, Series};
 
 fn demo_document(fig: &Figure) -> Document<'_> {
@@ -81,4 +82,44 @@ fn hidden_axis_text_is_absent_from_emf_while_drawing_records_remain() {
         bytes.len() > 88,
         "EMF still contains axis and tick drawing records"
     );
+}
+
+#[test]
+fn panel_label_visibility_controls_emf_text() {
+    let contains_utf16 = |bytes: &[u8], needle: &str| {
+        let encoded: Vec<u8> = needle.encode_utf16().flat_map(u16::to_le_bytes).collect();
+        bytes.windows(encoded.len()).any(|window| window == encoded)
+    };
+    let label = "PANEL_LABEL_Ω";
+    let document = Document {
+        width: 100.0,
+        height: 80.0,
+        background: Color::rgb(255, 255, 255),
+        items: vec![DocumentItem::PanelLabel {
+            frame: Rect::new(10.0, 20.0, 50.0, 40.0),
+            text: DocumentText {
+                text: label.to_owned(),
+                position: [3.0, 4.0],
+                font_size: 9.0,
+            },
+            visible: true,
+        }],
+    };
+    let visible = export_document_emf(&document).expect("visible label export");
+    assert!(contains_utf16(&visible, label));
+
+    let hidden = Document {
+        items: vec![DocumentItem::PanelLabel {
+            frame: Rect::new(10.0, 20.0, 50.0, 40.0),
+            text: DocumentText {
+                text: label.to_owned(),
+                position: [3.0, 4.0],
+                font_size: 9.0,
+            },
+            visible: false,
+        }],
+        ..document
+    };
+    let hidden = export_document_emf(&hidden).expect("hidden label export");
+    assert!(!contains_utf16(&hidden, label));
 }

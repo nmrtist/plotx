@@ -60,6 +60,11 @@ pub struct Document<'a> {
 pub enum DocumentItem<'a> {
     Plot(DocumentObject<'a>),
     Overlay(DocumentOverlay<'a>),
+    PanelLabel {
+        frame: Rect,
+        text: DocumentText,
+        visible: bool,
+    },
 }
 
 pub struct DocumentObject<'a> {

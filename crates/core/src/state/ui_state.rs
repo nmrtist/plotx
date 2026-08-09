@@ -576,6 +576,7 @@ impl Default for UiState {
 pub struct Document {
     pub datasets: Vec<Dataset>,
     pub canvases: Vec<CanvasDocument>,
+    pub assets: std::collections::BTreeMap<AssetId, AssetRecord>,
     /// Per-kind default styles fed to the authoring create-tools.
     pub style_library: StyleLibrary,
     pub project_path: Option<std::path::PathBuf>,

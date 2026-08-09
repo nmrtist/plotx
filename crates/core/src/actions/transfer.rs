@@ -1,4 +1,5 @@
 use super::*;
+use crate::state::{GroupMember, LayoutGroup, PanelId, PanelLabelMode};
 
 impl Action {
     /// Build a move/copy of `ids` (each expanded to its whole group) from canvas
@@ -38,36 +39,134 @@ impl Action {
             return None;
         }
 
-        let mut next_group = dst.next_group_id;
-        let mut group_map: Vec<(crate::state::GroupId, crate::state::GroupId)> = Vec::new();
         let mut inserted = Vec::with_capacity(picked.len());
         let mut removed = Vec::with_capacity(picked.len());
         for (offset, &(slot, object)) in picked.iter().enumerate() {
             let mut clone = object.clone();
             clone.id = dst.next_object_id.checked_advance(offset as u64);
-            if let Some(g) = clone.group {
-                let mapped = match group_map.iter().find(|(old, _)| *old == g) {
-                    Some(&(_, new)) => new,
-                    None => {
-                        let new = next_group;
-                        next_group += 1;
-                        group_map.push((g, new));
-                        new
-                    }
-                };
-                clone.group = Some(mapped);
-            }
+            clone.frame = src.content_page_frame(object.id)?;
             inserted.push(clone);
             if is_move {
                 removed.push((slot, object.clone()));
             }
         }
+        let id_map: std::collections::BTreeMap<_, _> = picked
+            .iter()
+            .zip(&inserted)
+            .map(|((_, source), target)| (source.id, target.id))
+            .collect();
+        let source_groups_before = src.groups.clone();
+        let mut source_groups_after = source_groups_before.clone();
+        if is_move {
+            source_groups_after.iter_mut().for_each(|group| {
+                group.members.retain(
+                    |member| !matches!(member, GroupMember::Content(id) if id_map.contains_key(id)),
+                );
+            });
+            source_groups_after.retain(|group| group.members.len() >= 2);
+        }
+        let target_groups_before = dst.groups.clone();
+        let mut target_groups_after = target_groups_before.clone();
+        let mut next_group = dst.next_group_id;
+        for group in &src.groups {
+            let members: Vec<_> = group
+                .members
+                .iter()
+                .filter_map(|member| match member {
+                    GroupMember::Content(id) => id_map.get(id).copied().map(GroupMember::Content),
+                    GroupMember::Panel(_) => None,
+                })
+                .collect();
+            if members.len() >= 2 {
+                target_groups_after.push(LayoutGroup {
+                    id: next_group,
+                    members,
+                });
+                next_group += 1;
+            }
+        }
+
+        let source_panels_before = src.panels.clone();
+        let mut source_panels_after = source_panels_before.clone();
+        if is_move {
+            source_panels_after.iter_mut().for_each(|panel| {
+                panel.item_order.retain(|id| !id_map.contains_key(id));
+            });
+            source_panels_after.retain(|panel| !panel.item_order.is_empty());
+            source_groups_after.iter_mut().for_each(|group| {
+                group.members.retain(|member| match member {
+                    GroupMember::Panel(id) => {
+                        source_panels_after.iter().any(|panel| panel.id == *id)
+                    }
+                    GroupMember::Content(_) => true,
+                });
+            });
+            source_groups_after.retain(|group| group.members.len() >= 2);
+        }
+        let target_panels_before = dst.panels.clone();
+        let mut target_page = dst.clone();
+        target_page.objects.extend(inserted.iter().cloned());
+        target_page.next_object_id = target_page
+            .next_object_id
+            .max(dst.next_object_id.checked_advance(inserted.len() as u64));
+        for source_panel in src.panels.iter().filter(|panel| {
+            !panel.item_order.is_empty()
+                && panel.item_order.iter().all(|id| id_map.contains_key(id))
+        }) {
+            let mut panel = source_panel.clone();
+            panel.id = if is_move { panel.id } else { PanelId::new() };
+            panel.item_order = source_panel
+                .item_order
+                .iter()
+                .filter_map(|id| id_map.get(id).copied())
+                .collect();
+            if matches!(panel.label.mode, PanelLabelMode::Auto { .. }) {
+                let slot = if is_move {
+                    first_free_auto_slot(&target_page.panels)
+                } else {
+                    let slot = target_page.next_panel_label_slot;
+                    target_page.next_panel_label_slot = slot.saturating_add(1);
+                    slot
+                };
+                panel.label.mode = PanelLabelMode::Auto { slot };
+                target_page.next_panel_label_slot = target_page
+                    .next_panel_label_slot
+                    .max(slot.saturating_add(1));
+            }
+            for &source_id in &source_panel.item_order {
+                let target_id = *id_map.get(&source_id)?;
+                target_page.object_mut(target_id)?.frame = src.object(source_id)?.frame;
+            }
+            target_page.panels.push(panel);
+        }
+        for object in &inserted {
+            if object.plot().is_some() && target_page.parent_panel(object.id).is_none() {
+                target_page.create_panel_for_plot(object.id)?;
+            }
+        }
+        for object in &mut inserted {
+            *object = target_page.object(object.id)?.clone();
+        }
+        let target_label_slot_after = target_page.next_panel_label_slot;
+        let target_panels_after = target_page.panels;
 
         Some(Self::TransferObjects {
             from,
             to,
             removed,
             inserted,
+            source_groups_before,
+            source_groups_after,
+            target_groups_before,
+            target_groups_after,
+            source_panels_before,
+            source_panels_after,
+            target_panels_before,
+            target_panels_after,
+            source_label_slot_before: src.next_panel_label_slot,
+            source_label_slot_after: src.next_panel_label_slot,
+            target_label_slot_before: dst.next_panel_label_slot,
+            target_label_slot_after,
             active_before: app.session.active_canvas,
             selection_before: app.session.ui.selection.clone(),
         })
@@ -92,17 +191,43 @@ impl Action {
             mut inserted,
             active_before,
             selection_before,
+            source_groups_before,
+            source_groups_after,
+            target_groups_before,
+            target_groups_after,
+            source_panels_before,
+            source_panels_after,
+            target_panels_before,
+            mut target_panels_after,
+            source_label_slot_before,
+            source_label_slot_after,
+            target_label_slot_before,
+            target_label_slot_after,
             ..
         } = Action::transfer_objects(app, from, &[object], to, true)?
         else {
             return None;
         };
-        inserted.first_mut()?.frame = newcomer_frame;
+        inserted.first_mut()?.frame =
+            crate::state::ObjectFrame::new(0.0, 0.0, newcomer_frame.width, newcomer_frame.height);
+        let newcomer_id = inserted.first()?.id;
+        let newcomer_panel = target_panels_after
+            .iter_mut()
+            .find(|panel| panel.item_order.contains(&newcomer_id))?;
+        newcomer_panel.frame = newcomer_frame;
+        for &(content, frame) in &existing_after {
+            if let Some(panel) = target_panels_after
+                .iter_mut()
+                .find(|panel| panel.item_order.contains(&content))
+            {
+                panel.frame = frame;
+            }
+        }
         let src = app.doc.canvases.get(from)?;
         let dst = app.doc.canvases.get(to)?;
         let existing_before = existing_after
             .iter()
-            .filter_map(|&(id, _)| dst.object(id).map(|o| (id, o.frame)))
+            .filter_map(|&(id, _)| dst.layout_frame(id).map(|frame| (id, frame)))
             .collect();
         let source_will_be_empty = src.objects.len() == removed.len();
         let source_canvas_before =
@@ -119,12 +244,35 @@ impl Action {
             source_canvas_before,
             removed,
             inserted,
+            source_groups_before,
+            source_groups_after,
+            target_groups_before,
+            target_groups_after,
+            source_panels_before,
+            source_panels_after,
+            target_panels_before,
+            target_panels_after,
+            source_label_slot_before,
+            source_label_slot_after,
+            target_label_slot_before,
+            target_label_slot_after,
             existing_before,
             existing_after,
             active_before,
             selection_before,
         })
     }
+}
+
+fn first_free_auto_slot(panels: &[crate::state::Panel]) -> u64 {
+    let used: std::collections::BTreeSet<_> = panels
+        .iter()
+        .filter_map(|panel| match panel.label.mode {
+            PanelLabelMode::Auto { slot } => Some(slot),
+            PanelLabelMode::LockedAuto { .. } | PanelLabelMode::Manual { .. } => None,
+        })
+        .collect();
+    (0..).find(|slot| !used.contains(slot)).unwrap_or(u64::MAX)
 }
 
 impl PlotxApp {
@@ -161,6 +309,12 @@ impl PlotxApp {
             to,
             removed,
             inserted,
+            source_groups_after,
+            target_groups_after,
+            source_panels_after,
+            target_panels_after,
+            source_label_slot_after,
+            target_label_slot_after,
             ..
         } = action
         else {
@@ -174,12 +328,18 @@ impl PlotxApp {
         if let Some(dst) = self.doc.canvases.get_mut(to) {
             for object in inserted {
                 dst.next_object_id = dst.next_object_id.max(object.id.checked_advance(1));
-                if let Some(group) = object.group {
-                    dst.next_group_id = dst.next_group_id.max(group + 1);
-                }
                 dst.objects.push(object.clone());
             }
+            dst.groups = target_groups_after.clone();
+            dst.panels = target_panels_after.clone();
+            dst.next_panel_label_slot = *target_label_slot_after;
+            dst.next_group_id = dst.groups.iter().map(|group| group.id).max().unwrap_or(0) + 1;
             dst.selected_object = ids.first().copied();
+        }
+        if let Some(src) = self.doc.canvases.get_mut(from) {
+            src.groups = source_groups_after.clone();
+            src.panels = source_panels_after.clone();
+            src.next_panel_label_slot = *source_label_slot_after;
         }
         self.session.active_canvas = Some(to);
         self.session.ui.selection = Selection::Objects(ids);
@@ -204,8 +364,15 @@ impl PlotxApp {
             to,
             removed,
             inserted,
+            source_groups_before,
+            target_groups_before,
+            source_panels_before,
+            target_panels_before,
+            source_label_slot_before,
+            target_label_slot_before,
             active_before,
             selection_before,
+            ..
         } = action
         else {
             return;
@@ -218,6 +385,9 @@ impl PlotxApp {
                     dst.selected_object = None;
                 }
             }
+            dst.groups = target_groups_before.clone();
+            dst.panels = target_panels_before.clone();
+            dst.next_panel_label_slot = *target_label_slot_before;
         }
         if let Some(src) = self.doc.canvases.get_mut(from) {
             // Ascending slot order keeps each re-inserted object at its original
@@ -227,6 +397,9 @@ impl PlotxApp {
                 src.next_object_id = src.next_object_id.max(object.id.checked_advance(1));
                 src.objects.insert(at, object.clone());
             }
+            src.groups = source_groups_before.clone();
+            src.panels = source_panels_before.clone();
+            src.next_panel_label_slot = *source_label_slot_before;
         }
         self.session.active_canvas = active_before;
         let active = active_before
@@ -250,6 +423,12 @@ impl PlotxApp {
             source_canvas_before,
             removed,
             inserted,
+            source_groups_after,
+            target_groups_after,
+            source_panels_after,
+            target_panels_after,
+            source_label_slot_after,
+            target_label_slot_after,
             existing_after,
             ..
         } = action
@@ -273,23 +452,23 @@ impl PlotxApp {
         if let Some(dst) = self.doc.canvases.get_mut(to) {
             for object in inserted {
                 dst.next_object_id = dst.next_object_id.max(object.id.checked_advance(1));
-                if let Some(group) = object.group {
-                    dst.next_group_id = dst.next_group_id.max(group + 1);
-                }
                 dst.objects.push(object.clone());
             }
+            dst.groups = target_groups_after.clone();
+            dst.panels = target_panels_after.clone();
+            dst.next_panel_label_slot = *target_label_slot_after;
+            dst.next_group_id = dst.groups.iter().map(|group| group.id).max().unwrap_or(0) + 1;
             dst.selected_object = ids.first().copied();
+        }
+        if let Some(src) = self.doc.canvases.get_mut(from) {
+            src.groups = source_groups_after.clone();
+            src.panels = source_panels_after.clone();
+            src.next_panel_label_slot = *source_label_slot_after;
         }
         // The clones' figures were built for the source frame; rebuild at the
         // landing size now that they sit in the target's layout.
         for &id in &ids {
-            if let Some(frame) = self
-                .doc
-                .canvases
-                .get(to)
-                .and_then(|c| c.object(id))
-                .map(|o| o.frame)
-            {
+            if let Some(frame) = self.doc.canvases.get(to).and_then(|c| c.layout_frame(id)) {
                 self.set_object_frame(to, id, frame);
             }
         }
@@ -321,6 +500,12 @@ impl PlotxApp {
             source_canvas_before,
             removed,
             inserted,
+            source_groups_before,
+            target_groups_before,
+            source_panels_before,
+            target_panels_before,
+            source_label_slot_before,
+            target_label_slot_before,
             existing_before,
             active_before,
             selection_before,
@@ -350,9 +535,14 @@ impl PlotxApp {
                     dst.selected_object = None;
                 }
             }
+            dst.groups = target_groups_before.clone();
         }
         for &(id, frame) in existing_before {
             self.set_object_frame(current_target, id, frame);
+        }
+        if let Some(dst) = self.doc.canvases.get_mut(current_target) {
+            dst.panels = target_panels_before.clone();
+            dst.next_panel_label_slot = *target_label_slot_before;
         }
         if source_canvas_before.is_none()
             && let Some(src) = self.doc.canvases.get_mut(from)
@@ -362,6 +552,9 @@ impl PlotxApp {
                 src.next_object_id = src.next_object_id.max(object.id.checked_advance(1));
                 src.objects.insert(at, object.clone());
             }
+            src.groups = source_groups_before.clone();
+            src.panels = source_panels_before.clone();
+            src.next_panel_label_slot = *source_label_slot_before;
         }
         self.session.active_canvas = active_before;
         let active = active_before
@@ -452,9 +645,13 @@ mod tests {
         let a = app.doc.canvases[0].objects[0].id;
         let _b = push_text_object(&mut app, 0, "b");
         let group = app.doc.canvases[0].allocate_group_id();
-        for id in [a, _b] {
-            app.doc.canvases[0].object_mut(id).unwrap().group = Some(group);
-        }
+        app.doc.canvases[0].groups.push(crate::state::LayoutGroup {
+            id: group,
+            members: vec![
+                crate::state::GroupMember::Content(a),
+                crate::state::GroupMember::Content(_b),
+            ],
+        });
         // Give canvas 1 its own group id space so a collision would be visible.
         app.doc.canvases[1].next_group_id = 1;
 
@@ -462,16 +659,12 @@ mod tests {
         assert!(app.doc.canvases[0].objects.is_empty());
         assert_eq!(app.doc.canvases[1].objects.len(), 3);
 
-        let moved: Vec<_> = app.doc.canvases[1].objects[1..]
-            .iter()
-            .map(|o| o.group)
-            .collect();
-        assert!(moved[0].is_some());
-        assert_eq!(moved[0], moved[1]);
+        let moved = &app.doc.canvases[1].groups[0].members;
+        assert_eq!(moved.len(), 2);
 
         app.undo();
         assert_eq!(app.doc.canvases[0].objects.len(), 2);
-        assert_eq!(app.doc.canvases[0].object(a).unwrap().group, Some(group));
+        assert_eq!(app.doc.canvases[0].content_group(a), Some(group));
         assert_eq!(app.doc.canvases[1].objects.len(), 1);
     }
 

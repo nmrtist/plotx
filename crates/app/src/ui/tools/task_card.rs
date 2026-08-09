@@ -125,7 +125,11 @@ pub(super) fn area(host: &Ui, id: Id, pos: Pos2) -> Area {
     if let Some(stored) = stored {
         area.current_pos(stored)
     } else {
-        area.default_pos(pos)
+        // `default_pos` only applies when egui first creates the Area. The
+        // central workspace can move when sidebars or workflow chrome change,
+        // so an untouched task card must be re-anchored to the current host on
+        // every frame. A user drag stores an explicit position above.
+        area.current_pos(pos)
     }
 }
 

@@ -72,7 +72,6 @@ fn continuous_text_box_input_commits_one_undo_record() {
         frame: ObjectFrame::new(0.0, 0.0, 40.0, 20.0),
         locked: false,
         visible: true,
-        group: None,
         kind: CanvasObjectKind::Text(TextBox::label(String::new())),
     });
     app.doc.canvases.push(canvas);

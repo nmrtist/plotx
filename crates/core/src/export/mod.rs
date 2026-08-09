@@ -526,7 +526,6 @@ mod tests {
             frame,
             locked: false,
             visible: true,
-            group: None,
             kind: CanvasObjectKind::Shape(ShapeObject::new(ShapeKind::Rect)),
         });
         canvas

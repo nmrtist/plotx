@@ -39,6 +39,41 @@ pub(super) fn validate_action(
     shape: &mut ValidationShape,
 ) -> Result<(), ActionApplyError> {
     match action {
+        Action::ReplacePanelState {
+            canvas,
+            before,
+            after,
+        } => {
+            if *canvas >= shape.canvases {
+                return Err(ActionApplyError::StaleTarget(format!("canvas {canvas}")));
+            }
+            for (label, state) in [("before", before), ("after", after)] {
+                crate::state::validate_panel_structure(
+                    &state.panels,
+                    state.objects.iter().map(|item| item.id),
+                    &state.groups,
+                )
+                .map_err(|error| {
+                    ActionApplyError::InvalidValue(format!("{label} panel state: {error}"))
+                })?;
+                for item in &state.objects {
+                    crate::state::validate_frame(item.frame, "content")
+                        .map_err(ActionApplyError::InvalidValue)?;
+                }
+            }
+        }
+        Action::SetObjectGroups { canvas, after, .. } => {
+            let Some(mut projected) = app.doc.canvases.get(*canvas).cloned() else {
+                return Err(ActionApplyError::StaleTarget(format!("canvas {canvas}")));
+            };
+            if after.iter().any(|(id, _)| projected.object(*id).is_none()) {
+                return Err(ActionApplyError::StaleTarget("group content".to_owned()));
+            }
+            projected.apply_content_group_assignments(after);
+            projected
+                .validate_structure()
+                .map_err(ActionApplyError::InvalidValue)?;
+        }
         Action::Composite(actions) => {
             for child in actions {
                 validate_action(app, child, shape)?;

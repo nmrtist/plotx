@@ -104,7 +104,7 @@ pub(super) fn note_inspector_edit(app: &mut PlotxApp, ci: usize, ids: &[ObjectId
     };
     let frames = ids
         .iter()
-        .filter_map(|&id| c.object(id).map(|o| (id, o.frame)))
+        .filter_map(|&id| c.layout_frame(id).map(|frame| (id, frame)))
         .collect();
     app.session.ui.inspector_edit = Some(PendingInspectorEdit { canvas: ci, frames });
 }
@@ -130,11 +130,11 @@ pub(super) fn flush_inspector_edit(app: &mut PlotxApp, ui: &Ui, text_focused: bo
         let mut fb = Vec::new();
         let mut fa = Vec::new();
         for &(id, before) in &edit.frames {
-            if let Some(o) = c.object(id)
-                && o.frame != before
+            if let Some(after) = c.layout_frame(id)
+                && after != before
             {
                 fb.push((id, before));
-                fa.push((id, o.frame));
+                fa.push((id, after));
             }
         }
         (fb, fa)

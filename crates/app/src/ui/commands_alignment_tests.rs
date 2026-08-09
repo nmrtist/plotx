@@ -104,7 +104,6 @@ fn selected_non_plot_never_falls_back_to_an_unrelated_plot() {
         frame: ObjectFrame::new(0.0, 0.0, 120.0, 40.0),
         locked: false,
         visible: true,
-        group: None,
         kind: CanvasObjectKind::Text(TextBox::label("Note".to_owned())),
     });
     app.doc.canvases[0].selected_object = Some(text_id);

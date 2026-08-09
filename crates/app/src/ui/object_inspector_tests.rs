@@ -85,7 +85,6 @@ fn frame_drag_with_mid_gesture_catalog_style_write_keeps_two_independent_undo_re
         frame: ObjectFrame::new(1.0, 2.0, 30.0, 20.0),
         locked: false,
         visible: true,
-        group: None,
         kind: plotx_core::state::CanvasObjectKind::Shape(plotx_core::state::ShapeObject::new(
             plotx_core::state::ShapeKind::Rect,
         )),

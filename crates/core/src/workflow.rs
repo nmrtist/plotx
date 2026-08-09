@@ -410,7 +410,6 @@ pub fn build_plot_object(
         frame,
         locked: false,
         visible: true,
-        group: None,
         kind: CanvasObjectKind::Plot(Box::new(PlotObject::new(
             Some(dataset.resource_id()),
             crate::state::SeriesId::new(binding.series.len() as u64),
@@ -436,9 +435,8 @@ pub fn build_default_canvas(dataset: &Dataset, source: &str) -> CanvasDocument {
     )
 }
 
-/// Build the canonical initial layout for one dataset. GUI insertion, CLI,
-/// automation, and export use this same layout policy; callers supply only the
-/// document-local dataset index and canvas identity.
+/// Build the canonical initial layout used by GUI insertion, CLI, automation,
+/// and export; callers supply only the document-local dataset and canvas identity.
 pub fn build_default_canvas_for_dataset(
     dataset: &Dataset,
     dataset_index: usize,
@@ -477,7 +475,7 @@ pub fn build_default_canvas_for_dataset(
         } else if matches!(dataset, Dataset::MassSpec(_)) {
             "Total Ion Chromatogram".to_owned()
         } else {
-            "Plot 1".to_owned()
+            dataset_title(dataset)
         },
     );
     if let Dataset::MassSpec(mass_spec) = dataset {
@@ -488,8 +486,8 @@ pub fn build_default_canvas_for_dataset(
                 &optical_fields,
                 "mass_chromatogram",
             );
-            if let Some(plot) = first.plot_mut() {
-                plot.panel.user_note = format!(
+            if first.plot().is_some() {
+                first.name = format!(
                     "UV chromatogram{} — {}",
                     if optical_fields.len() == 1 { "" } else { "s" },
                     optical_fields
@@ -499,11 +497,14 @@ pub fn build_default_canvas_for_dataset(
                         .join(", ")
                 );
             }
-        } else if let Some(plot) = first.plot_mut() {
-            plot.panel.user_note = mass_spec.tic_panel_note();
+        } else if first.plot().is_some() {
+            first.name = mass_spec.tic_panel_note();
         }
     }
     canvas.objects.push(first);
+    canvas
+        .create_panel_for_plot(id)
+        .expect("the default object is a plot");
     if has_map_and_force {
         let second_id = canvas.allocate_object_id();
         let mut second = build_plot_object(
@@ -532,6 +533,9 @@ pub fn build_default_canvas_for_dataset(
             plot.adopt_rebuilt_figure(figure);
         }
         canvas.objects.push(second);
+        canvas
+            .create_panel_for_plot(second_id)
+            .expect("the AFM companion object is a plot");
     }
     if let Dataset::MassSpec(mass_spec) = dataset
         && has_uv
@@ -554,7 +558,7 @@ pub fn build_default_canvas_for_dataset(
                 series.source.field = field;
                 series.encoding = plotx_figure::SeriesEncoding::default();
             }
-            plot.panel.user_note = mass_spec.tic_panel_note();
+            second.name = mass_spec.tic_panel_note();
             let figure = build_dataset_figure(
                 dataset,
                 &plot.chart,
@@ -563,6 +567,9 @@ pub fn build_default_canvas_for_dataset(
             plot.adopt_rebuilt_figure(figure);
         }
         canvas.objects.push(second);
+        canvas
+            .create_panel_for_plot(second_id)
+            .expect("the mass spectrum companion object is a plot");
     }
     canvas
 }

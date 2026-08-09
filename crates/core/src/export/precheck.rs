@@ -69,15 +69,21 @@ pub fn page_metrics(canvas: &CanvasDocument) -> PageMetrics {
             continue;
         }
         match &object.kind {
-            CanvasObjectKind::Text(t) | CanvasObjectKind::PanelLabel(t) => {
+            CanvasObjectKind::RasterImage(_) => {}
+            CanvasObjectKind::Text(t) => {
                 if !t.text.trim().is_empty() {
                     fonts.push(t.font_size);
                 }
             }
             CanvasObjectKind::Shape(s) => lines.push(s.stroke_width),
             CanvasObjectKind::Plot(plot) => {
-                if plot.panel.visible {
-                    fonts.push(plot.panel.font_size);
+                if let Some(panel) = canvas
+                    .parent_panel(object.id)
+                    .and_then(|id| canvas.panel(id))
+                    && panel.visible
+                    && panel.label.visible
+                {
+                    fonts.push(panel.label.font_size);
                 }
                 let typography = plot.figure().typography;
                 if plot.figure().axis_frame != AxisFrame::Hidden {
@@ -278,7 +284,6 @@ mod tests {
             frame: ObjectFrame::new(0.0, 0.0, 100.0, 100.0),
             locked: false,
             visible: true,
-            group: None,
             kind: CanvasObjectKind::Plot(Box::new(PlotObject::new(
                 None,
                 crate::state::SeriesId::new(1),
@@ -321,7 +326,6 @@ mod tests {
             frame: ObjectFrame::new(0.0, 0.0, 100.0, 100.0),
             locked: false,
             visible: true,
-            group: None,
             kind: CanvasObjectKind::Plot(Box::new(PlotObject::new(
                 None,
                 crate::state::SeriesId::new(1),
@@ -364,7 +368,6 @@ mod tests {
             frame: ObjectFrame::new(0.0, 0.0, 100.0, 100.0),
             locked: false,
             visible: true,
-            group: None,
             kind: CanvasObjectKind::Plot(Box::new(PlotObject::new(
                 None,
                 crate::state::SeriesId::new(1),

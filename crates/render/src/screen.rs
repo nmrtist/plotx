@@ -542,7 +542,19 @@ pub fn paint_document(
     document: &Document<'_>,
     viewport: DocumentViewport,
 ) {
-    paint_document_with_stats(painter, screen, document, viewport, None);
+    paint_document_impl(painter, screen, document, viewport, true, None);
+}
+
+/// Paint the editable board representation. The page background stays bounded,
+/// while document items may remain visible outside the page so users can
+/// recover and reposition temporarily overflowing content.
+pub fn paint_document_for_editor(
+    painter: &egui::Painter,
+    screen: Rect,
+    document: &Document<'_>,
+    viewport: DocumentViewport,
+) {
+    paint_document_impl(painter, screen, document, viewport, false, None);
 }
 
 pub fn paint_document_with_stats(
@@ -550,6 +562,17 @@ pub fn paint_document_with_stats(
     screen: Rect,
     document: &Document<'_>,
     viewport: DocumentViewport,
+    stats: Option<&mut RenderStats>,
+) {
+    paint_document_impl(painter, screen, document, viewport, true, stats);
+}
+
+fn paint_document_impl(
+    painter: &egui::Painter,
+    screen: Rect,
+    document: &Document<'_>,
+    viewport: DocumentViewport,
+    clip_items_to_page: bool,
     mut stats: Option<&mut RenderStats>,
 ) {
     if let Some(stats) = stats.as_deref_mut() {
@@ -565,18 +588,48 @@ pub fn paint_document_with_stats(
         Pos2::new(page.left, page.top),
         Vec2::new(page.width, page.height),
     );
-    // Page clipping also supplies the board's complete culling bound.
-    let painter = painter.with_clip_rect(page_rect);
-    painter.rect_filled(page_rect, 0.0, col(document.background));
+    let page_painter = painter.with_clip_rect(page_rect);
+    page_painter.rect_filled(page_rect, 0.0, col(document.background));
+    let item_painter = if clip_items_to_page {
+        page_painter
+    } else {
+        painter.clone()
+    };
 
     for item in &document.items {
         match item {
             DocumentItem::Plot(object) => {
-                paint_document_object(&painter, page, object, viewport, stats.as_deref_mut())
+                paint_document_object(&item_painter, page, object, viewport, stats.as_deref_mut())
             }
             DocumentItem::Overlay(overlay) => {
-                paint_document_overlay(&painter, page, overlay, viewport)
+                paint_document_overlay(&item_painter, page, overlay, viewport)
             }
+            DocumentItem::PanelLabel {
+                frame,
+                text,
+                visible,
+            } if *visible => {
+                let pos = Pos2::new(
+                    page.left + (frame.left + text.position[0]) * viewport.zoom,
+                    page.top + (frame.top + text.position[1]) * viewport.zoom,
+                );
+                let font = FontId::proportional((text.font_size * viewport.zoom).max(6.0));
+                item_painter.text(
+                    pos,
+                    Align2::LEFT_TOP,
+                    &text.text,
+                    font.clone(),
+                    col(Color::BLACK),
+                );
+                item_painter.text(
+                    pos + Vec2::new(0.6, 0.0),
+                    Align2::LEFT_TOP,
+                    &text.text,
+                    font,
+                    col(Color::BLACK),
+                );
+            }
+            DocumentItem::PanelLabel { .. } => {}
         }
     }
 }

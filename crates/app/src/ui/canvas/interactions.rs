@@ -358,8 +358,13 @@ pub(crate) fn handle_object_interactions(
                     app.reset_interaction();
                 }
                 app.focus_object_datasets(ci, id);
-                if let Some(object) = app.doc.canvases[ci].object(id).filter(|o| !o.locked) {
-                    let before = object.frame;
+                if app.doc.canvases[ci]
+                    .object(id)
+                    .is_some_and(|object| !object.locked)
+                {
+                    let Some(before) = app.doc.canvases[ci].layout_frame(id) else {
+                        return;
+                    };
                     let start = page_pos.map(|p| [p.x, p.y]).unwrap_or([before.x, before.y]);
                     let others = if matches!(hit.kind, ObjectDragKind::Move) {
                         app.session
@@ -373,7 +378,11 @@ pub(crate) fn handle_object_interactions(
                                 app.doc.canvases[ci]
                                     .object(oid)
                                     .filter(|o| !o.locked)
-                                    .map(|o| (oid, o.frame))
+                                    .and_then(|_| {
+                                        app.doc.canvases[ci]
+                                            .layout_frame(oid)
+                                            .map(|frame| (oid, frame))
+                                    })
                             })
                             .collect()
                     } else {
@@ -448,18 +457,17 @@ pub(crate) fn handle_object_interactions(
                     let candidate = drag_frame(drag.before, drag.kind, dpx, dpy);
                     let (snapped, guides) = snap_object_frame(app, ci, &drag, candidate, ui);
                     let applied = [snapped.x - drag.before.x, snapped.y - drag.before.y];
-                    if let Some(object) = app.doc.canvases[ci].object_mut(drag.object) {
-                        object.frame = snapped;
-                    }
+                    app.doc.canvases[ci].set_layout_frame(drag.object, snapped);
                     for &(oid, before) in &drag.others {
-                        if let Some(o) = app.doc.canvases[ci].object_mut(oid) {
-                            o.frame = ObjectFrame::new(
+                        app.doc.canvases[ci].set_layout_frame(
+                            oid,
+                            ObjectFrame::new(
                                 before.x + applied[0],
                                 before.y + applied[1],
                                 before.width,
                                 before.height,
-                            );
-                        }
+                            ),
+                        );
                     }
                     app.session.ui.snap_guides = guides;
                 }
@@ -515,7 +523,9 @@ fn finish_marquee(app: &mut PlotxApp, ci: usize, marq: MarqueeDrag) {
         .iter()
         .filter(|o| o.visible)
         .filter(|o| {
-            let f = o.frame;
+            let Some(f) = app.doc.canvases[ci].layout_frame(o.id) else {
+                return false;
+            };
             max_x >= f.x && min_x <= f.x + f.width && max_y >= f.y && min_y <= f.y + f.height
         })
         .map(|o| o.id)
@@ -624,12 +634,12 @@ pub(crate) fn arrange_context_menu(app: &mut PlotxApp, ci: usize, ui: &mut Ui) {
 
 pub(crate) fn finish_object_drag(app: &mut PlotxApp, ci: usize, drag: ObjectDrag) {
     if drag.others.is_empty() {
-        if let Some(object) = app.doc.canvases[ci].object(drag.object) {
+        if let Some(after) = app.doc.canvases[ci].layout_frame(drag.object) {
             app.execute_action(Action::move_resize_object(
                 ci,
                 drag.object,
                 drag.before,
-                object.frame,
+                after,
             ));
         }
         return;
@@ -638,7 +648,11 @@ pub(crate) fn finish_object_drag(app: &mut PlotxApp, ci: usize, drag: ObjectDrag
     before.extend(drag.others.iter().copied());
     let after: Vec<(ObjectId, ObjectFrame)> = before
         .iter()
-        .filter_map(|&(id, _)| app.doc.canvases[ci].object(id).map(|o| (id, o.frame)))
+        .filter_map(|&(id, _)| {
+            app.doc.canvases[ci]
+                .layout_frame(id)
+                .map(|frame| (id, frame))
+        })
         .collect();
     app.execute_action(Action::set_object_frames(ci, before, after));
 }

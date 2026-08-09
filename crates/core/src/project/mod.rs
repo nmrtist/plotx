@@ -1,9 +1,10 @@
 use crate::layout::PageLayout;
 use crate::state::{
-    AnalysisSelection, AxisRange, CanvasDocument, CanvasObject, CanvasObjectKind, CanvasViewport,
-    DataBinding, Dataset, DatasetLineage, DerivationKind, Nmr2DDataset, NmrDataset, ObjectFrame,
-    ObjectId, PanelMeta, PlotObject, PlotxApp, PrimaryView, SeriesBinding, ShapeKind, ShapeObject,
-    StackMode, StackSpec, TextAlign, TextBox, Tool,
+    AnalysisSelection, AssetId, AssetRecord, AxisRange, CanvasDocument, CanvasObject,
+    CanvasObjectKind, CanvasViewport, DataBinding, Dataset, DatasetLineage, DerivationKind,
+    Document, Nmr2DDataset, NmrDataset, ObjectFrame, ObjectId, PanelMeta, PlotObject, PlotxApp,
+    PrimaryView, SeriesBinding, ShapeKind, ShapeObject, StackMode, StackSpec, TextAlign, TextBox,
+    Tool,
 };
 use num_complex::Complex64;
 use plotx_figure::Color;
@@ -16,13 +17,16 @@ use plotx_processing::{
     SmoothMethod, StepId, StepKind, StepSource, ZeroFill,
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use zip::ZipArchive;
 use zip::write::SimpleFileOptions;
 
 mod afm_convert;
+mod asset_codec;
 mod axis_overrides;
 mod codec;
 mod convert;
@@ -275,11 +279,13 @@ fn save_project_impl(
         },
         objects: Vec::new(),
         views: Vec::new(),
+        assets: Vec::new(),
         runs: Vec::new(),
         workspace: "workspace.json".to_owned(),
     };
 
     let mut bindings = Vec::with_capacity(doc.datasets.len());
+    asset_codec::write_reachable_assets(doc, &mut zip, options, &mut manifest)?;
     let mut written_table_blocks = std::collections::BTreeSet::new();
     for dataset in &doc.datasets {
         let data_id = dataset.resource_id().to_string();
@@ -461,6 +467,8 @@ pub fn load_project(path: &Path) -> Result<PlotxApp> {
     let mut app = PlotxApp::new();
     app.doc.datasets.clear();
     app.doc.canvases.clear();
+    app.doc.assets.clear();
+    asset_codec::load_assets(&mut zip, &manifest, &mut app)?;
     app.doc.project_path = Some(path.to_owned());
     // Restore before the canvases below are built: figures stamp the document
     // typography at build time.
@@ -527,6 +535,18 @@ pub fn load_project(path: &Path) -> Result<PlotxApp> {
         .collect::<Result<Vec<crate::automation::RunManifest>>>()?;
     app.doc.automation_revision = workspace.automation_revision;
     validate_resource_ids(&app.doc)?;
+    for canvas in &app.doc.canvases {
+        for item in &canvas.objects {
+            if let CanvasObjectKind::RasterImage(image) = &item.kind
+                && !app.doc.assets.contains_key(&image.asset)
+            {
+                return Err(ProjectError::Invalid(format!(
+                    "content {} references missing asset {}",
+                    item.id, image.asset
+                )));
+            }
+        }
+    }
 
     let active_dataset = workspace
         .active_data
@@ -594,6 +614,9 @@ fn validate_resource_ids(doc: &crate::state::Document) -> Result<()> {
                 "duplicate stable resource id {id}"
             )));
         }
+    }
+    for canvas in &doc.canvases {
+        canvas.validate_structure().map_err(ProjectError::Invalid)?;
     }
     Ok(())
 }
@@ -729,6 +752,8 @@ mod lineage_tests;
 mod linefit_tests;
 #[cfg(test)]
 mod multiplet_tests;
+#[cfg(test)]
+mod panel_schema_tests;
 #[cfg(test)]
 mod pipeline_domain_tests;
 #[cfg(test)]

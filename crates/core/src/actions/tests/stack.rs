@@ -160,7 +160,14 @@ fn plain_then_ctrl_click_selects_two_datasets_for_stacking() {
     assert_eq!(app.active_dataset(), Some(1));
 
     app.stack_selected_data();
-    let plot = app.doc.canvases.last().unwrap().objects[0].plot().unwrap();
+    let canvas = app.doc.canvases.last().unwrap();
+    assert_eq!(canvas.panels.len(), 1);
+    assert_eq!(
+        canvas.panel_letter(canvas.objects[0].id).as_deref(),
+        Some("a")
+    );
+    assert_eq!(canvas.panel_notes().len(), 1);
+    let plot = canvas.objects[0].plot().unwrap();
     assert_ne!(
         plot.binding.series[0].primary_color(),
         plot.binding.series[1].primary_color(),

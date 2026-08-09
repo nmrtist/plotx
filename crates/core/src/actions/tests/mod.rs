@@ -140,6 +140,7 @@ fn insert_dataset_existing_canvas_does_not_select_inserted_object() {
     let inserted_id = app.doc.canvases[0].next_object_id;
     let dataset_index = app.doc.datasets.len();
     let dataset = Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d())));
+    let expected_note = crate::workflow::dataset_title(&dataset);
 
     app.execute_action(Action::InsertDatasetWithCanvas {
         dataset_index,
@@ -156,6 +157,11 @@ fn insert_dataset_existing_canvas_does_not_select_inserted_object() {
 
     assert_eq!(app.doc.canvases[0].objects.len(), 2);
     assert_eq!(app.doc.canvases[0].selected_object, None);
+    let panel = app.doc.canvases[0].parent_panel(inserted_id).unwrap();
+    assert_eq!(
+        app.doc.canvases[0].panel(panel).unwrap().note,
+        expected_note
+    );
     app.doc.canvases[0].selected_object = Some(inserted_id);
 
     app.undo();
@@ -413,31 +419,6 @@ fn preset_only_change_at_equal_size_is_undoable() {
 }
 
 #[test]
-fn plot_title_undo_redo_restores_text_position_and_visibility() {
-    let mut app = sample_app();
-    let object_id = app.doc.canvases[0].objects[0].id;
-    let before = first_plot(&app).panel.clone();
-    let mut after = before.clone();
-    after.user_note = "edited title".to_owned();
-    after.position = [42.0, 12.0];
-    after.visible = false;
-
-    app.execute_action(Action::set_panel_meta(
-        0,
-        object_id,
-        before.clone(),
-        after.clone(),
-    ));
-    assert_eq!(first_plot(&app).panel, after);
-
-    app.undo();
-    assert_eq!(first_plot(&app).panel, before);
-
-    app.redo();
-    assert_eq!(first_plot(&app).panel, after);
-}
-
-#[test]
 fn page_view_zoom_pan_does_not_change_svg_or_object_geometry() {
     let mut app = sample_app();
     let before_frame = app.doc.canvases[0].objects[0].frame;
@@ -610,7 +591,6 @@ pub(super) fn push_text_object(
         frame: ObjectFrame::new(0.0, 0.0, 40.0, 20.0),
         locked: false,
         visible: true,
-        group: None,
         kind: CanvasObjectKind::Text(TextBox::label(text.to_owned())),
     });
     id

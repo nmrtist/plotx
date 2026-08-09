@@ -597,13 +597,17 @@ impl PlotxApp {
         plot.mint_series_ids();
         canvas.objects.push(CanvasObject {
             id,
-            name: "Plot 1".to_owned(),
+            name: self.default_plot_title(primary),
             frame,
             locked: false,
             visible: true,
-            group: None,
             kind: CanvasObjectKind::Plot(Box::new(plot)),
         });
+        let panel_id = canvas
+            .create_panel_for_plot(id)
+            .expect("a newly materialized stack object is a plot");
+        canvas.panel_mut(panel_id).expect("new panel exists").note =
+            self.default_plot_title(primary);
         let index = self.doc.canvases.len();
         let canvas_count = self.doc.canvases.len();
         self.execute_action(Action::insert_canvas(

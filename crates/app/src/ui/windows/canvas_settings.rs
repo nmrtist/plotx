@@ -112,11 +112,7 @@ fn panels_section(app: &mut PlotxApp, ci: usize, ui: &mut Ui) {
     }
     for (i, id) in order.into_iter().enumerate() {
         let letter = app.doc.canvases[ci].panel_label_style.format(i);
-        let Some(_panel) = app.doc.canvases[ci]
-            .object(id)
-            .and_then(|o| o.plot())
-            .map(|p| p.panel.clone())
-        else {
+        let Some(_panel) = app.doc.canvases[ci].panel_meta_for_content(id) else {
             continue;
         };
         ui.horizontal(|ui| {
@@ -136,9 +132,7 @@ fn commit_note_edit(app: &mut PlotxApp) {
         .doc
         .canvases
         .get(ci)
-        .and_then(|c| c.object(id))
-        .and_then(|o| o.plot())
-        .map(|p| p.panel.clone())
+        .and_then(|c| c.panel_meta_for_content(id))
     else {
         return;
     };

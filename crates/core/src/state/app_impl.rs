@@ -41,6 +41,7 @@ impl PlotxApp {
             doc: SharedDocument::new(Document {
                 datasets: Vec::new(),
                 canvases: Vec::new(),
+                assets: std::collections::BTreeMap::new(),
                 style_library: StyleLibrary::default(),
                 project_path: None,
                 project_revision: None,
@@ -583,10 +584,9 @@ impl PlotxApp {
             return;
         };
         match &o.kind {
-            CanvasObjectKind::PanelLabel(t) => self.doc.style_library.panel_label = t.clone(),
             CanvasObjectKind::Text(t) => self.doc.style_library.text = t.clone(),
             CanvasObjectKind::Shape(s) => self.doc.style_library.shape = s.clone(),
-            CanvasObjectKind::Plot(_) => return,
+            CanvasObjectKind::Plot(_) | CanvasObjectKind::RasterImage(_) => return,
         }
         self.session.status = "Saved as default for new objects.".to_owned();
     }

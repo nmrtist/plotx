@@ -22,7 +22,9 @@ const OVERFLOW_SLACK_PT: f32 = 0.5;
 pub fn content_bounds_pt(canvas: &CanvasDocument) -> Option<[f32; 4]> {
     let mut bounds: Option<[f32; 4]> = None;
     for object in canvas.objects.iter().filter(|o| o.visible) {
-        let f = object.frame;
+        let Some(f) = canvas.layout_frame(object.id) else {
+            continue;
+        };
         let b = bounds.get_or_insert([f.x, f.y, f.x + f.width, f.y + f.height]);
         b[0] = b[0].min(f.x);
         b[1] = b[1].min(f.y);
@@ -58,7 +60,15 @@ pub fn scaled_frames(
     after_mm: [f32; 2],
 ) -> Option<FramePairs> {
     let scale = content_scale_factor(before_mm, after_mm)?;
-    let before: Vec<_> = canvas.objects.iter().map(|o| (o.id, o.frame)).collect();
+    let before: Vec<_> = canvas
+        .objects
+        .iter()
+        .filter_map(|object| {
+            canvas
+                .layout_frame(object.id)
+                .map(|frame| (object.id, frame))
+        })
+        .collect();
     if before.is_empty() {
         return None;
     }
@@ -158,7 +168,6 @@ mod tests {
             frame,
             locked: false,
             visible: true,
-            group: None,
             kind: CanvasObjectKind::Text(TextBox::label("x".to_owned())),
         });
         canvas.next_object_id = ObjectId::new(2);

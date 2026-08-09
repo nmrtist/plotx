@@ -97,7 +97,7 @@ fn create_object(app: &mut PlotxApp, ci: usize, tool: Tool, frame: ObjectFrame) 
         Tool::PanelLabel => {
             let mut t = app.doc.style_library.panel_label.clone();
             t.text = "a".to_owned();
-            ("Panel label".to_owned(), CanvasObjectKind::PanelLabel(t))
+            ("Text".to_owned(), CanvasObjectKind::Text(t))
         }
         Tool::Text => {
             let mut t = app.doc.style_library.text.clone();
@@ -116,7 +116,6 @@ fn create_object(app: &mut PlotxApp, ci: usize, tool: Tool, frame: ObjectFrame) 
         frame,
         locked: false,
         visible: true,
-        group: None,
         kind,
     };
     let selection_before = app.session.ui.selection.clone();

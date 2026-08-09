@@ -26,7 +26,6 @@ pub struct PlotObject {
     derived_axes: DerivedAxes,
     figure: Figure,
     pub viewport: CanvasViewport,
-    pub panel: PanelMeta,
 }
 
 impl PlotObject {
@@ -41,7 +40,7 @@ impl PlotObject {
         axis_overrides: AxisOverrides,
         figure: Figure,
         viewport: CanvasViewport,
-        panel: PanelMeta,
+        _panel: PanelMeta,
     ) -> Self {
         let derived_axes = DerivedAxes::from_figure(&figure);
         Self {
@@ -55,7 +54,6 @@ impl PlotObject {
             derived_axes,
             figure,
             viewport,
-            panel,
         }
     }
 
@@ -73,7 +71,7 @@ impl PlotObject {
         derived_axes: DerivedAxes,
         figure: Figure,
         viewport: CanvasViewport,
-        panel: PanelMeta,
+        _panel: PanelMeta,
     ) -> Self {
         Self {
             display_owner,
@@ -86,7 +84,6 @@ impl PlotObject {
             derived_axes,
             figure,
             viewport,
-            panel,
         }
     }
 

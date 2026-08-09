@@ -14,6 +14,8 @@ fn tile_drop_transfers_reframes_and_round_trips() {
     app.session.active_canvas = Some(0);
     let newcomer = app.doc.canvases[0].objects[0].id;
     let existing = app.doc.canvases[1].objects[0].id;
+    let newcomer_panel = app.doc.canvases[0].create_panel_for_plot(newcomer).unwrap();
+    app.doc.canvases[1].create_panel_for_plot(existing).unwrap();
     let src_before = app.doc.canvases[0].objects.len();
     let dst_before = app.doc.canvases[1].objects.len();
 
@@ -31,9 +33,21 @@ fn tile_drop_transfers_reframes_and_round_trips() {
     assert_eq!(app.doc.canvases[1].objects.len(), dst_before + 1);
     assert_eq!(app.session.active_canvas, Some(1));
     let moved_id = app.doc.canvases[1].objects.last().unwrap().id;
+    assert_eq!(
+        app.doc.canvases[1].parent_panel(moved_id),
+        Some(newcomer_panel)
+    );
+    assert_eq!(
+        app.doc.canvases[1].panel_letter(existing).as_deref(),
+        Some("a")
+    );
+    assert_eq!(
+        app.doc.canvases[1].panel_letter(moved_id).as_deref(),
+        Some("b")
+    );
     assert_eq!(app.session.ui.selection.object(), Some(moved_id));
-    let ex = app.doc.canvases[1].object(existing).unwrap().frame;
-    let nc = app.doc.canvases[1].objects.last().unwrap().frame;
+    let ex = app.doc.canvases[1].content_page_frame(existing).unwrap();
+    let nc = app.doc.canvases[1].content_page_frame(moved_id).unwrap();
     assert_eq!(ex, existing_after_frame);
     assert!(nc.x > ex.x);
     assert!(nc.x + nc.width <= page[0] + 0.5);
@@ -42,9 +56,13 @@ fn tile_drop_transfers_reframes_and_round_trips() {
     assert_eq!(app.doc.canvases[0].objects.len(), src_before);
     assert_eq!(app.doc.canvases[1].objects.len(), dst_before);
     assert_eq!(app.doc.canvases[0].objects[0].id, newcomer);
+    assert_eq!(
+        app.doc.canvases[0].panel_letter(newcomer).as_deref(),
+        Some("a")
+    );
     assert_eq!(app.session.active_canvas, Some(0));
     assert_eq!(
-        app.doc.canvases[1].object(existing).unwrap().frame,
+        app.doc.canvases[1].content_page_frame(existing).unwrap(),
         ObjectFrame::new(0.0, 0.0, page[0], page[1])
     );
 
@@ -52,7 +70,41 @@ fn tile_drop_transfers_reframes_and_round_trips() {
     assert_eq!(app.doc.canvases[0].objects.len(), src_before - 1);
     assert_eq!(app.doc.canvases[1].objects.len(), dst_before + 1);
     assert_eq!(app.session.active_canvas, Some(1));
-    assert_eq!(app.doc.canvases[1].object(existing).unwrap().frame, ex);
+    assert_eq!(
+        app.doc.canvases[1].content_page_frame(existing).unwrap(),
+        ex
+    );
+    assert_eq!(
+        app.doc.canvases[1].panel_letter(moved_id).as_deref(),
+        Some("b")
+    );
+
+    app.transfer_objects_to_canvas(1, &[moved_id], 0, true);
+    let on_blank = app.doc.canvases[0].objects.last().unwrap().id;
+    assert_eq!(
+        app.doc.canvases[0].parent_panel(on_blank),
+        Some(newcomer_panel)
+    );
+    assert_eq!(
+        app.doc.canvases[0].panel_letter(on_blank).as_deref(),
+        Some("a")
+    );
+
+    app.transfer_objects_to_canvas(0, &[on_blank], 1, true);
+    let returned = app.doc.canvases[1].objects.last().unwrap().id;
+    assert_eq!(
+        app.doc.canvases[1].parent_panel(returned),
+        Some(newcomer_panel)
+    );
+    assert_eq!(
+        app.doc.canvases[1].panel_letter(existing).as_deref(),
+        Some("a")
+    );
+    assert_eq!(
+        app.doc.canvases[1].panel_letter(returned).as_deref(),
+        Some("b")
+    );
+    assert_eq!(app.doc.canvases[1].next_panel_label_slot, 2);
 }
 
 fn assert_empty_source_removal_round_trip(from: usize, to: usize) {

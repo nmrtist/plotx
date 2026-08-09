@@ -43,31 +43,25 @@ pub(crate) fn handle_frame_caption_interactions(
                     ui.id().with(("panel_note_row", ci, object_id)),
                     Sense::click(),
                 )
-                .on_hover_text("Click to select. Double-click to edit this panel note.");
+                .on_hover_text("Click to edit this panel description.");
             if resp.hovered() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                 consumed = true;
             }
-            if resp.double_clicked() {
+            if resp.clicked() {
                 app.session.active_canvas = Some(ci);
                 app.select_object(ci, object_id);
                 open_inline_panel_note_editor(app, ci, object_id);
-                consumed = true;
-            } else if resp.clicked() {
-                app.session.active_canvas = Some(ci);
-                app.select_object(ci, object_id);
-                app.session.status =
-                    "Panel selected. Double-click its note to edit in place.".to_owned();
                 consumed = true;
             }
             resp.context_menu(|ui| {
                 app.session.active_canvas = Some(ci);
                 app.select_object(ci, object_id);
-                if ui.button("Edit note in place").clicked() {
+                if ui.button("Edit description in place").clicked() {
                     open_inline_panel_note_editor(app, ci, object_id);
                     ui.close();
                 }
-                if ui.button("Edit note in dialog").clicked() {
+                if ui.button("Edit description in dialog").clicked() {
                     app.session.ui.panel_note_inline_edit = None;
                     open_panel_note_editor(app, ci, object_id);
                     ui.close();
@@ -83,9 +77,7 @@ pub(crate) fn open_inline_panel_note_editor(app: &mut PlotxApp, ci: usize, objec
         .doc
         .canvases
         .get(ci)
-        .and_then(|canvas| canvas.object(object_id))
-        .and_then(|object| object.plot())
-        .map(|plot| plot.panel.clone())
+        .and_then(|canvas| canvas.panel_meta_for_content(object_id))
     else {
         return;
     };
@@ -131,11 +123,9 @@ pub(crate) fn render_inline_panel_note_editor(app: &mut PlotxApp, screen: egui::
         if let Some(edit) = app.session.ui.panel_note_inline_edit.as_mut() {
             edit.buffer.clone_from(&buffer);
         }
-        if let Some(plot) = app.doc.canvases[ci]
-            .object_mut(object_id)
-            .and_then(|object| object.plot_mut())
-        {
-            plot.panel.user_note = buffer.clone();
+        if let Some(mut panel) = app.doc.canvases[ci].panel_meta_for_content(object_id) {
+            panel.user_note = buffer.clone();
+            app.doc.canvases[ci].set_panel_meta_for_content(object_id, panel);
             app.mark_document_dirty();
         }
     }
@@ -202,14 +192,12 @@ fn commit_inline_panel_note_edit(app: &mut PlotxApp) {
         .doc
         .canvases
         .get(ci)
-        .and_then(|canvas| canvas.object(id))
-        .and_then(|object| object.plot())
-        .map(|plot| plot.panel.clone())
+        .and_then(|canvas| canvas.panel_meta_for_content(id))
     else {
         return;
     };
     app.execute_action(Action::set_panel_meta(ci, id, before, after));
-    app.session.status = "Panel note updated.".to_owned();
+    app.session.status = "Panel description updated.".to_owned();
 }
 
 fn cancel_inline_panel_note_edit(app: &mut PlotxApp) {
@@ -217,14 +205,8 @@ fn cancel_inline_panel_note_edit(app: &mut PlotxApp) {
     let Some((ci, id, before)) = app.session.ui.note_edit_before.take() else {
         return;
     };
-    if let Some(plot) = app
-        .doc
-        .canvases
-        .get_mut(ci)
-        .and_then(|canvas| canvas.object_mut(id))
-        .and_then(|object| object.plot_mut())
-    {
-        plot.panel = before;
+    if let Some(canvas) = app.doc.canvases.get_mut(ci) {
+        canvas.set_panel_meta_for_content(id, before);
     }
-    app.session.status = "Panel note edit cancelled.".to_owned();
+    app.session.status = "Panel description edit cancelled.".to_owned();
 }

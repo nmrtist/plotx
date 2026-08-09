@@ -49,6 +49,8 @@ macro_rules! uuid_id {
 
 uuid_id!(DatasetId);
 uuid_id!(CanvasId);
+uuid_id!(PanelId);
+uuid_id!(AssetId);
 
 macro_rules! local_id {
     ($name:ident) => {
@@ -119,7 +121,12 @@ macro_rules! local_id {
 
 local_id!(SeriesId);
 local_id!(FieldId);
-local_id!(ObjectId);
+local_id!(ContentId);
+
+/// Transitional source-level spelling used by the existing chart editing UI.
+/// Persisted page content is identified by `ContentId`; this alias does not
+/// create a second identity domain.
+pub type ObjectId = ContentId;
 
 #[cfg(test)]
 #[path = "identity_tests.rs"]
