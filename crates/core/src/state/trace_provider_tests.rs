@@ -786,3 +786,6 @@ fn electrophysiology_trace_figures_drop_non_finite_points() {
             .all(|value| value.is_finite())
     );
 }
+
+#[path = "trace_alignment_tests.rs"]
+mod trace_alignment_tests;

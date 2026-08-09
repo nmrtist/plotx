@@ -4,7 +4,7 @@ use plotx_core::state::{Tool, ToolGroup, WorkflowTab};
 use super::{Applicability, CommandId, RibbonPlacement};
 
 pub(super) fn ribbon_placement(id: CommandId) -> Option<RibbonPlacement> {
-    use Applicability::{Always, Homonuclear2dOnly, SeriesOnly, TableOnly};
+    use Applicability::{Always, Homonuclear2dOnly, LineAlignmentOnly, SeriesOnly, TableOnly};
     use WorkflowTab::{Analyze, Arrange, Data, Figure, Process, View};
     let (tab, group, priority, applicability) = match id {
         CommandId::Tool(Tool::BrowseZoom) | CommandId::ZoomToFit | CommandId::ZoomToSelection => {
@@ -28,6 +28,7 @@ pub(super) fn ribbon_placement(id: CommandId) -> Option<RibbonPlacement> {
             Applicability::ToolGroup(ToolGroup::Peaks),
         ),
         CommandId::Tool(Tool::Symmetry) => (Analyze, "Review", 1, Homonuclear2dOnly),
+        CommandId::AlignTraces => (Analyze, "Align", 1, LineAlignmentOnly),
         CommandId::Tool(Tool::ManualPhase) => (Process, "Correct", 0, Always),
         CommandId::SpectrumArithmetic | CommandId::AlignSpectra => {
             (Process, "Transform", 1, Always)

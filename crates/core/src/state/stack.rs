@@ -1,6 +1,13 @@
 use super::*;
 use plotx_figure::{ErrorBar, Series};
 
+struct PreparedLine {
+    index: usize,
+    x_bounds: [f64; 2],
+    series: Vec<Series>,
+    error_bars: Vec<ErrorBar>,
+}
+
 impl PlotxApp {
     /// Whether a binding has one stackable representation. Item-addressed line
     /// traces use their field contracts and may cross enclosing data domains;
@@ -92,13 +99,16 @@ impl PlotxApp {
         } else {
             self.build_full_canvas_figure(primary, &line_chart, size_mm)
         };
+        if let Some(primary_binding) = binding.series.first() {
+            self.apply_series_binding_style(&mut fig, primary_binding);
+        }
         let x_span = (fig.x.max - fig.x.min).abs().max(f64::MIN_POSITIVE);
         fig.series.clear();
         fig.error_bars.clear();
 
         // Build each visible trace's (scaled, optionally normalized) line series,
         // tracking the global peak the vertical offset scales against.
-        let mut prepared: Vec<(usize, Vec<Series>, Vec<ErrorBar>)> = Vec::new();
+        let mut prepared = Vec::new();
         let mut global_peak = 0.0f64;
         for (i, sb) in binding.series.iter().enumerate() {
             let Some(dataset) = self.doc.dataset_index(sb.source.resource) else {
@@ -116,6 +126,7 @@ impl PlotxApp {
                 self.build_full_canvas_figure(dataset, &line_chart, size_mm)
             };
             self.apply_series_binding_style(&mut part, sb);
+            let part_x_bounds = [part.x.min, part.x.max];
             let mut series = part.series;
             let mut error_bars = part.error_bars;
             let peak = series
@@ -140,13 +151,22 @@ impl PlotxApp {
                 error_bar.positive *= factor.abs();
             }
             global_peak = global_peak.max(trace_peak);
-            prepared.push((i, series, error_bars));
+            prepared.push(PreparedLine {
+                index: i,
+                x_bounds: part_x_bounds,
+                series,
+                error_bars,
+            });
         }
 
         let stacked = matches!(stack.mode, StackMode::Offset);
-        let (mut x_min, mut x_max) = (fig.x.min, fig.x.max);
+        let (mut x_min, mut x_max) = (f64::INFINITY, f64::NEG_INFINITY);
         let (mut y_min, mut y_max) = (fig.y.min, fig.y.max);
-        for (i, mut series, mut error_bars) in prepared {
+        for prepared in prepared {
+            let i = prepared.index;
+            let part_x_bounds = prepared.x_bounds;
+            let mut series = prepared.series;
+            let mut error_bars = prepared.error_bars;
             let x_off = if stacked {
                 i as f64 * stack.shear_x * x_span
             } else {
@@ -158,6 +178,8 @@ impl PlotxApp {
                 0.0
             };
             let active = stack.active == Some(i);
+            x_min = x_min.min(part_x_bounds[0] + x_off);
+            x_max = x_max.max(part_x_bounds[1] + x_off);
             for mut s in series.drain(..) {
                 for p in &mut s.points {
                     p[0] += x_off;
@@ -185,8 +207,10 @@ impl PlotxApp {
                 fig.error_bars.push(error_bar);
             }
         }
-        fig.x.min = x_min;
-        fig.x.max = x_max;
+        if x_min.is_finite() && x_max.is_finite() {
+            fig.x.min = x_min;
+            fig.x.max = x_max;
+        }
         fig.y.min = y_min;
         fig.y.max = y_max;
         if !binding.primary_visible() {

@@ -110,6 +110,24 @@ impl SeriesBinding {
         }
     }
 
+    pub fn line_x_shift(&self) -> Option<f64> {
+        match &self.encoding {
+            plotx_figure::SeriesEncoding::Line(line) => Some(line.x_shift.get()),
+            _ => None,
+        }
+    }
+
+    pub fn set_line_x_shift(&mut self, value: f64) -> bool {
+        let Some(value) = plotx_figure::FiniteF64::new(value) else {
+            return false;
+        };
+        let plotx_figure::SeriesEncoding::Line(line) = &mut self.encoding else {
+            return false;
+        };
+        line.x_shift = value;
+        true
+    }
+
     pub fn primary_color(&self) -> Option<Color> {
         match &self.encoding {
             plotx_figure::SeriesEncoding::Line(line) => Some(line.color.resolve()),

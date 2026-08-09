@@ -11,6 +11,7 @@ use validate::{ValidationShape, validate_action};
 
 impl PlotxApp {
     pub fn execute_action(&mut self, action: Action) {
+        self.finish_series_presentation_edit();
         self.finish_axis_overrides_edit();
         if let Err(error) = self.try_execute_action(action) {
             self.session.status = error.to_string();
@@ -37,6 +38,7 @@ impl PlotxApp {
     pub fn undo(&mut self) {
         self.finish_pending_wheel_zoom(f64::INFINITY, true);
         self.finish_pending_wheel_property(f64::INFINITY, true);
+        self.finish_series_presentation_edit();
         self.finish_axis_overrides_edit();
         self.reset_interaction();
         let Some(action) = self.session.undo_stack.pop() else {
@@ -53,6 +55,7 @@ impl PlotxApp {
     pub fn redo(&mut self) {
         self.finish_pending_wheel_zoom(f64::INFINITY, true);
         self.finish_pending_wheel_property(f64::INFINITY, true);
+        self.finish_series_presentation_edit();
         self.finish_axis_overrides_edit();
         self.reset_interaction();
         let Some(action) = self.session.redo_stack.pop() else {
@@ -91,6 +94,7 @@ impl PlotxApp {
         self.session.ui.processing_session = None;
         self.session.ui.property_gesture = None;
         self.session.ui.inspector_edit = None;
+        self.session.ui.series_presentation_edit = None;
         self.session.ui.axis_overrides_before = None;
         self.session.ui.selection = Selection::None;
         self.session.ui.panel_note_inline_edit = None;
@@ -374,6 +378,67 @@ impl PlotxApp {
             return;
         }
         self.set_object_binding_with_viewport(canvas, object, binding, true);
+    }
+
+    pub fn begin_series_presentation_edit(&mut self, canvas: usize, object: ObjectId) {
+        if self
+            .session
+            .ui
+            .series_presentation_edit
+            .as_ref()
+            .is_some_and(|edit| edit.canvas == canvas && edit.object == object)
+        {
+            return;
+        }
+        self.finish_series_presentation_edit();
+        let Some(before) = self
+            .doc
+            .canvases
+            .get(canvas)
+            .and_then(|canvas| canvas.object(object))
+            .and_then(|object| object.plot())
+            .map(|plot| plot.binding.clone())
+        else {
+            return;
+        };
+        self.session.ui.series_presentation_edit = Some(PendingSeriesPresentationEdit {
+            canvas,
+            object,
+            before,
+        });
+    }
+
+    pub fn set_series_presentation_value(
+        &mut self,
+        canvas: usize,
+        object: ObjectId,
+        binding: &DataBinding,
+    ) {
+        self.begin_series_presentation_edit(canvas, object);
+        self.set_object_presentation(canvas, object, binding);
+        self.mark_document_dirty();
+    }
+
+    pub fn finish_series_presentation_edit(&mut self) {
+        let Some(edit) = self.session.ui.series_presentation_edit.take() else {
+            return;
+        };
+        let Some(after) = self
+            .doc
+            .canvases
+            .get(edit.canvas)
+            .and_then(|canvas| canvas.object(edit.object))
+            .and_then(|object| object.plot())
+            .map(|plot| plot.binding.clone())
+        else {
+            return;
+        };
+        self.execute_action(Action::set_series_presentation(
+            edit.canvas,
+            edit.object,
+            edit.before,
+            after,
+        ));
     }
 
     fn rebuild_plot_presentation(&mut self, canvas: usize, object: ObjectId) {

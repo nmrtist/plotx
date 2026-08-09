@@ -124,6 +124,24 @@ A single plot frame can display several 1D datasets — superimposed, or
 stacked with adjustable vertical spacing and 3D shear. 2D datasets combine
 as a color overlay.
 
+To align line series along x, select the plot and choose **Align Traces…** in
+the **Align** group on the **Analyze** tab. The command is available when the
+plot contains at least two visible line series with the same x-axis unit. You
+can open the same dialog with **Align traces…** under **Data** in the Object
+inspector.
+
+Choose a reference series, then align by **Trace start** (the first finite
+plotted sample) or by a peak within an x window. For peak alignment,
+**Positive** finds upward peaks, **Negative** finds downward peaks, and
+**Magnitude** compares their prominence. Review the **Anchor**, **Delta**, and
+**Result** columns before selecting **Apply**. Hidden series, incompatible
+series, and series without a usable anchor are listed as **Skipped** and remain
+unchanged.
+
+Alignment preserves the plot's current zoom. To adjust one line manually, edit
+its **X shift** under **Data**. Automatic and manual shifts are undoable plot
+settings and do not affect source data or data exports.
+
 ## Plot styling and typography
 
 PlotX styles plots for print automatically: clean bottom-and-left axes with

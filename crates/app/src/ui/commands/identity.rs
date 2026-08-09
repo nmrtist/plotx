@@ -137,6 +137,7 @@ pub(super) fn command_identity(
         }
         CommandId::SpectrumArithmetic => plain("Spectrum Arithmetic…", Some(icon::MATH_OPERATIONS)),
         CommandId::AlignSpectra => plain("Align Spectra…", Some(icon::ARROWS_LEFT_RIGHT)),
+        CommandId::AlignTraces => plain("Align Traces…", Some(icon::ARROWS_LEFT_RIGHT)),
         CommandId::StackData => plain("Stack Selected Data", Some(icon::STACK)),
         CommandId::ExtractMassSpectrum => plain("Extract Mass Spectrum", Some(icon::WAVE_SINE)),
         CommandId::SelectRange => (
@@ -378,6 +379,7 @@ fn simple_stable_id(id: CommandId) -> &'static str {
         CommandId::ApplyProcessingTemplate => "process.apply_template",
         CommandId::SpectrumArithmetic => "process.arithmetic",
         CommandId::AlignSpectra => "process.align_spectra",
+        CommandId::AlignTraces => "analysis.align_traces",
         CommandId::StackData => "data.stack",
         CommandId::ExtractMassSpectrum => "analysis.extract_mass_spectrum",
         CommandId::SelectRange => "analysis.select_range",

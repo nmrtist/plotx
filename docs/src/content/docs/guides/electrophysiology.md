@@ -18,6 +18,21 @@ from the selected compatible recording. Use **Show all**, **Hide all**, the row
 checkboxes, or remove buttons to reduce the stack to the voltages or currents
 you want to compare.
 
+To align sweep peaks, select the plot and choose **Align Traces…** in the
+**Align** group on the **Analyze** tab. You can also choose **Align traces…**
+under **Data** in the Object inspector. Choose a reference sweep, then use
+**Peak in window** and enter the time window to search. **Positive** finds
+upward peaks, **Negative** finds downward peaks, and **Magnitude** compares
+their prominence. **Trace start** instead aligns the first finite plotted
+sample; it does not detect stimulus onset.
+
+Review each sweep's **Anchor**, **Delta**, and **Result** before selecting
+**Apply**. Hidden sweeps and sweeps without a usable peak are listed as
+**Skipped** and remain unchanged. To correct one sweep manually, edit its **X
+shift (s)** under **Data**; this is also available on a single-sweep plot.
+Automatic and manual shifts are undoable plot settings: they do not alter the
+imported samples or dataset exports.
+
 To compare recordings, select two or more compatible recordings in the Data
 browser and choose **Stack selected data**. The trace composer lists every
 sweep from each recording's selected channel and starts with all of them

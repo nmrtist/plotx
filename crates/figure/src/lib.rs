@@ -7,8 +7,8 @@ mod encoding;
 pub use colormap::ColormapId;
 pub use encoding::{
     ColorSource, ContourBasePolicy, ContourLevelSpec, ContourSpec, ContourStyle,
-    DEFAULT_DATA_LINE_WIDTH_PT, EstimatorSelection, HeatmapSpec, ImageInterpolation, ImageSpec,
-    LineEncoding, PositiveFiniteF32, PositiveFiniteF64, SeriesEncoding, UnitInterval,
+    DEFAULT_DATA_LINE_WIDTH_PT, EstimatorSelection, FiniteF64, HeatmapSpec, ImageInterpolation,
+    ImageSpec, LineEncoding, PositiveFiniteF32, PositiveFiniteF64, SeriesEncoding, UnitInterval,
 };
 
 /// An RGB color, 0–255 per channel.

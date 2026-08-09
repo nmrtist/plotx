@@ -217,7 +217,25 @@ impl PlotxApp {
                     .as_nmr()
                     .is_some_and(|nmr| nmr.output_domain() == plotx_io::Domain::Time);
             if fits_apply {
+                let data_series_count = fig.series.len();
+                let x_shift = binding
+                    .series
+                    .first()
+                    .and_then(SeriesBinding::line_x_shift)
+                    .unwrap_or(0.0);
+                // Stored fit windows are source coordinates. Temporarily restore
+                // those bounds for applicability, then translate only the newly
+                // materialized overlays into the plot's displayed coordinates.
+                fig.x.min -= x_shift;
+                fig.x.max -= x_shift;
                 fig = apply_line_fit_overlays(fig, self.doc.datasets[primary].line_fits());
+                fig.x.min += x_shift;
+                fig.x.max += x_shift;
+                for fit in &mut fig.series[data_series_count..] {
+                    for point in &mut fit.points {
+                        point[0] += x_shift;
+                    }
+                }
             }
             fig
         }
@@ -236,6 +254,9 @@ impl PlotxApp {
             return;
         };
         let color = line.color.resolve();
+        let x_shift = line.x_shift.get();
+        figure.x.min += x_shift;
+        figure.x.max += x_shift;
         let semantic_colors = figure.series_colors_are_semantic;
         for series in &mut figure.series {
             if let Some(label) = &binding.label {
@@ -246,6 +267,7 @@ impl PlotxApp {
             }
             series.width = line.width.get();
             for point in &mut series.points {
+                point[0] += x_shift;
                 point[1] *= line.scale;
             }
         }
@@ -254,9 +276,26 @@ impl PlotxApp {
                 error_bar.color = color;
             }
             error_bar.width = line.width.get();
+            error_bar.center[0] += x_shift;
             error_bar.center[1] *= line.scale;
             error_bar.negative *= line.scale.abs();
             error_bar.positive *= line.scale.abs();
+        }
+        for curve in &mut figure.integral_curves {
+            curve.start_ppm += x_shift;
+            curve.end_ppm += x_shift;
+        }
+        for polygon in &mut figure.polygons {
+            for point in &mut polygon.points {
+                point[0] += x_shift;
+            }
+        }
+        for annotation in &mut figure.annotations {
+            annotation.at[0] += x_shift;
+        }
+        for range in &mut figure.range_annotations {
+            range.x0 += x_shift;
+            range.x1 += x_shift;
         }
         if !semantic_colors
             && figure.heatmap.is_none()

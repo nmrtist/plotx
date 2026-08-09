@@ -217,7 +217,7 @@ fn loading_a_maximum_series_id_reports_exhaustion() {
             "series": [{
                 "id": u64::MAX,
                 "source": { "kind": "field", "input": recipe, "field": 0 },
-                "encoding": {"kind":"line","spec":{"color":{"explicit":{"r":15,"g":77,"b":146}},"scale":1.0,"width":1.0}}
+                "encoding": {"kind":"line","spec":{"color":{"explicit":{"r":15,"g":77,"b":146}},"scale":1.0,"width":1.0,"x_shift":0.0}}
             }],
             "frame": { "x": 0.0, "y": 0.0, "width": 100.0, "height": 80.0 },
             "locked": false,

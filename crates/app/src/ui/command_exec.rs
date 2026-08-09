@@ -132,6 +132,7 @@ fn execute_inner(
         }
         CommandId::SpectrumArithmetic => super::arithmetic::open_spectrum_arithmetic_dialog(app),
         CommandId::AlignSpectra => super::align::open_align_spectra_dialog(app),
+        CommandId::AlignTraces => super::trace_alignment::open_active_trace_alignment_dialog(app),
         CommandId::StackData => app.stack_selected_data(),
         CommandId::ExtractMassSpectrum => {
             app.set_tool(Tool::SelectRegion);

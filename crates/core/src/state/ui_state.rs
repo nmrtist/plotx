@@ -14,6 +14,8 @@ pub use task_dock::TaskDockTab;
 
 mod trace_composer;
 pub use trace_composer::{TraceComposerItem, TraceComposerState};
+mod trace_alignment;
+pub use trace_alignment::TraceAlignmentDialogState;
 
 /// Which sidebar entry an in-progress inline rename targets.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -254,6 +256,7 @@ pub struct UiState {
     pub property_gesture: Option<crate::actions::PendingPropertyGesture>,
     pub property_text_edits: Vec<PropertyTextEditState>,
     pub inspector_edit: Option<PendingInspectorEdit>,
+    pub series_presentation_edit: Option<PendingSeriesPresentationEdit>,
     /// Pre-edit snapshot for a plot-local axis text/range gesture.
     pub axis_overrides_before: Option<(usize, ObjectId, AxisOverrides)>,
     pub canvas_settings: Option<usize>,
@@ -291,6 +294,7 @@ pub struct UiState {
     pub processing_template_dialog: Option<ProcessingTemplateDialogState>,
     pub spectrum_arithmetic_dialog: Option<SpectrumArithmeticDialogState>,
     pub align_spectra_dialog: Option<AlignSpectraDialogState>,
+    pub trace_alignment_dialog: Option<TraceAlignmentDialogState>,
     pub trace_composer: Option<TraceComposerState>,
     pub selection: Selection,
     pub selection_scope: SelectionScope,
@@ -470,6 +474,7 @@ impl Default for UiState {
             property_gesture: None,
             property_text_edits: Vec::new(),
             inspector_edit: None,
+            series_presentation_edit: None,
             axis_overrides_before: None,
             canvas_settings: None,
             figure_typography_open: false,
@@ -496,6 +501,7 @@ impl Default for UiState {
             processing_template_dialog: None,
             spectrum_arithmetic_dialog: None,
             align_spectra_dialog: None,
+            trace_alignment_dialog: None,
             trace_composer: None,
             selection: Selection::None,
             selection_scope: SelectionScope::default(),

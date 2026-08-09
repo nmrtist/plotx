@@ -27,6 +27,18 @@ increments; **Cancel** leaves the project unchanged. This remains available
 while a dataset displays a DOSY map because the composer selects stable stack
 increments rather than copying data from the displayed map.
 
+To align peaks in a stack on the canvas, select the plot and choose **Align
+Traces…** in the **Align** group on the **Analyze** tab. You can also choose
+**Align traces…** under **Data** in the Object inspector. Choose a reference
+increment and a peak window, then review the proposed shifts before selecting
+**Apply**. Hidden increments and increments without a usable peak are listed as
+**Skipped** and remain unchanged. **Trace start** is also available when you
+need to align the first finite plotted sample instead of a peak.
+
+For a manual correction, edit **X shift (ppm)** on the increment's line row.
+These undoable shifts belong to the plot, so the processed spectra and DOSY or
+ILT maps remain unchanged.
+
 ## Workflow
 
 1. Import the pseudo-2D dataset.

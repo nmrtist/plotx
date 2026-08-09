@@ -34,6 +34,7 @@ mod switcher;
 #[cfg(not(target_os = "macos"))]
 mod title_bar;
 pub(crate) mod tools;
+mod trace_alignment;
 mod trace_composer;
 mod windows;
 
@@ -91,6 +92,7 @@ pub fn render(
         || app.session.ui.processing_template_dialog.is_some()
         || app.session.ui.spectrum_arithmetic_dialog.is_some()
         || app.session.ui.align_spectra_dialog.is_some()
+        || app.session.ui.trace_alignment_dialog.is_some()
         || app.session.ui.trace_composer.is_some()
         || app.session.ui.command_palette.is_some()
         || app.session.ui.save_project_options
@@ -172,6 +174,7 @@ pub fn render(
     processing_templates::processing_template_window(app, &ctx);
     arithmetic::spectrum_arithmetic_window(app, &ctx);
     align::align_spectra_window(app, &ctx);
+    trace_alignment::trace_alignment_window(app, &ctx);
     trace_composer::trace_composer_window(app, &ctx);
     batch_workflow.show(app, &ctx);
 
@@ -349,9 +352,11 @@ fn feedback_banner(app: &mut PlotxApp, ui: &mut Ui, dark: bool) {
 
 fn render_sidebars(app: &mut PlotxApp, ui: &mut Ui, dark: bool, workspace_width: f32) {
     let compact = workspace_width < 1200.0;
-    if !app.session.secondary_sidebar_visible {
+    let inspector_visible = app.session.secondary_sidebar_visible;
+    if !inspector_visible {
         app.finish_axis_overrides_edit();
     }
+    object_inspector::finish_series_edit_if_inactive(app, inspector_visible);
     if app.session.primary_sidebar_visible {
         let panel = egui::Panel::left("primary_sidebar")
             .frame(egui::Frame::NONE.inner_margin(egui::Margin {

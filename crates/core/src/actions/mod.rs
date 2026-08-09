@@ -157,6 +157,14 @@ pub struct PendingInspectorEdit {
     pub frames: Vec<(ObjectId, ObjectFrame)>,
 }
 
+/// Coalesces a continuous plot-series presentation gesture into one undo step.
+#[derive(Clone)]
+pub struct PendingSeriesPresentationEdit {
+    pub canvas: usize,
+    pub object: ObjectId,
+    pub before: DataBinding,
+}
+
 #[derive(Clone)]
 pub enum Action {
     Composite(Vec<Action>),

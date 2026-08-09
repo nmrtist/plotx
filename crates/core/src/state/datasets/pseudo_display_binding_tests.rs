@@ -2,6 +2,64 @@ use super::pseudo_tests::{synthetic_dosy, wait_for_compute};
 use super::*;
 
 #[test]
+fn trace_alignment_merges_stack_projection_without_changing_map_bindings() {
+    let mut owner = Nmr2DDataset::load(synthetic_dosy(1.2e-9));
+    assert!(owner.build_dosy_map());
+    owner.display = PseudoDisplay::Stack;
+    let mut app = PlotxApp::new_with_settings(crate::settings::Settings::default());
+    app.doc.datasets.push(Dataset::Nmr2D(Box::new(owner)));
+    let page = crate::workflow::build_default_canvas(&app.doc.datasets[0], "Owner");
+    app.doc.canvases.push(page);
+    let canvas = app.doc.canvases[0].resource_id;
+    let object = app.doc.canvases[0].objects[0].id;
+    let owner_id = app.doc.datasets[0].resource_id();
+    let stack_field = app.doc.datasets[0]
+        .field_catalog()
+        .id_for_key("nmr.stack")
+        .unwrap();
+    let displayed = app.display_binding(
+        Some(owner_id),
+        &app.doc.canvases[0].objects[0].plot().unwrap().binding,
+    );
+    let reference = displayed.series[0].id;
+    let map_before: Vec<_> = app.doc.canvases[0].objects[0]
+        .plot()
+        .unwrap()
+        .binding
+        .series
+        .iter()
+        .filter(|series| series.source.field != stack_field)
+        .cloned()
+        .collect();
+    app.apply_trace_alignment(TraceAlignmentRequest {
+        canvas,
+        object,
+        reference,
+        method: TraceAlignmentMethod::TraceStart,
+    })
+    .unwrap();
+    let map_after: Vec<_> = app.doc.canvases[0].objects[0]
+        .plot()
+        .unwrap()
+        .binding
+        .series
+        .iter()
+        .filter(|series| series.source.field != stack_field)
+        .cloned()
+        .collect();
+    assert_eq!(map_after, map_before);
+    app.set_pseudo_display(0, PseudoDisplay::DosyMap);
+    let map_display = app.display_binding(
+        Some(owner_id),
+        &app.doc.canvases[0].objects[0].plot().unwrap().binding,
+    );
+    assert!(matches!(
+        map_display.series[0].encoding,
+        plotx_figure::SeriesEncoding::Contour(_)
+    ));
+}
+
+#[test]
 fn live_binding_projects_the_current_field_and_keeps_external_series() {
     let mut owner = Nmr2DDataset::load(synthetic_dosy(1.2e-9));
     assert!(owner.build_dosy_map());

@@ -75,20 +75,23 @@ impl XrdDataset {
     pub(crate) fn field_descriptors(&self) -> Vec<FieldDescriptor> {
         self.field_id()
             .into_iter()
-            .map(|id| FieldDescriptor {
-                id,
-                local_id: "xrd.intensity".to_owned(),
-                name: "Intensity".to_owned(),
-                capabilities: FieldCapabilities::new([
-                    CapabilityId::new(CAP_FIELD_CURVE_1D),
-                    CapabilityId::new(CAP_FIELD_XRD_PATTERN),
-                ]),
-                dimensions: vec![self.data.len()],
-                units: vec!["deg".to_owned(), "a.u.".to_owned()],
-                metadata: FieldMetadata(BTreeMap::from([(
-                    "recommended_encoding".to_owned(),
-                    "line".to_owned(),
-                )])),
+            .map(|id| {
+                FieldDescriptor {
+                    id,
+                    local_id: "xrd.intensity".to_owned(),
+                    name: "Intensity".to_owned(),
+                    capabilities: FieldCapabilities::new([
+                        CapabilityId::new(CAP_FIELD_CURVE_1D),
+                        CapabilityId::new(CAP_FIELD_XRD_PATTERN),
+                    ]),
+                    dimensions: vec![self.data.len()],
+                    units: vec!["deg".to_owned(), "a.u.".to_owned()],
+                    metadata: FieldMetadata(BTreeMap::from([(
+                        "recommended_encoding".to_owned(),
+                        "line".to_owned(),
+                    )])),
+                }
+                .with_line_x_unit("deg")
             })
             .collect()
     }

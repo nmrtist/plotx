@@ -33,6 +33,7 @@ pub struct RibbonPlacement {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Applicability {
     Always,
+    LineAlignmentOnly,
     TableOnly,
     SeriesOnly,
     Homonuclear2dOnly,
@@ -87,6 +88,7 @@ pub enum CommandId {
     ApplyProcessingTemplate,
     SpectrumArithmetic,
     AlignSpectra,
+    AlignTraces,
     StackData,
     ExtractMassSpectrum,
     SelectRange,
@@ -228,6 +230,7 @@ pub fn catalog(app: &PlotxApp) -> Vec<CommandDescriptor> {
         CommandId::ApplyProcessingTemplate,
         CommandId::SpectrumArithmetic,
         CommandId::AlignSpectra,
+        CommandId::AlignTraces,
         CommandId::StackData,
         CommandId::ExtractMassSpectrum,
         CommandId::SelectRange,
@@ -483,6 +486,10 @@ pub fn describe(app: &PlotxApp, id: CommandId) -> CommandDescriptor {
             app.can_align_spectra(),
             "Select at least two non-empty 1D NMR spectra, or clear the selection to use all spectra.",
         ),
+        CommandId::AlignTraces => requires(
+            app.trace_alignment_target().is_some(),
+            "Select a plot with at least two visible line series that use the same x-axis unit.",
+        ),
         CommandId::StackData => requires(
             app.stackable_selection().is_some(),
             "Select at least two compatible datasets. Trace collections such as electrophysiology require compatible axes and units.",
@@ -668,6 +675,7 @@ pub fn describe(app: &PlotxApp, id: CommandId) -> CommandDescriptor {
             && app.session.ui.processing_template_dialog.is_none()
             && app.session.ui.spectrum_arithmetic_dialog.is_none()
             && app.session.ui.align_spectra_dialog.is_none()
+            && app.session.ui.trace_alignment_dialog.is_none()
             && app.session.ui.trace_composer.is_none()
             && !app.session.ui.interaction.is_active());
     // Activation requirements must not trap an already-active tool after the
@@ -682,6 +690,7 @@ pub fn describe(app: &PlotxApp, id: CommandId) -> CommandDescriptor {
     // `groups_for_tab`, pushing usable groups into the overflow menu.
     let ribbon = ribbon_placement(id).filter(|placement| match placement.applicability {
         Applicability::Always => true,
+        Applicability::LineAlignmentOnly => app.trace_alignment_target().is_some(),
         Applicability::TableOnly => is_table(),
         Applicability::SeriesOnly => is_series(),
         Applicability::Homonuclear2dOnly => dataset()
@@ -737,3 +746,7 @@ mod mass_spec_tests;
 #[cfg(test)]
 #[path = "commands_xps_tests.rs"]
 mod xps_tests;
+
+#[cfg(test)]
+#[path = "commands_alignment_tests.rs"]
+mod alignment_tests;

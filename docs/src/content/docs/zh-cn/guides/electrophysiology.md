@@ -15,6 +15,17 @@ float32、单/多记录通道、定长或变长 sweep、ADC 缩放、通道名�
 recording 的全部 sweep。可用 **Show all**、**Hide all**、每行的复选框或删除按钮，
 把 stack 缩减到需要比较的电压或电流。
 
+若要对齐 sweep 的峰，请选中图形，然后在 **Analyze** 页签的 **Align** 组中选择
+**Align Traces…**。也可以在对象检查器的 **Data** 中选择 **Align traces…**。
+选择参考 sweep 后，用 **Peak in window** 输入要搜索的时间窗。**Positive** 查找
+向上的峰，**Negative** 查找向下的峰，**Magnitude** 比较两者的突出度。若选择
+**Trace start**，则会对齐第一个有限绘制样本，而不是检测刺激起点。
+
+选择 **Apply** 前，请检查每条 sweep 的 **Anchor**、**Delta** 和 **Result**。
+隐藏的 sweep 以及没有可用峰的 sweep 会列为 **Skipped**，并保持不变。若要手动
+校正一条 sweep，可在 **Data** 中编辑其 **X shift (s)**；单 sweep 图中也有此项。
+自动和手动位移都是可撤销的图形设置，不会改动导入样本或数据集导出。
+
 若要比较多个 recording，请在 Data 浏览器中选择两个或更多兼容的 recording，
 然后选择 **Stack selected data**。trace composer 会列出每个 recording 当前所选
 通道中的全部 sweep，并默认全部纳入。可按数据集、sweep 标签或参数值搜索，再用

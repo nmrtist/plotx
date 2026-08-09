@@ -18,7 +18,20 @@ pub(super) fn data_section(app: &mut PlotxApp, ci: usize, object: ObjectId, ui: 
     let multiple_datasets = binding.dataset_ids().len() > 1;
     let count = binding.series.len();
     let mut next_binding: Option<DataBinding> = None;
+    let mut next_presentation_binding: Option<DataBinding> = None;
     let mut next_stack: Option<StackSpec> = None;
+    let canvas_id = app.doc.canvases[ci].resource_id;
+    if app.can_align_plot_traces(canvas_id, object) && ui.button("Align traces…").clicked() {
+        crate::ui::trace_alignment::open_trace_alignment_dialog(app, canvas_id, object);
+    }
+    let x_unit = plot_x_unit(
+        app.doc.canvases[ci]
+            .object(object)
+            .and_then(|object| object.plot())
+            .map(|plot| plot.figure().x.label.as_str())
+            .unwrap_or("x"),
+    )
+    .to_owned();
     if is_stack {
         ui.horizontal(|ui| {
             if ui
@@ -145,6 +158,19 @@ pub(super) fn data_section(app: &mut PlotxApp, ci: usize, object: ObjectId, ui: 
                         next_binding = Some(b);
                     }
                     if matches!(sb.encoding, plotx_figure::SeriesEncoding::Line(_)) {
+                        if let Some(after) = x_shift_control(
+                            app,
+                            ci,
+                            object,
+                            display_owner,
+                            &persisted_binding,
+                            &binding,
+                            i,
+                            &x_unit,
+                            ui,
+                        ) {
+                            next_presentation_binding = Some(after);
+                        }
                         let mut scale = sb.line_scale();
                         if ui
                             .add(DragValue::new(&mut scale).speed(0.02).range(0.01..=100.0))
@@ -160,10 +186,27 @@ pub(super) fn data_section(app: &mut PlotxApp, ci: usize, object: ObjectId, ui: 
                             next_binding = Some(b);
                         }
                     }
-                } else if i != 0 && ui.small_button("Primary").clicked() {
-                    let mut b = binding.clone();
-                    b.series.swap(0, i);
-                    next_binding = Some(b);
+                } else {
+                    if matches!(sb.encoding, plotx_figure::SeriesEncoding::Line(_))
+                        && let Some(after) = x_shift_control(
+                            app,
+                            ci,
+                            object,
+                            display_owner,
+                            &persisted_binding,
+                            &binding,
+                            i,
+                            &x_unit,
+                            ui,
+                        )
+                    {
+                        next_presentation_binding = Some(after);
+                    }
+                    if i != 0 && ui.small_button("Primary").clicked() {
+                        let mut b = binding.clone();
+                        b.series.swap(0, i);
+                        next_binding = Some(b);
+                    }
                 }
             });
         });
@@ -213,7 +256,18 @@ pub(super) fn data_section(app: &mut PlotxApp, ci: usize, object: ObjectId, ui: 
         ui.weak("Stacking is available for line-series plots.");
     }
 
-    if let Some(after) = next_binding
+    if let Some(after) = next_presentation_binding
+        && after != binding
+    {
+        let after = app.merge_display_binding(display_owner, &persisted_binding, after);
+        app.execute_action(Action::set_series_presentation(
+            ci,
+            object,
+            persisted_binding,
+            after,
+        ));
+        app.session.status = "Updated plot presentation.".to_owned();
+    } else if let Some(after) = next_binding
         && after != binding
     {
         let after = app.merge_display_binding(display_owner, &persisted_binding, after);
@@ -243,4 +297,59 @@ fn swatch(ui: &mut Ui, color: Color) {
         2.0,
         egui::Color32::from_rgb(color.r, color.g, color.b),
     );
+}
+
+fn plot_x_unit(label: &str) -> &str {
+    label
+        .rsplit_once('(')
+        .and_then(|(_, suffix)| suffix.strip_suffix(')'))
+        .filter(|unit| !unit.trim().is_empty())
+        .unwrap_or(label)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn x_shift_control(
+    app: &mut PlotxApp,
+    canvas: usize,
+    object: ObjectId,
+    display_owner: Option<plotx_core::state::DatasetId>,
+    persisted: &DataBinding,
+    displayed: &DataBinding,
+    index: usize,
+    x_unit: &str,
+    ui: &mut Ui,
+) -> Option<DataBinding> {
+    let mut x_shift = displayed.series[index].line_x_shift().unwrap_or(0.0);
+    let response = ui
+        .add(
+            DragValue::new(&mut x_shift)
+                .speed(0.01)
+                .max_decimals(6)
+                .prefix(format!("X shift ({x_unit}) ")),
+        )
+        .on_hover_text(format!("Manual x shift in {x_unit}"));
+    if response.drag_started() {
+        app.begin_series_presentation_edit(canvas, object);
+    }
+    let gesture_active = app
+        .session
+        .ui
+        .series_presentation_edit
+        .as_ref()
+        .is_some_and(|edit| edit.canvas == canvas && edit.object == object);
+    let mut typed_after = None;
+    if response.changed() && x_shift.is_finite() {
+        let mut after = displayed.clone();
+        after.series[index].set_line_x_shift(x_shift);
+        if gesture_active {
+            let after = app.merge_display_binding(display_owner, persisted, after);
+            app.set_series_presentation_value(canvas, object, &after);
+        } else {
+            typed_after = Some(after);
+        }
+    }
+    if response.drag_stopped() {
+        app.finish_series_presentation_edit();
+    }
+    typed_after
 }

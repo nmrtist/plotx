@@ -1,6 +1,7 @@
 use crate::actions::{
     Action, DatasetProcessingState, PendingCanvasSizeEdit, PendingInspectorEdit,
-    PendingPageLayoutEdit, PendingProcessingEdit, PendingViewportEdit,
+    PendingPageLayoutEdit, PendingProcessingEdit, PendingSeriesPresentationEdit,
+    PendingViewportEdit,
 };
 use crate::export::{ExportDialogState, ExportFormat, ExportSettings};
 use crate::{
@@ -105,6 +106,7 @@ mod table_fit;
 mod table_native;
 mod table_numeric;
 mod tile_drop;
+mod trace_alignment;
 mod trace_composer;
 mod trace_provider;
 #[cfg(test)]
@@ -186,6 +188,7 @@ pub use table_execution::*;
 pub use table_execution_job::*;
 pub use table_native::*;
 pub use tile_drop::*;
+pub use trace_alignment::*;
 pub use ui_drag::*;
 pub use ui_state::*;
 pub use units::*;

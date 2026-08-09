@@ -20,6 +20,31 @@ impl PositiveFiniteF64 {
     }
 }
 
+/// A finite signed scalar used by persisted presentation settings.
+#[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd, Serialize)]
+#[serde(transparent)]
+pub struct FiniteF64(f64);
+
+impl FiniteF64 {
+    pub fn new(value: f64) -> Option<Self> {
+        value.is_finite().then_some(Self(value))
+    }
+
+    pub const fn get(self) -> f64 {
+        self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for FiniteF64 {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = f64::deserialize(deserializer)?;
+        Self::new(value).ok_or_else(|| de::Error::custom("expected a finite value"))
+    }
+}
+
 impl<'de> Deserialize<'de> for PositiveFiniteF64 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -108,10 +133,13 @@ pub enum EstimatorSelection {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LineEncoding {
     pub color: ColorSource,
     pub scale: f64,
     pub width: PositiveFiniteF32,
+    /// Plot-owned translation in the x-axis coordinate system.
+    pub x_shift: FiniteF64,
 }
 
 impl Default for LineEncoding {
@@ -121,6 +149,7 @@ impl Default for LineEncoding {
             scale: 1.0,
             width: PositiveFiniteF32::new(DEFAULT_DATA_LINE_WIDTH_PT)
                 .expect("literal width is valid"),
+            x_shift: FiniteF64::default(),
         }
     }
 }
@@ -343,5 +372,21 @@ mod tests {
             )
             .is_ok()
         );
+    }
+
+    #[test]
+    fn strict_line_encoding_requires_one_finite_x_shift() {
+        let value = serde_json::to_value(LineEncoding::default()).unwrap();
+        assert_eq!(value["x_shift"], 0.0);
+
+        let mut missing = value.clone();
+        missing.as_object_mut().unwrap().remove("x_shift");
+        assert!(serde_json::from_value::<LineEncoding>(missing).is_err());
+
+        let mut unknown = value.clone();
+        unknown["legacy_shift"] = serde_json::json!(1.0);
+        assert!(serde_json::from_value::<LineEncoding>(unknown).is_err());
+
+        assert!(serde_json::from_str::<FiniteF64>("1e999").is_err());
     }
 }

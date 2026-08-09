@@ -119,6 +119,26 @@ pub(crate) fn render(app: &mut PlotxApp, ui: &mut Ui) {
     ui.add_space(2.0);
 }
 
+pub(crate) fn finish_series_edit_if_inactive(app: &mut PlotxApp, inspector_visible: bool) {
+    let target_changed = app
+        .session
+        .ui
+        .series_presentation_edit
+        .as_ref()
+        .is_some_and(|edit| {
+            app.session.active_canvas != Some(edit.canvas)
+                || app
+                    .doc
+                    .canvases
+                    .get(edit.canvas)
+                    .and_then(|canvas| canvas.selected_object)
+                    != Some(edit.object)
+        });
+    if !inspector_visible || target_changed {
+        app.finish_series_presentation_edit();
+    }
+}
+
 fn inspector_header(app: &PlotxApp, canvas: Option<usize>, ids: &[ObjectId], ui: &mut Ui) {
     let context = canvas
         .map(|canvas| selection_context_label(app, canvas, ids))

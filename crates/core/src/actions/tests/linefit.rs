@@ -488,3 +488,25 @@ fn single_plot_color_override_leaves_overlay_colors_alone() {
     assert_eq!(fig.series[0].color, override_color);
     assert!(fig.series[1..].iter().all(|s| s.color != override_color));
 }
+
+#[test]
+fn manual_x_shift_translates_data_and_fit_export_geometry_once() {
+    let mut app = two_lorentzian_app();
+    app.execute_action(Action::set_line_fits(
+        dataset_id(&app, 0),
+        Vec::new(),
+        vec![stored_sample(0)],
+    ));
+    let mut binding = DataBinding::single(&app.doc.datasets[0]);
+    assert!(binding.series[0].set_line_x_shift(2.0));
+    let figure = app.build_binding_figure(
+        &binding,
+        &ChartSpec::default_for(DataDomain::Nmr1d),
+        &StackSpec::default(),
+        [120.0, 80.0],
+    );
+    assert_eq!(figure.series.len(), 3);
+    assert!((figure.series[0].points[0][0] - 2.0).abs() < 1e-12);
+    assert!((figure.series[1].points[0][0] - 3.0).abs() < 1e-12);
+    assert!((figure.series[2].points[0][0] - 3.0).abs() < 1e-12);
+}

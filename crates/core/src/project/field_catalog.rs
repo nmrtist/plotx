@@ -35,6 +35,13 @@ pub(super) fn validate_series(
             "{context} uses an encoding not supported by field {field}"
         )));
     }
+    if let plotx_figure::SeriesEncoding::Line(line) = encoding
+        && !line.scale.is_finite()
+    {
+        return Err(ProjectError::Invalid(format!(
+            "{context} uses a non-finite line scale"
+        )));
+    }
     Ok(())
 }
 
