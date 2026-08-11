@@ -6,21 +6,19 @@ use plotx_core::state::{
     CanvasObjectKind, FrameRef, ObjectId, PlotxApp, PrimaryView, RegionSelection, RenameState,
     RenameTarget,
 };
-
 mod board_views;
 mod data_browser;
+mod layers_tree;
 pub(crate) mod selection;
 use board_views::board_views_section;
 use data_browser::{AnalysisItem, AnalysisKind, DataTree, DatasetNode};
 use selection::*;
-
 pub fn render(app: &mut PlotxApp, ui: &mut Ui) {
     ui.add_space(6.0);
     switcher::segmented(ui, &mut app.session.view);
     ui.add_space(8.0);
     ui.separator();
     ui.add_space(4.0);
-
     if app.session.view == PrimaryView::Data {
         ui.add(
             egui::TextEdit::singleline(&mut app.session.ui.data_browser_filter)
@@ -32,14 +30,11 @@ pub fn render(app: &mut PlotxApp, ui: &mut Ui) {
         );
         ui.add_space(4.0);
     }
-
-    // Board bookmarks pin to the bottom; the list scrolls in the space above.
     if app.session.view == PrimaryView::Canvas && !app.doc.canvases.is_empty() {
         egui::Panel::bottom("board_views")
             .resizable(false)
             .show_inside(ui, |ui| board_views_section(app, ui));
     }
-
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| match app.session.view {
@@ -47,13 +42,11 @@ pub fn render(app: &mut PlotxApp, ui: &mut Ui) {
             PrimaryView::Data => data_list(app, ui),
         });
 }
-
 enum RenameOutcome {
     Commit(String),
     Cancel,
     Editing,
 }
-
 /// The shared inline text box for an active rename. Clicking elsewhere keeps
 /// the draft; only Enter commits and Escape cancels it.
 fn rename_edit(ui: &mut Ui, rs: &mut RenameState, id: egui::Id) -> RenameOutcome {
@@ -89,20 +82,17 @@ fn rename_edit(ui: &mut Ui, rs: &mut RenameState, id: egui::Id) -> RenameOutcome
         RenameOutcome::Editing
     }
 }
-
 fn canvas_list(app: &mut PlotxApp, ui: &mut Ui) {
     if app.doc.canvases.is_empty() {
         ui.weak("No canvases yet. Opening data creates one automatically.");
         return;
     }
-
     let mut select: Option<(usize, SelectModifiers)> = None;
     let mut open_settings: Option<usize> = None;
     let mut delete: Option<usize> = None;
     let mut start_rename: Option<usize> = None;
     let mut commit: Option<(usize, String)> = None;
     let mut cancel = false;
-
     for ci in 0..app.doc.canvases.len() {
         let renaming = matches!(
             &app.session.ui.rename,
@@ -117,7 +107,6 @@ fn canvas_list(app: &mut PlotxApp, ui: &mut Ui) {
             }
             continue;
         }
-
         let name = app.doc.canvases[ci].name.clone();
         let selected = crate::ui::canvas::frame_is_selected(app, FrameRef::Page(ci));
         let resp = ui.selectable_label(selected, name);
@@ -147,7 +136,6 @@ fn canvas_list(app: &mut PlotxApp, ui: &mut Ui) {
         });
         resp.on_hover_text("Double-click to rename");
     }
-
     if let Some(ci) = app.session.active_canvas
         && ci < app.doc.canvases.len()
         && !app.doc.canvases[ci].objects.is_empty()
@@ -158,7 +146,6 @@ fn canvas_list(app: &mut PlotxApp, ui: &mut Ui) {
         ui.label(crate::typography::headline("Layers"));
         object_list(app, ci, ui);
     }
-
     if let Some((ci, name)) = commit {
         let trimmed = name.trim();
         if !trimmed.is_empty() {
@@ -216,20 +203,25 @@ fn canvas_list(app: &mut PlotxApp, ui: &mut Ui) {
         app.execute_action(action);
     }
 }
-
-/// The z-order (front-to-back, top-to-bottom) layers list. Rows mirror the
-/// canvas front: the top row is the frontmost object (last in `objects`).
 fn object_list(app: &mut PlotxApp, ci: usize, ui: &mut Ui) {
+    layers_tree::render_panels(app, ci, ui);
     let mut select = None;
     let mut reorder: Option<(ObjectId, ZOrder)> = None;
-    // (object, destination canvas, is_move). Deferred so the row's context menu
-    // doesn't hold an app borrow while mutating the canvases.
     let mut transfer: Option<(ObjectId, usize, bool)> = None;
     let others = crate::ui::menus::other_canvas_destinations(app, ci);
+    let panel_destinations: Vec<_> = app.doc.canvases[ci]
+        .panels
+        .iter()
+        .filter(|panel| !panel.locked)
+        .map(|panel| (panel.id, layers_tree::panel_tree_name(app, ci, panel)))
+        .collect();
     let count = app.doc.canvases[ci].objects.len();
     for row in 0..count {
         let oi = count - 1 - row;
         let object_id = app.doc.canvases[ci].objects[oi].id;
+        if app.doc.canvases[ci].parent_panel(object_id).is_some() {
+            continue;
+        }
         ui.horizontal(|ui| {
             let mut visible = app.doc.canvases[ci].objects[oi].visible;
             if ui
@@ -259,13 +251,36 @@ fn object_list(app: &mut PlotxApp, ci: usize, ui: &mut Ui) {
             }
             let selected = app.session.ui.selection.contains(object_id)
                 || app.session.ui.selection.object() == Some(object_id);
-            let resp = ui.selectable_label(selected, app.doc.canvases[ci].objects[oi].name.clone());
+            let resp = ui.add(
+                egui::Button::selectable(selected, app.doc.canvases[ci].objects[oi].name.clone())
+                    .sense(egui::Sense::click_and_drag()),
+            );
+            if resp.drag_started() {
+                app.session.ui.layers_drag_content = Some(object_id);
+            }
             if resp.clicked() || (resp.secondary_clicked() && !selected) {
                 claim_list_keyboard_focus(ui, &resp);
                 select = Some((object_id, select_modifiers(ui)));
             }
             resp.context_menu(|ui| {
                 object_transfer_menu(ui, object_id, &others, &mut transfer);
+                if !panel_destinations.is_empty() {
+                    ui.menu_button("Move into panel", |ui| {
+                        for (panel, name) in &panel_destinations {
+                            if ui.button(name).clicked() {
+                                app.select_content(ci, object_id);
+                                crate::ui::commands::execute_without_clipboard(
+                                    crate::ui::commands::CommandId::MoveContentToPanel(Some(
+                                        *panel,
+                                    )),
+                                    app,
+                                    ui.ctx(),
+                                );
+                                ui.close();
+                            }
+                        }
+                    });
+                }
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let mut locked = app.doc.canvases[ci].objects[oi].locked;
@@ -324,7 +339,6 @@ fn object_list(app: &mut PlotxApp, ci: usize, ui: &mut Ui) {
         app.transfer_objects_to_canvas(ci, &[object_id], to, is_move);
     }
 }
-
 fn object_transfer_menu(
     ui: &mut Ui,
     object_id: ObjectId,
@@ -343,7 +357,6 @@ fn object_transfer_menu(
         *transfer = Some((object_id, to, is_move));
     }
 }
-
 fn kind_glyph(kind: &CanvasObjectKind) -> &'static str {
     match kind {
         CanvasObjectKind::Plot(_) => icon::CHART_LINE,
@@ -352,7 +365,6 @@ fn kind_glyph(kind: &CanvasObjectKind) -> &'static str {
         CanvasObjectKind::RasterImage(_) => icon::FILE,
     }
 }
-
 fn kind_label(kind: &CanvasObjectKind) -> &'static str {
     match kind {
         CanvasObjectKind::Plot(_) => "Plot",
@@ -361,13 +373,11 @@ fn kind_label(kind: &CanvasObjectKind) -> &'static str {
         CanvasObjectKind::RasterImage(_) => "Image",
     }
 }
-
 fn data_list(app: &mut PlotxApp, ui: &mut Ui) {
     if app.doc.datasets.is_empty() {
         ui.weak("No data yet. Open an acquisition from the toolbar.");
         return;
     }
-
     data_browser::reveal_active_path(app);
     let query = app.session.ui.data_browser_filter.clone();
     let filtering = !query.trim().is_empty();
@@ -376,7 +386,6 @@ fn data_list(app: &mut PlotxApp, ui: &mut Ui) {
         ui.weak("No matching data or analysis results.");
         return;
     }
-
     let visible = tree.visible_datasets(app, filtering);
     let mut event = None;
     let mut rename_rendered = false;
@@ -393,7 +402,6 @@ fn data_list(app: &mut PlotxApp, ui: &mut Ui) {
     }
     apply_browser_event(app, ui, &visible, event);
 }
-
 #[derive(Clone)]
 enum BrowserEvent {
     SelectDataset(usize, SelectModifiers),
@@ -406,7 +414,6 @@ enum BrowserEvent {
     Jump(FrameRef),
     SelectAnalysis(usize, AnalysisItem, bool),
 }
-
 fn render_dataset_node(
     app: &mut PlotxApp,
     ui: &mut Ui,
@@ -424,7 +431,6 @@ fn render_dataset_node(
             &app.session.ui.rename,
             Some(RenameState { target: RenameTarget::Data(i), .. }) if *i == di
         );
-
     ui.horizontal(|ui| {
         ui.add_space(depth as f32 * 12.0);
         if has_children {
@@ -533,7 +539,6 @@ fn render_dataset_node(
             }
         });
     });
-
     if !open || node.cycle_cut {
         return;
     }
@@ -544,7 +549,6 @@ fn render_dataset_node(
         render_derived_group(app, ui, node, depth + 1, filtering, rename_rendered, event);
     }
 }
-
 fn render_analysis_group(
     app: &mut PlotxApp,
     ui: &mut Ui,

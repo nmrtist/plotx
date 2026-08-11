@@ -310,23 +310,29 @@ pub(crate) fn handle_object_interactions(
     ci: usize,
     rect: egui::Rect,
     ui: &Ui,
-    _resp: &egui::Response,
+    resp: &egui::Response,
 ) {
-    let (hover, primary_down, primary_pressed, primary_released, shift, alt, esc, focused) = ui
-        .input(|i| {
+    let (hover, primary_down, primary_pressed, primary_released, shift, command, alt, esc, focused) =
+        ui.input(|i| {
             (
                 i.pointer.hover_pos(),
                 i.pointer.primary_down(),
                 i.pointer.primary_pressed(),
                 i.pointer.primary_released(),
                 i.modifiers.shift,
+                i.modifiers.command,
                 i.modifiers.alt,
                 i.key_pressed(egui::Key::Escape),
                 i.focused,
             )
         });
 
-    if (esc || !focused) && matches!(app.interaction(), Interaction::Object(_)) {
+    if (esc || !focused)
+        && matches!(
+            app.interaction(),
+            Interaction::Object(_) | Interaction::Panel(_)
+        )
+    {
         app.cancel_interaction();
         return;
     }
@@ -337,32 +343,153 @@ pub(crate) fn handle_object_interactions(
         };
         let page_pos =
             screen_to_page_unbounded(app.session.board, &app.doc.canvases[ci], rect, screen_pos);
+        let editing_panel = app
+            .session
+            .ui
+            .hierarchical_selection
+            .editing_panel()
+            .filter(|(canvas, _)| *canvas == app.doc.canvases[ci].resource_id)
+            .map(|(_, panel)| panel);
+
+        // Page scope owns the Panel frame. This is deliberately checked before
+        // content hit-testing so a child can never steal the parent drag.
+        if editing_panel.is_none()
+            && !alt
+            && let Some(panel_hit) = page_pos
+                .and_then(|point| hit_panel(&app.doc.canvases[ci], point, app.session.board.zoom))
+        {
+            app.session.ui.selection_scope = plotx_core::state::SelectionScope::CanvasObjects;
+            if shift || command {
+                if let Err(reason) = app.toggle_panel_sibling(ci, panel_hit.panel) {
+                    app.session.status = reason.to_owned();
+                }
+            } else {
+                app.select_panel(ci, panel_hit.panel);
+                if resp.double_clicked() {
+                    app.enter_panel(ci, panel_hit.panel);
+                } else if app.doc.canvases[ci]
+                    .panel(panel_hit.panel)
+                    .is_some_and(|panel| !panel.locked)
+                {
+                    begin_panel_drag(
+                        app,
+                        ci,
+                        panel_hit.panel,
+                        panel_hit.kind,
+                        page_pos,
+                        screen_pos,
+                        false,
+                    );
+                }
+            }
+            return;
+        }
         let hit = page_pos.and_then(|page_pos| {
-            hit_object(&app.doc.canvases[ci], page_pos, app.session.board.zoom)
+            if editing_panel.is_some() || alt || command || resp.double_clicked() {
+                let hits = hit_content_objects(
+                    &app.doc.canvases[ci],
+                    page_pos,
+                    app.session.board.zoom,
+                    editing_panel,
+                );
+                if !alt {
+                    return hits.into_iter().next();
+                }
+                let current = app
+                    .session
+                    .ui
+                    .hierarchical_selection
+                    .lead()
+                    .and_then(|path| path.content);
+                let next = current
+                    .and_then(|id| hits.iter().position(|hit| hit.object == id))
+                    .map_or(0, |index| (index + 1) % hits.len().max(1));
+                return hits.get(next).copied();
+            }
+            if !alt {
+                return hit_object(&app.doc.canvases[ci], page_pos, app.session.board.zoom);
+            }
+            let hits = hit_objects(&app.doc.canvases[ci], page_pos, app.session.board.zoom);
+            let current = app
+                .session
+                .ui
+                .hierarchical_selection
+                .lead()
+                .and_then(|path| path.content);
+            let next = current
+                .and_then(|id| hits.iter().position(|hit| hit.object == id))
+                .map_or(0, |index| (index + 1) % hits.len().max(1));
+            hits.get(next).copied()
         });
 
         if let Some(hit) = hit {
             let id = hit.object;
-            if shift {
+            let parent = app.doc.canvases[ci].parent_panel(id);
+            if alt || command || (resp.double_clicked() && parent.is_some()) {
                 app.session.ui.selection_scope = plotx_core::state::SelectionScope::CanvasObjects;
-                app.toggle_object_selection(ci, id);
+                app.select_content(ci, id);
+            } else if shift {
+                app.session.ui.selection_scope = plotx_core::state::SelectionScope::CanvasObjects;
+                let editing_parent = app.session.ui.hierarchical_selection.editing_panel()
+                    == parent.map(|panel| (app.doc.canvases[ci].resource_id, panel));
+                let result = if let Some(panel) = parent.filter(|_| !editing_parent) {
+                    app.toggle_panel_sibling(ci, panel)
+                } else {
+                    app.toggle_content_sibling(ci, id)
+                };
+                if let Err(reason) = result {
+                    app.session.status = reason.to_owned();
+                }
             } else {
                 let keep_group = app.session.ui.selection.objects().len() > 1
                     && app.session.ui.selection.contains(id);
                 if !keep_group {
                     app.session.ui.selection_scope =
                         plotx_core::state::SelectionScope::CanvasObjects;
-                    app.select_object(ci, id);
+                    let editing_parent = app.session.ui.hierarchical_selection.editing_panel()
+                        == parent.map(|panel| (app.doc.canvases[ci].resource_id, panel));
+                    if let Some(panel) = parent.filter(|_| !editing_parent) {
+                        app.select_panel(ci, panel);
+                    } else {
+                        app.select_object(ci, id);
+                    }
                 }
                 if matches!(app.interaction(), Interaction::PanelLabel(_)) {
                     app.reset_interaction();
                 }
                 app.focus_object_datasets(ci, id);
-                if app.doc.canvases[ci]
-                    .object(id)
-                    .is_some_and(|object| !object.locked)
-                {
-                    let Some(before) = app.doc.canvases[ci].layout_frame(id) else {
+                let editable = parent
+                    .and_then(|panel| app.doc.canvases[ci].panel(panel))
+                    .map_or_else(
+                        || {
+                            app.doc.canvases[ci]
+                                .object(id)
+                                .is_some_and(|object| !object.locked)
+                        },
+                        |panel| {
+                            !panel.locked
+                                && app.doc.canvases[ci]
+                                    .object(id)
+                                    .is_some_and(|object| !object.locked)
+                        },
+                    );
+                if editable {
+                    let space = parent
+                        .filter(|panel| editing_panel == Some(*panel))
+                        .map(ObjectDragSpace::Panel)
+                        .unwrap_or(ObjectDragSpace::Page);
+                    if parent.is_some() && matches!(space, ObjectDragSpace::Page) {
+                        // A page-scope child is represented by its Panel. The
+                        // Panel hit branch normally returned above; this guard
+                        // keeps an out-of-bounds child from falling through to a
+                        // misleading content drag.
+                        return;
+                    }
+                    let Some(before) = (if matches!(space, ObjectDragSpace::Panel(_)) {
+                        app.doc.canvases[ci].object(id).map(|object| object.frame)
+                    } else {
+                        app.doc.canvases[ci].layout_frame(id)
+                    }) else {
                         return;
                     };
                     let start = page_pos.map(|p| [p.x, p.y]).unwrap_or([before.x, before.y]);
@@ -379,9 +506,14 @@ pub(crate) fn handle_object_interactions(
                                     .object(oid)
                                     .filter(|o| !o.locked)
                                     .and_then(|_| {
-                                        app.doc.canvases[ci]
-                                            .layout_frame(oid)
-                                            .map(|frame| (oid, frame))
+                                        let frame = if matches!(space, ObjectDragSpace::Panel(_)) {
+                                            app.doc.canvases[ci]
+                                                .object(oid)
+                                                .map(|object| object.frame)
+                                        } else {
+                                            app.doc.canvases[ci].layout_frame(oid)
+                                        }?;
+                                        Some((oid, frame))
                                     })
                             })
                             .collect()
@@ -398,6 +530,7 @@ pub(crate) fn handle_object_interactions(
                         start_pointer_screen: [screen_pos.x, screen_pos.y],
                         others,
                         active: matches!(hit.kind, ObjectDragKind::Resize(_)),
+                        space,
                     }));
                 }
             }
@@ -426,7 +559,7 @@ pub(crate) fn handle_object_interactions(
             }));
         }
     }
-
+    handle_panel_drag(app, ci, rect, hover, primary_down, primary_released, alt);
     let object_drag = match &app.session.ui.interaction {
         Interaction::Object(d) if d.canvas == ci => Some(d.clone()),
         _ => None,
@@ -451,24 +584,52 @@ pub(crate) fn handle_object_interactions(
                 d.active = active;
             }
             if active {
-                if update_tile_drop(app, ci, rect, &drag, hover) {
+                if let Some(source) = tile_source_for_object(app, &drag)
+                    && update_tile_drop(app, ci, rect, source, hover)
+                {
                     app.session.ui.snap_guides.clear();
                 } else {
                     let candidate = drag_frame(drag.before, drag.kind, dpx, dpy);
-                    let (snapped, guides) = snap_object_frame(app, ci, &drag, candidate, ui);
-                    let applied = [snapped.x - drag.before.x, snapped.y - drag.before.y];
-                    app.doc.canvases[ci].set_layout_frame(drag.object, snapped);
-                    for &(oid, before) in &drag.others {
-                        app.doc.canvases[ci].set_layout_frame(
-                            oid,
-                            ObjectFrame::new(
-                                before.x + applied[0],
-                                before.y + applied[1],
-                                before.width,
-                                before.height,
-                            ),
-                        );
+                    let (mut snapped, guides) = if let ObjectDragSpace::Panel(panel) = drag.space {
+                        snap_panel_content_frame(app, ci, panel, &drag, candidate, ui)
+                    } else {
+                        snap_object_frame(app, ci, &drag, candidate, ui)
+                    };
+                    let preserve_aspect = app.doc.canvases[ci].parent_panel(drag.object).is_some()
+                        || app.doc.canvases[ci]
+                            .object(drag.object)
+                            .and_then(|item| match &item.kind {
+                                CanvasObjectKind::RasterImage(image) => Some(image.preserve_aspect),
+                                _ => None,
+                            })
+                            .unwrap_or(false);
+                    if preserve_aspect {
+                        snapped = preserve_aspect_frame(drag.before, snapped, drag.kind);
                     }
+                    let applied = [snapped.x - drag.before.x, snapped.y - drag.before.y];
+                    if matches!(drag.space, ObjectDragSpace::Panel(_)) {
+                        if let Some(object) = app.doc.canvases[ci].object_mut(drag.object) {
+                            object.frame = snapped;
+                        }
+                    } else {
+                        app.doc.canvases[ci].set_layout_frame(drag.object, snapped);
+                    }
+                    for &(oid, before) in &drag.others {
+                        let frame = ObjectFrame::new(
+                            before.x + applied[0],
+                            before.y + applied[1],
+                            before.width,
+                            before.height,
+                        );
+                        if matches!(drag.space, ObjectDragSpace::Panel(_)) {
+                            if let Some(object) = app.doc.canvases[ci].object_mut(oid) {
+                                object.frame = frame;
+                            }
+                        } else {
+                            app.doc.canvases[ci].set_layout_frame(oid, frame);
+                        }
+                    }
+                    update_content_drop_target(app, ci, &drag, pointer_page);
                     app.session.ui.snap_guides = guides;
                 }
             }
@@ -477,14 +638,22 @@ pub(crate) fn handle_object_interactions(
             app.session.ui.snap_guides.clear();
             if let Interaction::Object(drag) = app.take_interaction() {
                 if let Some(preview) = app.session.ui.tile_drop.take() {
-                    commit_tile_drop(app, drag, preview, alt);
+                    if let Some(source) = tile_source_for_object(app, &drag) {
+                        commit_tile_drop(app, source, preview, alt);
+                    } else {
+                        finish_object_drag(app, ci, drag);
+                    }
                 } else if active {
-                    finish_object_drag(app, ci, drag);
+                    let target = app.session.ui.panel_drop_target.take();
+                    if target.is_some() || matches!(drag.space, ObjectDragSpace::Panel(_)) {
+                        finish_content_drag(app, ci, drag, target);
+                    } else {
+                        finish_object_drag(app, ci, drag);
+                    }
                 }
             }
         }
     }
-
     if matches!(&app.session.ui.interaction, Interaction::Marquee(m) if m.canvas == ci) {
         if primary_down
             && let Some(p) = hover.and_then(|p| {
@@ -500,41 +669,6 @@ pub(crate) fn handle_object_interactions(
             finish_marquee(app, ci, marq);
         }
     }
-}
-
-const MARQUEE_CLICK_PT: f32 = 3.0;
-
-fn finish_marquee(app: &mut PlotxApp, ci: usize, marq: MarqueeDrag) {
-    let dx = (marq.current[0] - marq.start[0]).abs();
-    let dy = (marq.current[1] - marq.start[1]).abs();
-    if dx < MARQUEE_CLICK_PT && dy < MARQUEE_CLICK_PT {
-        if !marq.additive {
-            clear_canvas_interaction_state(app, ci, CanvasInteractionClearScope::Selection);
-            app.session.status = "Selection cleared.".to_owned();
-        }
-        return;
-    }
-    let min_x = marq.start[0].min(marq.current[0]);
-    let max_x = marq.start[0].max(marq.current[0]);
-    let min_y = marq.start[1].min(marq.current[1]);
-    let max_y = marq.start[1].max(marq.current[1]);
-    let hits: Vec<ObjectId> = app.doc.canvases[ci]
-        .objects
-        .iter()
-        .filter(|o| o.visible)
-        .filter(|o| {
-            let Some(f) = app.doc.canvases[ci].layout_frame(o.id) else {
-                return false;
-            };
-            max_x >= f.x && min_x <= f.x + f.width && max_y >= f.y && min_y <= f.y + f.height
-        })
-        .map(|o| o.id)
-        .collect();
-    app.set_page_selection(ci, &hits, marq.additive);
-    app.session.status = format!(
-        "Selected {} object(s).",
-        app.session.ui.selection.objects().len()
-    );
 }
 
 pub(crate) fn arrange_context_menu(app: &mut PlotxApp, ci: usize, ui: &mut Ui) {

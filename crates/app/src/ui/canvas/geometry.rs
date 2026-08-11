@@ -1,42 +1,13 @@
 use super::*;
-
-#[derive(Clone, Copy)]
-pub(crate) struct ObjectHit {
-    pub(crate) object: ObjectId,
-    pub(crate) kind: ObjectDragKind,
-}
-
-pub(crate) fn hit_object(canvas: &CanvasDocument, p: Pos2, zoom: f32) -> Option<ObjectHit> {
-    let handle_radius = (HANDLE_SIZE_PX / zoom.max(0.01)).max(3.0);
-    canvas.objects.iter().rev().find_map(|object| {
-        if !object.visible {
-            return None;
-        }
-        let frame = canvas.layout_frame(object.id)?;
-        let r = egui::Rect::from_min_size(
-            Pos2::new(frame.x, frame.y),
-            egui::vec2(frame.width, frame.height),
-        );
-        let handles = [
-            (r.left_top(), ResizeHandle::TopLeft),
-            (r.right_top(), ResizeHandle::TopRight),
-            (r.left_bottom(), ResizeHandle::BottomLeft),
-            (r.right_bottom(), ResizeHandle::BottomRight),
-        ];
-        for (pos, handle) in handles {
-            if pos.distance(p) <= handle_radius {
-                return Some(ObjectHit {
-                    object: object.id,
-                    kind: ObjectDragKind::Resize(handle),
-                });
-            }
-        }
-        r.contains(p).then_some(ObjectHit {
-            object: object.id,
-            kind: ObjectDragKind::Move,
-        })
-    })
-}
+#[path = "geometry_aspect.rs"]
+mod aspect;
+pub(crate) use aspect::preserve_aspect_frame;
+#[path = "geometry_panels.rs"]
+mod panels;
+pub(crate) use panels::{
+    ObjectHit, PanelHit, content_screen_rect, hit_content_object, hit_content_objects, hit_object,
+    hit_objects, hit_panel,
+};
 
 /// Topmost canvas object under a screen point, including objects outside their
 /// owning page. The active page wins ties, matching page/frame hit ordering.
@@ -56,6 +27,28 @@ pub(crate) fn object_at_screen(
     canvases.into_iter().find_map(|canvas| {
         let page = transform.screen_to_page(&app.doc.canvases[canvas], point);
         hit_object(&app.doc.canvases[canvas], page, app.session.board.zoom).map(|hit| (canvas, hit))
+    })
+}
+
+/// Topmost Panel under a screen point, including an empty Panel or one placed
+/// beyond its page boundary. Board-level gestures use this before considering
+/// a marquee so direct manipulation always owns a semantic Panel hit.
+pub(crate) fn panel_at_screen(
+    app: &PlotxApp,
+    screen: egui::Rect,
+    point: Pos2,
+) -> Option<(usize, PanelHit)> {
+    let mut canvases: Vec<_> = (0..app.doc.canvases.len()).rev().collect();
+    if let Some(active) = app.session.active_canvas
+        && canvases.contains(&active)
+    {
+        canvases.retain(|candidate| *candidate != active);
+        canvases.insert(0, active);
+    }
+    let transform = BoardTransform::from_board(app.session.board, screen);
+    canvases.into_iter().find_map(|canvas| {
+        let page = transform.screen_to_page(&app.doc.canvases[canvas], point);
+        hit_panel(&app.doc.canvases[canvas], page, app.session.board.zoom).map(|hit| (canvas, hit))
     })
 }
 
@@ -198,6 +191,21 @@ impl BoardTransform {
                 continue;
             };
             bounds = bounds.union(plot_rect(frame));
+        }
+        // Empty Panels have no content frame to contribute above, but remain
+        // directly manipulable page objects and must not disappear from the
+        // editor's input/culling bounds when placed beyond the paper edge.
+        let page = self.page_screen_rect(canvas);
+        for panel in &canvas.panels {
+            let frame = panel.frame;
+            let panel_rect = egui::Rect::from_min_size(
+                Pos2::new(
+                    page.left() + frame.x * self.zoom,
+                    page.top() + frame.y * self.zoom,
+                ),
+                egui::vec2(frame.width * self.zoom, frame.height * self.zoom),
+            );
+            bounds = bounds.union(panel_rect);
         }
         bounds
     }
@@ -434,6 +442,10 @@ pub(crate) fn plot_rect(plot: PlotRect) -> EguiRect {
 pub(crate) fn pos(p: [f32; 2]) -> Pos2 {
     Pos2::new(p[0], p[1])
 }
+
+#[cfg(test)]
+#[path = "geometry_pr2_tests.rs"]
+mod pr2_tests;
 
 #[cfg(test)]
 mod tests {
@@ -683,6 +695,13 @@ mod tests {
             .push(text_object(2, ObjectFrame::new(20.0, 20.0, 50.0, 50.0)));
         let hit = hit_object(&canvas, Pos2::new(35.0, 35.0), 1.0).unwrap();
         assert_eq!(hit.object, ObjectId::new(2));
+        assert_eq!(
+            hit_objects(&canvas, Pos2::new(35.0, 35.0), 1.0)
+                .iter()
+                .map(|hit| hit.object)
+                .collect::<Vec<_>>(),
+            [ObjectId::new(2), ObjectId::new(1)]
+        );
     }
 
     #[test]

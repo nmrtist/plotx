@@ -20,6 +20,7 @@ pub(crate) enum RecentOpenKind {
     OriginProject,
     Folder,
     DataFile,
+    Image,
 }
 
 impl RecentOpenKind {
@@ -39,6 +40,7 @@ pub(crate) enum ClassifiedOpenPath {
     OriginProject(origin::OpenOriginSource),
     Folder,
     DataFile,
+    Image,
 }
 
 impl ClassifiedOpenPath {
@@ -50,6 +52,7 @@ impl ClassifiedOpenPath {
             Self::OriginProject(_) => RecentOpenKind::OriginProject,
             Self::Folder => RecentOpenKind::Folder,
             Self::DataFile => RecentOpenKind::DataFile,
+            Self::Image => RecentOpenKind::Image,
         }
     }
 
@@ -197,6 +200,7 @@ pub(crate) fn classify_open_handle(
         }
         RecentOpenKind::Folder => ClassifiedOpenPath::Folder,
         RecentOpenKind::DataFile => ClassifiedOpenPath::DataFile,
+        RecentOpenKind::Image => ClassifiedOpenPath::Image,
     })
 }
 
@@ -220,6 +224,9 @@ where
 }
 
 fn classify_open_header(path: &Path, header: &[u8]) -> Result<RecentOpenKind, OpenPathError> {
+    if plotx_io::image::sniff(header).supported() {
+        return Ok(RecentOpenKind::Image);
+    }
     if header.starts_with(b"CPYA") || header.starts_with(b"CPYUA") {
         let probe = plotx_io::origin::probe_origin(header).map_err(OpenPathError::OriginProbe)?;
         reject_origin_family_mismatch(path, probe.format)?;
@@ -331,10 +338,13 @@ pub(crate) fn dispatch_classified_path(
         }
         ClassifiedOpenPath::Folder => open_folder_path(app, path),
         ClassifiedOpenPath::DataFile => load_and_note(app, path),
+        ClassifiedOpenPath::Image => {
+            super::import_image_paths(app, std::slice::from_ref(&path.to_owned()))
+        }
     }
 }
 
-fn record_open_path_failure(app: &mut PlotxApp, path: &Path, error: OpenPathError) {
+pub(super) fn record_open_path_failure(app: &mut PlotxApp, path: &Path, error: OpenPathError) {
     let operation_id = app.session.begin_operation();
     let message = error.to_string();
     let (operation_kind, diagnostic_code) = open_path_failure_classification(path, &error);

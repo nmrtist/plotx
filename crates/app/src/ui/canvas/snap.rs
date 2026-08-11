@@ -121,6 +121,63 @@ pub(crate) fn snap_object_frame(
     }
 }
 
+/// Snap a Panel child in Panel-local coordinates. Guides are translated back to
+/// page coordinates because the overlay is deliberately rendered in page space.
+pub(crate) fn snap_panel_content_frame(
+    app: &PlotxApp,
+    ci: usize,
+    panel_id: PanelId,
+    drag: &ObjectDrag,
+    candidate: ObjectFrame,
+    ui: &Ui,
+) -> (ObjectFrame, Vec<SnapGuide>) {
+    let alt = ui.input(|i| i.modifiers.alt);
+    if !app.settings.general.snap_enabled || alt {
+        return (candidate, Vec::new());
+    }
+    let canvas = &app.doc.canvases[ci];
+    let Some(panel) = canvas.panel(panel_id) else {
+        return (candidate, Vec::new());
+    };
+    let zoom = app.session.board.zoom.max(0.01);
+    let threshold = SNAP_PX / zoom;
+    let mut targets = SnapTargets::from_page(
+        [panel.frame.width, panel.frame.height],
+        &plotx_core::layout::PageLayout::default(),
+    );
+    for &content in &panel.item_order {
+        let moving = content == drag.object || drag.others.iter().any(|(id, _)| *id == content);
+        if !moving
+            && canvas.object(content).is_some_and(|item| item.visible)
+            && let Some(frame) = canvas.object(content).map(|item| item.frame)
+        {
+            targets.push_object(frame);
+        }
+    }
+    let (frame, guides) = match drag.kind {
+        ObjectDragKind::Move => layout::snap_move(candidate, &targets, threshold),
+        ObjectDragKind::Resize(handle) => layout::snap_resize(
+            candidate,
+            movable_edges(handle),
+            &targets,
+            threshold,
+            MIN_OBJECT_SIZE_PT,
+        ),
+    };
+    let guides = guides
+        .into_iter()
+        .map(|mut guide| {
+            guide.pos += if guide.vertical {
+                panel.frame.x
+            } else {
+                panel.frame.y
+            };
+            guide
+        })
+        .collect();
+    (frame, guides)
+}
+
 pub(crate) fn movable_edges(handle: ResizeHandle) -> MovableEdges {
     let (left, right) = (
         matches!(handle, ResizeHandle::TopLeft | ResizeHandle::BottomLeft),

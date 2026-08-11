@@ -22,6 +22,7 @@ pub enum ParentPanelDto {
 #[serde(deny_unknown_fields)]
 pub struct RasterImageDto {
     pub asset: String,
+    pub page_index: u32,
     pub crop: [f32; 4],
     pub fit: String,
     pub rotation: u16,
@@ -43,6 +44,9 @@ pub struct ViewPanel {
     pub locked: bool,
     pub clip_children: bool,
     pub layout: PanelLayoutDto,
+    pub layout_gap: f32,
+    pub layout_padding: f32,
+    pub layout_alignment: String,
 }
 
 #[derive(Serialize, Deserialize, Clone)]

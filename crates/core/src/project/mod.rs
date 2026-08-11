@@ -617,6 +617,29 @@ fn validate_resource_ids(doc: &crate::state::Document) -> Result<()> {
     }
     for canvas in &doc.canvases {
         canvas.validate_structure().map_err(ProjectError::Invalid)?;
+        for item in &canvas.objects {
+            let crate::state::CanvasObjectKind::RasterImage(image) = &item.kind else {
+                continue;
+            };
+            let asset = doc.assets.get(&image.asset).ok_or_else(|| {
+                ProjectError::Invalid(format!("missing referenced asset {}", image.asset))
+            })?;
+            if image.page_index > 0 && asset.format != "tiff" {
+                return Err(ProjectError::Invalid(format!(
+                    "image {} references page {} of non-TIFF asset {}",
+                    item.id, image.page_index, asset.id
+                )));
+            }
+            if image.page_index > 0
+                && plotx_io::image::tiff_page_count(&asset.bytes)
+                    .is_none_or(|pages| image.page_index >= pages)
+            {
+                return Err(ProjectError::Invalid(format!(
+                    "image {} references missing page {} of asset {}",
+                    item.id, image.page_index, asset.id
+                )));
+            }
+        }
     }
     Ok(())
 }

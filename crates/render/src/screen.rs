@@ -604,6 +604,9 @@ fn paint_document_impl(
             DocumentItem::Overlay(overlay) => {
                 paint_document_overlay(&item_painter, page, overlay, viewport)
             }
+            DocumentItem::Raster(raster) => {
+                paint_document_raster(&item_painter, page, raster, viewport)
+            }
             DocumentItem::PanelLabel {
                 frame,
                 text,
@@ -614,25 +617,27 @@ fn paint_document_impl(
                     page.top + (frame.top + text.position[1]) * viewport.zoom,
                 );
                 let font = FontId::proportional((text.font_size * viewport.zoom).max(6.0));
-                item_painter.text(
-                    pos,
-                    Align2::LEFT_TOP,
-                    &text.text,
-                    font.clone(),
-                    col(Color::BLACK),
+                let color = crate::screen_raster::contrasting_label_color(
+                    &document.items,
+                    frame,
+                    text,
+                    document.background,
                 );
+                item_painter.text(pos, Align2::LEFT_TOP, &text.text, font.clone(), col(color));
                 item_painter.text(
                     pos + Vec2::new(0.6, 0.0),
                     Align2::LEFT_TOP,
                     &text.text,
                     font,
-                    col(Color::BLACK),
+                    col(color),
                 );
             }
             DocumentItem::PanelLabel { .. } => {}
         }
     }
 }
+
+use crate::screen_raster::paint_document_raster;
 
 fn paint_document_object(
     painter: &egui::Painter,

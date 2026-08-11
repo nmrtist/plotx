@@ -16,6 +16,14 @@ impl PlotxApp {
             };
         }
         match action {
+            Action::SetAsset { id, after, .. } => match after {
+                Some(asset) => {
+                    self.doc.assets.insert(*id, asset.clone());
+                }
+                None => {
+                    self.doc.assets.remove(id);
+                }
+            },
             Action::ReplacePanelState { canvas, after, .. } => {
                 self.set_panel_state(*canvas, after);
             }
@@ -262,6 +270,18 @@ impl PlotxApp {
                 ..
             } => {
                 self.set_object_text_value(*canvas, *object, after.clone());
+            }
+            Action::SetRasterImage {
+                canvas,
+                object,
+                after,
+                ..
+            } => {
+                if let Some(item) = self.doc.canvases[*canvas].object_mut(*object)
+                    && let crate::state::CanvasObjectKind::RasterImage(image) = &mut item.kind
+                {
+                    *image = after.clone();
+                }
             }
             Action::SetObjectStyle { canvas, after, .. } => {
                 self.set_object_styles(*canvas, after);

@@ -39,6 +39,21 @@ pub(super) fn validate_action(
     shape: &mut ValidationShape,
 ) -> Result<(), ActionApplyError> {
     match action {
+        Action::SetAsset { id, before, after } => {
+            for asset in before.iter().chain(after) {
+                if asset.id != *id || asset.pixel_size.contains(&0) {
+                    return Err(ActionApplyError::InvalidValue(format!(
+                        "asset {id} has invalid identity or dimensions"
+                    )));
+                }
+                let digest = plotx_io::image::sha256(&asset.bytes);
+                if digest != asset.sha256 {
+                    return Err(ActionApplyError::InvalidValue(format!(
+                        "asset {id} hash does not match its bytes"
+                    )));
+                }
+            }
+        }
         Action::ReplacePanelState {
             canvas,
             before,
@@ -228,6 +243,45 @@ pub(super) fn validate_action(
                 return Err(ActionApplyError::StaleTarget(format!("canvas {index}")));
             }
             shape.canvases += 1;
+        }
+        Action::SetRasterImage {
+            canvas,
+            object,
+            before,
+            after,
+        } => {
+            let Some(item) = app
+                .doc
+                .canvases
+                .get(*canvas)
+                .and_then(|canvas| canvas.object(*object))
+            else {
+                return Err(ActionApplyError::StaleTarget(format!("image {object}")));
+            };
+            if !matches!(item.kind, crate::state::CanvasObjectKind::RasterImage(_)) {
+                return Err(ActionApplyError::InvalidValue(format!(
+                    "content {object} is not a raster image"
+                )));
+            }
+            for image in [before, after] {
+                image.validate().map_err(ActionApplyError::InvalidValue)?;
+                let Some(asset) = app.doc.assets.get(&image.asset) else {
+                    return Err(ActionApplyError::InvalidValue(format!(
+                        "image {object} references missing asset {}",
+                        image.asset
+                    )));
+                };
+                if image.page_index > 0
+                    && (asset.format != "tiff"
+                        || plotx_io::image::tiff_page_count(&asset.bytes)
+                            .is_none_or(|pages| image.page_index >= pages))
+                {
+                    return Err(ActionApplyError::InvalidValue(format!(
+                        "image {object} references missing page {}",
+                        image.page_index
+                    )));
+                }
+            }
         }
         Action::SetObjectViewport { canvas, object, .. }
         | Action::SetAxisOverrides { canvas, object, .. }

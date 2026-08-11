@@ -5,7 +5,7 @@ pub(crate) mod canvas;
 pub(crate) mod canvas_size;
 mod clipboard_figure;
 #[cfg(windows)]
-mod clipboard_native;
+pub(crate) mod clipboard_native;
 pub(crate) mod clipboard_table;
 mod command_exec;
 mod command_palette;
@@ -16,6 +16,7 @@ mod diagnostics;
 mod export_dialog;
 mod figure_typography;
 pub(crate) mod file_dialogs;
+pub(crate) mod file_drop;
 mod menus;
 #[cfg(target_os = "macos")]
 pub(crate) mod native_menu;
@@ -66,6 +67,8 @@ pub fn render(
     ctx.send_viewport_cmd(egui::ViewportCommand::Title(project_window_title(app)));
     sync_chrome_theme(&ctx, app.settings.appearance.theme);
     clipboard_table_paste.begin_frame(app, &ctx);
+    file_dialogs::image_import::poll(app, &ctx);
+    file_dialogs::image_import::large_image_consent_window(app, &ctx);
     if let Some(payload) = app.poll_data_export() {
         copy_table_export(&ctx, payload);
     }
@@ -109,6 +112,7 @@ pub fn render(
         handle_rename_shortcut(app, &ctx);
         handle_fit_shortcut(app, &ctx);
         handle_focus_shortcut(app, &ctx);
+        handle_hierarchy_traversal(app, &ctx);
         handle_delete_shortcut(app, &ctx);
     }
 
@@ -178,7 +182,7 @@ pub fn render(
     trace_composer::trace_composer_window(app, &ctx);
     batch_workflow.show(app, &ctx);
 
-    handle_file_drop(app, &ctx);
+    file_drop::handle(app, &ctx);
     handle_close_request(app, &ctx);
     #[cfg(not(target_os = "macos"))]
     title_bar::resize_zones(&ctx);

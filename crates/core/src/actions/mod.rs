@@ -1,11 +1,11 @@
 use crate::layout::PageLayout;
 use crate::state::{
-    AxisOverrides, AxisProjections, CanvasDocument, CanvasObject, CanvasViewport, ChartSpec,
-    CurveFitReference, DataBinding, Dataset, DatasetId, ExtractedIonChromatogram,
-    ExtractedMassSpectrum, ExtractionId, IonChromatogramId, LayoutGroup, NamedView, ObjectFrame,
-    ObjectId, ObjectStyle, Panel, PanelLabelStyle, PanelMeta, PlotxApp, PrimaryView, Region,
-    Selection, StackSpec, StatAnalysis, StoredCurveFitAnalysis, StoredLineFit, StoredMultiplet,
-    TableEditDelta, TextBox, TypedTableState,
+    AssetId, AssetRecord, AxisOverrides, AxisProjections, CanvasDocument, CanvasObject,
+    CanvasViewport, ChartSpec, CurveFitReference, DataBinding, Dataset, DatasetId,
+    ExtractedIonChromatogram, ExtractedMassSpectrum, ExtractionId, IonChromatogramId, LayoutGroup,
+    NamedView, ObjectFrame, ObjectId, ObjectStyle, Panel, PanelLabelStyle, PanelMeta, PlotxApp,
+    PrimaryView, Region, Selection, StackSpec, StatAnalysis, StoredCurveFitAnalysis, StoredLineFit,
+    StoredMultiplet, TableEditDelta, TextBox, TypedTableState,
 };
 use crate::theme::ThemeSnapshot;
 use crate::{Integral2D, IntegralResult};
@@ -196,6 +196,11 @@ impl PanelState {
 #[derive(Clone)]
 pub enum Action {
     Composite(Vec<Action>),
+    SetAsset {
+        id: AssetId,
+        before: Option<AssetRecord>,
+        after: Option<AssetRecord>,
+    },
     ReplacePanelState {
         canvas: usize,
         before: PanelState,
@@ -490,6 +495,12 @@ pub enum Action {
         before: TextBox,
         after: TextBox,
     },
+    SetRasterImage {
+        canvas: usize,
+        object: ObjectId,
+        before: crate::state::RasterImageContent,
+        after: crate::state::RasterImageContent,
+    },
     /// Set the visual style of one or more objects at once (inspector edits,
     /// format-once). One entry per object; kinds that don't match are ignored.
     SetObjectStyle {
@@ -597,6 +608,7 @@ impl Action {
     fn is_noop(&self) -> bool {
         match self {
             Self::Composite(actions) => actions.iter().all(Self::is_noop),
+            Self::SetAsset { .. } => false,
             Self::ReplacePanelState { .. } => false,
             Self::UpdateDatasetProcessing { before, after, .. } => before == after,
             Self::SetObjectViewport { before, after, .. } => before == after,
@@ -648,6 +660,7 @@ impl Action {
             Self::SetMultiplets { before, after, .. } => before == after,
             Self::SetTableStatistics { before, after, .. } => before == after,
             Self::SetObjectText { before, after, .. } => before == after,
+            Self::SetRasterImage { before, after, .. } => before == after,
             Self::SetObjectStyle { before, after, .. } => before == after,
             Self::ApplyTheme { before, after, .. } => before == after,
             Self::SetFigureTypography { before, after } => before == after,

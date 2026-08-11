@@ -170,7 +170,8 @@ pub(crate) fn panel_label_screen_rect(
 ) -> Option<egui::Rect> {
     let frame = object_screen_rect(board, canvas, object_id, screen)?;
     let panel = canvas.panel_meta_for_content(object_id)?;
-    if !panel.visible {
+    let panel_id = canvas.parent_panel(object_id)?;
+    if !canvas.panel_label_is_displayed(panel_id) {
         return None;
     }
     let letter = canvas.panel_letter(object_id)?;

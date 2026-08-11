@@ -27,6 +27,7 @@ pub struct PeakBandDrag {
 pub enum Interaction {
     Idle,
     Object(ObjectDrag),
+    Panel(PanelDrag),
     Marquee(MarqueeDrag),
     PanelLabel(PanelLabelDrag),
     Frame(FrameDrag),
@@ -67,6 +68,7 @@ impl Interaction {
         match self {
             Interaction::Idle => GestureFamily::Idle,
             Interaction::Object(_)
+            | Interaction::Panel(_)
             | Interaction::Marquee(_)
             | Interaction::PanelLabel(_)
             | Interaction::Frame(_)
@@ -90,6 +92,7 @@ impl Interaction {
     pub fn canvas(&self) -> Option<usize> {
         match self {
             Interaction::Object(d) => Some(d.canvas),
+            Interaction::Panel(d) => Some(d.canvas),
             Interaction::Marquee(d) => Some(d.canvas),
             Interaction::PanelLabel(d) => Some(d.canvas),
             Interaction::Author(d) => Some(d.canvas),

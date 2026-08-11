@@ -6,7 +6,7 @@ use egui_phosphor::regular as icon;
 use plotx_core::actions::ZOrder;
 use plotx_core::layout::{Align, Distribute, GutterPreset, SpacingMode};
 use plotx_core::properties::PropertyStep;
-use plotx_core::state::{PlotxApp, Tool};
+use plotx_core::state::{PanelLayout, PlotxApp, Tool};
 
 use super::CommandId;
 
@@ -28,6 +28,11 @@ impl CommandId {
             Self::PropertyGroup(section) => format!("properties.group.{section}"),
             Self::StepProperty(step) => format!("properties.step.{}", step.as_str()),
             Self::Tool(tool) => format!("tool.{}", tool_slug(tool)),
+            Self::SetPanelLayout(layout) => {
+                format!("panel.layout.{}", panel_layout_slug(layout))
+            }
+            Self::MoveContentToPanel(Some(panel)) => format!("panel.move_content.{panel}"),
+            Self::MoveContentToPanel(None) => "panel.move_content.loose".to_owned(),
             _ => simple_stable_id(self).to_owned(),
         }
     }
@@ -54,6 +59,17 @@ pub(super) fn command_identity(
         CommandId::ClearRecentFiles => plain("Clear Recent Files", None),
         CommandId::HelpManual => plain("User Manual", Some(icon::BOOK_OPEN)),
         CommandId::ImportTable => plain("Import Table…", Some(icon::TABLE)),
+        CommandId::ImportImage => plain("Add Images…", Some(icon::FILE)),
+        CommandId::ImportImageFirstFrame => {
+            plain("Add Animated Image First Frame…", Some(icon::FILE))
+        }
+        CommandId::ImportImageWithoutMetadata => {
+            plain("Add Images Without Metadata…", Some(icon::FILE))
+        }
+        CommandId::ImportTiffPages => plain("Add All TIFF Pages…", Some(icon::FILE)),
+        CommandId::PasteImage => plain("Paste Image", Some(icon::CLIPBOARD_TEXT)),
+        CommandId::CancelImageImport => plain("Cancel Image Import", Some(icon::X)),
+        CommandId::ReplaceImage => plain("Replace Image…", Some(icon::ARROWS_CLOCKWISE)),
         CommandId::PasteTable => plain("Paste Table from Clipboard", Some(icon::CLIPBOARD_TEXT)),
         CommandId::SaveProject => plain("Save Project", Some(icon::FLOPPY_DISK)),
         CommandId::NewTable => plain("New Empty Data Table", Some(icon::TABLE)),
@@ -80,6 +96,30 @@ pub(super) fn command_identity(
         CommandId::DeselectAll => (selection_label(app, "Deselect All"), None, None),
         CommandId::Group => ("Group Selection".into(), None, None),
         CommandId::Ungroup => ("Ungroup Selection".into(), None, None),
+        CommandId::CreatePanel => plain("Create Empty Panel", Some(icon::RECTANGLE)),
+        CommandId::ComposePanel => plain("Compose Panel from Selection", Some(icon::SQUARES_FOUR)),
+        CommandId::DissolvePanel => {
+            plain("Dissolve Panel and Keep Contents", Some(icon::ARROWS_OUT))
+        }
+        CommandId::DeletePanel => plain("Delete Panel and Contents", Some(icon::TRASH)),
+        CommandId::DuplicatePanel => plain("Duplicate Panel", Some(icon::COPY)),
+        CommandId::MergePanels => plain("Merge Selected Panels", Some(icon::UNION)),
+        CommandId::SplitPanel => plain("Split Selected Contents into Panel", Some(icon::SCISSORS)),
+        CommandId::ReorderPanelLabels => plain(
+            "Renumber Panels by Reading Order",
+            Some(icon::SORT_ASCENDING),
+        ),
+        CommandId::SetPanelLayout(layout) => plain(
+            match layout {
+                PanelLayout::Free => "Panel Layout: Free",
+                PanelLayout::VerticalStack => "Panel Layout: Vertical Stack",
+                PanelLayout::HorizontalStack => "Panel Layout: Horizontal Stack",
+                PanelLayout::Grid { .. } => "Panel Layout: Grid",
+            },
+            Some(icon::SQUARES_FOUR),
+        ),
+        CommandId::MoveContentToPanel(Some(_)) => plain("Move into Panel", Some(icon::ARROW_RIGHT)),
+        CommandId::MoveContentToPanel(None) => plain("Move out of Panel", Some(icon::ARROW_LEFT)),
         CommandId::TogglePrimarySidebar => (
             "Left Sidebar".into(),
             Some(icon::SIDEBAR),
@@ -346,6 +386,13 @@ fn simple_stable_id(id: CommandId) -> &'static str {
         CommandId::RunBatchWorkflow => "tools.automation",
         CommandId::RunScientificScript => "tools.run_scientific_script",
         CommandId::ImportTable => "file.import_table",
+        CommandId::ImportImage => "figure.import_image",
+        CommandId::ImportImageFirstFrame => "figure.import_image_first_frame",
+        CommandId::ImportImageWithoutMetadata => "figure.import_image_without_metadata",
+        CommandId::ImportTiffPages => "figure.import_tiff_pages",
+        CommandId::PasteImage => "figure.paste_image",
+        CommandId::CancelImageImport => "figure.cancel_image_import",
+        CommandId::ReplaceImage => "figure.replace_image",
         CommandId::PasteTable => "file.paste_table",
         CommandId::SaveProject => "file.save",
         CommandId::NewTable => "file.new_table",
@@ -358,6 +405,15 @@ fn simple_stable_id(id: CommandId) -> &'static str {
         CommandId::DeselectAll => "edit.deselect_all",
         CommandId::Group => "edit.group",
         CommandId::Ungroup => "edit.ungroup",
+        CommandId::CreatePanel => "panel.create",
+        CommandId::ComposePanel => "panel.compose",
+        CommandId::DissolvePanel => "panel.dissolve",
+        CommandId::DeletePanel => "panel.delete",
+        CommandId::DuplicatePanel => "panel.duplicate",
+        CommandId::MergePanels => "panel.merge",
+        CommandId::SplitPanel => "panel.split",
+        CommandId::ReorderPanelLabels => "panel.renumber",
+        CommandId::MoveContentToPanel(_) => "panel.move_content.context",
         CommandId::TogglePrimarySidebar => "view.primary_sidebar",
         CommandId::ToggleSecondarySidebar => "view.secondary_sidebar",
         CommandId::ZoomToFit => "view.zoom_fit",
@@ -402,6 +458,15 @@ fn simple_stable_id(id: CommandId) -> &'static str {
         CommandId::SimplifyInnerAxes => "arrange.simplify_inner_axes",
         CommandId::CycleCursor => "tool.next_cursor",
         _ => unreachable!("dynamic commands have formatted stable IDs"),
+    }
+}
+
+fn panel_layout_slug(layout: PanelLayout) -> &'static str {
+    match layout {
+        PanelLayout::Free => "free",
+        PanelLayout::VerticalStack => "vertical_stack",
+        PanelLayout::HorizontalStack => "horizontal_stack",
+        PanelLayout::Grid { .. } => "grid_2x2",
     }
 }
 

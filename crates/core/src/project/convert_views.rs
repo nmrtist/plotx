@@ -241,6 +241,7 @@ pub fn canvas_to_view(
                 CanvasObjectKind::RasterImage(image) => Ok(ViewCanvasObject {
                     image: Some(RasterImageDto {
                         asset: image.asset.to_string(),
+                        page_index: image.page_index,
                         crop: image.crop,
                         fit: match image.fit {
                             ImageFit::Contain => "contain",
@@ -373,6 +374,7 @@ pub fn view_to_canvas(
                     asset: image.asset.parse::<AssetId>().map_err(|_| {
                         ProjectError::Invalid(format!("invalid asset id {}", image.asset))
                     })?,
+                    page_index: image.page_index,
                     crop: image.crop,
                     fit: match image.fit.as_str() {
                         "contain" => ImageFit::Contain,

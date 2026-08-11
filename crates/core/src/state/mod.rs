@@ -39,6 +39,7 @@ mod app_impl_linefit;
 mod app_impl_multiplet;
 mod app_impl_peaks;
 mod app_impl_project;
+mod app_impl_selection;
 mod app_impl_slice;
 mod app_impl_statistics;
 #[cfg(test)]

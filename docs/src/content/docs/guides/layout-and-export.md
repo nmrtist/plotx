@@ -18,6 +18,71 @@ undoes as one step. In the Canvas list, `Shift`-click selects a continuous range
 and `Ctrl`-click adds or removes one canvas. `Ctrl` + `A` selects every frame or
 canvas according to the area you last used.
 
+## Add external images
+
+To place each image on its own fitted page, choose **Add Images…** from the File
+menu, Ribbon, or command palette. You can select multiple PNG, JPEG, TIFF, WebP,
+or BMP files. You can also drop files onto the board; each image gets a new page
+even if you drop it over an existing one.
+
+To add an image inside an existing Panel, select or enter an unlocked Panel,
+then drop the file inside the green outline. To paste an image or a copied list
+of image files, use **Paste Image** or press `Ctrl`/`Cmd` + `V`. On Windows, you
+can copy files from File Explorer or copy image pixels from an application such
+as Paint. Pasting in a text field continues to paste text normally.
+
+When PlotX creates a page for an image, it uses the image's physical size when
+DPI information is available and assumes 96 DPI otherwise. The page is at most
+89 mm wide, and its height follows the image's aspect ratio. The image fills the
+page without distortion. Importing several images is one undoable action; a
+failed or cancelled import leaves the project unchanged.
+
+For formats that need special handling, use these commands:
+
+- **Add Animated Image First Frame…** imports the first frame of an animated
+  PNG or WebP.
+- **Add Images Without Metadata…** removes metadata by converting the image to
+  PNG before adding it.
+- **Add All TIFF Pages…** adds every readable page of a multi-page TIFF. The
+  standard **Add Images…** command adds only its first page.
+
+PlotX asks for confirmation before importing a very large image. Select an
+image and use **Image** in the Object inspector to crop or rotate it, adjust its
+opacity, or choose how it is interpolated. These changes do not alter the
+embedded source image.
+
+Pages that contain external images cannot yet be exported or copied with
+**Copy Figure**. PlotX stops the operation and reports the reason instead of
+creating a figure with the image missing.
+
+## Work with figure panels
+
+Use the Panel commands in the Arrange menu or command palette to build a
+multi-panel figure. You can create an empty Panel, turn selected objects into a
+Panel, or duplicate, merge, split, dissolve, and delete Panels. Expand a Panel
+in Layers to see the objects it contains.
+
+Click anywhere inside a Panel to select it, then drag to move it or use a corner
+handle to resize it together with its contents. `Shift`-click selects multiple
+Panels. To work with an object inside a Panel, double-click the Panel or press
+`Enter`. Use the breadcrumb above the page or press `Esc` to return to the page.
+You can also `Ctrl`/`Cmd`-click an object to select it without entering first.
+
+Inside a Panel, objects snap to the Panel edge and to one another. To move an
+object into another unlocked Panel, drag it over the Panel and release when the
+target is highlighted. You can make the same move in Layers by dragging the
+object's row onto the Panel's row. A Stack or Grid Panel rearranges its contents
+after the move. Hidden objects remain selectable in Layers; locked objects can
+be selected but not edited.
+
+Use the Panel inspector to control visibility, locking, clipping, labels, and
+layout. **Vertical Stack**, **Horizontal Stack**, and **Grid** arrange the
+contents using the selected gap, padding, and alignment. Automatic panel letters
+appear only when a page has more than one visible Panel and follow reading order:
+left to right, then top to bottom. A letter placed over an image automatically
+switches between black and white for contrast. Manual and locked labels remain
+visible on a page with one Panel.
+
 ## Canvas size
 
 The active page shows a size chip above its top-left corner — the current

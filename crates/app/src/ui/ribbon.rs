@@ -412,6 +412,8 @@ fn short_label(command: &CommandDescriptor) -> String {
         }
         .to_owned(),
         CommandId::ImportTable => "Import Table".to_owned(),
+        CommandId::ImportImage => "Add Images".to_owned(),
+        CommandId::ImportImageFirstFrame => "First Frame".to_owned(),
         CommandId::PasteTable => "Paste Table".to_owned(),
         CommandId::NewTable => "New Table".to_owned(),
         CommandId::StackData => "Stack Data".to_owned(),

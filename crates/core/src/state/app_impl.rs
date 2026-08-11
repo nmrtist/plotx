@@ -12,8 +12,6 @@ type PlotRebuild = (
 use crate::operation::OperationHistory;
 use plotx_processing::{ProjectionMode, SliceKind};
 
-/// Qualitative, colourblind-safe overlay palette (Okabe–Ito derived). Index 0 is
-/// the default single-trace blue so a promoted primary keeps its colour.
 pub const OVERLAY_PALETTE: [Color; 8] = [
     Color::rgb(0x1f, 0x6f, 0xeb),
     Color::rgb(0xd5, 0x5e, 0x00),
@@ -72,8 +70,6 @@ impl PlotxApp {
                     files
                 },
                 ui: UiState {
-                    // `ilt_params` deliberately starts empty rather than mirroring
-                    // the preference here: a copy taken at construction would not
                     // follow later preference edits, and resolving at build time
                     // is what keeps the default reachable as a lifecycle stage.
                     ..Default::default()
@@ -322,23 +318,22 @@ impl PlotxApp {
     /// Select a whole object in page space. Clicking a grouped member selects the
     /// whole group, with the clicked object primary.
     pub fn select_object(&mut self, ci: usize, id: ObjectId) {
+        let Some(canvas) = self.doc.canvases.get(ci) else {
+            return;
+        };
+        let canvas_id = canvas.resource_id;
+        let parent = canvas.parent_panel(id);
         self.session.ui.panel_label_selection = None;
         self.session.ui.selection = Selection::Objects(self.group_click_members(ci, id));
+        self.session
+            .ui
+            .hierarchical_selection
+            .replace(SelectionPath::content(canvas_id, parent, id));
         if let Some(c) = self.doc.canvases.get_mut(ci) {
             c.selected_object = Some(id);
         }
     }
 
-    /// Navigate to a page.
-    ///
-    /// Switching pages is never only a change of what is drawn. `ObjectId`s are
-    /// allocated per page and start again at one on each, so a selection left
-    /// over from the page being left resolves, on the page being entered, to an
-    /// unrelated object — and every inspector row, property write and tool that
-    /// follows would act on it. Activation therefore re-derives the selection
-    /// and the data focus from the page it enters, and every entry point that
-    /// switches pages comes through here rather than assigning `active_canvas`
-    /// and leaving the rest of the session pointing at the page it left.
     pub fn activate_canvas(&mut self, ci: usize) {
         let Some(canvas) = self.doc.canvases.get(ci) else {
             return;
@@ -352,13 +347,6 @@ impl PlotxApp {
         self.reset_interaction();
     }
 
-    /// Navigate to one object: activate its page, select it, and follow the
-    /// datasets it draws.
-    ///
-    /// This is [`Self::activate_canvas`]'s counterpart for a destination that
-    /// names an object, and it exists for the same reason: selecting an object
-    /// without pointing the data focus at what it draws leaves the two halves of
-    /// the session describing different things.
     pub fn reveal_object(&mut self, ci: usize, id: ObjectId) {
         if self
             .doc
@@ -375,8 +363,6 @@ impl PlotxApp {
         self.focus_object_datasets(ci, id);
     }
 
-    /// Point the data focus at the datasets one object draws, with the object's
-    /// own active dataset leading.
     pub fn focus_object_datasets(&mut self, ci: usize, id: ObjectId) {
         let Some(object) = self
             .doc
@@ -400,8 +386,7 @@ impl PlotxApp {
         }
     }
 
-    /// The group members of `id` with `id` moved to the front (the primary).
-    fn group_click_members(&self, ci: usize, id: ObjectId) -> Vec<ObjectId> {
+    pub(super) fn group_click_members(&self, ci: usize, id: ObjectId) -> Vec<ObjectId> {
         let Some(c) = self.doc.canvases.get(ci) else {
             return vec![id];
         };
@@ -412,8 +397,6 @@ impl PlotxApp {
         members
     }
 
-    /// Shift+click: toggle an object (and its group) in or out of the current
-    /// page-space multi-selection.
     pub fn toggle_object_selection(&mut self, ci: usize, id: ObjectId) {
         let group = self.group_click_members(ci, id);
         let mut current: Vec<ObjectId> = self.session.ui.selection.objects().to_vec();
@@ -433,8 +416,6 @@ impl PlotxApp {
         }
     }
 
-    /// Replace (or extend, when `additive`) the page-space selection with a set of
-    /// objects, expanding each to its full group. Used by the marquee.
     pub fn set_page_selection(&mut self, ci: usize, ids: &[ObjectId], additive: bool) {
         let mut out: Vec<ObjectId> = if additive {
             self.session.ui.selection.objects().to_vec()
@@ -457,7 +438,6 @@ impl PlotxApp {
         }
     }
 
-    /// Ctrl+A: select every visible object on the active canvas.
     pub fn select_all_objects(&mut self) {
         let Some(ci) = self.session.active_canvas else {
             return;
@@ -481,7 +461,6 @@ impl PlotxApp {
         self.set_selection(Selection::Objects(ids));
     }
 
-    /// Sub-select a plot's panel letter (its own page-space selection scope).
     pub fn select_panel_label(&mut self, ci: usize, id: ObjectId) {
         self.session.ui.selection = Selection::None;
         self.session.ui.panel_label_selection = Some((ci, id));
@@ -490,13 +469,10 @@ impl PlotxApp {
         }
     }
 
-    /// The active-canvas panel-letter sub-selection, as `(canvas, object)`.
     pub fn panel_label_selection(&self) -> Option<(usize, ObjectId)> {
         self.session.ui.panel_label_selection
     }
 
-    /// Set the unified selection and mirror the active canvas's page-space object
-    /// identity, which drives active-plot resolution and serialization.
     pub fn set_selection(&mut self, selection: Selection) {
         let primary = selection.object();
         self.session.ui.panel_label_selection = None;
@@ -505,13 +481,15 @@ impl PlotxApp {
             && let Some(c) = self.doc.canvases.get_mut(ci)
         {
             c.selected_object = primary;
+            if let Some(id) = primary {
+                let path = SelectionPath::content(c.resource_id, c.parent_panel(id), id);
+                self.session.ui.hierarchical_selection.replace(path);
+            } else {
+                self.session.ui.hierarchical_selection.clear();
+            }
         }
     }
 
-    /// Re-derive the selection from a newly active canvas's persisted object
-    /// identity (the panel-letter sub-selection is transient and resets on a canvas
-    /// switch). If the canvas has a plot but none is selected, arm its first plot
-    /// so the Browse-default viewing tools have a target out of the box.
     pub fn sync_selection_to_active_canvas(&mut self) {
         self.session.ui.panel_label_selection = None;
         self.session.ui.selection = self
@@ -521,6 +499,20 @@ impl PlotxApp {
             .and_then(|c| c.selected_object)
             .map(Selection::single)
             .unwrap_or(Selection::None);
+        self.session.ui.hierarchical_selection.clear();
+        if let Some(ci) = self.session.active_canvas
+            && let Some(canvas) = self.doc.canvases.get(ci)
+            && let Some(id) = canvas.selected_object
+        {
+            self.session
+                .ui
+                .hierarchical_selection
+                .replace(SelectionPath::content(
+                    canvas.resource_id,
+                    canvas.parent_panel(id),
+                    id,
+                ));
+        }
         if let Some(ci) = self.session.active_canvas
             && let Some(c) = self.doc.canvases.get(ci)
             && c.selected_plot_object_id().is_none()

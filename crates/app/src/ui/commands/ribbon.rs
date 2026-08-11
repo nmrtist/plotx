@@ -17,6 +17,7 @@ pub(super) fn ribbon_placement(id: CommandId) -> Option<RibbonPlacement> {
         | CommandId::Preferences => (View, "Display", 1, Always),
         CommandId::OpenFile
         | CommandId::ImportTable
+        | CommandId::ImportImage
         | CommandId::OpenFolder
         | CommandId::PasteTable => (Data, "Import", 0, Always),
         CommandId::NewTable | CommandId::StackData => (Data, "Build", 1, Always),

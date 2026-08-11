@@ -25,6 +25,7 @@ pub enum QuarterTurn {
 #[derive(Clone, Debug, PartialEq)]
 pub struct RasterImageContent {
     pub asset: AssetId,
+    pub page_index: u32,
     /// Normalized `[left, top, right, bottom]` source rectangle.
     pub crop: [f32; 4],
     pub fit: ImageFit,
@@ -38,6 +39,7 @@ impl RasterImageContent {
     pub fn new(asset: AssetId) -> Self {
         Self {
             asset,
+            page_index: 0,
             crop: [0.0, 0.0, 1.0, 1.0],
             fit: ImageFit::Contain,
             rotation: QuarterTurn::Zero,
@@ -243,7 +245,7 @@ pub fn document_items(canvas: &CanvasDocument) -> Vec<plotx_render::DocumentItem
                 position: panel.label.position,
                 font_size: panel.label.font_size,
             },
-            visible: panel.visible && panel.label.visible,
+            visible: canvas.panel_label_is_displayed(panel.id),
         })
     }));
     items

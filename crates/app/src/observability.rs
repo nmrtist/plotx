@@ -281,10 +281,13 @@ fn rotate_files(dir: &Path, prefix: &str, keep: usize) -> io::Result<()> {
         })
         .collect::<Vec<_>>();
     files.sort_by_key(|entry| {
-        entry
-            .metadata()
-            .and_then(|metadata| metadata.modified())
-            .unwrap_or(UNIX_EPOCH)
+        (
+            entry
+                .metadata()
+                .and_then(|metadata| metadata.modified())
+                .unwrap_or(UNIX_EPOCH),
+            entry.file_name(),
+        )
     });
     let remove_count = files.len().saturating_sub(keep);
     for entry in files.into_iter().take(remove_count) {

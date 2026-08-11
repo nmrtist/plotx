@@ -1,5 +1,3 @@
-use crate::state::ObjectId;
-
 /// The active-canvas index after deleting `deleted` from `len` canvases: `None`
 /// when the last page goes, else the same slot clamped to the new final index.
 pub fn active_canvas_after_delete(len: usize, deleted: usize) -> Option<usize> {
@@ -23,16 +21,16 @@ pub enum ZOrder {
 /// Compute a new full id order after applying `op` to the `targets` within
 /// `order`. Targets keep their relative order; `Forward`/`Backward` step one
 /// slot past the nearest non-target neighbour.
-pub fn reorder_z(order: &[ObjectId], targets: &[ObjectId], op: ZOrder) -> Vec<ObjectId> {
-    let is_target = |id: &ObjectId| targets.contains(id);
+pub fn reorder_z<T: Copy + Eq>(order: &[T], targets: &[T], op: ZOrder) -> Vec<T> {
+    let is_target = |id: &T| targets.contains(id);
     match op {
         ZOrder::Front => {
-            let mut v: Vec<ObjectId> = order.iter().copied().filter(|id| !is_target(id)).collect();
+            let mut v: Vec<T> = order.iter().copied().filter(|id| !is_target(id)).collect();
             v.extend(order.iter().copied().filter(|id| is_target(id)));
             v
         }
         ZOrder::Back => {
-            let mut v: Vec<ObjectId> = order.iter().copied().filter(is_target).collect();
+            let mut v: Vec<T> = order.iter().copied().filter(is_target).collect();
             v.extend(order.iter().copied().filter(|id| !is_target(id)));
             v
         }

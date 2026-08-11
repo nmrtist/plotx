@@ -24,6 +24,7 @@ ignore = [
     # wayland-scanner moves to quick-xml >= 0.41.
     { id = "RUSTSEC-2026-0194", reason = "quick-xml is build-time only via wayland-scanner; no safe upgrade" },
     { id = "RUSTSEC-2026-0195", reason = "quick-xml is build-time only via wayland-scanner; no safe upgrade" },
+    { id = "RUSTSEC-2026-0249", reason = "smartstring is transitive through rhai; no safe upgrade is available" },
 ]
 
 [licenses]

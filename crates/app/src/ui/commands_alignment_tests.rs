@@ -1,4 +1,19 @@
 use super::*;
+
+#[test]
+fn image_entry_commands_are_available_before_a_page_exists() {
+    let app = PlotxApp::new_with_settings(plotx_core::settings::Settings::default());
+    assert!(app.doc.canvases.is_empty());
+    for command in [
+        CommandId::ImportImage,
+        CommandId::ImportImageFirstFrame,
+        CommandId::ImportImageWithoutMetadata,
+        CommandId::ImportTiffPages,
+        CommandId::PasteImage,
+    ] {
+        assert!(describe(&app, command).enabled);
+    }
+}
 use plotx_core::actions::Action;
 use plotx_core::state::{
     CanvasObject, CanvasObjectKind, DEFAULT_CANVAS_SIZE_MM, Dataset, ElectrophysiologyDataset,

@@ -1,18 +1,18 @@
 use egui::{Color32, Pos2, Rect as EguiRect, Sense, Stroke, StrokeKind, Ui, Vec2};
-use plotx_core::actions::{Action, PendingViewportEdit, PendingWheelPropertyEdit};
+use plotx_core::actions::{Action, PanelState, PendingViewportEdit, PendingWheelPropertyEdit};
 use plotx_core::layout::{self, MovableEdges, SnapGuide, SnapTargets};
 use plotx_core::state::region_color;
 use plotx_core::state::{
     AnalysisSelection, AuthorDrag, AxisRange, BOARD_GUTTER_PT, BoardFitTarget, BoardMarqueeDrag,
     BoardViewport, CanvasDocument, CanvasObject, CanvasObjectKind, Dataset, FrameDrag, FrameRef,
     FurnitureDrag, FurnitureTarget, Integral2DDrag, Integral2DDragKind, IntegralDrag, Interaction,
-    MarqueeDrag, ObjectDrag, ObjectDragKind, ObjectFrame, ObjectId, PanDrag, PanelLabelDrag,
-    PanelNoteEditState, PhaseDrag, PhaseDragKind, PhaseOrient, PlotxApp, Region, RegionDrag,
-    RegionDragKind, RegionId, RegionSelection, ResizeHandle, SHEET_COL_W_PT, SHEET_HEADER_H_PT,
-    SHEET_MAX_ROWS, SHEET_ROW_H_PT, Selection, SelectionDrag, TableDataset, TextEditState,
-    TileDropCacheKey, TileDropPreview, Tool, ZoomAxis, ZoomDrag, board_frame_id, board_frame_ref,
-    board_frames, frame_board_pos, frame_board_rect, set_frame_board_pos,
-    toggle_frame_selection_synced,
+    MarqueeDrag, ObjectDrag, ObjectDragKind, ObjectDragSpace, ObjectFrame, ObjectId, PanDrag,
+    PanelDrag, PanelId, PanelLabelDrag, PanelNoteEditState, PhaseDrag, PhaseDragKind, PhaseOrient,
+    PlotxApp, Region, RegionDrag, RegionDragKind, RegionId, RegionSelection, ResizeHandle,
+    SHEET_COL_W_PT, SHEET_HEADER_H_PT, SHEET_MAX_ROWS, SHEET_ROW_H_PT, Selection, SelectionDrag,
+    TableDataset, TextEditState, TileDropCacheKey, TileDropPreview, Tool, ZoomAxis, ZoomDrag,
+    board_frame_id, board_frame_ref, board_frames, frame_board_pos, frame_board_rect,
+    set_frame_board_pos, toggle_frame_selection_synced,
 };
 use plotx_core::{Integral2D, IntegralResult};
 use plotx_render::Rect as PlotRect;
@@ -32,16 +32,23 @@ mod authoring;
 mod board;
 mod board_marquee;
 mod board_notes;
+mod breadcrumb;
 mod chrome;
 mod cursors;
 mod furniture;
 mod geometry;
+mod image_drop;
+mod image_painting;
+pub(crate) use image_drop::{ImagePanelDropTarget, image_drop_target};
 mod integrals;
 mod integrals2d;
 mod interactions;
+mod marquee_interactions;
 mod navigation;
 mod painting;
+mod panel_interactions;
 mod panel_notes;
+mod panel_selection;
 mod peaks;
 mod phase;
 mod readout;
@@ -54,6 +61,7 @@ mod tiling;
 pub(crate) use authoring::*;
 pub(crate) use board::*;
 pub(crate) use board_notes::*;
+pub(crate) use breadcrumb::*;
 pub(crate) use chrome::*;
 pub(crate) use cursors::*;
 pub(crate) use furniture::*;
@@ -61,8 +69,10 @@ pub(crate) use geometry::*;
 pub(crate) use integrals::*;
 pub(crate) use integrals2d::*;
 pub(crate) use interactions::*;
+pub(crate) use marquee_interactions::*;
 pub(crate) use navigation::*;
 pub(crate) use painting::*;
+pub(crate) use panel_interactions::*;
 pub(crate) use panel_notes::*;
 pub(crate) use peaks::*;
 pub(crate) use phase::*;
@@ -148,7 +158,6 @@ pub fn render_central(app: &mut PlotxApp, ui: &mut Ui) {
     sync_macos_trackpad_gesture(ui.ctx(), &ui.input(|i| i.events.clone()), pointer_owned);
     let view_consumed = pointer_owned && handle_navigation(app, ci, rect, ui);
 
-    // A live non-frame gesture cannot be interrupted by a frame switch.
     let frame_consumed =
         if pointer_owned && !view_consumed && app.session.ui.interaction.allows_frame_dispatch() {
             dispatch_frame_gesture(app, rect, ui)
@@ -514,31 +523,6 @@ fn welcome_action(ui: &mut Ui, glyph: &str, label: &str) -> bool {
     .clicked()
 }
 
-fn canvas_breadcrumb(app: &PlotxApp, ci: usize, ui: &mut Ui) {
-    ui.horizontal(|ui| {
-        ui.add_space(2.0);
-        ui.small(app.doc.canvases[ci].name.clone());
-        ui.weak("›");
-        ui.small(app.session.tool.label());
-        if let Some(id) = data_edit_target(app, ci).or_else(|| app.session.ui.selection.object()) {
-            let title = app.doc.canvases[ci]
-                .object(id)
-                .map(|object| {
-                    app.doc.canvases[ci]
-                        .panel_meta_for_content(object.id)
-                        .and_then(|panel| panel.user_note.lines().next().map(str::to_owned))
-                        .filter(|line| !line.trim().is_empty())
-                        .unwrap_or_else(|| object.name.clone())
-                })
-                .unwrap_or_default();
-            ui.weak("›");
-            ui.small(format!("\"{title}\""));
-        }
-    });
-    ui.add_space(2.0);
-}
-
-/// A specific handler that sets its own cursor later in the frame wins.
 fn canvas_cursor(app: &PlotxApp, ci: usize, rect: egui::Rect, ui: &Ui) {
     let Some(p) = ui
         .input(|i| i.pointer.hover_pos())
@@ -546,8 +530,6 @@ fn canvas_cursor(app: &PlotxApp, ci: usize, rect: egui::Rect, ui: &Ui) {
     else {
         return;
     };
-    // Ambient pan reads on top of the tool cursor: an active data-pan grabs, and
-    // holding Space arms the hand anywhere on the board.
     if matches!(app.session.ui.interaction, Interaction::Furniture(_)) {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
         return;
@@ -565,10 +547,33 @@ fn canvas_cursor(app: &PlotxApp, ci: usize, rect: egui::Rect, ui: &Ui) {
         return;
     }
     let icon = if app.session.tool.is_layout_tool() {
-        match screen_to_page_unbounded(app.session.board, &app.doc.canvases[ci], rect, p)
-            .and_then(|page| hit_object(&app.doc.canvases[ci], page, app.session.board.zoom))
-        {
-            Some(hit) => match hit.kind {
+        let editing_panel = app
+            .session
+            .ui
+            .hierarchical_selection
+            .editing_panel()
+            .filter(|(canvas, _)| *canvas == app.doc.canvases[ci].resource_id)
+            .map(|(_, panel)| panel);
+        match screen_to_page_unbounded(app.session.board, &app.doc.canvases[ci], rect, p).and_then(
+            |page| {
+                if let Some(panel) = editing_panel {
+                    return hit_content_object(
+                        &app.doc.canvases[ci],
+                        page,
+                        app.session.board.zoom,
+                        Some(panel),
+                    )
+                    .map(|hit| hit.kind);
+                }
+                hit_panel(&app.doc.canvases[ci], page, app.session.board.zoom)
+                    .map(|hit| hit.kind)
+                    .or_else(|| {
+                        hit_object(&app.doc.canvases[ci], page, app.session.board.zoom)
+                            .map(|hit| hit.kind)
+                    })
+            },
+        ) {
+            Some(kind) => match kind {
                 ObjectDragKind::Move => egui::CursorIcon::Grab,
                 ObjectDragKind::Resize(handle) => resize_cursor(handle),
             },

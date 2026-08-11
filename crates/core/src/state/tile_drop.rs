@@ -7,6 +7,10 @@ pub struct TileDropPreview {
     pub target: usize,
     pub newcomer: ObjectFrame,
     pub existing: Vec<(ObjectId, ObjectFrame)>,
+    /// Screen-space ghost sizing is based on the page-space frame that was
+    /// dragged. This may be a Panel frame when its sole transferable content
+    /// is being tiled into another canvas.
+    pub source_frame: ObjectFrame,
     /// Current cursor in screen pixels and its clamped relative grab point in
     /// the source's pre-drag frame. These are independent of the target layout.
     pub pointer_screen: [f32; 2],
@@ -14,10 +18,10 @@ pub struct TileDropPreview {
 }
 
 impl TileDropPreview {
-    pub fn ghost_frame(&self, before: ObjectFrame, zoom: f32) -> ObjectFrame {
+    pub fn ghost_frame(&self, zoom: f32) -> ObjectFrame {
         let zoom = if zoom.is_finite() { zoom.max(0.0) } else { 0.0 };
-        let width = before.width.max(0.0) * zoom;
-        let height = before.height.max(0.0) * zoom;
+        let width = self.source_frame.width.max(0.0) * zoom;
+        let height = self.source_frame.height.max(0.0) * zoom;
         ObjectFrame::new(
             self.pointer_screen[0] - self.anchor[0].clamp(0.0, 1.0) * width,
             self.pointer_screen[1] - self.anchor[1].clamp(0.0, 1.0) * height,
@@ -61,10 +65,11 @@ mod tests {
             target: 1,
             newcomer: ObjectFrame::new(0.0, 0.0, 5.0, 5.0),
             existing: vec![],
+            source_frame: ObjectFrame::new(2.0, 3.0, 40.0, 20.0),
             pointer_screen: [90.0, 70.0],
             anchor: [0.25, 2.0],
         };
-        let ghost = preview.ghost_frame(ObjectFrame::new(2.0, 3.0, 40.0, 20.0), 2.0);
+        let ghost = preview.ghost_frame(2.0);
         assert_eq!(ghost, ObjectFrame::new(70.0, 30.0, 80.0, 40.0));
     }
 }

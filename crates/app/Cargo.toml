@@ -28,6 +28,7 @@ egui_extras.workspace = true
 egui-phosphor.workspace = true
 fontdb.workspace = true
 image.workspace = true
+arboard.workspace = true
 log.workspace = true
 num-complex.workspace = true
 rfd.workspace = true
@@ -56,3 +57,4 @@ winresource = "0.1"
 
 [dev-dependencies]
 ab_glyph = "0.2"
+tiff.workspace = true

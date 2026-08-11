@@ -2,8 +2,54 @@ use crate::actions::Action;
 use crate::actions::tests::{push_canvas, sample_app};
 use crate::layout::compute_tiling_plan;
 use crate::state::{
-    AxisOverrides, AxisRange, ObjectFrame, ObjectId, TileDropCacheKey, TileDropPreview,
+    AssetId, AxisOverrides, AxisRange, ContentKind, ObjectFrame, ObjectId, RasterImageContent,
+    TileDropCacheKey, TileDropPreview,
 };
+
+#[test]
+fn tile_drop_wraps_loose_raster_images_and_round_trips() {
+    let mut app = sample_app();
+    push_canvas(&mut app, 0, "target", [120.0, 80.0]);
+    let newcomer = app.doc.canvases[0].objects[0].id;
+    let existing = app.doc.canvases[1].objects[0].id;
+    app.doc.canvases[0].objects[0].kind =
+        ContentKind::RasterImage(RasterImageContent::new(AssetId::new()));
+    app.doc.canvases[1].objects[0].kind =
+        ContentKind::RasterImage(RasterImageContent::new(AssetId::new()));
+    let page = app.doc.canvases[1].size_pt();
+    let layout = app.doc.canvases[1].layout;
+    let plan = compute_tiling_plan(page, &layout, &[existing], [page[0] * 0.9, page[1] * 0.5]);
+    let action =
+        Action::tile_drop(&app, 0, newcomer, 1, plan.newcomer, plan.existing, false).unwrap();
+    app.execute_action(action);
+    assert!(app.doc.canvases[0].objects.is_empty());
+    assert_eq!(app.doc.canvases[1].objects.len(), 2);
+    let moved = app.doc.canvases[1].objects.last().unwrap().id;
+    assert!(app.doc.canvases[1].parent_panel(moved).is_some());
+    assert_eq!(
+        app.doc.canvases[1].panel_letter(existing).as_deref(),
+        Some("a")
+    );
+    assert_eq!(
+        app.doc.canvases[1].panel_letter(moved).as_deref(),
+        Some("b")
+    );
+    assert!(app.doc.canvases[1].objects[0].frame.width < page[0]);
+    let existing_frame = app.doc.canvases[1].object(existing).unwrap().frame;
+    let moved_frame = app.doc.canvases[1].object(moved).unwrap().frame;
+    assert_eq!(existing_frame.x, 0.0);
+    assert_eq!(moved_frame.x, 0.0);
+    let existing_page_frame = app.doc.canvases[1].content_page_frame(existing).unwrap();
+    let moved_page_frame = app.doc.canvases[1].content_page_frame(moved).unwrap();
+    assert!(moved_page_frame.x > existing_page_frame.x);
+    assert!(moved_page_frame.width < page[0]);
+    app.undo();
+    assert_eq!(app.doc.canvases[0].objects.len(), 1);
+    assert_eq!(app.doc.canvases[1].objects.len(), 1);
+    app.redo();
+    assert!(app.doc.canvases[0].objects.is_empty());
+    assert_eq!(app.doc.canvases[1].objects.len(), 2);
+}
 
 /// A drop of canvas 0's plot onto canvas 1 (which already has one plot) transfers
 /// ownership and reframes both into a two-way split, undoably.
@@ -107,6 +153,41 @@ fn tile_drop_transfers_reframes_and_round_trips() {
     assert_eq!(app.doc.canvases[1].next_panel_label_slot, 2);
 }
 
+#[test]
+fn tile_drop_renumbers_auto_labels_in_final_reading_order() {
+    let mut app = sample_app();
+    push_canvas(&mut app, 0, "target", [120.0, 80.0]);
+    let newcomer = app.doc.canvases[0].objects[0].id;
+    let existing = app.doc.canvases[1].objects[0].id;
+    app.doc.canvases[0].create_panel_for_plot(newcomer).unwrap();
+    app.doc.canvases[1].create_panel_for_plot(existing).unwrap();
+    let page = app.doc.canvases[1].size_pt();
+    let plan = compute_tiling_plan(
+        page,
+        &app.doc.canvases[1].layout,
+        &[existing],
+        [page[0] * 0.1, page[1] * 0.5],
+    );
+    let action = Action::tile_drop(&app, 0, newcomer, 1, plan.newcomer, plan.existing, false)
+        .expect("left tile action");
+    app.execute_action(action);
+    let moved = app.doc.canvases[1].objects.last().unwrap().id;
+    assert_eq!(
+        app.doc.canvases[1].panel_letter(moved).as_deref(),
+        Some("a")
+    );
+    assert_eq!(
+        app.doc.canvases[1].panel_letter(existing).as_deref(),
+        Some("b")
+    );
+    app.undo();
+    app.redo();
+    assert_eq!(
+        app.doc.canvases[1].panel_letter(moved).as_deref(),
+        Some("a")
+    );
+}
+
 fn assert_empty_source_removal_round_trip(from: usize, to: usize) {
     let mut app = sample_app();
     push_canvas(&mut app, 0, "second", [120.0, 80.0]);
@@ -179,6 +260,7 @@ fn cancelling_interaction_clears_tile_preview_cache() {
         target: 1,
         newcomer: ObjectFrame::new(0.0, 0.0, 50.0, 80.0),
         existing: Vec::new(),
+        source_frame: ObjectFrame::new(0.0, 0.0, 50.0, 80.0),
         pointer_screen: [0.0; 2],
         anchor: [0.5; 2],
     });

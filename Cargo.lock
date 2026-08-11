@@ -2903,6 +2903,7 @@ dependencies = [
  "byteorder-lite",
  "color_quant",
  "gif 0.14.2",
+ "image-webp",
  "moxcms",
  "num-traits",
  "png 0.18.1",
@@ -4054,6 +4055,7 @@ name = "plotx"
 version = "0.1.0"
 dependencies = [
  "ab_glyph",
+ "arboard",
  "eframe",
  "egui",
  "egui-phosphor",
@@ -4074,6 +4076,7 @@ dependencies = [
  "rfd",
  "rhai",
  "serde_json",
+ "tiff",
  "uuid",
  "windows-sys 0.61.2",
  "winresource",
@@ -4168,12 +4171,17 @@ dependencies = [
  "base64",
  "calamine",
  "flate2",
+ "image",
+ "memmap2",
  "num-complex",
  "quick-xml 0.41.0",
  "rust_xlsxwriter",
  "serde",
  "serde_json",
+ "sha2",
+ "tempfile",
  "thiserror 2.0.18",
+ "tiff",
  "zip 8.6.0",
 ]
 
@@ -4194,6 +4202,7 @@ name = "plotx-render"
 version = "0.1.0"
 dependencies = [
  "egui",
+ "image",
  "plotx-figure",
  "unicode-width",
  "windows-sys 0.61.2",

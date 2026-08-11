@@ -5,6 +5,11 @@ description: 导入、分析、导出或更新不符合预期时的检查清单�
 
 ## 导入
 
+**图片无法导入。** 请确认文件实际内容为 PNG、JPEG、TIFF、WebP 或 BMP；
+PlotX 检查文件签名，而不只看扩展名。PlotX 不支持 SVG；若是动画 PNG 或 WebP，
+请使用 **Add Animated Image First Frame…**。打开 **Operation and Diagnostic
+History** 可查看文件名、检测到的格式、失败环节和原因。导入失败不会改动项目。
+
 **ABF 文件打不开。** PlotX 读取 int16 或 float32 采样的 ABF 2.x。ABF1
 文件和压缩的 ABF2 数据目前不支持——请在采集软件中重新导出为未压缩的
 ABF2。
@@ -32,6 +37,9 @@ ABF2。
 提议的排除。
 
 ## 导出
+
+**页面含外部图片时导出停止。** 导出与 **Copy Figure** 不支持外部图片。请先从
+页面中移除图片再导出。PlotX 会停止操作，不会生成缺少图片的图版。
 
 **导出预检标记了我的图。** 字号或线宽违反所选期刊预设。在画板上修正
 ——**Figure Typography…** 可一次设定全部坐标轴文字尺寸——或改选符合

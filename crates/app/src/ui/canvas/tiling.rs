@@ -1,30 +1,94 @@
 use super::*;
 
-fn drag_is_tileable(app: &PlotxApp, drag: &ObjectDrag) -> bool {
-    if drag.kind != ObjectDragKind::Move || !drag.others.is_empty() {
-        return false;
-    }
-    if app.session.ui.selection.objects().len() > 1 {
-        return false;
-    }
-    app.doc.canvases.get(drag.canvas).is_some_and(|canvas| {
-        canvas
-            .object(drag.object)
-            .is_some_and(|o| canvas.content_group(o.id).is_none() && o.plot().is_some())
+/// The document-level source of an automatic canvas tiling gesture. A one-item
+/// Panel and a loose object use the same source so changing page-scope selection
+/// can never change the resulting transfer semantics.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct TileTransferSource {
+    pub(crate) canvas: usize,
+    pub(crate) object: ObjectId,
+    pub(crate) frame: ObjectFrame,
+    pub(crate) start_pointer: [f32; 2],
+    pub(crate) panel: Option<PanelId>,
+}
+
+pub(crate) fn tile_source_for_object(
+    app: &PlotxApp,
+    drag: &ObjectDrag,
+) -> Option<TileTransferSource> {
+    (drag.kind == ObjectDragKind::Move && drag.others.is_empty()).then_some(())?;
+    tile_source(
+        app,
+        drag.canvas,
+        drag.object,
+        drag.before,
+        drag.start_pointer,
+        None,
+    )
+}
+
+pub(crate) fn tile_source_for_panel(
+    app: &PlotxApp,
+    drag: &PanelDrag,
+) -> Option<TileTransferSource> {
+    (drag.kind == ObjectDragKind::Move && drag.others.is_empty()).then_some(())?;
+    let canvas = app.doc.canvases.get(drag.canvas)?;
+    let panel = canvas.panel(drag.panel)?;
+    (panel.item_order.len() == 1).then_some(())?;
+    tile_source(
+        app,
+        drag.canvas,
+        panel.item_order[0],
+        drag.before,
+        drag.start_pointer,
+        Some(drag.panel),
+    )
+}
+
+fn tile_source(
+    app: &PlotxApp,
+    canvas_index: usize,
+    object: ObjectId,
+    frame: ObjectFrame,
+    start_pointer: [f32; 2],
+    panel: Option<PanelId>,
+) -> Option<TileTransferSource> {
+    let canvas = app.doc.canvases.get(canvas_index)?;
+    let item = canvas.object(object)?;
+    (canvas.content_group(object).is_none()
+        && matches!(
+            item.kind,
+            CanvasObjectKind::Plot(_) | CanvasObjectKind::RasterImage(_)
+        ))
+    .then_some(TileTransferSource {
+        canvas: canvas_index,
+        object,
+        frame,
+        start_pointer,
+        panel,
     })
+}
+
+pub(crate) fn restore_tile_source(app: &mut PlotxApp, source: TileTransferSource) {
+    let Some(canvas) = app.doc.canvases.get_mut(source.canvas) else {
+        return;
+    };
+    if let Some(panel) = source.panel {
+        if let Some(panel) = canvas.panel_mut(panel) {
+            panel.frame = source.frame;
+        }
+    } else {
+        canvas.set_layout_frame(source.object, source.frame);
+    }
 }
 
 pub(crate) fn update_tile_drop(
     app: &mut PlotxApp,
     _ci: usize,
     rect: egui::Rect,
-    drag: &ObjectDrag,
+    source: TileTransferSource,
     pointer_screen: Option<Pos2>,
 ) -> bool {
-    if !drag_is_tileable(app, drag) {
-        app.session.ui.tile_drop = None;
-        return false;
-    }
     let Some(p) = pointer_screen else {
         app.session.ui.tile_drop = None;
         return false;
@@ -33,7 +97,7 @@ pub(crate) fn update_tile_drop(
         app.session.ui.tile_drop = None;
         return false;
     };
-    if target == drag.canvas {
+    if target == source.canvas {
         app.session.ui.tile_drop = None;
         return false;
     }
@@ -41,7 +105,7 @@ pub(crate) fn update_tile_drop(
     let pointer_page = bt.screen_to_page(&app.doc.canvases[target], p);
     let page_pt = app.doc.canvases[target].size_pt();
     let layout = app.doc.canvases[target].layout;
-    let existing_ids = app.doc.canvases[target].plot_object_ids();
+    let existing_ids = tileable_object_ids(&app.doc.canvases[target]);
     let region = plotx_core::layout::tiling_drop_region(
         page_pt,
         existing_ids.len(),
@@ -54,7 +118,7 @@ pub(crate) fn update_tile_drop(
         [pointer_page.x, pointer_page.y],
     );
     let cache_key = tile_cache_key(
-        drag,
+        source,
         target,
         page_pt,
         layout,
@@ -72,14 +136,14 @@ pub(crate) fn update_tile_drop(
         if let Some(preview) = app.session.ui.tile_drop.as_mut() {
             preview.pointer_screen = [p.x, p.y];
         }
-        app.doc.canvases[drag.canvas].set_layout_frame(drag.object, drag.before);
+        restore_tile_source(app, source);
         return true;
     }
     let existing_items: Vec<_> = existing_ids
         .iter()
         .filter_map(|&id| layout_item(&app.doc.canvases[target], id))
         .collect();
-    let Some(newcomer_item) = layout_item(&app.doc.canvases[drag.canvas], drag.object) else {
+    let Some(newcomer_item) = layout_item(&app.doc.canvases[source.canvas], source.object) else {
         app.session.ui.tile_drop = None;
         return false;
     };
@@ -95,11 +159,12 @@ pub(crate) fn update_tile_drop(
         target,
         newcomer: plan.newcomer,
         existing: plan.existing,
+        source_frame: source.frame,
         pointer_screen: [p.x, p.y],
         anchor: [
-            ((drag.start_pointer[0] - drag.before.x) / drag.before.width.max(f32::EPSILON))
+            ((source.start_pointer[0] - source.frame.x) / source.frame.width.max(f32::EPSILON))
                 .clamp(0.0, 1.0),
-            ((drag.start_pointer[1] - drag.before.y) / drag.before.height.max(f32::EPSILON))
+            ((source.start_pointer[1] - source.frame.y) / source.frame.height.max(f32::EPSILON))
                 .clamp(0.0, 1.0),
         ],
     });
@@ -108,12 +173,12 @@ pub(crate) fn update_tile_drop(
     } else {
         "Hold Alt to keep the empty source canvas.".into()
     };
-    app.doc.canvases[drag.canvas].set_layout_frame(drag.object, drag.before);
+    restore_tile_source(app, source);
     true
 }
 
 fn tile_cache_key(
-    drag: &ObjectDrag,
+    source: TileTransferSource,
     target_canvas: usize,
     target_page_pt: [f32; 2],
     target_layout: plotx_core::layout::PageLayout,
@@ -122,8 +187,8 @@ fn tile_cache_key(
     pointer_cell: Option<usize>,
 ) -> TileDropCacheKey {
     TileDropCacheKey {
-        source_canvas: drag.canvas,
-        source_object: drag.object,
+        source_canvas: source.canvas,
+        source_object: source.object,
         target_canvas,
         target_page_pt,
         target_layout,
@@ -135,70 +200,80 @@ fn tile_cache_key(
 
 fn layout_item(canvas: &CanvasDocument, id: ObjectId) -> Option<plotx_core::layout::LayoutItem> {
     let object = canvas.object(id)?;
-    let plot = object.plot()?;
-    Some(plotx_core::layout::layout_item(
-        id,
-        plot.figure(),
-        canvas.layout_frame(id)?,
-    ))
+    let frame = canvas.layout_frame(id)?;
+    match &object.kind {
+        CanvasObjectKind::Plot(plot) => {
+            Some(plotx_core::layout::layout_item(id, plot.figure(), frame))
+        }
+        CanvasObjectKind::RasterImage(_) => Some(plotx_core::layout::LayoutItem {
+            id,
+            insets: [0.0; 4],
+        }),
+        CanvasObjectKind::Text(_) | CanvasObjectKind::Shape(_) => None,
+    }
+}
+
+fn tileable_object_ids(canvas: &CanvasDocument) -> Vec<ObjectId> {
+    canvas
+        .objects
+        .iter()
+        .filter(|object| {
+            matches!(
+                object.kind,
+                CanvasObjectKind::Plot(_) | CanvasObjectKind::RasterImage(_)
+            )
+        })
+        .map(|object| object.id)
+        .collect()
 }
 
 /// Falls back to a plain move if the atomic action cannot be built.
 pub(crate) fn commit_tile_drop(
     app: &mut PlotxApp,
-    drag: ObjectDrag,
+    source: TileTransferSource,
     preview: TileDropPreview,
     alt: bool,
 ) {
     let remove_empty_source = app.settings.general.keep_empty_source_canvas == alt;
     let source_becomes_empty =
-        app.doc.canvases.get(drag.canvas).is_some_and(|canvas| {
-            canvas.objects.len() == 1 && canvas.object(drag.object).is_some()
+        app.doc.canvases.get(source.canvas).is_some_and(|canvas| {
+            canvas.objects.len() == 1 && canvas.object(source.object).is_some()
         });
     let Some(action) = Action::tile_drop(
         app,
-        drag.canvas,
-        drag.object,
+        source.canvas,
+        source.object,
         preview.target,
         preview.newcomer,
         preview.existing,
         remove_empty_source,
     ) else {
-        if drag.active {
-            finish_object_drag(app, drag.canvas, drag);
-        }
+        restore_tile_source(app, source);
+        app.session.status = "Could not tile this content into the destination canvas.".to_owned();
         return;
     };
     let target = app.doc.canvases[preview.target].name.clone();
     app.execute_action(action);
     app.session.status = if remove_empty_source && source_becomes_empty {
-        format!("Tiled plot into “{target}” and removed the empty source canvas.")
+        format!("Tiled content into “{target}” and removed the empty source canvas.")
     } else {
-        format!("Tiled plot into “{target}”; kept the source canvas.")
+        format!("Tiled content into “{target}”; kept the source canvas.")
     };
 }
 
 pub(crate) fn paint_tile_ghost(app: &PlotxApp, painter: &egui::Painter, chrome: ChromeStyle) {
-    let (Some(preview), Interaction::Object(drag)) =
-        (&app.session.ui.tile_drop, &app.session.ui.interaction)
-    else {
+    let Some(preview) = &app.session.ui.tile_drop else {
         return;
     };
-    if preview.cache_key.source_canvas != drag.canvas
-        || preview.cache_key.source_object != drag.object
-    {
-        return;
-    }
-    let Some(plot) = app
+    let object = app
         .doc
         .canvases
-        .get(drag.canvas)
-        .and_then(|canvas| canvas.object(drag.object))
-        .and_then(|object| object.plot())
-    else {
+        .get(preview.cache_key.source_canvas)
+        .and_then(|canvas| canvas.object(preview.cache_key.source_object));
+    let Some(object) = object else {
         return;
     };
-    let ghost = preview.ghost_frame(drag.before, app.session.board.zoom);
+    let ghost = preview.ghost_frame(app.session.board.zoom);
     if ![ghost.x, ghost.y, ghost.width, ghost.height]
         .iter()
         .all(|v| v.is_finite())
@@ -206,7 +281,9 @@ pub(crate) fn paint_tile_ghost(app: &PlotxApp, painter: &egui::Painter, chrome: 
         return;
     }
     let screen = PlotRect::new(ghost.x, ghost.y, ghost.width, ghost.height);
-    plotx_render::screen::paint(painter, screen, plot.figure(), app.session.board.zoom);
+    if let Some(plot) = object.plot() {
+        plotx_render::screen::paint(painter, screen, plot.figure(), app.session.board.zoom);
+    }
     let r = EguiRect::from_min_size(
         Pos2::new(ghost.x, ghost.y),
         Vec2::new(ghost.width, ghost.height),
@@ -264,16 +341,13 @@ pub(crate) fn paint_tile_preview(
 mod tests {
     use super::*;
 
-    fn drag(canvas: usize, object: u64) -> ObjectDrag {
-        ObjectDrag {
+    fn tile_source_for_test(canvas: usize, object: u64) -> TileTransferSource {
+        TileTransferSource {
             canvas,
             object: ObjectId::new(object),
-            kind: ObjectDragKind::Move,
-            before: ObjectFrame::new(0.0, 0.0, 10.0, 10.0),
+            frame: ObjectFrame::new(0.0, 0.0, 10.0, 10.0),
             start_pointer: [0.0; 2],
-            start_pointer_screen: [0.0; 2],
-            others: Vec::new(),
-            active: true,
+            panel: None,
         }
     }
 
@@ -284,7 +358,7 @@ mod tests {
         let ids = [ObjectId::new(20), ObjectId::new(21)];
         let reversed_ids = [ObjectId::new(21), ObjectId::new(20)];
         let base = tile_cache_key(
-            &drag(0, 10),
+            tile_source_for_test(0, 10),
             2,
             page,
             layout,
@@ -295,7 +369,7 @@ mod tests {
         assert_eq!(
             base,
             tile_cache_key(
-                &drag(0, 10),
+                tile_source_for_test(0, 10),
                 2,
                 page,
                 layout,
@@ -307,7 +381,7 @@ mod tests {
         assert_ne!(
             base,
             tile_cache_key(
-                &drag(1, 11),
+                tile_source_for_test(1, 11),
                 2,
                 page,
                 layout,
@@ -319,7 +393,7 @@ mod tests {
         assert_ne!(
             base,
             tile_cache_key(
-                &drag(0, 10),
+                tile_source_for_test(0, 10),
                 3,
                 page,
                 layout,
@@ -331,7 +405,7 @@ mod tests {
         assert_ne!(
             base,
             tile_cache_key(
-                &drag(0, 10),
+                tile_source_for_test(0, 10),
                 2,
                 [401.0, 300.0],
                 layout,
@@ -343,7 +417,7 @@ mod tests {
         assert_ne!(
             base,
             tile_cache_key(
-                &drag(0, 10),
+                tile_source_for_test(0, 10),
                 2,
                 page,
                 plotx_core::layout::PageLayout { cols: 2, ..layout },
@@ -355,7 +429,7 @@ mod tests {
         assert_ne!(
             base,
             tile_cache_key(
-                &drag(0, 10),
+                tile_source_for_test(0, 10),
                 2,
                 page,
                 layout,
@@ -367,7 +441,7 @@ mod tests {
         assert_ne!(
             base,
             tile_cache_key(
-                &drag(0, 10),
+                tile_source_for_test(0, 10),
                 2,
                 page,
                 layout,
@@ -377,7 +451,7 @@ mod tests {
             )
         );
         let retile_top_left = tile_cache_key(
-            &drag(0, 10),
+            tile_source_for_test(0, 10),
             2,
             page,
             layout,
@@ -386,7 +460,7 @@ mod tests {
             Some(0),
         );
         let retile_bottom_right = tile_cache_key(
-            &drag(0, 10),
+            tile_source_for_test(0, 10),
             2,
             page,
             layout,

@@ -98,6 +98,7 @@ pub fn export_document_emf(doc: &Document<'_>) -> Result<Vec<u8>, EmfError> {
                             write_overlay(&mut dc, overlay);
                         }
                     }
+                    DocumentItem::Raster(_) => {}
                     DocumentItem::PanelLabel {
                         frame,
                         text,

@@ -5,6 +5,13 @@ description: What to check when an import, analysis, export, or update doesn't b
 
 ## Importing
 
+**An image will not import.** Confirm that its actual content is PNG, JPEG,
+TIFF, WebP, or BMP. PlotX checks the signature, not just the extension. SVG is
+not supported. For an animated PNG or WebP, use **Add Animated Image First
+Frame…**. Open **Operation and Diagnostic History** to see the file name,
+detected format, point of failure, and reason. A failed import does not change
+the project.
+
 **My ABF file won't open.** PlotX reads ABF 2.x with int16 or float32
 samples. ABF1 files and compressed ABF2 data are not currently supported —
 re-export the recording as uncompressed ABF2 from your acquisition software.
@@ -37,6 +44,10 @@ samples, or excluded cells; the message states what was wrong. Adjust the
 window or confirm the exclusion it proposes.
 
 ## Exporting
+
+**Export stops because the page contains an external image.** Export and
+**Copy Figure** do not support external images. Remove the images from the page
+before exporting. PlotX stops instead of creating a figure with images missing.
 
 **The export precheck flags my figure.** Font sizes or line widths violate
 the selected journal preset. Fix them on the board — **Figure Typography…**

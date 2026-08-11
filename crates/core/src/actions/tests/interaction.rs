@@ -25,17 +25,18 @@ fn delete_canvas_resets_in_flight_interaction() {
 #[test]
 fn gesture_active_covers_only_the_board_freezing_drags() {
     use crate::state::{
-        AuthorDrag, FrameDrag, Interaction, MarqueeDrag, ObjectDrag, ObjectDragKind, ObjectFrame,
-        PanDrag, PanelLabelDrag, PhaseAxis, PhaseDrag, PhaseDragKind, RegionDrag, RegionDragKind,
-        SelectionDrag, ZoomAxis, ZoomDrag,
+        AuthorDrag, FrameDrag, Interaction, MarqueeDrag, ObjectDrag, ObjectDragKind,
+        ObjectDragSpace, ObjectFrame, PanDrag, PanelDrag, PanelLabelDrag, PhaseAxis, PhaseDrag,
+        PhaseDragKind, RegionDrag, RegionDragKind, SelectionDrag, ZoomAxis, ZoomDrag,
     };
     let mut app = sample_app();
     let object = app.doc.canvases[0].objects[0].id;
     let frame = ObjectFrame::new(0.0, 0.0, 10.0, 10.0);
     let viewport = first_plot(&app).viewport.clone();
     let title = crate::state::PanelMeta::new("title".to_owned(), frame.width);
+    let panel = crate::state::PanelId::new();
 
-    let cases: [(Interaction, bool); 11] = [
+    let cases: [(Interaction, bool); 12] = [
         (Interaction::Idle, false),
         (
             Interaction::Object(ObjectDrag {
@@ -46,6 +47,21 @@ fn gesture_active_covers_only_the_board_freezing_drags() {
                 start_pointer: [0.0, 0.0],
                 start_pointer_screen: [0.0, 0.0],
                 others: Vec::new(),
+                active: true,
+                space: ObjectDragSpace::Page,
+            }),
+            true,
+        ),
+        (
+            Interaction::Panel(PanelDrag {
+                canvas: 0,
+                panel,
+                kind: ObjectDragKind::Move,
+                before: frame,
+                others: Vec::new(),
+                children: Vec::new(),
+                start_pointer: [0.0, 0.0],
+                start_pointer_screen: [0.0, 0.0],
                 active: true,
             }),
             true,

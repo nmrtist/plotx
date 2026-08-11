@@ -1,26 +1,21 @@
-//! Shared command descriptions and dispatch. Menus, the Ribbon, shortcuts and
-//! the command palette all ask this module for the same live state and execute
-//! the same stable command IDs.
-
 use plotx_core::actions::ZOrder;
 use plotx_core::export::ExportFormat;
 use plotx_core::layout::{Align, Distribute, GutterPreset, SpacingMode};
 use plotx_core::properties::PropertyStep;
-use plotx_core::state::{Dataset, ObjectId, PlotxApp, Tool, ToolGroup, WorkflowTab};
+use plotx_core::state::{Dataset, PlotxApp, Tool, ToolGroup, WorkflowTab};
 
 pub use super::command_exec::{execute, execute_without_clipboard};
-
 mod identity;
 use identity::command_identity;
 pub(crate) use identity::recent_entry_label;
+mod helpers;
+pub(super) use helpers::chart_plot_target;
+use helpers::{requires, selected_paths_unlocked, tool_commands};
 mod ribbon;
 use ribbon::ribbon_placement;
-
-/// The published user manual; opened by `HelpManual` and linked from About.
 pub(crate) const MANUAL_URL: &str = "https://docs.plotx.nmrtist.space/";
 /// The public source repository, linked from About.
 pub(crate) const REPOSITORY_URL: &str = "https://github.com/nmrtist/plotx";
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RibbonPlacement {
     pub tab: WorkflowTab,
@@ -29,7 +24,6 @@ pub struct RibbonPlacement {
     pub priority: u8,
     pub applicability: Applicability,
 }
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Applicability {
     Always,
@@ -39,7 +33,6 @@ pub enum Applicability {
     Homonuclear2dOnly,
     ToolGroup(ToolGroup),
 }
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CommandId {
     NewProject,
@@ -49,12 +42,17 @@ pub enum CommandId {
     OpenFolder,
     RunBatchWorkflow,
     RunScientificScript,
-    /// Reopen the recent-list entry at this index (newest first). Registered
-    /// per live entry, so the index always resolves against the current list.
     OpenRecent(usize),
     ClearRecentFiles,
     HelpManual,
     ImportTable,
+    ImportImage,
+    ImportImageFirstFrame,
+    ImportImageWithoutMetadata,
+    ImportTiffPages,
+    PasteImage,
+    CancelImageImport,
+    ReplaceImage,
     PasteTable,
     SaveProject,
     NewTable,
@@ -69,6 +67,16 @@ pub enum CommandId {
     DeselectAll,
     Group,
     Ungroup,
+    CreatePanel,
+    ComposePanel,
+    DissolvePanel,
+    DeletePanel,
+    DuplicatePanel,
+    MergePanels,
+    SplitPanel,
+    ReorderPanelLabels,
+    SetPanelLayout(plotx_core::state::PanelLayout),
+    MoveContentToPanel(Option<plotx_core::state::PanelId>),
     TogglePrimarySidebar,
     ToggleSecondarySidebar,
     ZoomToFit,
@@ -108,9 +116,6 @@ pub enum CommandId {
     Multiplets,
     TidyBoard,
     CanvasSettings,
-    /// Apply the size preset with this catalog id (`SizePreset::id`) to the
-    /// active canvas. Registered per catalog entry so every preset is
-    /// palette-searchable.
     SetCanvasSizePreset(&'static str),
     ArrangeGrid(u32, u32),
     SimplifyInnerAxes,
@@ -128,8 +133,6 @@ pub enum CommandId {
     /// Move the canvas-steppable property one rung (§8.5 channel 3). The
     /// property is derived from the catalog, so the binding does not name one.
     StepProperty(PropertyStep),
-    /// Advance through the cursor family. Unlike ordinary tool bindings, repeated
-    /// presses select the next applicable cursor instead of leaving the tool.
     CycleCursor,
     Tool(Tool),
 }
@@ -142,34 +145,6 @@ pub enum CommandExecutionClass {
     UiOnly,
     ToolEditor,
     ToolBacked,
-}
-
-impl CommandId {
-    fn tool_target(self) -> Option<Tool> {
-        match self {
-            Self::SelectRange => Some(Tool::SelectRegion),
-            Self::Regions => Some(Tool::Regions),
-            Self::PeakList => Some(Tool::Peaks),
-            Self::LineFit => Some(Tool::LineFit),
-            Self::Integrate => Some(Tool::Integrate),
-            Self::Tool(tool) => Some(tool),
-            _ => None,
-        }
-    }
-
-    pub fn execution_class(self) -> CommandExecutionClass {
-        match self {
-            Self::RunBatchWorkflow | Self::RunScientificScript => CommandExecutionClass::ToolEditor,
-            Self::OperationHistory | Self::CommandPalette | Self::About => {
-                CommandExecutionClass::UiOnly
-            }
-            Self::ExportData
-            | Self::Export(_)
-            | Self::ApplyProcessingTemplate
-            | Self::ApplyTheme(_) => CommandExecutionClass::ToolBacked,
-            _ => CommandExecutionClass::UiOnly,
-        }
-    }
 }
 
 pub struct CommandDescriptor {
@@ -199,6 +174,13 @@ pub fn catalog(app: &PlotxApp) -> Vec<CommandDescriptor> {
         CommandId::ClearRecentFiles,
         CommandId::HelpManual,
         CommandId::ImportTable,
+        CommandId::ImportImage,
+        CommandId::ImportImageFirstFrame,
+        CommandId::ImportImageWithoutMetadata,
+        CommandId::ImportTiffPages,
+        CommandId::PasteImage,
+        CommandId::CancelImageImport,
+        CommandId::ReplaceImage,
         CommandId::PasteTable,
         CommandId::SaveProject,
         CommandId::NewTable,
@@ -211,6 +193,18 @@ pub fn catalog(app: &PlotxApp) -> Vec<CommandDescriptor> {
         CommandId::DeselectAll,
         CommandId::Group,
         CommandId::Ungroup,
+        CommandId::CreatePanel,
+        CommandId::ComposePanel,
+        CommandId::DissolvePanel,
+        CommandId::DeletePanel,
+        CommandId::DuplicatePanel,
+        CommandId::MergePanels,
+        CommandId::SplitPanel,
+        CommandId::ReorderPanelLabels,
+        CommandId::SetPanelLayout(plotx_core::state::PanelLayout::Free),
+        CommandId::SetPanelLayout(plotx_core::state::PanelLayout::VerticalStack),
+        CommandId::SetPanelLayout(plotx_core::state::PanelLayout::HorizontalStack),
+        CommandId::SetPanelLayout(plotx_core::state::PanelLayout::Grid { rows: 2, cols: 2 }),
         CommandId::TogglePrimarySidebar,
         CommandId::ToggleSecondarySidebar,
         CommandId::ZoomToFit,
@@ -321,36 +315,6 @@ pub fn catalog(app: &PlotxApp) -> Vec<CommandDescriptor> {
         .collect()
 }
 
-/// `Ok` when a requirement holds, otherwise the sentence a surface shows in the
-/// disabled tooltip. Chain with `and_then` to report the first unmet one.
-fn requires(ok: bool, reason: &'static str) -> Result<(), &'static str> {
-    if ok { Ok(()) } else { Err(reason) }
-}
-
-/// The canvas and plot object displaying `dataset`, preferring the active
-/// canvas so Chart Type lands on the plot the user is looking at.
-pub(super) fn chart_plot_target(app: &PlotxApp, dataset: usize) -> Option<(usize, ObjectId)> {
-    let candidates = app
-        .session
-        .active_canvas
-        .into_iter()
-        .chain(0..app.doc.canvases.len());
-    for ci in candidates {
-        let Some(canvas) = app.doc.canvases.get(ci) else {
-            continue;
-        };
-        let hit = canvas.objects.iter().find(|object| {
-            object.plot().is_some_and(|plot| {
-                plot.binding.primary_dataset() == Some(app.doc.datasets[dataset].resource_id())
-            })
-        });
-        if let Some(object) = hit {
-            return Some((ci, object.id));
-        }
-    }
-    None
-}
-
 pub fn describe(app: &PlotxApp, id: CommandId) -> CommandDescriptor {
     let has_canvas = app.session.active_canvas.is_some();
     let selected = app.session.ui.selection.objects().len();
@@ -421,6 +385,32 @@ pub fn describe(app: &PlotxApp, id: CommandId) -> CommandDescriptor {
             app.session.ui.table_import_preview.is_none(),
             "Finish or cancel the current table import preview before importing another table.",
         ),
+        CommandId::ImportImage
+        | CommandId::ImportImageFirstFrame
+        | CommandId::ImportImageWithoutMetadata
+        | CommandId::ImportTiffPages
+        | CommandId::PasteImage => Ok(()),
+        CommandId::CancelImageImport => requires(
+            super::file_dialogs::image_import::has_active_jobs(),
+            "Start an image import before cancelling it.",
+        ),
+        CommandId::ReplaceImage => requires(
+            app.session.active_canvas.is_some_and(|ci| {
+                app.session
+                    .ui
+                    .hierarchical_selection
+                    .lead()
+                    .and_then(|path| path.content)
+                    .and_then(|id| app.doc.canvases[ci].object(id))
+                    .is_some_and(|item| {
+                        matches!(
+                            item.kind,
+                            plotx_core::state::CanvasObjectKind::RasterImage(_)
+                        ) && !item.locked
+                    })
+            }),
+            "Select an unlocked image before replacing it.",
+        ),
         CommandId::ExportData => requires(
             dataset().is_some_and(|dataset| {
                 !plotx_core::data_export::DataExportAvailability::for_dataset(dataset).is_empty()
@@ -429,8 +419,15 @@ pub fn describe(app: &PlotxApp, id: CommandId) -> CommandDescriptor {
         ),
         CommandId::Export(_) => requires(has_canvas, "Open a canvas before exporting a figure."),
         CommandId::CopyFigure => requires(
-            super::clipboard_figure::resolve_copy_target(app).is_some(),
-            "Open a canvas or select a page frame before copying a figure.",
+            super::clipboard_figure::resolve_copy_target(app).is_some_and(|canvas| {
+                !app.doc.canvases[canvas].objects.iter().any(|item| {
+                    matches!(
+                        item.kind,
+                        plotx_core::state::CanvasObjectKind::RasterImage(_)
+                    )
+                })
+            }),
+            "Open a figure without external images; Copy Figure cannot include them yet.",
         ),
         CommandId::Undo => requires(app.can_undo(), "Nothing to undo yet."),
         CommandId::Redo => requires(app.can_redo(), "Nothing to redo yet."),
@@ -445,6 +442,73 @@ pub fn describe(app: &PlotxApp, id: CommandId) -> CommandDescriptor {
         CommandId::Ungroup => requires(
             selected >= 1,
             "Select at least one object before ungrouping it.",
+        ),
+        CommandId::CreatePanel => {
+            requires(has_canvas, "Open a figure page before creating a panel.")
+        }
+        CommandId::ComposePanel => requires(
+            app.session
+                .ui
+                .hierarchical_selection
+                .paths()
+                .iter()
+                .any(|path| path.content.is_some() && path.panel.is_none())
+                && selected_paths_unlocked(app),
+            "Select one or more unlocked loose content items before composing a panel.",
+        ),
+        CommandId::DissolvePanel
+        | CommandId::DeletePanel
+        | CommandId::DuplicatePanel
+        | CommandId::SetPanelLayout(_) => requires(
+            app.session
+                .ui
+                .hierarchical_selection
+                .lead()
+                .is_some_and(|path| path.panel.is_some())
+                && selected_paths_unlocked(app),
+            "Select an unlocked panel before using this command.",
+        ),
+        CommandId::MoveContentToPanel(target) => requires(
+            selected >= 1
+                && selected_paths_unlocked(app)
+                && target.is_none_or(|panel| {
+                    app.session.active_canvas.is_some_and(|ci| {
+                        app.doc.canvases[ci]
+                            .panel(panel)
+                            .is_some_and(|panel| !panel.locked)
+                    })
+                }),
+            "Select unlocked sibling content and an unlocked destination panel.",
+        ),
+        CommandId::MergePanels => requires(
+            app.session
+                .ui
+                .hierarchical_selection
+                .paths()
+                .iter()
+                .filter(|path| path.panel.is_some() && path.content.is_none())
+                .count()
+                >= 2
+                && selected_paths_unlocked(app),
+            "Select at least two unlocked sibling panels before merging them.",
+        ),
+        CommandId::SplitPanel => requires(
+            app.session
+                .ui
+                .hierarchical_selection
+                .paths()
+                .iter()
+                .any(|path| path.panel.is_some() && path.content.is_some())
+                && selected_paths_unlocked(app),
+            "Select unlocked content inside an unlocked panel before splitting it.",
+        ),
+        CommandId::ReorderPanelLabels => requires(
+            has_canvas
+                && app
+                    .session
+                    .active_canvas
+                    .is_some_and(|ci| !app.doc.canvases[ci].panels.is_empty()),
+            "Create a panel before renumbering panel labels.",
         ),
         CommandId::ZoomToFit => requires(has_canvas, "Open a canvas before zooming to fit."),
         CommandId::ZoomToSelection => {
@@ -628,8 +692,15 @@ pub fn describe(app: &PlotxApp, id: CommandId) -> CommandDescriptor {
             "Select at least three objects before distributing them.",
         ),
         CommandId::ZOrder(_) => requires(
-            selected >= 1,
-            "Select an object before changing its stacking order.",
+            selected >= 1
+                || app
+                    .session
+                    .ui
+                    .hierarchical_selection
+                    .paths()
+                    .iter()
+                    .any(|path| path.panel.is_some() && path.content.is_none()),
+            "Select an object or panel before changing its stacking order.",
         ),
         CommandId::PropertyGroup(section) => requires(
             super::properties::discovery::group_applies(app, section),
@@ -713,40 +784,15 @@ pub fn describe(app: &PlotxApp, id: CommandId) -> CommandDescriptor {
     }
 }
 
-fn tool_commands() -> [Tool; 17] {
-    [
-        Tool::Select,
-        Tool::BrowseZoom,
-        Tool::ManualPhase,
-        Tool::Integrate,
-        Tool::Peaks,
-        Tool::InspectCursor,
-        Tool::DeltaCursor,
-        Tool::Symmetry,
-        Tool::Slice,
-        Tool::LineFit,
-        Tool::Annotate,
-        Tool::Text,
-        Tool::PanelLabel,
-        Tool::Rect,
-        Tool::Ellipse,
-        Tool::Line,
-        Tool::Arrow,
-    ]
-}
-
-#[cfg(test)]
-#[path = "commands_tests.rs"]
-mod tests;
-
-#[cfg(test)]
-#[path = "commands_mass_spec_tests.rs"]
-mod mass_spec_tests;
-
-#[cfg(test)]
-#[path = "commands_xps_tests.rs"]
-mod xps_tests;
-
 #[cfg(test)]
 #[path = "commands_alignment_tests.rs"]
 mod alignment_tests;
+#[cfg(test)]
+#[path = "commands_mass_spec_tests.rs"]
+mod mass_spec_tests;
+#[cfg(test)]
+#[path = "commands_tests.rs"]
+mod tests;
+#[cfg(test)]
+#[path = "commands_xps_tests.rs"]
+mod xps_tests;

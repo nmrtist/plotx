@@ -139,9 +139,21 @@ impl Action {
             }
             target_page.panels.push(panel);
         }
-        for object in &inserted {
-            if object.plot().is_some() && target_page.parent_panel(object.id).is_none() {
-                target_page.create_panel_for_plot(object.id)?;
+        let panel_capable: Vec<_> = target_page
+            .objects
+            .iter()
+            .filter(|object| {
+                matches!(
+                    object.kind,
+                    crate::state::CanvasObjectKind::Plot(_)
+                        | crate::state::CanvasObjectKind::RasterImage(_)
+                )
+            })
+            .map(|object| object.id)
+            .collect();
+        for id in panel_capable {
+            if target_page.parent_panel(id).is_none() {
+                target_page.create_panel_for_content(id)?;
             }
         }
         for object in &mut inserted {
@@ -202,7 +214,7 @@ impl Action {
             source_label_slot_before,
             source_label_slot_after,
             target_label_slot_before,
-            target_label_slot_after,
+            mut target_label_slot_after,
             ..
         } = Action::transfer_objects(app, from, &[object], to, true)?
         else {
@@ -211,10 +223,12 @@ impl Action {
         inserted.first_mut()?.frame =
             crate::state::ObjectFrame::new(0.0, 0.0, newcomer_frame.width, newcomer_frame.height);
         let newcomer_id = inserted.first()?.id;
-        let newcomer_panel = target_panels_after
+        if let Some(newcomer_panel) = target_panels_after
             .iter_mut()
-            .find(|panel| panel.item_order.contains(&newcomer_id))?;
-        newcomer_panel.frame = newcomer_frame;
+            .find(|panel| panel.item_order.contains(&newcomer_id))
+        {
+            newcomer_panel.frame = newcomer_frame;
+        }
         for &(content, frame) in &existing_after {
             if let Some(panel) = target_panels_after
                 .iter_mut()
@@ -223,6 +237,22 @@ impl Action {
                 panel.frame = frame;
             }
         }
+        let mut ordered_page = app.doc.canvases.get(to)?.clone();
+        ordered_page.panels.clone_from(&target_panels_after);
+        let order = ordered_page.panel_reading_order();
+        let mut slot = 0_u64;
+        for id in order {
+            let panel = target_panels_after
+                .iter_mut()
+                .find(|panel| panel.id == id)?;
+            if panel.label.participates_in_sequence {
+                if matches!(panel.label.mode, PanelLabelMode::Auto { .. }) {
+                    panel.label.mode = PanelLabelMode::Auto { slot };
+                }
+                slot = slot.saturating_add(1);
+            }
+        }
+        target_label_slot_after = target_label_slot_after.max(slot);
         let src = app.doc.canvases.get(from)?;
         let dst = app.doc.canvases.get(to)?;
         let existing_before = existing_after

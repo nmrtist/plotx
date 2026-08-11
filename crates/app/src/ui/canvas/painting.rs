@@ -522,28 +522,7 @@ pub(crate) fn paint_selection_drag(
 }
 
 pub(crate) fn paint_document(app: &PlotxApp, ci: usize, rect: egui::Rect, painter: &egui::Painter) {
-    let canvas = &app.doc.canvases[ci];
-    let [width, height] = canvas.size_pt();
-    let document = plotx_render::Document {
-        width,
-        height,
-        background: canvas.background,
-        items: plotx_core::state::document_items(canvas),
-    };
-    let zoom = app.session.board.zoom;
-    let bp = canvas.board_pos;
-    plotx_render::screen::paint_document_for_editor(
-        painter,
-        PlotRect::new(rect.left(), rect.top(), rect.width(), rect.height()),
-        &document,
-        plotx_render::DocumentViewport {
-            zoom,
-            pan: [
-                app.session.board.pan[0] + bp[0] * zoom,
-                app.session.board.pan[1] + bp[1] * zoom,
-            ],
-        },
-    );
+    super::image_painting::paint_document(app, ci, rect, painter);
 }
 
 pub(crate) fn paint_layout_overlay(
@@ -677,17 +656,29 @@ pub(crate) fn paint_object_selection(
     painter: &egui::Painter,
     chrome: ChromeStyle,
 ) {
+    super::panel_selection::paint(app, ci, rect, painter, chrome);
     let selection = &app.session.ui.selection;
     let mut ids = selection.objects().to_vec();
     if let Some(primary) = selection.object().filter(|id| !ids.contains(id)) {
         ids.push(primary);
     }
     let handles = ids.len() == 1 && app.session.tool.is_layout_tool();
+    let editing_panel = app
+        .session
+        .ui
+        .hierarchical_selection
+        .editing_panel()
+        .filter(|(canvas, _)| *canvas == app.doc.canvases[ci].resource_id);
     for id in ids {
-        let Some(frame) = object_screen_rect(app.session.board, &app.doc.canvases[ci], id, rect)
-        else {
-            continue;
-        };
+        let frame = editing_panel
+            .and_then(|(_, panel)| {
+                (app.doc.canvases[ci].parent_panel(id) == Some(panel)).then(|| {
+                    content_screen_rect(app.session.board, &app.doc.canvases[ci], id, rect)
+                })
+            })
+            .flatten()
+            .or_else(|| object_screen_rect(app.session.board, &app.doc.canvases[ci], id, rect));
+        let Some(frame) = frame else { continue };
         let r = plot_rect(frame);
         let stroke = if data_edit_target(app, ci) == Some(id) {
             Stroke::new(2.0_f32, chrome.selection_active)

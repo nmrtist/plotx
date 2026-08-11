@@ -12,6 +12,10 @@ pub use xps::{PropertyTextEditState, XpsWorkbenchTab};
 mod task_dock;
 pub use task_dock::TaskDockTab;
 
+#[path = "ui_layout_drag.rs"]
+mod layout_drag;
+pub use layout_drag::*;
+
 mod trace_composer;
 pub use trace_composer::{TraceComposerItem, TraceComposerState};
 mod trace_alignment;
@@ -238,6 +242,14 @@ impl PropertyFocus {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct RasterProxy {
+    pub hash: [u8; 32],
+    pub page_index: u32,
+    pub pixel_size: [u32; 2],
+    pub rgba8: std::sync::Arc<Vec<u8>>,
+}
+
 pub struct UiState {
     /// The single in-flight direct-manipulation gesture; see [`Interaction`].
     pub interaction: Interaction,
@@ -297,11 +309,17 @@ pub struct UiState {
     pub trace_alignment_dialog: Option<TraceAlignmentDialogState>,
     pub trace_composer: Option<TraceComposerState>,
     pub selection: Selection,
+    pub hierarchical_selection: HierarchicalSelection,
+    pub raster_proxies: Vec<RasterProxy>,
     pub selection_scope: SelectionScope,
     pub selection_anchors: SelectionAnchors,
     /// A panel-letter sub-selection (canvas index, object id): its own page-space
     /// selection scope, distinct from the whole-object `selection`.
     pub panel_label_selection: Option<(usize, ObjectId)>,
+    /// Panel currently highlighted as a same-page drop destination.
+    pub panel_drop_target: Option<PanelId>,
+    /// Content row being dragged in the Layers tree.
+    pub layers_drag_content: Option<ContentId>,
     /// Live auto-tiling preview while a single-plot move drag hovers a different
     /// canvas: the target's resulting layout, painted as ghost rects and committed
     /// on release. `None` when the drag is not over a tiling target. Derived from
@@ -449,6 +467,7 @@ impl UiState {
         matches!(
             self.interaction,
             Interaction::Object(_)
+                | Interaction::Panel(_)
                 | Interaction::Marquee(_)
                 | Interaction::Selection(_)
                 | Interaction::Zoom(_)
@@ -504,9 +523,13 @@ impl Default for UiState {
             trace_alignment_dialog: None,
             trace_composer: None,
             selection: Selection::None,
+            hierarchical_selection: HierarchicalSelection::default(),
+            raster_proxies: Vec::new(),
             selection_scope: SelectionScope::default(),
             selection_anchors: SelectionAnchors::default(),
             panel_label_selection: None,
+            panel_drop_target: None,
+            layers_drag_content: None,
             tile_drop: None,
             frame_selection: Vec::new(),
             data_selection: Vec::new(),
@@ -711,31 +734,6 @@ impl Session {
     pub fn sanitized_diagnostics_text(&self) -> String {
         self.operation_history.sanitized_text()
     }
-}
-
-#[derive(Clone, Debug)]
-pub struct ObjectDrag {
-    pub canvas: usize,
-    pub object: ObjectId,
-    pub kind: ObjectDragKind,
-    pub before: ObjectFrame,
-    /// Pointer position in page space (pt) when the drag began, so the live
-    /// frame is recomputed absolutely each frame — a snap correction on one
-    /// frame is not re-perturbed by the next frame's incremental delta.
-    pub start_pointer: [f32; 2],
-    /// Pointer position in screen px when the drag began. The move dead-zone is
-    /// measured against screen-space pointer travel: intent to drag is about how
-    /// far the cursor moved, not how far the page moved under it, so a view
-    /// change can never trip a drag the user never made.
-    pub start_pointer_screen: [f32; 2],
-    /// Start frames of the other selected objects moving with the primary (group
-    /// move). Empty for a single-object drag; populated only for `Move`.
-    pub others: Vec<(ObjectId, ObjectFrame)>,
-    /// Whether the gesture has cleared the move dead-zone. A `Move` starts `false`
-    /// and only moves/commits once the pointer travels past the threshold, so a
-    /// click with a few px of jitter selects without nudging the frame. Resize
-    /// grabs are deliberate and start `true`.
-    pub active: bool,
 }
 
 /// In-progress drag of a whole frame (page or sheet) across the board by its

@@ -109,8 +109,16 @@ fn panel_visibility_and_labels_are_independent_of_content_kind() {
     let items = crate::state::document_items(&page);
     assert!(matches!(
         items.last(),
-        Some(plotx_render::DocumentItem::PanelLabel { visible: true, .. })
+        Some(plotx_render::DocumentItem::PanelLabel { visible: false, .. })
     ));
+
+    let second = page.create_panel("b".to_owned(), ObjectFrame::new(70.0, 30.0, 40.0, 40.0));
+    page.panel_mut(second).unwrap().item_order.push(ids[1]);
+    let items = crate::state::document_items(&page);
+    assert!(items.iter().rev().take(2).all(|item| matches!(
+        item,
+        plotx_render::DocumentItem::PanelLabel { visible: true, .. }
+    )));
 }
 
 #[test]
@@ -134,5 +142,22 @@ fn layout_frame_keeps_panel_page_geometry_separate_from_local_content() {
     assert_eq!(
         page.content_page_frame(ids[0]).unwrap(),
         ObjectFrame::new(80.0, 60.0, 20.0, 15.0)
+    );
+}
+
+#[test]
+fn panel_resize_scales_children_to_the_requested_frame() {
+    let (mut page, ids) = page();
+    let panel = page.create_panel("a".to_owned(), ObjectFrame::new(10.0, 20.0, 40.0, 20.0));
+    page.panel_mut(panel).unwrap().item_order.push(ids[0]);
+    page.object_mut(ids[0]).unwrap().frame = ObjectFrame::new(0.0, 0.0, 40.0, 20.0);
+    page.set_layout_frame(ids[0], ObjectFrame::new(0.0, 10.0, 50.0, 30.0));
+    assert_eq!(
+        page.panel(panel).unwrap().frame,
+        ObjectFrame::new(0.0, 10.0, 50.0, 30.0)
+    );
+    assert_eq!(
+        page.object(ids[0]).unwrap().frame,
+        ObjectFrame::new(0.0, 0.0, 50.0, 30.0)
     );
 }

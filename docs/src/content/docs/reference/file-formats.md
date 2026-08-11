@@ -33,6 +33,22 @@ you on reopening if the map no longer matches the data the project
 reconstructs. The contour drawing is not stored — PlotX redraws it from the
 saved map when the project opens.
 
+## Embedded images
+
+PlotX accepts PNG, JPEG, TIFF, WebP, and BMP images and stores them in the
+`.plotx` project. Duplicating an image does not duplicate its stored source, but
+each copy can have its own crop, rotation, opacity, fit, and interpolation.
+
+SVG is not supported. For an animated PNG or WebP, **Add Images…** reports that
+the image is animated; use **Add Animated Image First Frame…** to display its
+first frame. **Add Images Without Metadata…** converts the pixels to PNG before
+storing them.
+
+PlotX rejects images above 500 megapixels or an estimated 2 GiB when decoded.
+It asks for confirmation above 100 megapixels or 512 MiB. For a multi-page TIFF,
+**Add Images…** imports the first page and **Add All TIFF Pages…** imports every
+page that PlotX can read. Each imported page can be edited independently.
+
 ## `.plotxproc` processing recipes
 
 A `.plotxproc` file stores one processing pipeline, without any data — save a

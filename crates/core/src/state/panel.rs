@@ -58,6 +58,15 @@ pub enum PanelLayout {
     },
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PanelAlignment {
+    #[default]
+    Stretch,
+    Start,
+    Center,
+    End,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Panel {
     pub id: PanelId,
@@ -70,6 +79,9 @@ pub struct Panel {
     pub locked: bool,
     pub clip_children: bool,
     pub layout: PanelLayout,
+    pub layout_gap: f32,
+    pub layout_padding: f32,
+    pub layout_alignment: PanelAlignment,
 }
 
 impl Panel {
@@ -85,6 +97,9 @@ impl Panel {
             locked: false,
             clip_children: false,
             layout: PanelLayout::Free,
+            layout_gap: 6.0,
+            layout_padding: 6.0,
+            layout_alignment: PanelAlignment::Stretch,
         }
     }
 }
@@ -137,6 +152,13 @@ pub fn validate_panel_structure(
             && (rows == 0 || cols == 0)
         {
             return Err(format!("panel {} has an empty grid dimension", panel.id));
+        }
+        if !panel.layout_gap.is_finite()
+            || panel.layout_gap < 0.0
+            || !panel.layout_padding.is_finite()
+            || panel.layout_padding < 0.0
+        {
+            return Err(format!("panel {} has invalid layout spacing", panel.id));
         }
     }
     let mut group_ids = BTreeSet::new();
@@ -233,6 +255,30 @@ pub fn validate_frame(frame: ObjectFrame, what: &str) -> Result<(), String> {
 }
 
 impl CanvasDocument {
+    /// Automatic labels distinguish multi-panel pages; explicit labels remain
+    /// visible even when the page has only one panel.
+    pub fn panel_label_is_displayed(&self, panel: PanelId) -> bool {
+        let Some(panel) = self.panel(panel) else {
+            return false;
+        };
+        if !panel.visible || !panel.label.visible {
+            return false;
+        }
+        if !matches!(panel.label.mode, PanelLabelMode::Auto { .. }) {
+            return true;
+        }
+        self.panels
+            .iter()
+            .filter(|candidate| {
+                candidate.visible
+                    && candidate.label.visible
+                    && candidate.label.participates_in_sequence
+            })
+            .take(2)
+            .count()
+            >= 2
+    }
+
     /// Page-space frame manipulated by the canvas authoring UI. Parented
     /// content is represented by its semantic panel; loose content uses its
     /// own frame. This is the single coordinate contract for selection,
@@ -282,15 +328,20 @@ impl CanvasDocument {
         }
     }
 
-    /// Give a loose plot its default one-item semantic panel while preserving
-    /// its page position and existing display name as the panel note.
-    pub fn create_panel_for_plot(&mut self, content: ContentId) -> Option<PanelId> {
+    /// Give loose panel-capable content its default one-item semantic panel while
+    /// preserving its page position and existing display name as the panel note.
+    pub fn create_panel_for_content(&mut self, content: ContentId) -> Option<PanelId> {
         if let Some(panel) = self.parent_panel(content) {
             return Some(panel);
         }
         let (name, frame) = {
             let item = self.object(content)?;
-            item.plot()?;
+            if !matches!(
+                item.kind,
+                super::CanvasObjectKind::Plot(_) | super::CanvasObjectKind::RasterImage(_)
+            ) {
+                return None;
+            }
             (item.name.clone(), item.frame)
         };
         let panel_id = self.create_panel(name.clone(), frame);
@@ -302,6 +353,11 @@ impl CanvasDocument {
         panel.item_order.push(content);
         panel.note = name;
         Some(panel_id)
+    }
+
+    pub fn create_panel_for_plot(&mut self, content: ContentId) -> Option<PanelId> {
+        self.object(content)?.plot()?;
+        self.create_panel_for_content(content)
     }
 }
 

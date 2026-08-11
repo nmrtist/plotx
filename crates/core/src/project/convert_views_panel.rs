@@ -1,4 +1,5 @@
 use super::*;
+use crate::state::PanelAlignment;
 
 pub(super) fn panel_to_dto(panel: &Panel) -> ViewPanel {
     let (participates, position, font_size) = (
@@ -45,6 +46,15 @@ pub(super) fn panel_to_dto(panel: &Panel) -> ViewPanel {
             PanelLayout::HorizontalStack => PanelLayoutDto::HorizontalStack,
             PanelLayout::Grid { rows, cols } => PanelLayoutDto::Grid { rows, cols },
         },
+        layout_gap: panel.layout_gap,
+        layout_padding: panel.layout_padding,
+        layout_alignment: match panel.layout_alignment {
+            PanelAlignment::Stretch => "stretch",
+            PanelAlignment::Start => "start",
+            PanelAlignment::Center => "center",
+            PanelAlignment::End => "end",
+        }
+        .to_owned(),
     }
 }
 
@@ -139,6 +149,19 @@ pub(super) fn panel_from_dto(dto: &ViewPanel) -> Result<Panel> {
             PanelLayoutDto::VerticalStack => PanelLayout::VerticalStack,
             PanelLayoutDto::HorizontalStack => PanelLayout::HorizontalStack,
             PanelLayoutDto::Grid { rows, cols } => PanelLayout::Grid { rows, cols },
+        },
+        layout_gap: dto.layout_gap,
+        layout_padding: dto.layout_padding,
+        layout_alignment: match dto.layout_alignment.as_str() {
+            "stretch" => PanelAlignment::Stretch,
+            "start" => PanelAlignment::Start,
+            "center" => PanelAlignment::Center,
+            "end" => PanelAlignment::End,
+            value => {
+                return Err(ProjectError::Invalid(format!(
+                    "unknown panel layout alignment {value}"
+                )));
+            }
         },
     })
 }

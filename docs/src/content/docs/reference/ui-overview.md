@@ -37,6 +37,10 @@ introduces the same regions in walkthrough form.
 
 ## Recurring elements
 
+- **Figure panel (Panel)** — a labelled section of a figure that can contain
+  plots, images, text, and shapes. Panels cannot be placed inside other Panels.
+  A **group** moves and arranges objects together but does not add a panel label.
+
 - **Task page** — one task's page in the task dock. Drag its lower edge to
   change its height. Switching tabs keeps a page's settings; closing it with
   its ✕ is what discards them, and selecting a tab makes that page's dataset

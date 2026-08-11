@@ -699,3 +699,4 @@ pub fn load_path(path: impl AsRef<Path>) -> Result<LoadResult, IoError> {
         DataFormat::CasaXpsText => xps::load_casaxps(path),
     }
 }
+pub mod image;

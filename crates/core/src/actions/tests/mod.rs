@@ -13,6 +13,7 @@ mod interaction;
 mod linefit;
 mod more;
 mod multiplet;
+mod pr2;
 mod scheme_apply;
 mod stable_identity;
 mod stack;

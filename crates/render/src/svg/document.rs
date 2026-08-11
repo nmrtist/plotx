@@ -77,6 +77,7 @@ fn export_document_with_page(
                     write_overlay(&mut s, overlay);
                 }
             }
+            DocumentItem::Raster(_) => {}
             DocumentItem::PanelLabel {
                 frame,
                 text,

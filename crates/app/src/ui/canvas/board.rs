@@ -545,7 +545,9 @@ pub(crate) fn dispatch_frame_gesture(app: &mut PlotxApp, rect: egui::Rect, ui: &
     });
     if pressed
         && let Some(point) = hover
-        && let Some((canvas, _)) = object_at_screen(app, rect, point)
+        && let Some(canvas) = object_at_screen(app, rect, point)
+            .map(|(canvas, _)| canvas)
+            .or_else(|| panel_at_screen(app, rect, point).map(|(canvas, _)| canvas))
     {
         if app.session.active_canvas != Some(canvas) {
             activate_frame(app, FrameRef::Page(canvas));

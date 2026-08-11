@@ -15,6 +15,8 @@ pub use ticks::{AxisLayout, AxisTicks, axis_layout, axis_ticks, axis_ticks_for, 
 pub mod screen;
 #[cfg(feature = "screen")]
 mod screen_annotations;
+#[cfg(feature = "screen")]
+mod screen_raster;
 
 #[cfg(all(windows, feature = "emf"))]
 pub mod emf;
@@ -60,11 +62,37 @@ pub struct Document<'a> {
 pub enum DocumentItem<'a> {
     Plot(DocumentObject<'a>),
     Overlay(DocumentOverlay<'a>),
+    Raster(DocumentRaster<'a>),
     PanelLabel {
         frame: Rect,
         text: DocumentText,
         visible: bool,
     },
+}
+
+pub struct DocumentRaster<'a> {
+    pub source_hash: [u8; 32],
+    pub frame: Rect,
+    pub pixels: &'a [u8],
+    /// Pixel dimensions of `pixels`, which may describe an editor proxy.
+    pub pixel_size: [u32; 2],
+    /// Original asset dimensions used for fit, crop, and effective resolution.
+    pub source_pixel_size: [u32; 2],
+    pub crop: [f32; 4],
+    pub fit: RasterFit,
+    pub quarter_turns: u8,
+    pub opacity: f32,
+    pub nearest: bool,
+    /// Optional page-space bounds imposed by a containing layout panel.
+    pub clip: Option<Rect>,
+    pub visible: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RasterFit {
+    Contain,
+    Cover,
+    Stretch,
 }
 
 pub struct DocumentObject<'a> {

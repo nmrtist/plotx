@@ -27,6 +27,20 @@ PlotX（或相反）时，文件会被拒绝并给出明确的"不支持的版�
 重新打开项目时，若某张图与项目重建出的数据不再一致，PlotX 就据此发出警告。
 等高线绘图本身不保存；项目打开时，PlotX 会根据保存的图重新绘制。
 
+## 嵌入图片
+
+PlotX 支持 PNG、JPEG、TIFF、WebP 与 BMP，并将图片保存在 `.plotx` 项目中。
+复制图片不会重复保存源图片，但每个副本可以分别设置裁剪、旋转、透明度、适配与
+插值方式。
+
+PlotX 不支持 SVG。用 **Add Images…** 添加动画 PNG 或 WebP 时，PlotX 会提示该
+图片包含动画；使用 **Add Animated Image First Frame…** 可显示其第一帧。
+**Add Images Without Metadata…** 会先把图片像素转换为 PNG，再保存到项目中。
+
+图片超过 5 亿像素或预计解码后超过 2 GiB 时，PlotX 会拒绝导入；超过 1 亿像素或
+512 MiB 时，会先要求确认。对于多页 TIFF，**Add Images…** 导入第一页，**Add All
+TIFF Pages…** 导入 PlotX 能够读取的所有页面。导入后的各页可以分别编辑。
+
 ## `.plotxproc` 处理配方
 
 `.plotxproc` 文件保存一条处理管线，不含任何数据——配方保存一次即可在

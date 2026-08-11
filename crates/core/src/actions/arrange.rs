@@ -1,4 +1,5 @@
 use super::*;
+use crate::state::{ContentId, ObjectId, PanelId};
 
 impl PlotxApp {
     /// Reposition the active canvas's plot objects into a `rows × cols` grid
@@ -24,6 +25,20 @@ impl PlotxApp {
         let mut after_layout = before_layout;
         after_layout.rows = rows.max(1);
         after_layout.cols = cols.max(1);
+        let page_siblings = self.page_sibling_frames(ci);
+        if page_siblings.len() >= 2 {
+            let ids: Vec<_> = page_siblings.iter().map(|(_, id, _)| *id).collect();
+            let after = crate::layout::assign_grid(canvas.size_pt(), &after_layout, &ids);
+            self.execute_action(Action::Composite(vec![
+                Action::set_page_layout(ci, before_layout, after_layout),
+                self.page_sibling_frame_action(ci, &page_siblings, &after),
+            ]));
+            self.session.status = format!(
+                "Arranged {} page item(s) into a {rows}×{cols} grid.",
+                after.len()
+            );
+            return;
+        }
         let page = canvas.size_pt();
         let ids = canvas.plot_object_ids();
         let axis_changes = if simplify_inner_axes {
@@ -159,11 +174,69 @@ impl PlotxApp {
             .collect()
     }
 
+    fn page_sibling_frames(&self, ci: usize) -> Vec<(PageSibling, ObjectId, ObjectFrame)> {
+        let Some(page) = self.doc.canvases.get(ci) else {
+            return Vec::new();
+        };
+        self.session
+            .ui
+            .hierarchical_selection
+            .paths()
+            .iter()
+            .filter_map(|path| match (path.panel, path.content) {
+                (Some(panel), None) => page
+                    .panel(panel)
+                    .filter(|panel| !panel.locked)
+                    .map(|panel| (PageSibling::Panel(panel.id), panel.frame)),
+                (None, Some(content)) => page
+                    .object(content)
+                    .filter(|item| !item.locked && page.parent_panel(content).is_none())
+                    .map(|item| (PageSibling::Content(content), item.frame)),
+                _ => None,
+            })
+            .enumerate()
+            .map(|(index, (target, frame))| (target, ObjectId::new(index as u64 + 1), frame))
+            .collect()
+    }
+
+    fn page_sibling_frame_action(
+        &self,
+        ci: usize,
+        before: &[(PageSibling, ObjectId, ObjectFrame)],
+        after: &[(ObjectId, ObjectFrame)],
+    ) -> Action {
+        let state_before = PanelState::of(&self.doc.canvases[ci]);
+        let mut page = self.doc.canvases[ci].clone();
+        for ((target, _, _), (_, frame)) in before.iter().zip(after) {
+            match target {
+                PageSibling::Panel(id) => page.panel_mut(*id).unwrap().frame = *frame,
+                PageSibling::Content(id) => page.object_mut(*id).unwrap().frame = *frame,
+            }
+        }
+        Action::ReplacePanelState {
+            canvas: ci,
+            before: state_before,
+            after: PanelState::of(&page),
+        }
+    }
+
     /// Align the current multi-selection to a shared edge/centre (≥2 objects).
     pub fn align_selected(&mut self, mode: crate::layout::Align) {
         let Some(ci) = self.session.active_canvas else {
             return;
         };
+        let page_siblings = self.page_sibling_frames(ci);
+        if page_siblings.len() >= 2 {
+            let frames: Vec<_> = page_siblings
+                .iter()
+                .map(|(_, id, frame)| (*id, *frame))
+                .collect();
+            let after = crate::layout::align(&frames, mode);
+            let action = self.page_sibling_frame_action(ci, &page_siblings, &after);
+            self.execute_action(action);
+            self.session.status = "Aligned page items.".to_owned();
+            return;
+        }
         let before = self.selected_movable_frames(ci);
         if before.len() < 2 {
             return;
@@ -178,6 +251,18 @@ impl PlotxApp {
         let Some(ci) = self.session.active_canvas else {
             return;
         };
+        let page_siblings = self.page_sibling_frames(ci);
+        if page_siblings.len() >= 3 {
+            let frames: Vec<_> = page_siblings
+                .iter()
+                .map(|(_, id, frame)| (*id, *frame))
+                .collect();
+            let after = crate::layout::distribute(&frames, axis);
+            let action = self.page_sibling_frame_action(ci, &page_siblings, &after);
+            self.execute_action(action);
+            self.session.status = "Distributed page items.".to_owned();
+            return;
+        }
         let before = self.selected_movable_frames(ci);
         if before.len() < 3 {
             return;
@@ -246,6 +331,31 @@ impl PlotxApp {
         let Some(ci) = self.session.active_canvas else {
             return;
         };
+        let panel_targets: Vec<_> = self
+            .session
+            .ui
+            .hierarchical_selection
+            .paths()
+            .iter()
+            .filter(|path| path.content.is_none())
+            .filter_map(|path| path.panel)
+            .collect();
+        if !panel_targets.is_empty() {
+            let before = PanelState::of(&self.doc.canvases[ci]);
+            let mut page = self.doc.canvases[ci].clone();
+            let order: Vec<_> = page.panels.iter().map(|panel| panel.id).collect();
+            let reordered = crate::actions::reorder_z(&order, &panel_targets, op);
+            page.panels
+                .sort_by_key(|panel| reordered.iter().position(|id| *id == panel.id));
+            reorder_panel_content_blocks(&mut page, &panel_targets, op);
+            self.execute_action(Action::ReplacePanelState {
+                canvas: ci,
+                before,
+                after: PanelState::of(&page),
+            });
+            self.session.status = "Reordered panels.".to_owned();
+            return;
+        }
         let targets: Vec<ObjectId> = self.session.ui.selection.objects().to_vec();
         self.apply_z_order(ci, &targets, op);
     }
@@ -309,6 +419,56 @@ impl PlotxApp {
             }
         }
     }
+}
+
+/// A Panel is one stacking unit even though its children are stored in the
+/// canvas-wide content collection. Reordering only `page.panels` changes tree
+/// order but not paint order, so derive page-level blocks and move every child
+/// in the selected Panel together. Loose content retains its own layer slot.
+fn reorder_panel_content_blocks(
+    page: &mut crate::state::CanvasDocument,
+    panels: &[PanelId],
+    op: crate::actions::ZOrder,
+) {
+    let mut blocks: Vec<Vec<ObjectId>> = Vec::new();
+    for object in &page.objects {
+        let parent = page.parent_panel(object.id);
+        if let Some(panel) = parent
+            && let Some(block) = blocks.iter_mut().find(|block| {
+                block
+                    .first()
+                    .is_some_and(|first| page.parent_panel(*first) == Some(panel))
+            })
+        {
+            block.push(object.id);
+        } else {
+            blocks.push(vec![object.id]);
+        }
+    }
+    let order: Vec<_> = (0..blocks.len()).collect();
+    let targets: Vec<_> = order
+        .iter()
+        .copied()
+        .filter(|index| {
+            blocks[*index]
+                .first()
+                .and_then(|id| page.parent_panel(*id))
+                .is_some_and(|panel| panels.contains(&panel))
+        })
+        .collect();
+    let reordered = crate::actions::reorder_z(&order, &targets, op);
+    let object_order: Vec<_> = reordered
+        .into_iter()
+        .flat_map(|index| blocks[index].iter().copied())
+        .collect();
+    page.objects
+        .sort_by_key(|object| object_order.iter().position(|id| *id == object.id));
+}
+
+#[derive(Clone, Copy)]
+enum PageSibling {
+    Panel(PanelId),
+    Content(ContentId),
 }
 
 fn layout_items(

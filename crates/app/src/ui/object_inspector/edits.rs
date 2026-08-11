@@ -51,6 +51,31 @@ pub(super) fn selection_context_label(app: &PlotxApp, ci: usize, ids: &[ObjectId
         return "No canvas".to_owned();
     };
     if ids.is_empty() {
+        if let Some(panel) = app
+            .session
+            .ui
+            .hierarchical_selection
+            .lead()
+            .and_then(|path| path.panel)
+            .and_then(|id| canvas.panel(id))
+        {
+            let label = match &panel.label.mode {
+                plotx_core::state::PanelLabelMode::Auto { slot } => {
+                    canvas.panel_label_style.format(*slot as usize)
+                }
+                plotx_core::state::PanelLabelMode::LockedAuto { value }
+                | plotx_core::state::PanelLabelMode::Manual { value } => value.clone(),
+            };
+            return format!(
+                "{} / {}",
+                canvas.name,
+                if label.is_empty() {
+                    panel.name.clone()
+                } else {
+                    format!("Panel {label}")
+                }
+            );
+        }
         return format!("Canvas · {}", canvas.name);
     }
     let datasets: std::collections::HashSet<_> = ids
@@ -84,6 +109,25 @@ pub(super) fn selection_context_label(app: &PlotxApp, ci: usize, ids: &[ObjectId
         .object(ids[0])
         .map(|object| object.name.clone())
         .unwrap_or_else(|| "Object".to_owned());
+    if let Some(panel) = canvas.parent_panel(ids[0]).and_then(|id| canvas.panel(id)) {
+        let label = match &panel.label.mode {
+            plotx_core::state::PanelLabelMode::Auto { slot } => {
+                canvas.panel_label_style.format(*slot as usize)
+            }
+            plotx_core::state::PanelLabelMode::LockedAuto { value }
+            | plotx_core::state::PanelLabelMode::Manual { value } => value.clone(),
+        };
+        return format!(
+            "{} / {} / {}",
+            canvas.name,
+            if label.is_empty() {
+                panel.name.clone()
+            } else {
+                format!("Panel {label}")
+            },
+            object
+        );
+    }
     let dataset = datasets
         .iter()
         .next()

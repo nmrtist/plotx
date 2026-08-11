@@ -58,7 +58,7 @@ fn canonical_conversion_and_default_canvas_share_dataset_identity() {
     assert!(crate::state::document_items(&canvas).iter().any(|item| {
         matches!(
             item,
-            plotx_render::DocumentItem::PanelLabel { visible: true, .. }
+            plotx_render::DocumentItem::PanelLabel { visible: false, .. }
         )
     }));
 }

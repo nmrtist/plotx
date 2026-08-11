@@ -126,6 +126,10 @@ struct Shell {
 }
 
 impl eframe::App for Shell {
+    #[cfg(windows)]
+    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        ui::clipboard_native::restore_missing_paste_shortcut(raw_input);
+    }
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         observability::show_pending_crash_dialog();
@@ -586,26 +590,19 @@ impl Shell {
     }
 }
 
-/// Undecorated windows lose the DWM frame, so Windows 11 rounded corners and
-/// the drop shadow must be requested explicitly. Both calls are cosmetic:
-/// failures (e.g. Windows 10 rejecting the corner attribute) are deliberately
-/// ignored and the window simply stays square/shadowless.
+/// Register native drag hit testing, then restore the DWM frame effects lost
+/// by undecorated windows. Cosmetic DWM failures are deliberately ignored.
 #[cfg(windows)]
 fn apply_windows_frame_polish(cc: &eframe::CreationContext<'_>) {
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use windows_sys::Win32::Graphics::Dwm::{
         DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmExtendFrameIntoClientArea,
         DwmSetWindowAttribute,
     };
     use windows_sys::Win32::UI::Controls::MARGINS;
 
-    let Ok(handle) = cc.window_handle() else {
+    let Some(hwnd) = ui::file_drop::register_native_window(cc) else {
         return;
     };
-    let RawWindowHandle::Win32(win32) = handle.as_raw() else {
-        return;
-    };
-    let hwnd = win32.hwnd.get() as *mut core::ffi::c_void;
     let corner = DWMWCP_ROUND;
     // SAFETY: hwnd comes from the live winit window; both DWM calls only read
     // the passed attribute structs.

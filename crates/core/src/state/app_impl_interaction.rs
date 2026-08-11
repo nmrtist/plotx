@@ -17,6 +17,8 @@ impl PlotxApp {
     pub fn reset_interaction(&mut self) {
         self.session.ui.interaction = Interaction::Idle;
         self.session.ui.tile_drop = None;
+        self.session.ui.panel_drop_target = None;
+        self.session.ui.layers_drag_content = None;
         self.session.ui.snap_guides.clear();
     }
 
@@ -90,14 +92,49 @@ impl PlotxApp {
                 }
             }
             Interaction::Object(drag) => {
-                self.set_object_frame(drag.canvas, drag.object, drag.before);
+                if matches!(drag.space, ObjectDragSpace::Panel(_)) {
+                    if let Some(page) = self.doc.canvases.get_mut(drag.canvas)
+                        && let Some(object) = page.object_mut(drag.object)
+                    {
+                        object.frame = drag.before;
+                    }
+                } else {
+                    self.set_object_frame(drag.canvas, drag.object, drag.before);
+                }
                 for (id, frame) in drag.others {
-                    self.set_object_frame(drag.canvas, id, frame);
+                    if matches!(drag.space, ObjectDragSpace::Panel(_)) {
+                        if let Some(page) = self.doc.canvases.get_mut(drag.canvas)
+                            && let Some(object) = page.object_mut(id)
+                        {
+                            object.frame = frame;
+                        }
+                    } else {
+                        self.set_object_frame(drag.canvas, id, frame);
+                    }
+                }
+            }
+            Interaction::Panel(drag) => {
+                if let Some(page) = self.doc.canvases.get_mut(drag.canvas) {
+                    if let Some(panel) = page.panel_mut(drag.panel) {
+                        panel.frame = drag.before;
+                    }
+                    for (id, frame) in drag.others {
+                        if let Some(panel) = page.panel_mut(id) {
+                            panel.frame = frame;
+                        }
+                    }
+                    for (id, frame) in drag.children {
+                        if let Some(object) = page.object_mut(id) {
+                            object.frame = frame;
+                        }
+                    }
                 }
             }
             _ => {}
         }
         self.session.ui.tile_drop = None;
+        self.session.ui.panel_drop_target = None;
+        self.session.ui.layers_drag_content = None;
         self.session.ui.snap_guides.clear();
     }
 }

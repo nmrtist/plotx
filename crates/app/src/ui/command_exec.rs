@@ -3,7 +3,8 @@
 //! within the repository size limit.
 
 use plotx_core::state::{
-    CommandPaletteState, LineShapeKind, PlotxApp, ProjectTransition, Tool, ToolGroup,
+    CanvasDocument, CommandPaletteState, LineShapeKind, ObjectFrame, PlotxApp, ProjectTransition,
+    Tool, ToolGroup,
 };
 
 use super::clipboard_table::ClipboardTablePaste;
@@ -64,6 +65,17 @@ fn execute_inner(
             ctx.open_url(egui::OpenUrl::new_tab(commands::MANUAL_URL));
         }
         CommandId::ImportTable => super::file_dialogs::import_delimited_table(app),
+        CommandId::ImportImage => super::file_dialogs::import_images(app),
+        CommandId::ImportImageFirstFrame => {
+            super::file_dialogs::image_import::import_images_first_frame(app)
+        }
+        CommandId::ImportImageWithoutMetadata => {
+            super::file_dialogs::image_import::import_images_without_metadata(app)
+        }
+        CommandId::ImportTiffPages => super::file_dialogs::image_import::import_tiff_pages(app),
+        CommandId::PasteImage => super::file_dialogs::image_import::paste_clipboard_image(app),
+        CommandId::CancelImageImport => super::file_dialogs::image_import::cancel_all(app),
+        CommandId::ReplaceImage => super::file_dialogs::image_import::replace_selected_image(app),
         CommandId::PasteTable => {
             if let Some(clipboard) = clipboard {
                 clipboard.request(app, ctx);
@@ -90,6 +102,16 @@ fn execute_inner(
         CommandId::DeselectAll => deselect_all_in_scope(app),
         CommandId::Group => app.group_selected(),
         CommandId::Ungroup => app.ungroup_selected(),
+        CommandId::CreatePanel
+        | CommandId::ComposePanel
+        | CommandId::DissolvePanel
+        | CommandId::DeletePanel
+        | CommandId::DuplicatePanel
+        | CommandId::MergePanels
+        | CommandId::SplitPanel
+        | CommandId::ReorderPanelLabels
+        | CommandId::SetPanelLayout(_)
+        | CommandId::MoveContentToPanel(_) => execute_panel_command(id, app),
         CommandId::TogglePrimarySidebar => {
             app.session.primary_sidebar_visible = !app.session.primary_sidebar_visible;
         }
@@ -200,6 +222,151 @@ fn execute_inner(
         }
         CommandId::Tool(tool) => app.toggle_tool(tool),
     }
+}
+
+fn execute_panel_command(id: CommandId, app: &mut PlotxApp) {
+    use plotx_core::actions::Action;
+
+    let Some(ci) = app.session.active_canvas else {
+        return;
+    };
+    let paths = app.session.ui.hierarchical_selection.paths().to_vec();
+    let lead = paths.first().copied();
+    let selected_panel = lead.and_then(|path| path.panel);
+    let selected_contents: Vec<_> = paths.iter().filter_map(|path| path.content).collect();
+    let result: Result<(Option<plotx_core::state::PanelId>, Action), String> = match id {
+        CommandId::CreatePanel => {
+            let page = &app.doc.canvases[ci];
+            let frame = next_panel_frame(page);
+            app.create_panel_action(ci, "Panel".to_owned(), frame)
+                .map(|(panel, action)| (Some(panel), action))
+                .map_err(|error| error.to_string())
+        }
+        CommandId::ComposePanel => app
+            .compose_panel_action(ci, "Panel".to_owned(), &selected_contents, 6.0)
+            .map(|(panel, action)| (Some(panel), action))
+            .map_err(|error| error.to_string()),
+        CommandId::DissolvePanel => selected_panel
+            .ok_or_else(|| "Select a panel before dissolving it.".to_owned())
+            .and_then(|panel| {
+                app.dissolve_panel_action(ci, panel)
+                    .map(|action| (None, action))
+                    .map_err(|error| error.to_string())
+            }),
+        CommandId::DeletePanel => selected_panel
+            .ok_or_else(|| "Select a panel before deleting it.".to_owned())
+            .and_then(|panel| {
+                app.delete_panel_action(ci, panel)
+                    .map(|action| (None, action))
+                    .map_err(|error| error.to_string())
+            }),
+        CommandId::DuplicatePanel => selected_panel
+            .ok_or_else(|| "Select a panel before duplicating it.".to_owned())
+            .and_then(|panel| {
+                app.duplicate_panel_action(ci, panel, [8.0, 8.0])
+                    .map(|(new_panel, action)| (Some(new_panel), action))
+                    .map_err(|error| error.to_string())
+            }),
+        CommandId::MergePanels => {
+            let panels: Vec<_> = paths
+                .iter()
+                .filter_map(|path| (path.content.is_none()).then_some(path.panel).flatten())
+                .collect();
+            let primary = panels
+                .first()
+                .copied()
+                .ok_or_else(|| "Select at least two panels to merge.".to_owned());
+            primary.and_then(|primary| {
+                app.merge_panels_action(ci, primary, &panels[1..])
+                    .map(|action| (Some(primary), action))
+                    .map_err(|error| error.to_string())
+            })
+        }
+        CommandId::SplitPanel => selected_panel
+            .ok_or_else(|| "Select content inside a panel before splitting it.".to_owned())
+            .and_then(|panel| {
+                app.split_panel_action(ci, panel, &selected_contents, "Panel".to_owned())
+                    .map(|(new_panel, action)| (Some(new_panel), action))
+                    .map_err(|error| error.to_string())
+            }),
+        CommandId::ReorderPanelLabels => app
+            .reorder_panel_labels_action(ci)
+            .map(|action| (None, action))
+            .map_err(|error| error.to_string()),
+        CommandId::SetPanelLayout(layout) => selected_panel
+            .ok_or_else(|| "Select a panel before changing its layout.".to_owned())
+            .and_then(|panel| {
+                let current = app.doc.canvases[ci]
+                    .panel(panel)
+                    .ok_or_else(|| "The selected panel no longer exists.".to_owned())?;
+                app.set_panel_layout_action(
+                    ci,
+                    panel,
+                    layout,
+                    current.layout_gap,
+                    current.layout_padding,
+                    current.layout_alignment,
+                )
+                .map(|action| (Some(panel), action))
+                .map_err(|error| error.to_string())
+            }),
+        CommandId::MoveContentToPanel(target) => app
+            .move_contents_to_panel_action(ci, &selected_contents, target, 0)
+            .map(|action| (target, action))
+            .map_err(|error| error.to_string()),
+        _ => return,
+    };
+    match result {
+        Ok((panel, action)) => {
+            app.execute_action(action);
+            if let Some(panel) = panel {
+                app.select_panel(ci, panel);
+            } else if matches!(id, CommandId::DeletePanel | CommandId::DissolvePanel) {
+                app.session.ui.hierarchical_selection.clear();
+            }
+        }
+        Err(error) => app.session.status = error,
+    }
+}
+
+fn next_panel_frame(page: &CanvasDocument) -> ObjectFrame {
+    let [page_width, page_height] = page.size_pt();
+    let margin = 12.0;
+    let width = (page_width * 0.42)
+        .clamp(48.0, 220.0)
+        .min(page_width - margin * 2.0);
+    let height = (page_height * 0.42)
+        .clamp(48.0, 160.0)
+        .min(page_height - margin * 2.0);
+    let overlaps = |candidate: ObjectFrame| {
+        page.panels.iter().any(|panel| {
+            candidate.x < panel.frame.x + panel.frame.width
+                && candidate.x + candidate.width > panel.frame.x
+                && candidate.y < panel.frame.y + panel.frame.height
+                && candidate.y + candidate.height > panel.frame.y
+        })
+    };
+    for row in 0..8 {
+        for col in 0..8 {
+            let x = margin + col as f32 * (width + margin);
+            let y = margin + row as f32 * (height + margin);
+            if x + width <= page_width - margin
+                && y + height <= page_height - margin
+                && !overlaps(ObjectFrame::new(x, y, width, height))
+            {
+                return ObjectFrame::new(x, y, width, height);
+            }
+        }
+    }
+    // A fully occupied page still gets a deterministic, visible cascade. The
+    // fallback is bounded to the page and can be moved immediately.
+    let offset = (page.panels.len() % 8) as f32 * 8.0;
+    ObjectFrame::new(
+        (margin + offset).min((page_width - margin - width).max(margin)),
+        (margin + offset).min((page_height - margin - height).max(margin)),
+        width,
+        height,
+    )
 }
 
 fn select_all_in_scope(app: &mut PlotxApp) {
@@ -413,6 +580,7 @@ mod tests {
     use plotx_core::actions::Action;
     use plotx_core::properties::{AggregateValue, PropertyAddress, PropertyValue, app_preferences};
     use plotx_core::settings::Settings;
+    use plotx_core::state::CanvasDocument;
     use plotx_core::state::DEFAULT_CANVAS_SIZE_MM;
 
     fn catalog_snap(app: &mut PlotxApp, enabled: bool) {
@@ -424,6 +592,20 @@ mod tests {
             )
             .expect("the Preferences catalog row plans");
         app.commit_property(commit);
+    }
+
+    #[test]
+    fn new_panel_frame_avoids_existing_panel_overlap_when_space_exists() {
+        let mut page = CanvasDocument::new("page".to_owned(), [120.0, 90.0]);
+        let first = next_panel_frame(&page);
+        page.create_panel("Panel".to_owned(), first);
+        let second = next_panel_frame(&page);
+        assert!(
+            second.x >= first.x + first.width
+                || second.x + second.width <= first.x
+                || second.y >= first.y + first.height
+                || second.y + second.height <= first.y
+        );
     }
 
     fn resolved_snap(app: &PlotxApp) -> AggregateValue<PropertyValue> {

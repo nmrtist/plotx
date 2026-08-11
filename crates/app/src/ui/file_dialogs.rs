@@ -8,16 +8,47 @@ use plotx_core::state::ProcessingSchemeDialogState;
 
 mod delimited;
 mod discovery;
+pub(crate) mod image_import;
 mod origin;
 mod path;
 mod preview;
 mod recent;
 mod xlsx;
 pub(crate) use delimited::DelimitedTableSource;
+pub(crate) use image_import::{import_image_paths, import_images};
 use path::{ensure_extension, ensure_plotx_extension, io_error_category};
 pub(crate) use preview::table_import_preview_window;
 pub(crate) use recent::{RecentOpenKind, open_recent_path, recent_open_kind};
 use xlsx::import_xlsx_table_path;
+
+pub(crate) struct ClassifiedDropPath(recent::ClassifiedOpenPath);
+
+impl ClassifiedDropPath {
+    pub(crate) fn is_image(&self) -> bool {
+        self.0.kind() == RecentOpenKind::Image
+    }
+}
+
+pub(crate) fn classify_dropped_path(
+    app: &mut PlotxApp,
+    path: &std::path::Path,
+) -> Option<ClassifiedDropPath> {
+    match recent::classify_open_path(path) {
+        Ok(classified) => Some(ClassifiedDropPath(classified)),
+        Err(error) => {
+            recent::record_open_path_failure(app, path, error);
+            None
+        }
+    }
+}
+
+pub(crate) fn dispatch_dropped_path(
+    app: &mut PlotxApp,
+    path: &std::path::Path,
+    classified: ClassifiedDropPath,
+) {
+    recent::dispatch_classified_path(app, path, classified.0);
+}
 
 pub(crate) fn import_delimited_table(app: &mut PlotxApp) {
     let Some(path) = rfd::FileDialog::new()
@@ -344,6 +375,10 @@ pub(crate) fn load_and_note(app: &mut PlotxApp, path: &std::path::Path) {
 pub(crate) fn open_file(app: &mut PlotxApp) {
     if let Some(paths) = rfd::FileDialog::new()
         .add_filter(
+            "Images (*.png, *.jpg, *.jpeg, *.tif, *.tiff, *.webp, *.bmp)",
+            &["png", "jpg", "jpeg", "tif", "tiff", "webp", "bmp"],
+        )
+        .add_filter(
             "All supported data (*.mzML, *.rasx, *.raw, *.vms, *.txt, *.spm, *.pfc, *.abf, *.jdf, fid, ser, *.zip, *.opj)",
             origin::OPEN_FILE_FILTER_EXTENSIONS,
         )
@@ -360,7 +395,7 @@ pub(crate) fn open_file(app: &mut PlotxApp) {
         .add_filter("Bruker TopSpin (fid, ser)", &["fid", "ser"])
         .add_filter("Archive (*.zip)", &["zip"])
         .add_filter("All files", &["*"])
-        .set_title("Open data files — format is detected automatically")
+        .set_title("Open data or add images — format is detected automatically")
         .pick_files()
     {
         for path in paths {

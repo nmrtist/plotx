@@ -105,6 +105,7 @@ static BINDINGS: &[CommandBinding] = &[
         // routes the platform Copy event to this command.
         menu_accelerator: false,
     },
+    bound(commands::CommandId::PasteImage, cmd(egui::Key::V)),
     bound(commands::CommandId::SelectAll, cmd(egui::Key::A)),
     bound(commands::CommandId::DeselectAll, cmd_shift(egui::Key::A)),
     bound(commands::CommandId::Group, cmd(egui::Key::G)),
@@ -259,16 +260,31 @@ pub(super) fn handle_command_shortcuts(
     clipboard: &mut clipboard_table::ClipboardTablePaste,
     ctx: &egui::Context,
 ) {
-    if ctx.egui_wants_keyboard_input() {
-        return;
+    if let Some(command) = shortcut_command(ctx) {
+        commands::execute(command, app, clipboard, ctx);
     }
-    let command = ctx.input(|i| {
+}
+
+fn shortcut_command(ctx: &egui::Context) -> Option<commands::CommandId> {
+    let system_paste = ctx.input(|input| {
+        input
+            .events
+            .iter()
+            .any(|event| matches!(event, egui::Event::Paste(_)))
+    });
+    if ctx.egui_wants_keyboard_input() {
+        return None;
+    }
+    ctx.input(|i| {
         // The platform Copy event has no chord of its own; route it like Cmd+C.
         if i.events
             .iter()
             .any(|event| matches!(event, egui::Event::Copy))
         {
             return Some(commands::CommandId::CopyFigure);
+        }
+        if system_paste {
+            return Some(commands::CommandId::PasteImage);
         }
         BINDINGS
             .iter()
@@ -279,10 +295,7 @@ pub(super) fn handle_command_shortcuts(
                     .any(|chord| chord_pressed(i, chord))
                     .then_some(binding.id)
             })
-    });
-    if let Some(command) = command {
-        commands::execute(command, app, clipboard, ctx);
-    }
+    })
 }
 
 pub(super) fn handle_escape_shortcut(app: &mut PlotxApp, ctx: &egui::Context) {
@@ -333,6 +346,18 @@ fn handle_escape(app: &mut PlotxApp, now: f64) {
     if app.session.ui.panel_label_selection.is_some() {
         app.session.ui.panel_label_selection = None;
         app.session.status = "Selection cleared.".to_owned();
+        return;
+    }
+
+    if app
+        .session
+        .ui
+        .hierarchical_selection
+        .lead()
+        .is_some_and(|path| path.panel.is_some() && path.content.is_some())
+    {
+        app.exit_panel_scope();
+        app.session.status = "Selected parent panel.".to_owned();
         return;
     }
 
@@ -441,6 +466,15 @@ pub(super) fn handle_focus_shortcut(app: &mut PlotxApp, ctx: &egui::Context) {
     if !ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
         return;
     }
+    if let Some(path) = app.session.ui.hierarchical_selection.lead()
+        && let Some(panel) = path.panel
+        && path.content.is_none()
+        && let Some(ci) = app.doc.canvas_index(path.canvas)
+    {
+        app.enter_panel(ci, panel);
+        app.session.status = "Entered panel.".to_owned();
+        return;
+    }
     let frame = match app.session.ui.frame_selection.as_slice() {
         [only] => plotx_core::state::board_frame_ref(app, *only),
         _ => app
@@ -453,6 +487,75 @@ pub(super) fn handle_focus_shortcut(app: &mut PlotxApp, ctx: &egui::Context) {
     };
     canvas::request_board_fit(app, ctx, frame);
     app.session.status = "Focused frame.".to_owned();
+}
+
+pub(super) fn handle_hierarchy_traversal(app: &mut PlotxApp, ctx: &egui::Context) {
+    if ctx.egui_wants_keyboard_input() {
+        return;
+    }
+    let (pressed, reverse) =
+        ctx.input(|input| (input.key_pressed(egui::Key::Tab), input.modifiers.shift));
+    if !pressed {
+        return;
+    }
+    let Some(ci) = app.session.active_canvas else {
+        return;
+    };
+    let canvas = &app.doc.canvases[ci];
+    let current = app.session.ui.hierarchical_selection.lead();
+    let mut paths = Vec::new();
+    if let Some(panel_id) = current.and_then(|path| {
+        (path.canvas == canvas.resource_id && path.content.is_some())
+            .then_some(path.panel)
+            .flatten()
+    }) {
+        if let Some(panel) = canvas.panel(panel_id) {
+            paths.extend(panel.item_order.iter().filter_map(|id| {
+                canvas.object(*id).filter(|item| item.visible).map(|_| {
+                    plotx_core::state::SelectionPath::content(
+                        canvas.resource_id,
+                        Some(panel_id),
+                        *id,
+                    )
+                })
+            }));
+        }
+    } else {
+        paths.extend(
+            canvas
+                .panels
+                .iter()
+                .filter(|panel| panel.visible)
+                .map(|panel| plotx_core::state::SelectionPath::panel(canvas.resource_id, panel.id)),
+        );
+        paths.extend(
+            canvas
+                .objects
+                .iter()
+                .filter(|item| item.visible && canvas.parent_panel(item.id).is_none())
+                .map(|item| {
+                    plotx_core::state::SelectionPath::content(canvas.resource_id, None, item.id)
+                }),
+        );
+    }
+    if paths.is_empty() {
+        return;
+    }
+    let at = current
+        .and_then(|path| paths.iter().position(|candidate| *candidate == path))
+        .unwrap_or(if reverse { 0 } else { paths.len() - 1 });
+    let next = if reverse {
+        (at + paths.len() - 1) % paths.len()
+    } else {
+        (at + 1) % paths.len()
+    };
+    let path = paths[next];
+    if let Some(content) = path.content {
+        app.select_content(ci, content);
+    } else if let Some(panel) = path.panel {
+        app.select_panel(ci, panel);
+    }
+    app.session.status = format!("Selected item {} of {}.", next + 1, paths.len());
 }
 
 pub(super) fn handle_delete_shortcut(app: &mut PlotxApp, ctx: &egui::Context) {
@@ -519,55 +622,6 @@ pub(super) fn handle_delete_shortcut(app: &mut PlotxApp, ctx: &egui::Context) {
     app.session.status = "Panel letter hidden.".to_owned();
 }
 
-pub(super) fn handle_file_drop(app: &mut PlotxApp, ctx: &egui::Context) {
-    let hovering = ctx.input(|i| !i.raw.hovered_files.is_empty());
-    if hovering {
-        let painter = ctx.layer_painter(egui::LayerId::new(
-            egui::Order::Foreground,
-            egui::Id::new("file_drop_overlay"),
-        ));
-        let rect = ctx.content_rect();
-        painter.rect_filled(rect, 0.0, Color32::from_black_alpha(160));
-        painter.text(
-            rect.center(),
-            egui::Align2::CENTER_CENTER,
-            "Drop a PlotX project, table, Origin project, data file, data folder, or archive",
-            egui::FontId::new(
-                crate::typography::TITLE_1_PT,
-                egui::FontFamily::Proportional,
-            ),
-            Color32::WHITE,
-        );
-    }
-
-    let dropped: Vec<_> = ctx.input(|i| {
-        i.raw
-            .dropped_files
-            .iter()
-            .filter_map(|f| f.path.clone())
-            .collect()
-    });
-    if let Some(project) = dropped.iter().find(|path| {
-        super::file_dialogs::recent_open_kind(path) == super::file_dialogs::RecentOpenKind::Project
-    }) {
-        let ignored = dropped.len().saturating_sub(1);
-        super::file_dialogs::open_recent_path(app, project);
-        if ignored > 0 {
-            app.session.status = format!(
-                "Opening {}. Ignored {ignored} other dropped item(s) because a project open replaces the current document.",
-                project.display()
-            );
-        }
-        return;
-    }
-    for path in dropped {
-        // Route by shape through the same dispatcher as the recent list and the
-        // welcome page, so a dropped CSV reaches the delimited importer instead
-        // of failing through the acquisition loader. Notes each open as recent.
-        super::file_dialogs::open_recent_path(app, &path);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -591,6 +645,10 @@ mod tests {
     fn labels_derive_from_the_binding_table() {
         let label = shortcut_label(commands::CommandId::SaveProject).unwrap();
         assert!(label.ends_with("+S"));
+        assert!(
+            shortcut_label(commands::CommandId::PasteImage)
+                .is_some_and(|label| label.ends_with("+V"))
+        );
         assert_eq!(
             shortcut_label(commands::CommandId::Tool(Tool::Select)).as_deref(),
             Some("V")
@@ -601,6 +659,56 @@ mod tests {
         );
         assert!(shortcut_label(commands::CommandId::Tool(Tool::Symmetry)).is_none());
         assert!(shortcut_label(commands::CommandId::About).is_none());
+    }
+
+    fn paste_key_event() -> egui::Event {
+        egui::Event::Key {
+            key: egui::Key::V,
+            physical_key: Some(egui::Key::V),
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::CTRL,
+        }
+    }
+
+    #[test]
+    fn restored_ctrl_v_and_platform_paste_events_route_to_paste_image() {
+        for event in [
+            paste_key_event(),
+            egui::Event::Paste("clipboard".to_owned()),
+        ] {
+            let ctx = egui::Context::default();
+            let input = egui::RawInput {
+                events: vec![event],
+                modifiers: egui::Modifiers::CTRL,
+                ..Default::default()
+            };
+            let mut command = None;
+            let _ = ctx.run_ui(input, |ui| command = shortcut_command(ui.ctx()));
+            assert_eq!(command, Some(commands::CommandId::PasteImage));
+        }
+    }
+
+    #[test]
+    fn focused_text_edit_keeps_ctrl_v_for_text_paste() {
+        let ctx = egui::Context::default();
+        let mut text = String::new();
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            ui.add(egui::TextEdit::singleline(&mut text))
+                .request_focus();
+        });
+        let input = egui::RawInput {
+            events: vec![egui::Event::Paste("text".to_owned())],
+            modifiers: egui::Modifiers::CTRL,
+            ..Default::default()
+        };
+        let mut command = None;
+        let _ = ctx.run_ui(input, |ui| {
+            command = shortcut_command(ui.ctx());
+            ui.add(egui::TextEdit::singleline(&mut text));
+        });
+        assert_eq!(command, None);
+        assert_eq!(text, "text");
     }
 
     #[test]
