@@ -600,7 +600,6 @@ pub fn view_to_canvas(
                     derived_axes,
                     figure,
                     viewport,
-                    PanelMeta::new(app.default_plot_title(di), frame.width),
                 )))
             }
             other => {

@@ -20,6 +20,43 @@ fn exports_wellformed_ish_svg_with_polyline() {
 }
 
 #[test]
+fn dense_line_series_keeps_distinct_projected_x_coordinates() {
+    let count = 100_000usize;
+    let denominator = (count - 1) as f64;
+    let points = (0..count)
+        .map(|index| {
+            let noise = if index % 2 == 0 { -0.00001 } else { 0.00001 };
+            [index as f64 / denominator, 0.5 + noise]
+        })
+        .collect();
+    let figure = Figure::new("", Axis::new("x", 0.0, 1.0), Axis::new("y", 0.0, 1.0))
+        .with_series(Series::line("", points));
+
+    let output = export(&figure);
+    let serialized = output
+        .split_once("<polyline points=\"")
+        .expect("line series polyline")
+        .1
+        .split_once('"')
+        .expect("points attribute")
+        .0;
+    let xs: Vec<f32> = serialized
+        .split_ascii_whitespace()
+        .map(|point| {
+            point
+                .split_once(',')
+                .expect("x,y pair")
+                .0
+                .parse()
+                .expect("finite x coordinate")
+        })
+        .collect();
+
+    assert_eq!(xs.len(), count);
+    assert!(xs.windows(2).all(|pair| pair[0] < pair[1]));
+}
+
+#[test]
 fn escapes_xml_special_chars() {
     let figure = Figure::new(
         "A & B <test>",

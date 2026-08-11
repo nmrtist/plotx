@@ -455,8 +455,9 @@ pub(super) fn execute_export(
             });
             continue;
         }
-        let written = match crate::export::export_canvases(
+        let written = match crate::export::export_canvases_with_assets(
             std::slice::from_ref(canvas),
+            &app.doc.assets,
             Some(0),
             &ExportSettings {
                 format,
@@ -464,6 +465,7 @@ pub(super) fn execute_export(
                 dpi: params.dpi,
                 target_width_mm: None,
                 trim_to_visible_content: false,
+                allow_missing_images: false,
             },
             &base,
         ) {

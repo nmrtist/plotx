@@ -1,6 +1,7 @@
 use super::*;
 use crate::DocumentText;
 use plotx_figure::{Axis, ErrorBar, Figure, Series};
+use std::sync::Arc;
 
 fn demo_document(fig: &Figure) -> Document<'_> {
     Document {
@@ -57,6 +58,43 @@ fn round_trips_through_set_enh_meta_file_bits() {
         assert!(!hemf.is_null());
         DeleteEnhMetaFile(hemf);
     }
+}
+
+#[test]
+fn embedded_raster_records_alpha_blend_in_document_order() {
+    let document = Document {
+        width: 40.0,
+        height: 30.0,
+        background: Color::rgb(255, 255, 255),
+        items: vec![DocumentItem::Raster(crate::DocumentRaster {
+            source_hash: [3; 32],
+            frame: Rect::new(2.0, 3.0, 20.0, 10.0),
+            pixels: Arc::from([255, 0, 0, 128, 0, 0, 255, 255]),
+            pixel_size: [2, 1],
+            source_pixel_size: [2, 1],
+            crop: [0.0, 0.0, 1.0, 1.0],
+            fit: crate::RasterFit::Stretch,
+            quarter_turns: 0,
+            opacity: 0.5,
+            nearest: false,
+            clip: None,
+            visible: true,
+        })],
+    };
+    let bytes = export_document_emf(&document).expect("image EMF export");
+    let mut offset = 0usize;
+    let mut records = Vec::new();
+    while offset + 8 <= bytes.len() {
+        let kind = u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
+        let size = u32::from_le_bytes(bytes[offset + 4..offset + 8].try_into().unwrap()) as usize;
+        assert!(size >= 8 && offset + size <= bytes.len());
+        records.push(kind);
+        offset += size;
+    }
+    assert!(
+        records.contains(&114),
+        "EMR_ALPHABLEND must carry image pixels"
+    );
 }
 
 #[test]

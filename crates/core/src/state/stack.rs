@@ -579,7 +579,6 @@ impl PlotxApp {
         let frame = ObjectFrame::new(0.0, 0.0, page[0], page[1]);
         let figure = self.build_binding_figure(&binding, &chart, &stack, canvas.size_mm);
         let viewport = CanvasViewport::from_figure(&figure);
-        let panel = PanelMeta::new(self.default_plot_title(primary), frame.width);
         let mut plot = PlotObject::new(
             None,
             SeriesId::new(0),
@@ -590,7 +589,6 @@ impl PlotxApp {
             AxisOverrides::default(),
             figure,
             viewport,
-            panel,
         );
         // One place decides how a freshly materialized binding is numbered, so
         // the ids and the allocator cannot drift apart.

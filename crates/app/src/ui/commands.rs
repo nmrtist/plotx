@@ -419,15 +419,8 @@ pub fn describe(app: &PlotxApp, id: CommandId) -> CommandDescriptor {
         ),
         CommandId::Export(_) => requires(has_canvas, "Open a canvas before exporting a figure."),
         CommandId::CopyFigure => requires(
-            super::clipboard_figure::resolve_copy_target(app).is_some_and(|canvas| {
-                !app.doc.canvases[canvas].objects.iter().any(|item| {
-                    matches!(
-                        item.kind,
-                        plotx_core::state::CanvasObjectKind::RasterImage(_)
-                    )
-                })
-            }),
-            "Open a figure without external images; Copy Figure cannot include them yet.",
+            super::clipboard_figure::resolve_copy_target(app).is_some(),
+            "Open a canvas before copying a figure.",
         ),
         CommandId::Undo => requires(app.can_undo(), "Nothing to undo yet."),
         CommandId::Redo => requires(app.can_redo(), "Nothing to redo yet."),

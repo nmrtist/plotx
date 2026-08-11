@@ -1,5 +1,7 @@
-use crate::state::{CanvasDocument, render_document_svg};
+use super::{ExportError, MissingImagePolicy, prepare_render_document};
+use crate::state::{AssetId, AssetRecord, CanvasDocument, render_document_svg};
 use resvg::tiny_skia::{Pixmap, Transform};
+use std::collections::BTreeMap;
 use thiserror::Error;
 
 /// Conservative defaults keep one RGBA result below 256 MiB and prevent
@@ -192,6 +194,17 @@ pub fn rasterize_canvas(
 ) -> Result<RasterImage, RasterError> {
     let svg = render_document_svg(canvas);
     rasterize_svg(&svg, canvas.size_pt(), options)
+}
+
+pub fn rasterize_canvas_with_assets(
+    canvas: &CanvasDocument,
+    assets: &BTreeMap<AssetId, AssetRecord>,
+    options: RasterOptions,
+    missing_policy: MissingImagePolicy,
+) -> Result<RasterImage, ExportError> {
+    let document = prepare_render_document(canvas, assets, missing_policy)?;
+    let svg = plotx_render::svg::export_document(&document);
+    Ok(rasterize_svg(&svg, canvas.size_pt(), options)?)
 }
 
 /// Render a physically sized SVG into a straight-alpha RGBA8 image.

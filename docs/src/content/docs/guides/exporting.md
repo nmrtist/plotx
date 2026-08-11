@@ -16,9 +16,20 @@ pages, or a page range.
 
 Presets cover common journal figure sizes — for example
 *Single column · 89 mm · 600 dpi · TIFF* — and an export precheck flags
-font-size and line-width violations against the chosen preset before you
-export, so problems are fixed on the board rather than discovered by the
-journal.
+font-size and line-width violations against the chosen preset. For pages with
+images, it also reports the lowest effective PPI at the exported size, missing
+or damaged resources, and sources with ICC profiles or samples above 8 bits.
+Image resolution passes at 300 PPI, warns from 150 to 299 PPI, and fails below
+150 PPI. Raster output is 8-bit RGB/RGBA and does not embed the source ICC
+profile, so colour-critical work should be verified in its publication
+workflow.
+
+Every figure format includes embedded images and applies their crop, rotation,
+opacity, fit, interpolation, Panel clipping, and z-order. SVG embeds image
+pixels rather than linking to a local path; PDF and bitmap output matches the
+same page. If a source is missing or damaged, export stops by default. Enable
+**Export with missing-image placeholders** only when a labelled review copy is
+preferable to no output.
 
 ### Trim page whitespace
 
@@ -37,11 +48,9 @@ Empty pages keep their original dimensions.
 
 *Copy figure* (`Ctrl` + `C`, also in the export menu, the command palette,
 and a frame's right-click menu) copies the selected frame — or the active
-canvas — straight to the clipboard, no export needed. On Windows the figure
-is published as a bitmap (PNG + DIB) and as a vector (SVG + EMF) at the same
-time, and the app you paste into picks its best format automatically: chat
-apps paste the bitmap, while Word, PowerPoint, and WPS paste an editable
-vector.
+canvas — straight to the clipboard, no export needed. Images are included. On
+Windows the figure is published as PNG, DIB, SVG, and EMF at the same time, and
+the receiving app chooses a format it supports.
 
 ## Export numerical data
 

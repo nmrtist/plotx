@@ -9,6 +9,8 @@ use std::fmt::Write as _;
 
 mod color_scale;
 mod document;
+#[cfg(all(windows, feature = "emf"))]
+pub(crate) use document::prepared_raster;
 mod legend;
 mod sticks;
 pub use document::{export_document, export_document_for_bounds, export_document_page};
@@ -447,7 +449,7 @@ fn write_figure(
                 let mut pts = String::new();
                 for p in &series.points {
                     let (px, py) = proj.project(*p);
-                    let _ = write!(pts, "{px:.2},{py:.2} ");
+                    let _ = write!(pts, "{px},{py} ");
                 }
                 let _ = write!(
                     s,

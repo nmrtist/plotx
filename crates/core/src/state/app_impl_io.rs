@@ -36,6 +36,7 @@ impl PlotxApp {
                         Some((dataset.name.clone(), warning))
                     })
                     .collect::<Vec<_>>();
+                let asset_warnings = std::mem::take(&mut self.session.project_load_warnings);
                 let mut report = OperationReport::success(
                     operation_id,
                     OperationKind::ProjectLoad,
@@ -63,7 +64,21 @@ impl PlotxApp {
                         .with_context("dataset", name.clone().unwrap_or_default()),
                     );
                 }
-                if let Some((_, first)) = restore_warnings.first() {
+                for warning in &asset_warnings {
+                    report = report.with_diagnostic(
+                        Diagnostic::new(
+                            Severity::Warning,
+                            DiagnosticCode::ProjectLoadWarning,
+                            warning.clone(),
+                        )
+                        .with_source("core.project.assets")
+                        .with_context("path", path.display().to_string()),
+                    );
+                }
+                if let Some(first) = asset_warnings
+                    .first()
+                    .or_else(|| restore_warnings.first().map(|(_, warning)| warning))
+                {
                     self.session.status = first.clone();
                 }
                 self.session.record_operation(report);
@@ -372,27 +387,6 @@ impl PlotxApp {
             self.record_export_unavailable(format);
             return;
         }
-        if self.doc.canvases[ci]
-            .objects
-            .iter()
-            .any(|item| matches!(item.kind, crate::state::CanvasObjectKind::RasterImage(_)))
-        {
-            let operation_id = self.session.begin_operation();
-            self.session.record_operation(OperationReport::<()>::failure(
-                operation_id,
-                OperationKind::Export,
-                "Export stopped because this figure contains external images.",
-                Diagnostic::new(
-                    Severity::Error,
-                    DiagnosticCode::ExportUnavailable,
-                    "This export path does not yet support external images in the figure. Remove the images or keep the project as a .plotx file until image export is available.",
-                )
-                .with_source("core.export.precheck")
-                .with_context("format", format.label())
-                .with_context("reason", "external_images_unsupported"),
-            ));
-            return;
-        }
         let mut state = ExportDialogState::from_defaults(format, &self.settings.export);
         let canvas = &self.doc.canvases[ci];
         if let Some(preset) = crate::export::ExportPreset::matching_canvas(
@@ -412,37 +406,9 @@ impl PlotxApp {
                 .record_operation(export_unavailable_report(operation_id, settings.format));
             return;
         }
-        let export_pages = crate::export::resolve_page_scope(
-            settings.scope,
-            self.session.active_canvas,
-            self.doc.canvases.len(),
-        );
-        if export_pages.as_ref().is_ok_and(|pages| {
-            pages.iter().any(|&page| {
-                self.doc.canvases[page]
-                    .objects
-                    .iter()
-                    .any(|item| matches!(item.kind, crate::state::CanvasObjectKind::RasterImage(_)))
-            })
-        }) {
-            self.session
-                .record_operation(OperationReport::<()>::failure(
-                    operation_id,
-                    OperationKind::Export,
-                    "Export stopped because the selected pages contain external images.",
-                    Diagnostic::new(
-                        Severity::Error,
-                        DiagnosticCode::ExportUnavailable,
-                        "This export path does not yet support external images in the figure.",
-                    )
-                    .with_source("core.export.precheck")
-                    .with_context("format", settings.format.label())
-                    .with_context("reason", "external_images_unsupported"),
-                ));
-            return;
-        }
-        match crate::export::export_canvases(
+        match crate::export::export_canvases_with_assets(
             &self.doc.canvases,
+            &self.doc.assets,
             self.session.active_canvas,
             &settings,
             path,
@@ -550,7 +516,9 @@ fn export_error_code(error: &crate::export::ExportError) -> DiagnosticCode {
     match error {
         crate::export::ExportError::EmptyDocument
         | crate::export::ExportError::MissingCurrentPage => DiagnosticCode::ExportUnavailable,
-        crate::export::ExportError::InvalidRange { .. }
+        crate::export::ExportError::MissingImageAsset { .. }
+        | crate::export::ExportError::CorruptImageAsset { .. }
+        | crate::export::ExportError::InvalidRange { .. }
         | crate::export::ExportError::SvgParse(_)
         | crate::export::ExportError::Pdf(_)
         | crate::export::ExportError::Image(_)
@@ -563,6 +531,8 @@ fn export_error_kind(error: &crate::export::ExportError) -> &'static str {
     match error {
         crate::export::ExportError::EmptyDocument => "empty_document",
         crate::export::ExportError::MissingCurrentPage => "missing_current_page",
+        crate::export::ExportError::MissingImageAsset { .. } => "missing_image_asset",
+        crate::export::ExportError::CorruptImageAsset { .. } => "corrupt_image_asset",
         crate::export::ExportError::InvalidRange { .. } => "invalid_page_range",
         crate::export::ExportError::SvgParse(_) => "svg_parse",
         crate::export::ExportError::Pdf(_) => "pdf_conversion",
@@ -628,6 +598,7 @@ mod export_operation_tests {
                 dpi: crate::export::DEFAULT_BITMAP_DPI,
                 target_width_mm: None,
                 trim_to_visible_content: false,
+                allow_missing_images: false,
             },
             std::path::Path::new("unused.svg"),
         );
@@ -651,7 +622,7 @@ mod export_operation_tests {
     }
 
     #[test]
-    fn raster_precheck_only_scans_pages_in_the_requested_scope() {
+    fn image_pages_open_export_options_for_precheck_and_placeholder_choice() {
         let mut app = PlotxApp::new_with_settings(crate::settings::Settings::default());
         app.doc.canvases.push(CanvasDocument::new(
             "clean".to_owned(),
@@ -677,7 +648,7 @@ mod export_operation_tests {
         app.session.ui.export_options = None;
         app.session.active_canvas = Some(1);
         app.request_export(ExportFormat::Svg);
-        assert!(app.session.ui.export_options.is_none());
+        assert!(app.session.ui.export_options.is_some());
     }
 }
 

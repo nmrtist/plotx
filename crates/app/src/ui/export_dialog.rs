@@ -1,6 +1,7 @@
 use super::*;
 use plotx_core::export::{
-    ComplianceStatus, ExportPreset, PrecheckReport, page_metrics, precheck_report,
+    ComplianceStatus, ExportPreset, PrecheckReport, image_precheck_items, page_metrics,
+    precheck_report,
 };
 use plotx_core::settings::{MAX_EXPORT_DPI, MIN_EXPORT_DPI};
 
@@ -99,11 +100,30 @@ pub(super) fn export_options_window(app: &mut PlotxApp, ctx: &egui::Context) {
              Empty pages keep their original size.",
         );
 
+        let has_images = selected_pages_have_images(
+            &app.doc.canvases,
+            pending.scope,
+            active_page,
+            page_count,
+        );
+        if has_images {
+            ui.add_space(8.0);
+            ui.checkbox(
+                &mut pending.allow_missing_images,
+                "Export with missing-image placeholders",
+            )
+            .on_hover_text(
+                "If an embedded image cannot be read, export a labelled placeholder instead of stopping.",
+            );
+        } else {
+            pending.allow_missing_images = false;
+        }
+
         let preset = pending.preset;
         let scope = pending.scope;
         let dpi = pending.dpi;
-        if let Some(preset) = preset {
-            let report = build_report(app, preset, scope, dpi, active_page, page_count);
+        let report = build_report(app, preset, scope, dpi, active_page, page_count);
+        if !report.items.is_empty() {
             ui.add_space(10.0);
             ui.separator();
             draw_precheck(ui, &report);
@@ -138,6 +158,25 @@ pub(super) fn export_options_window(app: &mut PlotxApp, ctx: &egui::Context) {
     }
 }
 
+fn selected_pages_have_images(
+    canvases: &[plotx_core::state::CanvasDocument],
+    scope: ExportPageScope,
+    active_page: usize,
+    page_count: usize,
+) -> bool {
+    plotx_core::export::resolve_page_scope(scope, Some(active_page), page_count)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|page| canvases.get(page))
+        .flat_map(|canvas| &canvas.objects)
+        .any(|item| {
+            matches!(
+                &item.kind,
+                plotx_core::state::CanvasObjectKind::RasterImage(_)
+            )
+        })
+}
+
 fn set_confirmed_trim_default(app: &mut PlotxApp, trim_to_visible_content: bool) {
     let target = app.app_target();
     match app.plan_property_write(
@@ -156,7 +195,7 @@ fn set_confirmed_trim_default(app: &mut PlotxApp, trim_to_visible_content: bool)
 
 fn build_report(
     app: &PlotxApp,
-    preset: ExportPreset,
+    preset: Option<ExportPreset>,
     scope: ExportPageScope,
     dpi: u16,
     active_page: usize,
@@ -164,18 +203,32 @@ fn build_report(
 ) -> PrecheckReport {
     let pages = plotx_core::export::resolve_page_scope(scope, Some(active_page), page_count)
         .unwrap_or_else(|_| vec![active_page]);
-    let metrics: Vec<_> = pages
+    let mut report = if let Some(preset) = preset {
+        let metrics: Vec<_> = pages
+            .iter()
+            .filter_map(|&page| app.doc.canvases.get(page))
+            .map(page_metrics)
+            .collect();
+        precheck_report(
+            &metrics,
+            preset.target_width_mm(),
+            &preset.thresholds(),
+            preset.format(),
+            dpi,
+        )
+    } else {
+        PrecheckReport { items: Vec::new() }
+    };
+    let canvases: Vec<_> = pages
         .iter()
         .filter_map(|&page| app.doc.canvases.get(page))
-        .map(page_metrics)
         .collect();
-    precheck_report(
-        &metrics,
-        preset.target_width_mm(),
-        &preset.thresholds(),
-        preset.format(),
-        dpi,
-    )
+    report.items.extend(image_precheck_items(
+        &canvases,
+        &app.doc.assets,
+        preset.and_then(ExportPreset::target_width_mm),
+    ));
+    report
 }
 
 fn draw_precheck(ui: &mut Ui, report: &PrecheckReport) {
@@ -204,6 +257,49 @@ fn status_dot(ui: &mut Ui, status: ComplianceStatus) {
     };
     let (rect, _) = ui.allocate_exact_size(Vec2::splat(10.0), Sense::hover());
     ui.painter().circle_filled(rect.center(), 4.0, color);
+}
+
+#[cfg(test)]
+mod image_tests {
+    use super::*;
+    use plotx_core::state::{
+        AssetId, CanvasObject, CanvasObjectKind, ObjectFrame, ObjectId, RasterImageContent,
+    };
+
+    #[test]
+    fn placeholder_option_is_available_for_every_scope_containing_an_image() {
+        let plain = plotx_core::state::CanvasDocument::new("plain".to_owned(), [100.0, 80.0]);
+        let mut image_page =
+            plotx_core::state::CanvasDocument::new("image".to_owned(), [100.0, 80.0]);
+        image_page.objects.push(CanvasObject {
+            id: ObjectId::new(1),
+            name: "image".to_owned(),
+            frame: ObjectFrame::new(0.0, 0.0, 20.0, 20.0),
+            locked: false,
+            visible: true,
+            kind: CanvasObjectKind::RasterImage(RasterImageContent::new(AssetId::new())),
+        });
+        let pages = [plain, image_page];
+
+        assert!(!selected_pages_have_images(
+            &pages,
+            ExportPageScope::Current,
+            0,
+            pages.len(),
+        ));
+        assert!(selected_pages_have_images(
+            &pages,
+            ExportPageScope::Current,
+            1,
+            pages.len(),
+        ));
+        assert!(selected_pages_have_images(
+            &pages,
+            ExportPageScope::All,
+            0,
+            pages.len(),
+        ));
+    }
 }
 
 #[cfg(test)]

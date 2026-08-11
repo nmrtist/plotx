@@ -1,7 +1,8 @@
 use super::ExportError;
 use super::raster::{RasterError, RasterImage};
-use crate::state::{CanvasDocument, render_document_svg_for_bounds, render_document_svg_page};
+use crate::state::{AssetId, AssetRecord, CanvasDocument};
 use plotx_render::Rect;
+use std::collections::BTreeMap;
 
 const TRIM_SAFETY_EDGE_PT: f32 = 1.0;
 
@@ -140,17 +141,20 @@ pub(crate) fn raster_trim_padding(dpi: u16) -> u32 {
     u32::from(dpi).div_ceil(72).max(1)
 }
 
-pub(crate) fn trim_document_svg(
+pub(crate) fn trim_document_svg_with_assets(
     canvas: &CanvasDocument,
+    assets: &BTreeMap<AssetId, AssetRecord>,
     target_width_mm: Option<f32>,
+    missing_policy: super::MissingImagePolicy,
 ) -> Result<String, ExportError> {
     let [page_width, page_height] = canvas.size_pt();
     let scale = target_width_mm
         .map(|target| target / canvas.size_mm[0].max(f32::MIN_POSITIVE))
         .unwrap_or(1.0);
-    let bounds_svg = render_document_svg_for_bounds(canvas);
+    let document = super::prepare_render_document(canvas, assets, missing_policy)?;
+    let bounds_svg = plotx_render::svg::export_document_for_bounds(&document);
     let Some(bounds) = svg_content_bounds(&bounds_svg, [page_width, page_height])? else {
-        return Ok(super::document_svg(canvas, target_width_mm));
+        return super::document_svg_with_assets(canvas, assets, target_width_mm, missing_policy);
     };
     let left = bounds.left;
     let top = bounds.top;
@@ -166,11 +170,24 @@ pub(crate) fn trim_document_svg(
         (right + padding).min(page_width) - (left - padding).max(0.0),
         (bottom + padding).min(page_height) - (top - padding).max(0.0),
     );
-    Ok(render_document_svg_page(
-        canvas,
+    Ok(plotx_render::svg::export_document_page(
+        &document,
         view,
         [view.width * scale, view.height * scale],
     ))
+}
+
+#[cfg(test)]
+pub(crate) fn trim_document_svg(
+    canvas: &CanvasDocument,
+    target_width_mm: Option<f32>,
+) -> Result<String, ExportError> {
+    trim_document_svg_with_assets(
+        canvas,
+        &BTreeMap::new(),
+        target_width_mm,
+        super::MissingImagePolicy::Block,
+    )
 }
 
 fn svg_content_bounds(svg: &str, page: [f32; 2]) -> Result<Option<Rect>, ExportError> {

@@ -3,6 +3,16 @@ use crate::state::{
     AssetId, AssetRecord, ContentItem, ContentKind, ObjectFrame, RasterImageContent,
 };
 use sha2::{Digest, Sha256};
+use std::io::{Read, Write};
+
+fn png_bytes() -> Vec<u8> {
+    let image = image::RgbaImage::from_pixel(2, 2, image::Rgba([12, 34, 56, 255]));
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(image)
+        .write_to(&mut bytes, image::ImageFormat::Png)
+        .unwrap();
+    bytes.into_inner()
+}
 
 #[test]
 fn final_v1_panel_and_shared_asset_round_trip_deterministically() {
@@ -15,7 +25,7 @@ fn final_v1_panel_and_shared_asset_round_trip_deterministically() {
     page.panel_mut(panel).unwrap().item_order.push(plot);
     page.next_panel_label_slot = 9;
 
-    let bytes = b"not-decoded-in-foundation-stage".to_vec();
+    let bytes = png_bytes();
     let asset = AssetId::new();
     app.doc.assets.insert(
         asset,
@@ -23,7 +33,7 @@ fn final_v1_panel_and_shared_asset_round_trip_deterministically() {
             id: asset,
             sha256: Sha256::digest(&bytes).into(),
             format: "png".to_owned(),
-            pixel_size: [12, 8],
+            pixel_size: [2, 2],
             bytes: bytes.clone(),
         },
     );
@@ -65,9 +75,138 @@ fn final_v1_panel_and_shared_asset_round_trip_deterministically() {
 }
 
 #[test]
+fn missing_embedded_image_degrades_without_discarding_the_v1_content_item() {
+    let mut app = super::tests::sample_app();
+    let bytes = png_bytes();
+    let asset = AssetId::new();
+    app.doc.assets.insert(
+        asset,
+        AssetRecord {
+            id: asset,
+            sha256: Sha256::digest(&bytes).into(),
+            format: "png".to_owned(),
+            pixel_size: [2, 2],
+            bytes,
+        },
+    );
+    let image = app.doc.canvases[0].allocate_object_id();
+    app.doc.canvases[0].objects.push(ContentItem {
+        id: image,
+        name: "missing after archive damage".to_owned(),
+        frame: ObjectFrame::new(4.0, 5.0, 20.0, 10.0),
+        locked: false,
+        visible: true,
+        kind: ContentKind::RasterImage(RasterImageContent::new(asset)),
+    });
+
+    let valid = super::tests::temp_project("asset-degradation-source");
+    let damaged = super::tests::temp_project("asset-degradation-missing");
+    let _ = std::fs::remove_file(&valid);
+    let _ = std::fs::remove_file(&damaged);
+    save_project(&app, &valid, false).unwrap();
+
+    let mut source = zip::ZipArchive::new(std::fs::File::open(&valid).unwrap()).unwrap();
+    let output = std::fs::File::create(&damaged).unwrap();
+    let mut target = zip::ZipWriter::new(output);
+    for index in 0..source.len() {
+        let mut entry = source.by_index(index).unwrap();
+        if entry.name().starts_with("assets/") {
+            continue;
+        }
+        let mut contents = Vec::new();
+        entry.read_to_end(&mut contents).unwrap();
+        target
+            .start_file(entry.name(), zip::write::SimpleFileOptions::default())
+            .unwrap();
+        target.write_all(&contents).unwrap();
+    }
+    target.finish().unwrap();
+
+    let loaded = load_project(&damaged).expect("missing images must not block project open");
+    assert!(!loaded.session.project_load_warnings.is_empty());
+    assert!(!loaded.doc.assets.contains_key(&asset));
+    assert!(matches!(
+        &loaded.doc.canvases[0].object(image).unwrap().kind,
+        ContentKind::RasterImage(content) if content.asset == asset
+    ));
+    let resave = super::tests::temp_project("asset-degradation-resave");
+    let error = save_project(&loaded, &resave, false).unwrap_err();
+    assert!(error.to_string().contains("missing referenced asset"));
+    assert!(!resave.exists());
+
+    std::fs::remove_file(valid).unwrap();
+    std::fs::remove_file(damaged).unwrap();
+}
+
+#[test]
+fn image_reference_absent_from_manifest_produces_a_load_warning() {
+    let mut app = super::tests::sample_app();
+    let bytes = png_bytes();
+    let asset = AssetId::new();
+    app.doc.assets.insert(
+        asset,
+        AssetRecord {
+            id: asset,
+            sha256: Sha256::digest(&bytes).into(),
+            format: "png".to_owned(),
+            pixel_size: [2, 2],
+            bytes,
+        },
+    );
+    let image = app.doc.canvases[0].allocate_object_id();
+    app.doc.canvases[0].objects.push(ContentItem {
+        id: image,
+        name: "undeclared image".to_owned(),
+        frame: ObjectFrame::new(4.0, 5.0, 20.0, 10.0),
+        locked: false,
+        visible: true,
+        kind: ContentKind::RasterImage(RasterImageContent::new(asset)),
+    });
+
+    let valid = super::tests::temp_project("undeclared-asset-source");
+    let damaged = super::tests::temp_project("undeclared-asset-manifest");
+    let _ = std::fs::remove_file(&valid);
+    let _ = std::fs::remove_file(&damaged);
+    save_project(&app, &valid, false).unwrap();
+
+    let mut source = zip::ZipArchive::new(std::fs::File::open(&valid).unwrap()).unwrap();
+    let output = std::fs::File::create(&damaged).unwrap();
+    let mut target = zip::ZipWriter::new(output);
+    for index in 0..source.len() {
+        let mut entry = source.by_index(index).unwrap();
+        let mut contents = Vec::new();
+        entry.read_to_end(&mut contents).unwrap();
+        if entry.name() == "manifest.json" {
+            let mut manifest: serde_json::Value = serde_json::from_slice(&contents).unwrap();
+            manifest["assets"] = serde_json::json!([]);
+            contents = serde_json::to_vec(&manifest).unwrap();
+        }
+        target
+            .start_file(entry.name(), zip::write::SimpleFileOptions::default())
+            .unwrap();
+        target.write_all(&contents).unwrap();
+    }
+    target.finish().unwrap();
+
+    let loaded = load_project(&damaged).expect("undeclared image must not block project open");
+    assert!(loaded.session.project_load_warnings.iter().any(|warning| {
+        warning.contains(&asset.to_string())
+            && warning.contains("not listed in the project manifest")
+    }));
+    assert!(!loaded.doc.assets.contains_key(&asset));
+    assert!(matches!(
+        &loaded.doc.canvases[0].object(image).unwrap().kind,
+        ContentKind::RasterImage(content) if content.asset == asset
+    ));
+
+    std::fs::remove_file(valid).unwrap();
+    std::fs::remove_file(damaged).unwrap();
+}
+
+#[test]
 fn distinct_asset_ids_can_share_one_content_addressed_blob() {
     let mut app = super::tests::sample_app();
-    let bytes = b"identical-image-bytes".to_vec();
+    let bytes = png_bytes();
     let digest: [u8; 32] = Sha256::digest(&bytes).into();
     let first = AssetId::new();
     let second = AssetId::new();
@@ -78,7 +217,7 @@ fn distinct_asset_ids_can_share_one_content_addressed_blob() {
                 id,
                 sha256: digest,
                 format: "png".to_owned(),
-                pixel_size: [4, 3],
+                pixel_size: [2, 2],
                 bytes: bytes.clone(),
             },
         );

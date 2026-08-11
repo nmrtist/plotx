@@ -2,9 +2,8 @@ use crate::layout::PageLayout;
 use crate::state::{
     AnalysisSelection, AssetId, AssetRecord, AxisRange, CanvasDocument, CanvasObject,
     CanvasObjectKind, CanvasViewport, DataBinding, Dataset, DatasetLineage, DerivationKind,
-    Document, Nmr2DDataset, NmrDataset, ObjectFrame, ObjectId, PanelMeta, PlotObject, PlotxApp,
-    PrimaryView, SeriesBinding, ShapeKind, ShapeObject, StackMode, StackSpec, TextAlign, TextBox,
-    Tool,
+    Document, Nmr2DDataset, NmrDataset, ObjectFrame, ObjectId, PlotObject, PlotxApp, PrimaryView,
+    SeriesBinding, ShapeKind, ShapeObject, StackMode, StackSpec, TextAlign, TextBox, Tool,
 };
 use num_complex::Complex64;
 use plotx_figure::Color;
@@ -260,7 +259,7 @@ fn save_project_impl(
     recovery: Option<RecoveryMetadata>,
     backup_count: usize,
 ) -> Result<Option<String>> {
-    validate_resource_ids(doc)?;
+    validate_resource_ids(doc, true)?;
     let tmp_path = temporary_path(path);
     let file = File::create(&tmp_path)?;
     let mut zip = zip::ZipWriter::new(file);
@@ -468,7 +467,7 @@ pub fn load_project(path: &Path) -> Result<PlotxApp> {
     app.doc.datasets.clear();
     app.doc.canvases.clear();
     app.doc.assets.clear();
-    asset_codec::load_assets(&mut zip, &manifest, &mut app)?;
+    app.session.project_load_warnings = asset_codec::load_assets(&mut zip, &manifest, &mut app)?;
     app.doc.project_path = Some(path.to_owned());
     // Restore before the canvases below are built: figures stamp the document
     // typography at build time.
@@ -534,20 +533,12 @@ pub fn load_project(path: &Path) -> Result<PlotxApp> {
         .map(|entry| read_json(&mut zip, &entry.path))
         .collect::<Result<Vec<crate::automation::RunManifest>>>()?;
     app.doc.automation_revision = workspace.automation_revision;
-    validate_resource_ids(&app.doc)?;
-    for canvas in &app.doc.canvases {
-        for item in &canvas.objects {
-            if let CanvasObjectKind::RasterImage(image) = &item.kind
-                && !app.doc.assets.contains_key(&image.asset)
-            {
-                return Err(ProjectError::Invalid(format!(
-                    "content {} references missing asset {}",
-                    item.id, image.asset
-                )));
-            }
-        }
-    }
-
+    asset_codec::append_undeclared_image_warnings(
+        &app.doc,
+        &manifest,
+        &mut app.session.project_load_warnings,
+    );
+    validate_resource_ids(&app.doc, false)?;
     let active_dataset = workspace
         .active_data
         .as_ref()
@@ -588,7 +579,7 @@ pub fn load_project(path: &Path) -> Result<PlotxApp> {
     Ok(app)
 }
 
-fn validate_resource_ids(doc: &crate::state::Document) -> Result<()> {
+fn validate_resource_ids(doc: &crate::state::Document, require_image_assets: bool) -> Result<()> {
     let mut ids = std::collections::HashSet::new();
     for (kind, id) in doc
         .datasets
@@ -621,9 +612,15 @@ fn validate_resource_ids(doc: &crate::state::Document) -> Result<()> {
             let crate::state::CanvasObjectKind::RasterImage(image) = &item.kind else {
                 continue;
             };
-            let asset = doc.assets.get(&image.asset).ok_or_else(|| {
-                ProjectError::Invalid(format!("missing referenced asset {}", image.asset))
-            })?;
+            let Some(asset) = doc.assets.get(&image.asset) else {
+                if require_image_assets {
+                    return Err(ProjectError::Invalid(format!(
+                        "missing referenced asset {}",
+                        image.asset
+                    )));
+                }
+                continue;
+            };
             if image.page_index > 0 && asset.format != "tiff" {
                 return Err(ProjectError::Invalid(format!(
                     "image {} references page {} of non-TIFF asset {}",

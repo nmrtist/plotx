@@ -603,9 +603,7 @@ fn resize_cursor(handle: ResizeHandle) -> egui::CursorIcon {
 mod tests {
     use super::*;
 
-    use plotx_core::state::{
-        CanvasObject, CanvasObjectKind, CanvasViewport, PanelMeta, PlotObject, TextBox,
-    };
+    use plotx_core::state::{CanvasObject, CanvasObjectKind, CanvasViewport, PlotObject, TextBox};
     use plotx_figure::{Axis, Figure};
 
     #[test]
@@ -648,7 +646,6 @@ mod tests {
                     plotx_core::state::AxisOverrides::default(),
                     figure,
                     viewport,
-                    PanelMeta::new("title".to_owned(), 50.0),
                 )
             })),
         });
@@ -682,7 +679,6 @@ mod tests {
                     plotx_core::state::AxisOverrides::default(),
                     figure,
                     viewport,
-                    PanelMeta::new("title".to_owned(), 50.0),
                 )
             })),
         });

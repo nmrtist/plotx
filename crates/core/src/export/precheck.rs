@@ -1,6 +1,7 @@
 use super::ExportFormat;
-use crate::state::{CanvasDocument, CanvasObjectKind};
+use crate::state::{AssetId, AssetRecord, CanvasDocument, CanvasObjectKind, ImageFit, QuarterTurn};
 use plotx_figure::AxisFrame;
+use std::collections::BTreeMap;
 
 /// The minimum rendered sizes a figure must meet for a target. Values are in
 /// points, measured at the exported physical size (after any column downscale).
@@ -149,6 +150,138 @@ pub fn precheck_report(
     PrecheckReport { items }
 }
 
+pub fn image_precheck_items(
+    canvases: &[&CanvasDocument],
+    assets: &BTreeMap<AssetId, AssetRecord>,
+    target_width_mm: Option<f32>,
+) -> Vec<ComplianceItem> {
+    let mut minimum_ppi: Option<f32> = None;
+    let mut missing = 0usize;
+    let mut converted = 0usize;
+    let mut images = 0usize;
+    for canvas in canvases {
+        let output_scale = target_width_mm
+            .map(|target| target / canvas.size_mm[0].max(f32::MIN_POSITIVE))
+            .unwrap_or(1.0);
+        for item in &canvas.objects {
+            let CanvasObjectKind::RasterImage(image) = &item.kind else {
+                continue;
+            };
+            if !item.visible
+                || canvas
+                    .parent_panel(item.id)
+                    .and_then(|panel| canvas.panel(panel))
+                    .is_some_and(|panel| !panel.visible)
+            {
+                continue;
+            }
+            images += 1;
+            let Some(asset) = assets.get(&image.asset) else {
+                missing += 1;
+                continue;
+            };
+            let Ok(probe) = plotx_io::image::probe(&asset.bytes) else {
+                missing += 1;
+                continue;
+            };
+            if probe.high_precision || probe.has_icc {
+                converted += 1;
+            }
+            let source = if image.page_index == 0 {
+                asset.pixel_size
+            } else {
+                plotx_io::image::tiff_page_dimensions(&asset.bytes, image.page_index)
+                    .unwrap_or(asset.pixel_size)
+            };
+            let Some(frame) = canvas.content_page_frame(item.id) else {
+                continue;
+            };
+            let ppi = effective_ppi(source, image, frame, output_scale);
+            if ppi.is_finite() {
+                minimum_ppi = Some(minimum_ppi.map_or(ppi, |current| current.min(ppi)));
+            }
+        }
+    }
+    if images == 0 {
+        return Vec::new();
+    }
+    let mut items = vec![if missing == 0 {
+        ComplianceItem {
+            status: ComplianceStatus::Pass,
+            label: "Embedded images".to_owned(),
+            detail: format!("{images} available"),
+        }
+    } else {
+        ComplianceItem {
+            status: ComplianceStatus::Fail,
+            label: "Embedded images".to_owned(),
+            detail: format!("{missing} missing or damaged; replace before publication export"),
+        }
+    }];
+    if let Some(ppi) = minimum_ppi {
+        items.push(ComplianceItem {
+            status: if ppi >= 300.0 {
+                ComplianceStatus::Pass
+            } else if ppi >= 150.0 {
+                ComplianceStatus::Warn
+            } else {
+                ComplianceStatus::Fail
+            },
+            label: "Lowest effective image PPI".to_owned(),
+            detail: format!("{ppi:.0} PPI at exported size (recommended 300 PPI)"),
+        });
+    }
+    items.push(ComplianceItem {
+        status: if converted == 0 {
+            ComplianceStatus::Pass
+        } else {
+            ComplianceStatus::Warn
+        },
+        label: "Image color".to_owned(),
+        detail: if converted == 0 {
+            "8-bit RGB sources".to_owned()
+        } else {
+            format!(
+                "{converted} image(s) with an ICC profile or high-precision samples export as 8-bit RGBA without an embedded profile"
+            )
+        },
+    });
+    items
+}
+
+fn effective_ppi(
+    source: [u32; 2],
+    image: &crate::state::RasterImageContent,
+    frame: crate::state::ObjectFrame,
+    output_scale: f32,
+) -> f32 {
+    let mut pixels = [
+        source[0] as f32 * (image.crop[2] - image.crop[0]),
+        source[1] as f32 * (image.crop[3] - image.crop[1]),
+    ];
+    if matches!(
+        image.rotation,
+        QuarterTurn::Clockwise90 | QuarterTurn::Clockwise270
+    ) {
+        pixels.swap(0, 1);
+    }
+    let frame = [frame.width * output_scale, frame.height * output_scale];
+    match image.fit {
+        ImageFit::Stretch => (pixels[0] * 72.0 / frame[0].max(f32::MIN_POSITIVE))
+            .min(pixels[1] * 72.0 / frame[1].max(f32::MIN_POSITIVE)),
+        ImageFit::Contain => {
+            let points_per_pixel = (frame[0] / pixels[0].max(f32::MIN_POSITIVE))
+                .min(frame[1] / pixels[1].max(f32::MIN_POSITIVE));
+            72.0 / points_per_pixel.max(f32::MIN_POSITIVE)
+        }
+        ImageFit::Cover => {
+            let points_per_pixel = (frame[0] / pixels[0].max(f32::MIN_POSITIVE))
+                .max(frame[1] / pixels[1].max(f32::MIN_POSITIVE));
+            72.0 / points_per_pixel.max(f32::MIN_POSITIVE)
+        }
+    }
+}
+
 fn worst_scaled(
     metrics: &[PageMetrics],
     target_width_mm: Option<f32>,
@@ -210,10 +343,14 @@ fn threshold_status(value: f32, min: f32) -> ComplianceStatus {
 mod tests {
     use super::*;
     use crate::state::{
-        AxisOverrides, AxisProjections, CanvasObject, CanvasObjectKind, CanvasViewport, ChartSpec,
-        DataBinding, ObjectFrame, ObjectId, PanelMeta, PlotObject, StackSpec,
+        AssetId, AssetRecord, AxisOverrides, AxisProjections, CanvasObject, CanvasObjectKind,
+        CanvasViewport, ChartSpec, DataBinding, ObjectFrame, ObjectId, PlotObject,
+        RasterImageContent, StackSpec,
     };
+    use image::{DynamicImage, ImageBuffer, ImageFormat, Luma};
     use plotx_figure::{Axis, Color, Figure, RangeAnnotation, Series};
+    use sha2::{Digest, Sha256};
+    use std::io::Cursor;
 
     fn thresholds() -> ComplianceThresholds {
         ComplianceThresholds {
@@ -269,14 +406,65 @@ mod tests {
     }
 
     #[test]
+    fn effective_ppi_accounts_for_fit_crop_rotation_and_export_scale() {
+        let mut image = RasterImageContent::new(AssetId::new());
+        let frame = ObjectFrame::new(0.0, 0.0, 144.0, 72.0);
+        image.fit = ImageFit::Stretch;
+        assert_eq!(effective_ppi([600, 300], &image, frame, 1.0), 300.0);
+
+        image.crop = [0.0, 0.0, 0.5, 1.0];
+        assert_eq!(effective_ppi([600, 300], &image, frame, 1.0), 150.0);
+        image.crop = [0.0, 0.0, 1.0, 1.0];
+        image.rotation = QuarterTurn::Clockwise90;
+        assert_eq!(effective_ppi([600, 300], &image, frame, 0.5), 300.0);
+    }
+
+    #[test]
+    fn image_precheck_reports_availability_resolution_and_color_conversion() {
+        let source = ImageBuffer::from_pixel(600, 300, Luma([1000_u16]));
+        let mut encoded = Cursor::new(Vec::new());
+        DynamicImage::ImageLuma16(source)
+            .write_to(&mut encoded, ImageFormat::Png)
+            .unwrap();
+        let bytes = encoded.into_inner();
+        let id = AssetId::new();
+        let asset = AssetRecord {
+            id,
+            sha256: Sha256::digest(&bytes).into(),
+            format: "png".to_owned(),
+            pixel_size: [600, 300],
+            bytes,
+        };
+        let mut canvas = CanvasDocument::new("precheck".to_owned(), [100.0, 100.0]);
+        let mut image = RasterImageContent::new(id);
+        image.fit = ImageFit::Stretch;
+        canvas.objects.push(CanvasObject {
+            id: ObjectId::new(1),
+            name: "image".to_owned(),
+            frame: ObjectFrame::new(0.0, 0.0, 144.0, 72.0),
+            locked: false,
+            visible: true,
+            kind: CanvasObjectKind::RasterImage(image),
+        });
+
+        let items = image_precheck_items(&[&canvas], &BTreeMap::from([(id, asset)]), None);
+        assert_eq!(items[0].status, ComplianceStatus::Pass);
+        assert_eq!(items[1].status, ComplianceStatus::Pass);
+        assert!(items[1].detail.contains("300 PPI"));
+        assert_eq!(items[2].status, ComplianceStatus::Warn);
+        assert!(items[2].detail.contains("without an embedded profile"));
+
+        let missing = image_precheck_items(&[&canvas], &BTreeMap::new(), None);
+        assert_eq!(missing[0].status, ComplianceStatus::Fail);
+    }
+
+    #[test]
     fn hidden_axes_do_not_contribute_unrendered_typography() {
         let mut figure = Figure::new("", Axis::new("x", 0.0, 1.0), Axis::new("y", 0.0, 1.0));
         figure.axis_frame = AxisFrame::Hidden;
         figure.typography.tick_pt = 3.0;
         figure.typography.label_pt = 4.0;
         let viewport = CanvasViewport::from_figure(&figure);
-        let mut panel = PanelMeta::new(String::new(), 100.0);
-        panel.visible = false;
         let mut canvas = CanvasDocument::new("Hidden axes".to_owned(), [200.0, 100.0]);
         canvas.objects.push(CanvasObject {
             id: ObjectId::new(1),
@@ -294,7 +482,6 @@ mod tests {
                 AxisOverrides::default(),
                 figure,
                 viewport,
-                panel,
             ))),
         });
 
@@ -317,8 +504,6 @@ mod tests {
             Series::line("B", vec![[1.0, 1.0]]).colored(Color::rgb(200, 0, 0)),
         ];
         let viewport = CanvasViewport::from_figure(&figure);
-        let mut panel = PanelMeta::new(String::new(), 100.0);
-        panel.visible = false;
         let mut canvas = CanvasDocument::new("Legend".to_owned(), [200.0, 100.0]);
         canvas.objects.push(CanvasObject {
             id: ObjectId::new(1),
@@ -336,7 +521,6 @@ mod tests {
                 AxisOverrides::default(),
                 figure,
                 viewport,
-                panel,
             ))),
         });
 
@@ -359,8 +543,6 @@ mod tests {
             width: 1.0,
         });
         let viewport = CanvasViewport::from_figure(&figure);
-        let mut panel = PanelMeta::new(String::new(), 100.0);
-        panel.visible = false;
         let mut canvas = CanvasDocument::new("Ranges".to_owned(), [200.0, 100.0]);
         canvas.objects.push(CanvasObject {
             id: ObjectId::new(1),
@@ -378,7 +560,6 @@ mod tests {
                 AxisOverrides::default(),
                 figure,
                 viewport,
-                panel,
             ))),
         });
 

@@ -14,14 +14,15 @@ path = "src/lib.rs"
 default = ["screen"]
 # SVG export is always available. Gate egui screen rendering so headless and
 # export-only builds do not depend on egui; EMF export is available on Windows.
-screen = ["dep:egui", "dep:image"]
+screen = ["dep:egui"]
 emf = ["dep:windows-sys"]
 
 [dependencies]
 plotx-figure.workspace = true
 unicode-width.workspace = true
+base64.workspace = true
 egui = { workspace = true, optional = true }
-image = { workspace = true, optional = true }
+image.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, optional = true }

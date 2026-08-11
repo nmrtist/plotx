@@ -97,7 +97,7 @@ fn rotated_uv(x: f32, y: f32, crop: [f32; 4], turns: u8) -> [f32; 2] {
 pub(crate) fn paint_document_raster(
     painter: &egui::Painter,
     page: Rect,
-    raster: &DocumentRaster<'_>,
+    raster: &DocumentRaster,
     viewport: DocumentViewport,
 ) {
     if !raster.visible || raster.pixel_size.contains(&0) {
@@ -145,7 +145,13 @@ pub(crate) fn paint_document_raster(
     } else {
         egui::TextureOptions::LINEAR
     };
-    let texture = cached_texture(painter.ctx(), key, [width, height], raster.pixels, options);
+    let texture = cached_texture(
+        painter.ctx(),
+        key,
+        [width, height],
+        raster.pixels.as_ref(),
+        options,
+    );
     let [left, top, right, bottom] = crop;
     let uv = egui::Rect::from_min_max(egui::pos2(left, top), egui::pos2(right, bottom));
     let tint =
@@ -298,11 +304,11 @@ fn shrink_crop_axis(crop: &mut [f32; 4], horizontal: bool, fraction: f32) {
 mod tests {
     use super::*;
 
-    fn raster(pixels: &[u8]) -> DocumentRaster<'_> {
+    fn raster(pixels: &[u8]) -> DocumentRaster {
         DocumentRaster {
             source_hash: [0; 32],
             frame: Rect::new(0.0, 0.0, 100.0, 100.0),
-            pixels,
+            pixels: std::sync::Arc::from(pixels),
             pixel_size: [1, 1],
             source_pixel_size: [1, 1],
             crop: [0.0, 0.0, 1.0, 1.0],

@@ -82,6 +82,7 @@ pub fn export_document_emf(doc: &Document<'_>) -> Result<Vec<u8>, EmfError> {
         );
         SetBkMode(hdc, TRANSPARENT as i32);
 
+        let mut paint_error = None;
         {
             let mut dc = Dc {
                 hdc,
@@ -98,7 +99,12 @@ pub fn export_document_emf(doc: &Document<'_>) -> Result<Vec<u8>, EmfError> {
                             write_overlay(&mut dc, overlay);
                         }
                     }
-                    DocumentItem::Raster(_) => {}
+                    DocumentItem::Raster(raster) => {
+                        if !write_raster(&mut dc, raster) {
+                            paint_error = Some("could not record an embedded image".to_owned());
+                            break;
+                        }
+                    }
                     DocumentItem::PanelLabel {
                         frame,
                         text,
@@ -122,6 +128,10 @@ pub fn export_document_emf(doc: &Document<'_>) -> Result<Vec<u8>, EmfError> {
         if hemf.is_null() {
             return Err(EmfError("CloseEnhMetaFile failed".into()));
         }
+        if let Some(error) = paint_error {
+            DeleteEnhMetaFile(hemf);
+            return Err(EmfError(error));
+        }
         let size = GetEnhMetaFileBits(hemf, 0, std::ptr::null_mut());
         if size == 0 {
             DeleteEnhMetaFile(hemf);
@@ -135,6 +145,77 @@ pub fn export_document_emf(doc: &Document<'_>) -> Result<Vec<u8>, EmfError> {
         }
         Ok(bytes)
     }
+}
+
+fn write_raster(dc: &mut Dc, raster: &crate::DocumentRaster) -> bool {
+    if !raster.visible || raster.opacity <= 0.0 {
+        return true;
+    }
+    let Some(image) = crate::svg::prepared_raster(raster) else {
+        return false;
+    };
+    let image_aspect = image.width() as f32 / image.height().max(1) as f32;
+    let frame_aspect = raster.frame.width / raster.frame.height.max(f32::MIN_POSITIVE);
+    let destination = match raster.fit {
+        crate::RasterFit::Stretch => raster.frame,
+        crate::RasterFit::Contain => {
+            if image_aspect > frame_aspect {
+                let height = raster.frame.width / image_aspect;
+                Rect::new(
+                    raster.frame.left,
+                    raster.frame.top + (raster.frame.height - height) * 0.5,
+                    raster.frame.width,
+                    height,
+                )
+            } else {
+                let width = raster.frame.height * image_aspect;
+                Rect::new(
+                    raster.frame.left + (raster.frame.width - width) * 0.5,
+                    raster.frame.top,
+                    width,
+                    raster.frame.height,
+                )
+            }
+        }
+        crate::RasterFit::Cover => {
+            if image_aspect > frame_aspect {
+                let width = raster.frame.height * image_aspect;
+                Rect::new(
+                    raster.frame.left + (raster.frame.width - width) * 0.5,
+                    raster.frame.top,
+                    width,
+                    raster.frame.height,
+                )
+            } else {
+                let height = raster.frame.width / image_aspect;
+                Rect::new(
+                    raster.frame.left,
+                    raster.frame.top + (raster.frame.height - height) * 0.5,
+                    raster.frame.width,
+                    height,
+                )
+            }
+        }
+    };
+    let clip = match (raster.fit, raster.clip) {
+        (crate::RasterFit::Cover, Some(panel)) => intersect(panel, raster.frame),
+        (crate::RasterFit::Cover, None) => Some(raster.frame),
+        (_, Some(panel)) => intersect(panel, destination),
+        (_, None) => Some(destination),
+    };
+    clip.is_some_and(|clip| {
+        dc.clipped(clip, |dc| {
+            dc.raster(&image, destination, raster.opacity, raster.nearest)
+        })
+    })
+}
+
+fn intersect(a: Rect, b: Rect) -> Option<Rect> {
+    let left = a.left.max(b.left);
+    let top = a.top.max(b.top);
+    let right = a.right().min(b.right());
+    let bottom = a.bottom().min(b.bottom());
+    (right > left && bottom > top).then(|| Rect::new(left, top, right - left, bottom - top))
 }
 
 fn write_document_object(dc: &mut Dc, object: &DocumentObject<'_>) {

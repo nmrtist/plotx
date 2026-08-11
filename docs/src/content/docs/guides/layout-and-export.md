@@ -51,9 +51,17 @@ image and use **Image** in the Object inspector to crop or rotate it, adjust its
 opacity, or choose how it is interpolated. These changes do not alter the
 embedded source image.
 
-Pages that contain external images cannot yet be exported or copied with
-**Copy Figure**. PlotX stops the operation and reports the reason instead of
-creating a figure with the image missing.
+The board uses a bounded proxy for responsive editing, but SVG, PDF, EMF,
+PNG, JPEG, TIFF, and **Copy Figure** sample the embedded source. Crop,
+quarter-turn rotation, opacity, fit, interpolation, Panel clipping, and layer
+order therefore match the authored page without depending on the source file's
+original path.
+
+If an embedded image is missing or damaged, the project still opens and keeps
+the image item in place as a labelled placeholder. Use **Replace Image…** in
+the Object inspector to repair it. Normal save and publication export stop
+until it is replaced; the Export dialog can explicitly allow labelled
+placeholders when a review copy is still useful.
 
 ## Work with figure panels
 

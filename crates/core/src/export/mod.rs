@@ -1,4 +1,6 @@
+mod asset_render;
 mod fonts;
+mod pdf;
 mod precheck;
 mod preset;
 mod raster;
@@ -6,21 +8,22 @@ mod raster;
 mod state_tests;
 mod trim;
 
+pub use asset_render::{MissingImagePolicy, prepare_render_document};
 pub use precheck::{
-    ComplianceStatus, ComplianceThresholds, PrecheckReport, page_metrics, precheck_report,
+    ComplianceStatus, ComplianceThresholds, PrecheckReport, image_precheck_items, page_metrics,
+    precheck_report,
 };
 pub use preset::ExportPreset;
 pub use raster::{
     DEFAULT_MAX_RASTER_BYTES, DEFAULT_MAX_RASTER_HEIGHT, DEFAULT_MAX_RASTER_PIXELS,
     DEFAULT_MAX_RASTER_WIDTH, RasterError, RasterImage, RasterLimits, RasterOptions,
-    rasterize_canvas, rasterize_svg,
+    rasterize_canvas, rasterize_canvas_with_assets, rasterize_svg,
 };
 
-use crate::state::{CanvasDocument, render_document_svg};
+use crate::state::{AssetId, AssetRecord, CanvasDocument};
 use image::codecs::jpeg::{JpegEncoder, PixelDensity};
 use image::{ExtendedColorType, ImageFormat};
-use pdf_writer::{Content, Finish, Name, Pdf, Rect, Ref, TextStr};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
@@ -96,6 +99,7 @@ pub struct ExportDialogState {
     pub dpi: u16,
     pub preset: Option<ExportPreset>,
     pub trim_to_visible_content: bool,
+    pub allow_missing_images: bool,
 }
 
 impl ExportDialogState {
@@ -106,6 +110,7 @@ impl ExportDialogState {
             dpi: DEFAULT_BITMAP_DPI,
             preset: None,
             trim_to_visible_content: false,
+            allow_missing_images: false,
         }
     }
 
@@ -165,10 +170,9 @@ pub struct ExportSettings {
     pub format: ExportFormat,
     pub scope: ExportPageScope,
     pub dpi: u16,
-    /// When set, each page is scaled (uniformly, preserving aspect ratio) so its
-    /// output width equals this many millimetres. `None` keeps the page's size.
     pub target_width_mm: Option<f32>,
     pub trim_to_visible_content: bool,
+    pub allow_missing_images: bool,
 }
 
 impl From<&ExportDialogState> for ExportSettings {
@@ -179,6 +183,7 @@ impl From<&ExportDialogState> for ExportSettings {
             dpi: value.dpi,
             target_width_mm: value.target_width_mm(),
             trim_to_visible_content: value.trim_to_visible_content,
+            allow_missing_images: value.allow_missing_images,
         }
     }
 }
@@ -189,6 +194,13 @@ pub enum ExportError {
     EmptyDocument,
     #[error("current page is no longer available")]
     MissingCurrentPage,
+    #[error("image asset {asset} is missing; replace it or allow placeholder export")]
+    MissingImageAsset { asset: crate::state::AssetId },
+    #[error("image asset {asset} is damaged: {reason}")]
+    CorruptImageAsset {
+        asset: crate::state::AssetId,
+        reason: String,
+    },
     #[error("page range must be between 1 and {page_count}")]
     InvalidRange { page_count: usize },
     #[error("SVG parse failed: {0}")]
@@ -233,46 +245,69 @@ pub fn export_canvases(
     settings: &ExportSettings,
     base_path: &Path,
 ) -> Result<Vec<PathBuf>, ExportError> {
+    export_canvases_with_assets(canvases, &BTreeMap::new(), active_page, settings, base_path)
+}
+
+pub fn export_canvases_with_assets(
+    canvases: &[CanvasDocument],
+    assets: &BTreeMap<AssetId, AssetRecord>,
+    active_page: Option<usize>,
+    settings: &ExportSettings,
+    base_path: &Path,
+) -> Result<Vec<PathBuf>, ExportError> {
     let pages = resolve_page_scope(settings.scope, active_page, canvases.len())?;
     let target = settings.target_width_mm;
+    let missing_policy = if settings.allow_missing_images {
+        MissingImagePolicy::Placeholder
+    } else {
+        MissingImagePolicy::Block
+    };
     match settings.format {
         ExportFormat::Svg => export_svg(
             canvases,
+            assets,
             &pages,
             target,
             settings.trim_to_visible_content,
+            missing_policy,
             base_path,
         ),
         ExportFormat::Pdf => export_pdf(
             canvases,
+            assets,
             &pages,
             target,
             settings.trim_to_visible_content,
+            missing_policy,
             base_path,
         ),
         ExportFormat::Png | ExportFormat::Jpeg | ExportFormat::Tiff => export_bitmap(
             canvases,
+            assets,
             &pages,
-            settings.format,
-            settings.dpi,
-            target,
-            settings.trim_to_visible_content,
+            settings,
+            missing_policy,
             base_path,
         ),
     }
 }
 
-/// Scale the SVG's declared physical size; `None` preserves the authored size.
-fn document_svg(canvas: &CanvasDocument, target_width_mm: Option<f32>) -> String {
-    let svg = render_document_svg(canvas);
+fn document_svg_with_assets(
+    canvas: &CanvasDocument,
+    assets: &BTreeMap<AssetId, AssetRecord>,
+    target_width_mm: Option<f32>,
+    missing_policy: MissingImagePolicy,
+) -> Result<String, ExportError> {
+    let document = prepare_render_document(canvas, assets, missing_policy)?;
+    let svg = plotx_render::svg::export_document(&document);
     let Some(target) = target_width_mm else {
-        return svg;
+        return Ok(svg);
     };
     let [w, h] = canvas.size_pt();
     let scale = target / canvas.size_mm[0].max(f32::MIN_POSITIVE);
     let from = format!(r#"width="{w}pt" height="{h}pt""#);
     let to = format!(r#"width="{}pt" height="{}pt""#, w * scale, h * scale);
-    svg.replacen(&from, &to, 1)
+    Ok(svg.replacen(&from, &to, 1))
 }
 
 pub fn export_output_paths(
@@ -291,17 +326,24 @@ pub fn export_output_paths(
 
 fn export_svg(
     canvases: &[CanvasDocument],
+    assets: &BTreeMap<AssetId, AssetRecord>,
     pages: &[usize],
     target_width_mm: Option<f32>,
     trim_to_visible_content: bool,
+    missing_policy: MissingImagePolicy,
     base_path: &Path,
 ) -> Result<Vec<PathBuf>, ExportError> {
     let paths = export_output_paths(base_path, ExportFormat::Svg, pages.len());
     for (&page, path) in pages.iter().zip(&paths) {
         let svg = if trim_to_visible_content {
-            trim::trim_document_svg(&canvases[page], target_width_mm)?
+            trim::trim_document_svg_with_assets(
+                &canvases[page],
+                assets,
+                target_width_mm,
+                missing_policy,
+            )?
         } else {
-            document_svg(&canvases[page], target_width_mm)
+            document_svg_with_assets(&canvases[page], assets, target_width_mm, missing_policy)?
         };
         std::fs::write(path, svg)?;
     }
@@ -310,9 +352,11 @@ fn export_svg(
 
 fn export_pdf(
     canvases: &[CanvasDocument],
+    assets: &BTreeMap<AssetId, AssetRecord>,
     pages: &[usize],
     target_width_mm: Option<f32>,
     trim_to_visible_content: bool,
+    missing_policy: MissingImagePolicy,
     base_path: &Path,
 ) -> Result<Vec<PathBuf>, ExportError> {
     let path = with_extension(base_path, ExportFormat::Pdf.extension());
@@ -320,57 +364,53 @@ fn export_pdf(
         .iter()
         .map(|&page| {
             if trim_to_visible_content {
-                trim::trim_document_svg(&canvases[page], target_width_mm)
+                trim::trim_document_svg_with_assets(
+                    &canvases[page],
+                    assets,
+                    target_width_mm,
+                    missing_policy,
+                )
             } else {
-                Ok(document_svg(&canvases[page], target_width_mm))
+                document_svg_with_assets(&canvases[page], assets, target_width_mm, missing_policy)
             }
         })
         .collect::<Result<_, ExportError>>()?;
-    let pdf = if svgs.len() == 1 {
-        let tree = parse_pdf_svg(&svgs[0])?;
-        svg2pdf::to_pdf(
-            &tree,
-            svg2pdf::ConversionOptions::default(),
-            svg2pdf::PageOptions::default(),
-        )
-        .map_err(|e| ExportError::Pdf(e.to_string()))?
-    } else {
-        render_multi_page_pdf(&svgs)?
-    };
+    let pdf = pdf::render(&svgs)?;
     std::fs::write(&path, pdf)?;
     Ok(vec![path])
 }
 
 fn export_bitmap(
     canvases: &[CanvasDocument],
+    assets: &BTreeMap<AssetId, AssetRecord>,
     pages: &[usize],
-    format: ExportFormat,
-    dpi: u16,
-    target_width_mm: Option<f32>,
-    trim_to_visible_content: bool,
+    settings: &ExportSettings,
+    missing_policy: MissingImagePolicy,
     base_path: &Path,
 ) -> Result<Vec<PathBuf>, ExportError> {
-    let paths = export_output_paths(base_path, format, pages.len());
+    let paths = export_output_paths(base_path, settings.format, pages.len());
     for (&page, path) in pages.iter().zip(&paths) {
-        let raster = rasterize_canvas(
+        let raster = rasterize_canvas_with_assets(
             &canvases[page],
+            assets,
             RasterOptions {
-                dpi,
-                target_width_mm,
+                dpi: settings.dpi,
+                target_width_mm: settings.target_width_mm,
                 limits: RasterLimits::default(),
             },
+            missing_policy,
         )?;
-        let raster = if trim_to_visible_content {
+        let raster = if settings.trim_to_visible_content {
             let background = canvases[page].background;
             trim::crop_raster(
                 raster,
                 [background.r, background.g, background.b, 255],
-                trim::raster_trim_padding(dpi),
+                trim::raster_trim_padding(settings.dpi),
             )?
         } else {
             raster
         };
-        match format {
+        match settings.format {
             ExportFormat::Png => {
                 image::save_buffer_with_format(
                     path,
@@ -395,7 +435,7 @@ fn export_bitmap(
                 let rgb = raster.to_rgb_over([255, 255, 255]);
                 let file = std::fs::File::create(path)?;
                 let mut encoder = JpegEncoder::new_with_quality(file, 90);
-                encoder.set_pixel_density(PixelDensity::dpi(dpi));
+                encoder.set_pixel_density(PixelDensity::dpi(settings.dpi));
                 encoder.encode(
                     &rgb,
                     raster.width(),
@@ -407,76 +447,6 @@ fn export_bitmap(
         }
     }
     Ok(paths)
-}
-
-fn render_multi_page_pdf(svgs: &[String]) -> Result<Vec<u8>, ExportError> {
-    let mut alloc = Ref::new(1);
-    let catalog_id = alloc.bump();
-    let page_tree_id = alloc.bump();
-    let document_info_id = alloc.bump();
-    let page_ids: Vec<_> = svgs.iter().map(|_| alloc.bump()).collect();
-    let content_ids: Vec<_> = svgs.iter().map(|_| alloc.bump()).collect();
-
-    let mut embedded = Vec::with_capacity(svgs.len());
-    for svg in svgs {
-        let tree = parse_pdf_svg(svg)?;
-        let size = tree.size();
-        let (chunk, svg_id) = svg2pdf::to_chunk(&tree, svg2pdf::ConversionOptions::default())
-            .map_err(|e| ExportError::Pdf(e.to_string()))?;
-        let mut ref_map = HashMap::new();
-        let chunk = chunk.renumber(|old| *ref_map.entry(old).or_insert_with(|| alloc.bump()));
-        let svg_id = *ref_map
-            .get(&svg_id)
-            .ok_or_else(|| ExportError::Pdf("could not renumber SVG PDF object".into()))?;
-        // usvg reports CSS pixels (96/in), while a PDF MediaBox uses points
-        // (72/in). The SVG XObject is normalized and then placed at this size.
-        embedded.push((
-            chunk,
-            svg_id,
-            size.width() * 72.0 / 96.0,
-            size.height() * 72.0 / 96.0,
-        ));
-    }
-
-    let mut pdf = Pdf::new();
-    pdf.catalog(catalog_id).pages(page_tree_id);
-    pdf.document_info(document_info_id)
-        .producer(TextStr("plotx svg2pdf"));
-    pdf.pages(page_tree_id)
-        .kids(page_ids.iter().copied())
-        .count(page_ids.len() as i32);
-
-    for (index, ((chunk, svg_id, width, height), (&page_id, &content_id))) in embedded
-        .iter()
-        .zip(page_ids.iter().zip(&content_ids))
-        .enumerate()
-    {
-        let name = format!("S{}", index + 1);
-        let svg_name = Name(name.as_bytes());
-        let mut page = pdf.page(page_id);
-        page.media_box(Rect::new(0.0, 0.0, *width, *height));
-        page.parent(page_tree_id);
-        page.contents(content_id);
-        let mut resources = page.resources();
-        resources.x_objects().pair(svg_name, *svg_id);
-        resources.finish();
-        page.finish();
-
-        let mut content = Content::new();
-        content
-            .transform([*width, 0.0, 0.0, *height, 0.0, 0.0])
-            .x_object(svg_name);
-        pdf.stream(content_id, &content.finish());
-        pdf.extend(chunk);
-    }
-
-    Ok(pdf.finish())
-}
-
-fn parse_pdf_svg(svg: &str) -> Result<svg2pdf::usvg::Tree, ExportError> {
-    let mut options = svg2pdf::usvg::Options::default();
-    fonts::load_system_fonts(options.fontdb_mut());
-    svg2pdf::usvg::Tree::from_str(svg, &options).map_err(|e| ExportError::SvgParse(e.to_string()))
 }
 
 fn with_extension(path: &Path, extension: &str) -> PathBuf {
@@ -510,6 +480,16 @@ mod tests {
 
     fn canvas(name: &str, size_mm: [f32; 2]) -> CanvasDocument {
         CanvasDocument::new(name.to_owned(), size_mm)
+    }
+
+    fn document_svg(canvas: &CanvasDocument, target_width_mm: Option<f32>) -> String {
+        document_svg_with_assets(
+            canvas,
+            &BTreeMap::new(),
+            target_width_mm,
+            MissingImagePolicy::Block,
+        )
+        .expect("a document without image assets renders")
     }
 
     fn test_dir() -> PathBuf {
@@ -573,6 +553,7 @@ mod tests {
                 dpi: DEFAULT_BITMAP_DPI,
                 target_width_mm: None,
                 trim_to_visible_content: false,
+                allow_missing_images: false,
             },
             &out,
         )
@@ -595,6 +576,7 @@ mod tests {
                 dpi: DEFAULT_BITMAP_DPI,
                 target_width_mm: None,
                 trim_to_visible_content: false,
+                allow_missing_images: false,
             },
             &out,
         )
@@ -620,6 +602,7 @@ mod tests {
                     dpi: DEFAULT_BITMAP_DPI,
                     target_width_mm: None,
                     trim_to_visible_content: false,
+                    allow_missing_images: false,
                 },
                 &out,
             )
@@ -646,6 +629,7 @@ mod tests {
                 dpi: 600,
                 target_width_mm: Some(89.0),
                 trim_to_visible_content: false,
+                allow_missing_images: false,
             },
             &out,
         )
@@ -719,7 +703,9 @@ mod tests {
             .collect::<Vec<_>>();
         let authored_scale = 0.5;
         assert!((width_pt - view_box[2] * authored_scale).abs() < 0.01);
-        let bounds_svg = crate::state::render_document_svg_for_bounds(&doc);
+        let bounds_svg = plotx_render::svg::export_document_for_bounds(
+            &crate::state::build_render_document(&doc),
+        );
         let mut options = resvg::usvg::Options::default();
         fonts::load_system_fonts(options.fontdb_mut());
         let tree = resvg::usvg::Tree::from_str(&bounds_svg, &options).unwrap();
@@ -755,6 +741,7 @@ mod tests {
                     dpi: 72,
                     target_width_mm: None,
                     trim_to_visible_content: true,
+                    allow_missing_images: false,
                 },
                 &out,
             )
@@ -785,6 +772,7 @@ mod tests {
                 dpi: DEFAULT_BITMAP_DPI,
                 target_width_mm: None,
                 trim_to_visible_content: true,
+                allow_missing_images: false,
             },
             &out,
         )

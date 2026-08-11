@@ -22,6 +22,7 @@ mod screen_raster;
 pub mod emf;
 
 use plotx_figure::{AxisTrace, Color, ErrorBar, Figure, HeatmapGrid, Polygon};
+use std::sync::Arc;
 
 /// Fraction of the plot dimension reserved for a marginal axis-projection band.
 /// A fraction (not an absolute size) so bands scale with zoom like the margins.
@@ -62,7 +63,7 @@ pub struct Document<'a> {
 pub enum DocumentItem<'a> {
     Plot(DocumentObject<'a>),
     Overlay(DocumentOverlay<'a>),
-    Raster(DocumentRaster<'a>),
+    Raster(DocumentRaster),
     PanelLabel {
         frame: Rect,
         text: DocumentText,
@@ -70,10 +71,10 @@ pub enum DocumentItem<'a> {
     },
 }
 
-pub struct DocumentRaster<'a> {
+pub struct DocumentRaster {
     pub source_hash: [u8; 32],
     pub frame: Rect,
-    pub pixels: &'a [u8],
+    pub pixels: Arc<[u8]>,
     /// Pixel dimensions of `pixels`, which may describe an editor proxy.
     pub pixel_size: [u32; 2],
     /// Original asset dimensions used for fit, crop, and effective resolution.

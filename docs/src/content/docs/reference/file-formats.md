@@ -12,11 +12,6 @@ another machine or send it to a colleague and it opens exactly as you saved
 it, with no side files to remember. Keeping your original instrument data is
 still good practice, as with any analysis software.
 
-Until PlotX 1.0, the project format may change between releases. When a newer
-format meets an older PlotX (or the other way around), the file is rejected
-with a clear "unsupported version" message — your file is never modified or
-migrated silently. If that happens, update PlotX and reopen.
-
 **Preferences → General → Project backup copies** keeps previous saves as
 hidden files beside the project, so an accidental overwrite can be recovered.
 Automatic crash-recovery checkpoints are separate internal files. They are
@@ -38,6 +33,9 @@ saved map when the project opens.
 PlotX accepts PNG, JPEG, TIFF, WebP, and BMP images and stores them in the
 `.plotx` project. Duplicating an image does not duplicate its stored source, but
 each copy can have its own crop, rotation, opacity, fit, and interpolation.
+Export and clipboard output sample the embedded pixels and preserve those
+settings, Panel clipping, and z-order. SVG output embeds image data and never
+depends on the original local path.
 
 SVG is not supported. For an animated PNG or WebP, **Add Images…** reports that
 the image is animated; use **Add Animated Image First Frame…** to display its
@@ -49,13 +47,17 @@ It asks for confirmation above 100 megapixels or 512 MiB. For a multi-page TIFF,
 **Add Images…** imports the first page and **Add All TIFF Pages…** imports every
 page that PlotX can read. Each imported page can be edited independently.
 
+PlotX checks every embedded image when a project opens. A missing, damaged, or
+mismatched resource produces a diagnostic and a replaceable placeholder
+without discarding the page or image item. PlotX does not silently save that
+degraded state. Publication export blocks by default; an explicit Export-dialog
+option can emit a labelled placeholder for review.
+
 ## `.plotxproc` processing recipes
 
 A `.plotxproc` file stores one processing pipeline, without any data — save a
 recipe once and apply it to a whole series of similar experiments, on any
-machine. See [Recipes and templates](/guides/templates/). Version handling
-works the same way as for projects: a mismatched file is rejected with a clear
-message, never misread.
+machine. See [Recipes and templates](/guides/templates/).
 
 ## Workflow and run-record files
 

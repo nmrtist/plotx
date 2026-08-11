@@ -120,7 +120,7 @@ pub(super) fn insert_proxy(
             hash,
             page_index,
             pixel_size: proxy.pixel_size,
-            rgba8: Arc::new(proxy.rgba8),
+            rgba8: Arc::from(proxy.rgba8),
         });
     while app
         .session

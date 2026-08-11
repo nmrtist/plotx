@@ -1,6 +1,6 @@
 use super::{
     AxisOverrides, AxisProjections, CanvasViewport, ChartSpec, DataBinding, DatasetId, DerivedAxes,
-    PanelMeta, SeriesId, StackSpec,
+    SeriesId, StackSpec,
 };
 use plotx_figure::{Figure, FigureTypography};
 
@@ -40,7 +40,6 @@ impl PlotObject {
         axis_overrides: AxisOverrides,
         figure: Figure,
         viewport: CanvasViewport,
-        _panel: PanelMeta,
     ) -> Self {
         let derived_axes = DerivedAxes::from_figure(&figure);
         Self {
@@ -71,7 +70,6 @@ impl PlotObject {
         derived_axes: DerivedAxes,
         figure: Figure,
         viewport: CanvasViewport,
-        _panel: PanelMeta,
     ) -> Self {
         Self {
             display_owner,

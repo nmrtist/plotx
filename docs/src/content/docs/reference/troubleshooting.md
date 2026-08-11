@@ -45,9 +45,12 @@ window or confirm the exclusion it proposes.
 
 ## Exporting
 
-**Export stops because the page contains an external image.** Export and
-**Copy Figure** do not support external images. Remove the images from the page
-before exporting. PlotX stops instead of creating a figure with images missing.
+**A project opens with a missing-image placeholder.** The embedded resource is
+missing, damaged, or fails its integrity check. Check **Operation
+and Diagnostic History**, select the placeholder, and use **Replace Image…**.
+PlotX keeps the page editable but blocks normal save and export so the damaged
+state is not silently published. The Export dialog can explicitly create a
+labelled-placeholder review copy.
 
 **The export precheck flags my figure.** Font sizes or line widths violate
 the selected journal preset. Fix them on the board — **Figure Typography…**
@@ -55,10 +58,6 @@ sets all axis text sizes at once — or pick a preset that matches your
 intended size.
 
 ## Projects and updates
-
-**"Unsupported version" when opening a project.** The file was saved by a
-different PlotX with an incompatible project format (possible between
-releases until 1.0). Your file is intact — update PlotX and try again.
 
 **I overwrote a project by mistake.** If **Preferences → General → Project
 backup copies** is on, previous saves are kept as hidden files beside the

@@ -4,7 +4,10 @@
 use std::fmt;
 
 use egui::Context;
-use plotx_core::export::{RasterError, RasterImage, RasterOptions, rasterize_canvas};
+use plotx_core::export::{
+    ExportError, MissingImagePolicy, RasterError, RasterImage, RasterOptions,
+    prepare_render_document, rasterize_svg,
+};
 use plotx_core::operation::{Diagnostic, DiagnosticCode, OperationKind, OperationReport, Severity};
 use plotx_core::state::{BoardFrameId, PlotxApp};
 
@@ -92,15 +95,16 @@ fn build_payload(
         .get(canvas_index)
         .ok_or(ClipboardFigureError::NoTarget)?;
     let dpi = app.settings.export.dpi;
-    let raster =
-        rasterize_canvas(canvas, RasterOptions::new(dpi)).map_err(ClipboardFigureError::Raster)?;
+    let document = prepare_render_document(canvas, &app.doc.assets, MissingImagePolicy::Block)
+        .map_err(ClipboardFigureError::Export)?;
+    let svg = plotx_render::svg::export_document(&document);
+    let raster = rasterize_svg(&svg, canvas.size_pt(), RasterOptions::new(dpi))
+        .map_err(ClipboardFigureError::Raster)?;
     #[cfg(windows)]
     {
         let png = raster
             .to_png()
             .map_err(|error| ClipboardFigureError::PngEncode(error.into()))?;
-        let document = plotx_core::state::build_render_document(canvas);
-        let svg = plotx_render::svg::export_document(&document);
         let emf =
             plotx_render::emf::export_document_emf(&document).map_err(|error| error.to_string());
         Ok(FigurePayload {
@@ -293,6 +297,7 @@ fn clipboard_error_code(error: &ClipboardFigureError) -> DiagnosticCode {
 fn clipboard_error_category(error: &ClipboardFigureError) -> &'static str {
     match error {
         ClipboardFigureError::NoTarget => "no_target",
+        ClipboardFigureError::Export(_) => "embedded_image",
         ClipboardFigureError::Raster(_) => "rasterization",
         #[cfg(windows)]
         ClipboardFigureError::PngEncode(_) => "png_encode",
@@ -306,6 +311,7 @@ fn clipboard_error_category(error: &ClipboardFigureError) -> &'static str {
 #[derive(Debug)]
 enum ClipboardFigureError {
     NoTarget,
+    Export(ExportError),
     Raster(RasterError),
     #[cfg(windows)]
     PngEncode(Box<dyn std::error::Error + Send + Sync>),
@@ -322,6 +328,7 @@ impl fmt::Display for ClipboardFigureError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NoTarget => formatter.write_str("no canvas is selected or active"),
+            Self::Export(error) => error.fmt(formatter),
             Self::Raster(error) => error.fmt(formatter),
             #[cfg(windows)]
             Self::PngEncode(error) => write!(formatter, "PNG encoding failed: {error}"),
@@ -342,6 +349,7 @@ impl std::error::Error for ClipboardFigureError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Raster(error) => Some(error),
+            Self::Export(error) => Some(error),
             _ => None,
         }
     }

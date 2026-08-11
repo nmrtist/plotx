@@ -1,5 +1,5 @@
 use super::*;
-use plotx_core::state::{CanvasViewport, PanelMeta, PlotObject};
+use plotx_core::state::{CanvasViewport, PlotObject};
 use plotx_figure::{Axis, Figure};
 
 const PLOT_ID: ObjectId = ObjectId::new(1);
@@ -32,7 +32,6 @@ fn zoomed_plot_fixture() -> (PlotxApp, ObjectId, PlotRect) {
             plotx_core::state::AxisOverrides::default(),
             figure,
             viewport,
-            PanelMeta::new("title".to_owned(), 50.0),
         ))),
     });
     app.doc.canvases.push(canvas);

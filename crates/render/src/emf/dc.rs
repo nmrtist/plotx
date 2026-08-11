@@ -6,12 +6,13 @@ use plotx_figure::Color;
 use std::collections::HashMap;
 use windows_sys::Win32::Foundation::POINT;
 use windows_sys::Win32::Graphics::Gdi::{
-    ANTIALIASED_QUALITY, BS_SOLID, CreateFontW, CreateSolidBrush, DEFAULT_CHARSET, DeleteObject,
-    Ellipse, ExtCreatePen, ExtTextOutW, FW_BOLD, FW_NORMAL, GetTextMetricsW, HDC, HGDIOBJ,
-    IntersectClipRect, LOGBRUSH, LineTo, MoveToEx, NULL_BRUSH, NULL_PEN, PS_ENDCAP_ROUND,
-    PS_GEOMETRIC, PS_JOIN_ROUND, PS_SOLID, PolyPolyline, Polygon as GdiPolygon, Polyline,
-    Rectangle, RestoreDC, RoundRect, SaveDC, SelectObject, SetTextAlign, SetTextColor, TA_BASELINE,
-    TEXTMETRICW,
+    AC_SRC_ALPHA, AC_SRC_OVER, ANTIALIASED_QUALITY, BI_RGB, BITMAPINFO, BLENDFUNCTION, BS_SOLID,
+    COLORONCOLOR, CreateCompatibleDC, CreateDIBSection, CreateFontW, CreateSolidBrush,
+    DEFAULT_CHARSET, DIB_RGB_COLORS, DeleteDC, DeleteObject, Ellipse, ExtCreatePen, ExtTextOutW,
+    FW_BOLD, FW_NORMAL, GdiAlphaBlend, GetTextMetricsW, HALFTONE, HDC, HGDIOBJ, IntersectClipRect,
+    LOGBRUSH, LineTo, MoveToEx, NULL_BRUSH, NULL_PEN, PS_ENDCAP_ROUND, PS_GEOMETRIC, PS_JOIN_ROUND,
+    PS_SOLID, PolyPolyline, Polygon as GdiPolygon, Polyline, Rectangle, RestoreDC, RoundRect,
+    SaveDC, SelectObject, SetStretchBltMode, SetTextAlign, SetTextColor, TA_BASELINE, TEXTMETRICW,
 };
 
 /// Logical units per point, so hairline geometry survives integer coordinates.
@@ -259,6 +260,90 @@ impl Dc {
         }
     }
 
+    pub fn raster(
+        &mut self,
+        image: &image::RgbaImage,
+        destination: Rect,
+        opacity: f32,
+        nearest: bool,
+    ) -> bool {
+        let Ok(width) = i32::try_from(image.width()) else {
+            return false;
+        };
+        let Ok(height) = i32::try_from(image.height()) else {
+            return false;
+        };
+        let mut info = BITMAPINFO::default();
+        info.bmiHeader.biSize = std::mem::size_of_val(&info.bmiHeader) as u32;
+        info.bmiHeader.biWidth = width;
+        info.bmiHeader.biHeight = -height;
+        info.bmiHeader.biPlanes = 1;
+        info.bmiHeader.biBitCount = 32;
+        info.bmiHeader.biCompression = BI_RGB;
+        info.bmiHeader.biSizeImage = image.len() as u32;
+        let mut bits = std::ptr::null_mut();
+        unsafe {
+            let bitmap = CreateDIBSection(
+                self.hdc,
+                &info,
+                DIB_RGB_COLORS,
+                &mut bits,
+                std::ptr::null_mut(),
+                0,
+            );
+            if bitmap.is_null() || bits.is_null() {
+                if !bitmap.is_null() {
+                    DeleteObject(bitmap as HGDIOBJ);
+                }
+                return false;
+            }
+            let memory = CreateCompatibleDC(self.hdc);
+            if memory.is_null() {
+                DeleteObject(bitmap as HGDIOBJ);
+                return false;
+            }
+            let old = SelectObject(memory, bitmap as HGDIOBJ);
+            let output = std::slice::from_raw_parts_mut(bits.cast::<u8>(), image.len());
+            for (source, target) in image
+                .as_raw()
+                .chunks_exact(4)
+                .zip(output.chunks_exact_mut(4))
+            {
+                let alpha = u16::from(source[3]);
+                target.copy_from_slice(&[
+                    ((u16::from(source[2]) * alpha + 127) / 255) as u8,
+                    ((u16::from(source[1]) * alpha + 127) / 255) as u8,
+                    ((u16::from(source[0]) * alpha + 127) / 255) as u8,
+                    source[3],
+                ]);
+            }
+            let blend = BLENDFUNCTION {
+                BlendOp: AC_SRC_OVER as u8,
+                BlendFlags: 0,
+                SourceConstantAlpha: (opacity.clamp(0.0, 1.0) * 255.0).round() as u8,
+                AlphaFormat: AC_SRC_ALPHA as u8,
+            };
+            SetStretchBltMode(self.hdc, if nearest { COLORONCOLOR } else { HALFTONE });
+            let success = GdiAlphaBlend(
+                self.hdc,
+                l(destination.left),
+                l(destination.top),
+                l(destination.width),
+                l(destination.height),
+                memory,
+                0,
+                0,
+                width,
+                height,
+                blend,
+            ) != 0;
+            SelectObject(memory, old);
+            DeleteDC(memory);
+            DeleteObject(bitmap as HGDIOBJ);
+            success
+        }
+    }
+
     /// Baseline-anchored text matching SVG semantics: `align` maps text-anchor,
     /// `middle` emulates `dominant-baseline="middle"` via font metrics.
     pub fn text(&mut self, text: &str, pos: (f32, f32), style: TextStyle) {
@@ -299,7 +384,7 @@ impl Dc {
         }
     }
 
-    pub fn clipped(&mut self, clip: Rect, draw: impl FnOnce(&mut Self)) {
+    pub fn clipped<T>(&mut self, clip: Rect, draw: impl FnOnce(&mut Self) -> T) -> T {
         unsafe {
             SaveDC(self.hdc);
             IntersectClipRect(
@@ -310,10 +395,11 @@ impl Dc {
                 l(clip.bottom()),
             );
         }
-        draw(self);
+        let result = draw(self);
         unsafe {
             RestoreDC(self.hdc, -1);
         }
+        result
     }
 }
 

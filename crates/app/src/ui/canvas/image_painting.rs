@@ -33,7 +33,7 @@ pub(super) fn paint_document(app: &PlotxApp, ci: usize, rect: egui::Rect, painte
         items[object_index] = plotx_render::DocumentItem::Raster(plotx_render::DocumentRaster {
             source_hash: raster_cache_hash(asset.sha256, image.page_index),
             frame,
-            pixels: preview.rgba8.as_slice(),
+            pixels: preview.rgba8.clone(),
             pixel_size: preview.pixel_size,
             source_pixel_size: if image.page_index == 0 {
                 asset.pixel_size

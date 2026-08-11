@@ -247,7 +247,7 @@ pub struct RasterProxy {
     pub hash: [u8; 32],
     pub page_index: u32,
     pub pixel_size: [u32; 2],
-    pub rgba8: std::sync::Arc<Vec<u8>>,
+    pub rgba8: std::sync::Arc<[u8]>,
 }
 
 pub struct UiState {
@@ -669,6 +669,8 @@ pub struct Session {
     pub secondary_sidebar_visible: bool,
     pub status: String,
     pub operation_history: OperationHistory,
+    /// Non-fatal resource failures collected while opening the current project.
+    pub project_load_warnings: Vec<String>,
     /// Runtime cache of the persisted recent-files list (newest first), seeded
     /// from settings at construction and kept in sync by `note_recent_file` /
     /// `clear_recent_files` / `apply_settings`. Not serialized with projects.

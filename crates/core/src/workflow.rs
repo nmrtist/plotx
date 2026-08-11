@@ -1,13 +1,12 @@
 //! UI-independent loading, export, and default-layout workflows shared by all frontends.
 use crate::actions::ProcessingStateError;
 use crate::export::{
-    DEFAULT_BITMAP_DPI, ExportError, ExportFormat, ExportPageScope, ExportSettings, export_canvases,
+    DEFAULT_BITMAP_DPI, ExportError, ExportFormat, ExportPageScope, ExportSettings,
 };
 use crate::state::{
     AxisOverrides, AxisProjections, CanvasDocument, CanvasObject, CanvasObjectKind, CanvasViewport,
     ChartSpec, DEFAULT_CANVAS_SIZE_MM, DataBinding, Dataset, MM_TO_PT, Nmr2DDataset, NmrDataset,
-    ObjectFrame, ObjectId, PanelMeta, PlotObject, PlotxApp, StackMode, StackSpec,
-    default_chart_type,
+    ObjectFrame, ObjectId, PlotObject, PlotxApp, StackMode, StackSpec, default_chart_type,
 };
 use plotx_figure::{Axis, Figure};
 use plotx_io::{Acquisition, DataFormat, Domain, LoadWarning, LoadWarningCode, Provenance};
@@ -186,9 +185,6 @@ pub fn process_file(
 ) -> Result<ProcessResult, WorkflowError> {
     let mut loaded = load_dataset(input)?;
     loaded.apply_scheme_file(scheme)?;
-    // Headless exports use the same worker-only contour path as the desktop
-    // app. This waits for queued jobs rather than reintroducing a synchronous
-    // marching-squares shortcut in the export caller.
     let mut app = PlotxApp::new_with_settings(crate::settings::Settings::default());
     app.session
         .compute
@@ -217,16 +213,21 @@ pub fn process_file(
         dpi: DEFAULT_BITMAP_DPI,
         target_width_mm: None,
         trim_to_visible_content: false,
+        allow_missing_images: false,
     };
-    let output_paths = export_canvases(&app.doc.canvases, Some(0), &settings, output)?;
+    let output_paths = crate::export::export_canvases_with_assets(
+        &app.doc.canvases,
+        &app.doc.assets,
+        Some(0),
+        &settings,
+        output,
+    )?;
     Ok(ProcessResult {
         inspection: loaded.inspection,
         output_paths,
     })
 }
 
-/// The only acquisition-to-dataset conversion path. Loading frontends retain
-/// provenance separately and hand the neutral acquisition to this function.
 pub fn dataset_from_acquisition(acquisition: Acquisition) -> (Dataset, String) {
     dataset_from_acquisition_with_equal_scale_preference(acquisition, true)
 }
@@ -384,7 +385,6 @@ pub fn build_plot_object(
         build_dataset_figure(dataset, &chart, size_mm),
     );
     let viewport = CanvasViewport::from_figure(&figure);
-    let panel = PanelMeta::new(dataset_title(dataset), frame.width);
     let axis_overrides = AxisOverrides {
         lock_aspect: matches!(dataset, Dataset::Nmr2D(dataset) if dataset.is_true_2d())
             .then_some(figure.lock_aspect),
@@ -420,7 +420,6 @@ pub fn build_plot_object(
             axis_overrides,
             figure,
             viewport,
-            panel,
         ))),
     }
 }
@@ -435,8 +434,6 @@ pub fn build_default_canvas(dataset: &Dataset, source: &str) -> CanvasDocument {
     )
 }
 
-/// Build the canonical initial layout used by GUI insertion, CLI, automation,
-/// and export; callers supply only the document-local dataset and canvas identity.
 pub fn build_default_canvas_for_dataset(
     dataset: &Dataset,
     dataset_index: usize,
