@@ -118,12 +118,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # `--all-features` builds plotx-substrait, which generates code with protoc.
-      - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Update Rust toolchain
         run: |
           rustup update --no-self-update stable
@@ -154,11 +148,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Update Rust toolchain
         run: |
           rustup update --no-self-update stable
@@ -169,7 +158,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-on-failure: true
 
-      - name: Run the test suite in both backend configurations
+      - name: Run the reference-backend test suite
         run: cargo xtask pr-check test
 
   # Validates that the user manual builds. Deployment is separate: Cloudflare

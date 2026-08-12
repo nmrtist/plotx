@@ -82,7 +82,7 @@ fn pr_check(stage: Option<PrCheckStage>) -> Result<(), String> {
     use PrCheckStage::{Lint, Quick, Test};
     use PrCheckStep::{Cargo, DependencyPolicy, RustFileSizes};
 
-    let steps: [(PrCheckStage, PrCheckStep); 7] = [
+    let steps: [(PrCheckStage, PrCheckStep); 6] = [
         (
             Quick,
             Cargo {
@@ -117,8 +117,11 @@ fn pr_check(stage: Option<PrCheckStage>) -> Result<(), String> {
                 args: &[
                     "clippy",
                     "--workspace",
+                    "--exclude",
+                    "plotx-datafusion",
+                    "--exclude",
+                    "plotx-substrait",
                     "--all-targets",
-                    "--all-features",
                     "--locked",
                     "--quiet",
                     "--",
@@ -134,26 +137,10 @@ fn pr_check(stage: Option<PrCheckStage>) -> Result<(), String> {
                 args: &[
                     "test",
                     "--workspace",
-                    "--all-features",
-                    "--locked",
-                    "--profile",
-                    "pr-check",
-                    "--quiet",
-                ],
-            },
-        ),
-        // `--all-features` always enables plotx-core/datafusion, so the
-        // reference executor that default builds depend on is never exercised
-        // above.
-        (
-            Test,
-            Cargo {
-                name: "test (reference backend)",
-                args: &[
-                    "test",
-                    "-p",
-                    "plotx-core",
-                    "--no-default-features",
+                    "--exclude",
+                    "plotx-datafusion",
+                    "--exclude",
+                    "plotx-substrait",
                     "--locked",
                     "--profile",
                     "pr-check",
@@ -207,6 +194,12 @@ fn licenses() -> Result<(), String> {
     let about_args = [
         "about",
         "generate",
+        "--manifest-path",
+        "crates/app/Cargo.toml",
+        "--no-default-features",
+        "--target",
+        "x86_64-pc-windows-msvc",
+        "--locked",
         "-c",
         "xtask/about.toml",
         "xtask/about.hbs",
@@ -289,7 +282,16 @@ fn cargo_output(repo_root: &Path, args: &[&str]) -> Result<Output, String> {
 }
 
 fn run_cargo_deny_step(repo_root: &Path, index: usize, total: usize) -> Result<(), String> {
-    let args = ["deny", "--locked", "check"];
+    let args = [
+        "deny",
+        "--locked",
+        "--no-default-features",
+        "--exclude",
+        "plotx-datafusion",
+        "--exclude",
+        "plotx-substrait",
+        "check",
+    ];
     let started_at = Instant::now();
     print_step(index, total, "dependency policy")?;
     let output = cargo_output(repo_root, &args)?;

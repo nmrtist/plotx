@@ -20,7 +20,8 @@ long wait — use the narrowest one that answers your question:
 | Day-to-day development: build and run the app | `cargo run -p plotx` |
 | Test the crate you changed | `cargo test -p plotx-core` |
 | Optimized build for performance work | `cargo build --release -p plotx` |
-| Shipping configuration, adds the DataFusion table backend | `cargo release-build` |
+| Shipping configuration, uses the reference table executor | `cargo release-build` |
+| Explicit DataFusion maintenance build | `cargo datafusion-build` |
 | The same checks as CI, before a pull request | `cargo pr-check` |
 
 Two things that are easy to trip over:
@@ -28,15 +29,16 @@ Two things that are easy to trip over:
 - Development builds keep the scientific processing crates optimized so they
   stay usable under a debugger, but the UI and renderer are not. Judge frame
   rate or rendering performance only with an optimized build.
-- The app and CLI default to an in-memory reference table executor.
-  Shipping builds enable the DataFusion backend via `cargo release-build`;
-  the About window shows which engine is active.
+- The app, CLI, and shipping build use the in-memory reference table executor.
+  DataFusion and Substrait remain in the workspace for explicit maintenance,
+  but `cargo pr-check` and CI do not build or validate them.
 
-`cargo pr-check` requires `protoc` and `cargo-deny`
-(`cargo install --locked cargo-deny`); nothing else does. CI runs exactly the
+`cargo pr-check` requires `cargo-deny`
+(`cargo install --locked cargo-deny`). CI runs exactly the
 same steps, split into parallel jobs (`cargo xtask pr-check quick|lint|test`).
 `cargo licenses` (requires `cargo-about`) regenerates
-`dist/THIRD-PARTY-LICENSES.html`, the report of bundled third-party licenses.
+`dist/THIRD-PARTY-LICENSES.html` from the reference-only Windows shipping app's
+dependency graph.
 
 The user manual is an Astro/Starlight site in `docs/` (`npm run build` to
 validate). UI screenshots come from the built-in harness: point `PLOTX_SHOT`

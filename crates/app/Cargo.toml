@@ -11,8 +11,8 @@ name = "plotx"
 path = "src/main.rs"
 
 [features]
-# Default builds use the reference executor. Release builds enable DataFusion
-# through `cargo release-build`; the About window shows the active executor.
+# Development and shipping builds use the reference executor. This feature is
+# retained as an explicit maintenance switch for the dormant DataFusion backend.
 default = []
 datafusion = ["plotx-core/datafusion"]
 

@@ -14,12 +14,10 @@ members = [
     "crates/app",
     "xtask",
 ]
-# Keep the Substrait exchange crate out of bare root builds: it is the only
-# member that requires protoc, prost, and pbjson-types. CI and `cargo pr-check`
-# use `--workspace`, so they still cover every crate.
+# DataFusion and Substrait remain workspace members for explicit maintenance,
+# but bare root builds stay on the lightweight reference executor.
 default-members = [
     "crates/data",
-    "crates/datafusion",
     "crates/io",
     "crates/analysis",
     "crates/processing",

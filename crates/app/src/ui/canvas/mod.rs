@@ -414,13 +414,6 @@ fn welcome_page(app: &mut PlotxApp, ui: &mut Ui) {
                     egui::RichText::new("Scientific data analysis and figure preparation")
                         .color(ui.visuals().text_color()),
                 );
-                if !cfg!(feature = "datafusion") {
-                    ui.add_space(8.0);
-                    ui.label(
-                        egui::RichText::new("Development build: large tables may run more slowly.")
-                            .color(Color32::from_rgb(0xE0, 0x6C, 0x22)),
-                    );
-                }
                 ui.add_space(22.0);
                 welcome_start(app, ui);
             },

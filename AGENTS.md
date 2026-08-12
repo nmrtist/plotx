@@ -58,16 +58,17 @@ These instructions apply to the entire repository.
 - `plotx-data` stays engine-free: never add datafusion, datafusion-substrait or
   sqlparser to it. Backend adapters reach its internals through the
   `#[doc(hidden)] pub` seams; keep that set minimal instead of widening the API.
-- The app and CLI default to the reference table executor. DataFusion is an
-  opt-in `datafusion` feature, and releases are built with `cargo release-build`
-  so the flag lives in one place. Keep both configurations compiling.
+- The app, CLI, and shipping builds use the reference table executor. DataFusion
+  remains available through the opt-in `datafusion` feature and the
+  `cargo datafusion-build` maintenance alias, but default PR checks and CI do
+  not compile or validate DataFusion or Substrait.
 - Keep Rust source files below the repository's 800-line limit; prefer cohesive
   modules over large files. Extract tests to a sibling `*_tests.rs` referenced
   with `#[path]` when a file approaches it.
 - Run `cargo pr-check` before completing code changes. It checks formatting,
   source sizes, dependency licenses and advisories, a default-configuration
-  build of both frontends, Clippy with warnings denied, and the test suite in
-  both backend configurations. It requires `cargo-deny`.
+  build of both frontends, Clippy with warnings denied, and the reference-backend
+  test suite. It requires `cargo-deny`.
 
 ## Documentation
 

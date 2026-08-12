@@ -45,17 +45,14 @@ cd plotx
 cargo run --release -p plotx
 ```
 
-That is the fast development build. It uses the built-in reference table
-executor, which keeps whole tables in memory and cannot spill, so large-table
-work needs the shipping engine instead:
+Development and shipping builds use the built-in reference table executor:
 
 ```sh
-cargo release-build          # the desktop app with the DataFusion backend
+cargo release-build          # the shipping desktop app
 ```
 
-Releases are produced with `cargo release-build`. The About window always
-names the active table engine, so you can tell which kind of build you are
-running.
+The dormant DataFusion backend remains available for explicit maintenance with
+`cargo datafusion-build`, but it is not part of default builds or releases.
 
 The development workflow and pre-submission checks are described in
 [CONTRIBUTING.md](CONTRIBUTING.md).

@@ -2,7 +2,7 @@
 # Keep the license allow-list aligned with xtask/about.toml.
 
 [graph]
-all-features = true
+all-features = false
 # Every platform CI builds on. Releases currently ship for 64-bit Windows
 # only, but the dependency policy must cover whatever CI compiles.
 targets = [
