@@ -40,7 +40,7 @@ pub fn dataset_to_objects<'a>(
     data_id: &str,
     recipe_id: &str,
 ) -> Result<DatasetObjects<'a>> {
-    Ok(match dataset {
+    let mut objects = match dataset {
         Dataset::Nmr(n) => {
             let data = DataObject {
                 id: data_id.to_owned(),
@@ -315,7 +315,39 @@ pub fn dataset_to_objects<'a>(
             DatasetObjects::primary(data, DatasetBlob::Xrd(&xrd.data), recipe)
         }
         Dataset::Xps(xps) => super::xps_convert::to_objects(xps, data_id, recipe_id),
-    })
+    };
+    write_scientific_identity(&mut objects.data, dataset.scientific_identity())?;
+    Ok(objects)
+}
+
+pub(super) fn write_scientific_identity(
+    data: &mut DataObject,
+    identity: &plotx_io::ImportedScientificIdentity,
+) -> Result<()> {
+    let extensions = data.extensions.as_object_mut().ok_or_else(|| {
+        ProjectError::Invalid(format!("dataset {} extensions are not an object", data.id))
+    })?;
+    extensions.insert(
+        "plotx.scientific_identity".to_owned(),
+        serde_json::to_value(identity)?,
+    );
+    Ok(())
+}
+
+pub(super) fn read_scientific_identity(
+    data: &DataObject,
+) -> Result<plotx_io::ImportedScientificIdentity> {
+    let value = data
+        .extensions
+        .get("plotx.scientific_identity")
+        .cloned()
+        .ok_or_else(|| {
+            ProjectError::Invalid(format!(
+                "dataset {} is missing plotx.scientific_identity",
+                data.id
+            ))
+        })?;
+    serde_json::from_value(value).map_err(ProjectError::from)
 }
 pub fn object_to_dataset(
     zip: &mut zip::ZipArchive<File>,
@@ -353,6 +385,7 @@ pub fn object_to_dataset(
             .validate()
             .map_err(|error| ProjectError::Invalid(error.to_owned()))?;
         let mut dataset = crate::state::XrdDataset::load(decoded);
+        dataset.scientific_identity = read_scientific_identity(data)?;
         dataset.field_catalog = read_field_catalog(data)?;
         dataset.name = data.label.clone();
         if let Some(value) = recipe
@@ -391,6 +424,7 @@ pub fn object_to_dataset(
             ProjectLoadLimits::default().max_entry_bytes,
             |reader| super::mass_spec_convert::decode(reader),
         )?;
+        dataset.scientific_identity = read_scientific_identity(data)?;
         dataset.field_catalog = read_field_catalog(data)?;
         dataset.name = data.label.clone();
         dataset.repair_selection().map_err(ProjectError::Invalid)?;
@@ -410,6 +444,7 @@ pub fn object_to_dataset(
             |reader| super::afm_convert::decode_afm(reader),
         )?;
         let mut dataset = crate::state::AfmDataset::load(decoded);
+        dataset.scientific_identity = read_scientific_identity(data)?;
         dataset.field_catalog = read_field_catalog(data)?;
         dataset.name = data.label.clone();
         if let Some(state) = data.extensions.get("plotx.afm")
@@ -518,6 +553,7 @@ pub fn object_to_dataset(
                 source: nmr_source(data),
                 group_delay: dim.group_delay.unwrap_or(0.0),
             });
+            dataset.scientific_identity = read_scientific_identity(data)?;
             dataset.field_catalog = read_field_catalog(data)?;
             apply_1d_recipe(&mut dataset, recipe)?;
             dataset.name = data.label.clone();
@@ -581,6 +617,7 @@ pub fn object_to_dataset(
                 nus: None,
                 source: nmr_source(data),
             });
+            dataset.scientific_identity = read_scientific_identity(data)?;
             dataset.field_catalog = read_field_catalog(data)?;
             apply_2d_recipe(&mut dataset, recipe)?;
             read_region_analysis(&mut dataset, recipe)?;

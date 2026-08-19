@@ -141,7 +141,6 @@ fn insert_dataset_existing_canvas_does_not_select_inserted_object() {
     let inserted_id = app.doc.canvases[0].next_object_id;
     let dataset_index = app.doc.datasets.len();
     let dataset = Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d())));
-    let expected_note = crate::workflow::dataset_title(&dataset);
 
     app.execute_action(Action::InsertDatasetWithCanvas {
         dataset_index,
@@ -159,10 +158,7 @@ fn insert_dataset_existing_canvas_does_not_select_inserted_object() {
     assert_eq!(app.doc.canvases[0].objects.len(), 2);
     assert_eq!(app.doc.canvases[0].selected_object, None);
     let panel = app.doc.canvases[0].parent_panel(inserted_id).unwrap();
-    assert_eq!(
-        app.doc.canvases[0].panel(panel).unwrap().note,
-        expected_note
-    );
+    assert!(app.doc.canvases[0].panel(panel).unwrap().note.is_empty());
     app.doc.canvases[0].selected_object = Some(inserted_id);
 
     app.undo();

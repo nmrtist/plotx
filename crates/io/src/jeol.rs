@@ -1,8 +1,9 @@
 //! JEOL Delta `.jdf` reader.
 
 use crate::{
-    Acquisition, DiffusionMeta, Dim, Domain, IoError, NmrData, NmrData2D, PseudoAxis, PseudoKind,
-    QuadMode, gradient_shape_factor, gyromagnetic_ratio,
+    Acquisition, DataFormat, DiffusionMeta, Dim, Domain, ImportedScientificIdentity, IoError,
+    LoadResult, NmrData, NmrData2D, Provenance, PseudoAxis, PseudoKind, QuadMode,
+    gradient_shape_factor, gyromagnetic_ratio,
 };
 use num_complex::Complex64;
 use std::collections::HashMap;
@@ -65,6 +66,36 @@ pub fn read_jdf_path(path: &Path) -> Result<Acquisition, IoError> {
         .unwrap_or("<jdf>")
         .to_string();
     read_jdf_bytes(&bytes, source)
+}
+
+pub fn load_jdf_path(path: &Path) -> Result<LoadResult, IoError> {
+    let bytes = std::fs::read(path)?;
+    let source = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("<jdf>")
+        .to_owned();
+    let acquisition = read_jdf_bytes(&bytes, source)?;
+    let endian = if bytes[off::ENDIAN] == 0 {
+        Endian::Big
+    } else {
+        Endian::Little
+    };
+    let params = Params::parse(&bytes, off::PARAM_LIST, endian);
+    let mut scientific_identity = ImportedScientificIdentity::from_path(path);
+    scientific_identity.acquisition = experiment_name(&params);
+    Ok(LoadResult {
+        acquisition,
+        scientific_identity,
+        format: DataFormat::JeolDelta,
+        provenance: Provenance {
+            selected_path: path.to_path_buf(),
+            data_path: path.to_path_buf(),
+            parameter_paths: Vec::new(),
+            companion_paths: Vec::new(),
+        },
+        warnings: Vec::new(),
+    })
 }
 
 pub fn read_jdf_bytes(bytes: &[u8], source: String) -> Result<Acquisition, IoError> {
@@ -395,11 +426,7 @@ fn read_jdf_2d(bytes: &[u8], source: String, body_endian: Endian) -> Result<NmrD
         group_delay: 0.0,
     };
 
-    let experiment = params
-        .string_ci("experiment")
-        .or_else(|| params.string_ci("content"))
-        .map(|s| s.to_ascii_lowercase())
-        .filter(|s| !s.is_empty());
+    let experiment = experiment_name(&params).map(|name| name.to_ascii_lowercase());
 
     let (pseudo_axis, diffusion) = extract_pseudo(bytes, &params, &experiment, &direct, rows_real);
     let nus = detect_nus(bytes, &params, rows_real);
@@ -419,6 +446,25 @@ fn read_jdf_2d(bytes: &[u8], source: String, body_endian: Endian) -> Result<NmrD
         nus,
         source: format!("{source} (JEOL Delta 2D, {sample:?}, {cols_real}×{rows_real})"),
     })
+}
+
+fn experiment_value(params: &Params) -> Option<String> {
+    params
+        .string_ci("experiment")
+        .or_else(|| params.string_ci("content"))
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+}
+
+fn experiment_name(params: &Params) -> Option<String> {
+    let value = experiment_value(params)?;
+    let file_name = value.rsplit(['/', '\\']).next().unwrap_or(&value).trim();
+    let name = file_name
+        .rsplit_once('.')
+        .filter(|(_, extension)| extension.eq_ignore_ascii_case("jxp"))
+        .map_or(file_name, |(stem, _)| stem)
+        .trim();
+    (!name.is_empty()).then(|| name.to_owned())
 }
 
 /// Recover the pseudo-2D indirect ruler and (for DOSY) the diffusion-encoding

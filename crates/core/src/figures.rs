@@ -216,6 +216,10 @@ pub fn build_stack_figure(stack: &StackSpectrum) -> Figure {
 }
 
 pub(crate) fn axis_label(nucleus: &str) -> String {
+    format!("{} chemical shift (ppm)", format_nucleus(nucleus))
+}
+
+pub(crate) fn format_nucleus(nucleus: &str) -> String {
     let mut formatted = String::new();
     let mut chars = nucleus.chars().peekable();
     while chars.peek().is_some_and(char::is_ascii_digit) {
@@ -235,7 +239,7 @@ pub(crate) fn axis_label(nucleus: &str) -> String {
         });
     }
     formatted.extend(chars);
-    format!("{formatted} chemical shift (ppm)")
+    formatted
 }
 
 /// Build a DOSY contour figure from a per-column diffusion map: x = chemical

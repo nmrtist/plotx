@@ -52,9 +52,8 @@ fn canonical_conversion_and_default_canvas_share_dataset_identity() {
         canvas.panel_letter(canvas.objects[0].id).as_deref(),
         Some("a")
     );
-    assert_eq!(canvas.panels[0].note, dataset_title(&dataset));
-    assert_ne!(canvas.panels[0].note, "Plot 1");
-    assert_eq!(canvas.panel_notes().len(), 1);
+    assert!(canvas.panels[0].note.is_empty());
+    assert!(canvas.panel_notes().is_empty());
     assert!(crate::state::document_items(&canvas).iter().any(|item| {
         matches!(
             item,

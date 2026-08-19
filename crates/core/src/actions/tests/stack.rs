@@ -166,7 +166,7 @@ fn plain_then_ctrl_click_selects_two_datasets_for_stacking() {
         canvas.panel_letter(canvas.objects[0].id).as_deref(),
         Some("a")
     );
-    assert_eq!(canvas.panel_notes().len(), 1);
+    assert!(canvas.panel_notes().is_empty());
     let plot = canvas.objects[0].plot().unwrap();
     assert_ne!(
         plot.binding.series[0].primary_color(),

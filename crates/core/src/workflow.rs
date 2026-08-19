@@ -13,6 +13,8 @@ use plotx_io::{Acquisition, DataFormat, Domain, LoadWarning, LoadWarningCode, Pr
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+mod scientific_identity;
+pub use scientific_identity::dataset_from_loaded_acquisition;
 #[path = "workflow/mass_spec_layout.rs"]
 mod mass_spec_layout;
 #[path = "workflow/trace_collection.rs"]
@@ -169,7 +171,8 @@ pub fn load_dataset(path: &Path) -> Result<LoadedDataset, WorkflowError> {
         &loaded.warnings,
         &loaded.acquisition,
     );
-    let (dataset, source) = dataset_from_acquisition(loaded.acquisition);
+    let (dataset, source) =
+        dataset_from_loaded_acquisition(loaded.acquisition, loaded.scientific_identity, true);
     Ok(LoadedDataset {
         dataset,
         inspection,

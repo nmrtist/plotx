@@ -54,8 +54,7 @@ pub struct PanDrag {
     pub before: CanvasViewport,
 }
 
-/// A plot panel's identity: its long descriptive `note` (board-only, auto-listed
-/// in the page notes region) plus the placement/visibility of its auto-assigned
+/// A plot panel's user note plus the placement/visibility of its auto-assigned
 /// panel letter (a/b/c…), which is drawn bold in the frame's top-left corner. The
 /// letter glyph itself is computed from reading order + the page's label style, so
 /// it is not stored here.
@@ -448,9 +447,9 @@ pub struct CanvasDocument {
     pub selected_object: Option<ObjectId>,
     /// Top-left of this page on the board, in world (pt) space.
     pub board_pos: [f32; 2],
-    /// Board-only figure caption shown below the page frame (never exported or
-    /// presented). Acts as the page-level caption; per-panel descriptions live in
-    /// each plot's user note. Empty renders nothing; `caption_visible` toggles it
+    /// Board-only user note shown below the page frame (never exported or
+    /// presented). Per-panel notes live on panels. `caption_visible` toggles the
+    /// scientific summary and all user notes
     /// per page.
     pub caption: String,
     pub caption_visible: bool,

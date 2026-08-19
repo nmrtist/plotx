@@ -30,6 +30,7 @@ const SNAP_PX: f32 = 6.0;
 
 mod authoring;
 mod board;
+mod board_caption;
 mod board_marquee;
 mod board_notes;
 mod breadcrumb;
@@ -60,6 +61,7 @@ mod tiling;
 
 pub(crate) use authoring::*;
 pub(crate) use board::*;
+pub(crate) use board_caption::*;
 pub(crate) use board_notes::*;
 pub(crate) use breadcrumb::*;
 pub(crate) use chrome::*;

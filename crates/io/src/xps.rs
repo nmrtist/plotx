@@ -248,6 +248,14 @@ fn load_result(
         })
         .collect();
     Ok(LoadResult {
+        scientific_identity: crate::ImportedScientificIdentity {
+            subject: experiment
+                .measurements
+                .first()
+                .map(|item| item.label.clone()),
+            acquisition: None,
+            source_label: crate::ImportedScientificIdentity::from_path(path).source_label,
+        },
         acquisition: Acquisition::Xps(Box::new(experiment)),
         format,
         provenance: Provenance {

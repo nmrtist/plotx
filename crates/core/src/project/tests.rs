@@ -228,6 +228,11 @@ fn view_layout_without_board_pos_lands_on_grid_slot() {
 #[test]
 fn project_roundtrip_preserves_data_recipe_and_view() {
     let mut app = sample_app();
+    app.doc.datasets[0].set_scientific_identity(plotx_io::ImportedScientificIdentity {
+        subject: Some("Sample A".to_owned()),
+        acquisition: Some("zg30".to_owned()),
+        source_label: "synthetic".to_owned(),
+    });
     app.doc.canvases[0].layout = PageLayout {
         margin_mm: [11.0, 4.0, 9.0, 6.0],
         gutter_mm: 7.0,
@@ -288,6 +293,10 @@ fn project_roundtrip_preserves_data_recipe_and_view() {
     let _ = std::fs::remove_file(&path);
 
     assert_eq!(loaded.doc.datasets.len(), 1);
+    assert_eq!(
+        loaded.doc.datasets[0].scientific_identity(),
+        app.doc.datasets[0].scientific_identity()
+    );
     assert_eq!(loaded.doc.canvases.len(), 1);
     assert_eq!(loaded.active_dataset(), Some(0));
     assert_eq!(loaded.session.active_canvas, Some(0));

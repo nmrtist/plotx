@@ -223,7 +223,8 @@ impl PlotxApp {
             Ok(result) => {
                 let format = result.format.as_str();
                 let warnings = result.warnings;
-                let source = self.insert_acquisition(result.acquisition);
+                let source =
+                    self.insert_acquisition(result.acquisition, result.scientific_identity);
                 let mut report = if warnings.is_empty() {
                     OperationReport::success(
                         operation_id,
@@ -300,7 +301,7 @@ impl PlotxApp {
                 let mut warnings = result.warnings;
                 for item in result.items {
                     warnings.extend(item.warnings);
-                    self.insert_acquisition(item.acquisition);
+                    self.insert_acquisition(item.acquisition, item.scientific_identity);
                 }
                 let summary = if warnings.is_empty() {
                     format!("Loaded {count} spectra from {archive}")
@@ -362,12 +363,16 @@ impl PlotxApp {
 
     // Turn a loaded acquisition into a dataset on its own default canvas, as one
     // undoable step, and return its source label.
-    fn insert_acquisition(&mut self, acq: plotx_io::Acquisition) -> String {
-        let (dataset, source) =
-            crate::workflow::dataset_from_acquisition_with_equal_scale_preference(
-                acq,
-                self.settings.general.equal_scale_homonuclear_2d_imports,
-            );
+    fn insert_acquisition(
+        &mut self,
+        acq: plotx_io::Acquisition,
+        scientific_identity: plotx_io::ImportedScientificIdentity,
+    ) -> String {
+        let (dataset, source) = crate::workflow::dataset_from_loaded_acquisition(
+            acq,
+            scientific_identity,
+            self.settings.general.equal_scale_homonuclear_2d_imports,
+        );
         let name = Self::short_name(&source);
         self.execute_action(Action::insert_dataset_with_default_canvas(
             self,

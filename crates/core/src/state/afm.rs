@@ -7,6 +7,7 @@ pub struct AfmDataset {
     pub resource_id: DatasetId,
     /// Persisted mapping from stable channel keys to dataset-local field ids.
     pub field_catalog: FieldCatalog,
+    pub scientific_identity: plotx_io::ImportedScientificIdentity,
     pub data: Arc<AfmData>,
     /// Immutable keys calculated with the loaded raster data, never serialized.
     pub(crate) image_field_keys: Arc<[String]>,
@@ -17,6 +18,8 @@ pub struct AfmDataset {
 
 impl AfmDataset {
     pub fn load(data: AfmData) -> Self {
+        let scientific_identity =
+            plotx_io::ImportedScientificIdentity::from_path(std::path::Path::new(&data.source));
         let selected_pixel = data.forces.as_ref().map_or([0, 0], |forces| {
             [forces.grid_width / 2, forces.grid_height / 2]
         });
@@ -26,6 +29,7 @@ impl AfmDataset {
         Self {
             resource_id: DatasetId::new(),
             field_catalog,
+            scientific_identity,
             data: Arc::new(data),
             image_field_keys,
             name: None,

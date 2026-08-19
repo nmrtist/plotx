@@ -783,6 +783,8 @@ mod reference_tests;
 #[cfg(test)]
 mod schema_tests;
 #[cfg(test)]
+mod scientific_identity_tests;
+#[cfg(test)]
 mod step_identity_tests;
 #[cfg(test)]
 mod symmetry_tests;

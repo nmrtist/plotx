@@ -260,6 +260,7 @@ fn result(path: &Path, format: DataFormat, data: XrdData) -> Result<LoadResult, 
     data.validate()
         .map_err(|error| IoError::InvalidXrd(error.into()))?;
     Ok(LoadResult {
+        scientific_identity: crate::ImportedScientificIdentity::from_path(path),
         acquisition: Acquisition::Xrd(Box::new(data)),
         format,
         provenance: Provenance {

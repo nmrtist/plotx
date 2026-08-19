@@ -99,6 +99,7 @@ pub fn load(path: &Path) -> Result<LoadResult, IoError> {
     let bytes = std::fs::read(path)?;
     let acquisition = parse_bytes(&bytes, path.to_string_lossy().as_ref())?;
     Ok(LoadResult {
+        scientific_identity: crate::ImportedScientificIdentity::from_path(path),
         acquisition,
         format: DataFormat::JcampDx1D,
         provenance: Provenance {

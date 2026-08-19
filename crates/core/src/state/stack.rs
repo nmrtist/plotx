@@ -601,11 +601,9 @@ impl PlotxApp {
             visible: true,
             kind: CanvasObjectKind::Plot(Box::new(plot)),
         });
-        let panel_id = canvas
+        canvas
             .create_panel_for_plot(id)
             .expect("a newly materialized stack object is a plot");
-        canvas.panel_mut(panel_id).expect("new panel exists").note =
-            self.default_plot_title(primary);
         let index = self.doc.canvases.len();
         let canvas_count = self.doc.canvases.len();
         self.execute_action(Action::insert_canvas(

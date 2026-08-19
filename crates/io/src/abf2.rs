@@ -66,6 +66,11 @@ pub fn load(path: &Path) -> Result<LoadResult, IoError> {
     let bytes = std::fs::read(path)?;
     let (data, warnings) = parse(&bytes, path.to_string_lossy().into_owned())?;
     Ok(LoadResult {
+        scientific_identity: crate::ImportedScientificIdentity {
+            subject: None,
+            acquisition: data.protocol.clone(),
+            source_label: crate::ImportedScientificIdentity::from_path(path).source_label,
+        },
         acquisition: Acquisition::Electrophysiology(Box::new(data)),
         format: DataFormat::Abf2,
         provenance: Provenance {

@@ -171,6 +171,7 @@ pub struct TableDataset {
     pub resource_id: crate::state::DatasetId,
     /// Persisted identity for the table's default series field.
     pub field_catalog: crate::state::FieldCatalog,
+    pub scientific_identity: plotx_io::ImportedScientificIdentity,
     /// Executable extraction recipe used to refresh this immutable table.
     pub provenance: Option<TableProvenance>,
     /// Domain constants consumed by analysis bindings.
@@ -225,6 +226,11 @@ impl TableDataset {
         Self {
             resource_id: new_resource_id(),
             field_catalog,
+            scientific_identity: plotx_io::ImportedScientificIdentity {
+                subject: None,
+                acquisition: None,
+                source_label: "Data table".to_owned(),
+            },
             provenance: None,
             meta: TableMeta::default(),
             curve_fit_analyses: Vec::new(),

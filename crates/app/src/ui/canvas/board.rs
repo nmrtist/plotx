@@ -339,26 +339,26 @@ pub(crate) fn paint_frame_captions(
 ) {
     let bt = BoardTransform::from_board(app.session.board, screen);
     let color = ui.visuals().text_color();
-    for canvas in &app.doc.canvases {
+    for (ci, canvas) in app.doc.canvases.iter().enumerate() {
         if !canvas.caption_visible {
             continue;
         }
-        let mut lines: Vec<String> = Vec::new();
-        if !canvas.caption.trim().is_empty() {
-            lines.push(canvas.caption.clone());
-        }
-        lines.extend(
-            canvas
-                .panel_notes()
-                .into_iter()
-                .map(|(letter, note)| format!("{letter} — {note}")),
-        );
+        let lines = frame_caption_lines(app, ci);
         if lines.is_empty() {
             continue;
         }
         let page = bt.page_screen_rect(canvas);
         let font = egui::FontId::proportional((11.0 * bt.zoom).clamp(7.0, 28.0));
-        let galley = painter.layout(lines.join("\n"), font, color, page.width().max(1.0));
+        let galley = painter.layout(
+            lines
+                .into_iter()
+                .map(|line| line.text)
+                .collect::<Vec<_>>()
+                .join("\n"),
+            font,
+            color,
+            page.width().max(1.0),
+        );
         let top_left = Pos2::new(page.left(), page.bottom() + CAPTION_GAP_PX);
         if !screen.intersects(egui::Rect::from_min_size(top_left, galley.size())) {
             continue;

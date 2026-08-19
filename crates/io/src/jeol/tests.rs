@@ -47,6 +47,18 @@ fn params_with(strings: &[(&str, &str)]) -> Params {
 }
 
 #[test]
+fn experiment_name_is_cleaned_for_scientific_identity() {
+    let params = params_with(&[(
+        "experiment",
+        r"C:\Program Files\JEOL\experiments\13c_eb_sn.jxp",
+    )]);
+    assert_eq!(experiment_name(&params).as_deref(), Some("13c_eb_sn"));
+
+    let params = params_with(&[("CONTENT", "cosy.JXP")]);
+    assert_eq!(experiment_name(&params).as_deref(), Some("cosy"));
+}
+
+#[test]
 fn group_delay_from_fir_cascade() {
     // orders = "<stage count> <taps...>", factors = per-stage decimation.
     // Delay (final points) = Σ (taps_k-1)/2 · D_{k-1} / D_total.

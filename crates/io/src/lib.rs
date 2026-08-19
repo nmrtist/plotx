@@ -101,9 +101,41 @@ pub struct LoadWarning {
 #[derive(Debug, Clone)]
 pub struct LoadResult {
     pub acquisition: Acquisition,
+    /// Normalized, user-facing identity recovered by the importer. This is
+    /// deliberately separate from provenance paths and parser diagnostics: the
+    /// application must never reverse-parse `source` strings to name a sample.
+    pub scientific_identity: ImportedScientificIdentity,
     pub format: DataFormat,
     pub provenance: Provenance,
     pub warnings: Vec<LoadWarning>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ImportedScientificIdentity {
+    /// The specimen, recording, run, or other scientific subject.
+    pub subject: Option<String>,
+    /// The acquisition experiment, protocol, or method when the format names it.
+    pub acquisition: Option<String>,
+    /// A clean logical source name used only when no subject was recovered.
+    pub source_label: String,
+}
+
+impl ImportedScientificIdentity {
+    pub fn from_path(path: &Path) -> Self {
+        let source_label = path
+            .file_stem()
+            .or_else(|| path.file_name())
+            .and_then(|value| value.to_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("Untitled data")
+            .to_owned();
+        Self {
+            subject: None,
+            acquisition: None,
+            source_label,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -683,17 +715,7 @@ pub fn load_path(path: impl AsRef<Path>) -> Result<LoadResult, IoError> {
     let path = path.as_ref();
     match detect_format(path)? {
         DataFormat::Abf2 => abf2::load(path),
-        DataFormat::JeolDelta => Ok(LoadResult {
-            acquisition: jeol::read_jdf_path(path)?,
-            format: DataFormat::JeolDelta,
-            provenance: Provenance {
-                selected_path: path.to_path_buf(),
-                data_path: path.to_path_buf(),
-                parameter_paths: Vec::new(),
-                companion_paths: Vec::new(),
-            },
-            warnings: Vec::new(),
-        }),
+        DataFormat::JeolDelta => jeol::load_jdf_path(path),
         DataFormat::BrukerRaw => bruker::load_raw(path),
         DataFormat::VarianAgilentRaw => varian::load_raw(path),
         DataFormat::BrukerProcessed1D | DataFormat::BrukerProcessed2D => {

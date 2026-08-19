@@ -35,6 +35,7 @@ pub struct NmrDataset {
     /// Persisted child-field identity allocator and key mapping.
     pub field_catalog: FieldCatalog,
     pub data: NmrData,
+    pub scientific_identity: plotx_io::ImportedScientificIdentity,
     pub base: Processed1D,
     pub pipeline: AxisPipeline,
     /// Persistent owner-local allocator; excluded from processing undo snapshots.
@@ -62,6 +63,8 @@ pub struct NmrDataset {
 
 impl NmrDataset {
     pub fn load(data: NmrData) -> Self {
+        let scientific_identity =
+            plotx_io::ImportedScientificIdentity::from_path(std::path::Path::new(&data.source));
         let pipeline = match data.domain {
             Domain::Time => AxisPipeline::default_1d(),
             Domain::Frequency => AxisPipeline::frequency_1d(),
@@ -77,6 +80,7 @@ impl NmrDataset {
             resource_id: DatasetId::new(),
             field_catalog,
             data,
+            scientific_identity,
             base,
             pipeline,
             next_step_id: 0,
@@ -168,6 +172,7 @@ pub struct Nmr2DDataset {
     /// Persisted child-field identity allocator and key mapping.
     pub field_catalog: FieldCatalog,
     pub data: Arc<NmrData2D>,
+    pub scientific_identity: plotx_io::ImportedScientificIdentity,
     pub params: Params2D,
     /// Persistent owner-local allocator shared by both axes.
     pub next_step_id: u64,
@@ -233,6 +238,8 @@ impl Nmr2DDataset {
         data: NmrData2D,
         equal_scale_homonuclear_2d_imports: bool,
     ) -> Self {
+        let scientific_identity =
+            plotx_io::ImportedScientificIdentity::from_path(std::path::Path::new(&data.source));
         let preset = recommend_preset(&data);
         let params = match data.domain {
             Domain::Time => Params2D::default_for(preset),
@@ -260,6 +267,7 @@ impl Nmr2DDataset {
             resource_id: DatasetId::new(),
             field_catalog,
             data: Arc::new(data),
+            scientific_identity,
             base_params: params.clone(),
             base_stale: false,
             params,

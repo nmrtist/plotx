@@ -18,6 +18,16 @@ undoes as one step. In the Canvas list, `Shift`-click selects a continuous range
 and `Ctrl`-click adds or removes one canvas. `Ctrl` + `A` selects every frame or
 canvas according to the area you last used.
 
+## Scientific summary and notes
+
+PlotX shows an automatic summary of the plotted data below each page on the
+board. On a multi-panel page, shared information appears once and the remaining
+details follow the panel labels.
+
+Open **Canvas settings** to add a page note, or select a Panel and edit its
+**Note**. Notes appear after the summary and are not included in exports. Use
+**Show summary below page** to show or hide this whole board-only block.
+
 ## Add external images
 
 To place each image on its own fitted page, choose **Add Images…** from the File

@@ -14,7 +14,11 @@ fn loads_big_endian_scaled_1r_from_experiment_directory() {
     let experiment = root.join("sample").join("3");
     let proc_dir = experiment.join("pdata").join("1");
     std::fs::create_dir_all(&proc_dir).unwrap();
-    std::fs::write(experiment.join("acqus"), "##$TD= 8\n").unwrap();
+    std::fs::write(
+        experiment.join("acqus"),
+        "##$TD= 8\n##$EXP= <PROTON>\n##$PULPROG= <zg30>\n",
+    )
+    .unwrap();
     std::fs::write(
         proc_dir.join("procs"),
         "##$SI= 4\n##$DTYPP= 0\n##$BYTORDP= 1\n##$NC_proc= 1\n\
@@ -33,6 +37,14 @@ fn loads_big_endian_scaled_1r_from_experiment_directory() {
     );
     let loaded = plotx_io::load_path(&experiment).unwrap();
     assert_eq!(loaded.format, DataFormat::BrukerProcessed1D);
+    assert_eq!(
+        loaded.scientific_identity.subject.as_deref(),
+        Some("sample")
+    );
+    assert_eq!(
+        loaded.scientific_identity.acquisition.as_deref(),
+        Some("PROTON")
+    );
     assert!(
         loaded
             .provenance
@@ -88,6 +100,10 @@ fn loads_2rr_and_reverses_both_frequency_axes() {
 
     let loaded = plotx_io::load_path(&proc_dir).unwrap();
     assert_eq!(loaded.format, DataFormat::BrukerProcessed2D);
+    assert_eq!(
+        loaded.scientific_identity.subject.as_deref(),
+        Some("sample")
+    );
     let data = match loaded.acquisition {
         Acquisition::D2(data) => *data,
         Acquisition::D1(_) => panic!("expected 2D"),

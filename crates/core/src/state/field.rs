@@ -1,4 +1,5 @@
 use super::field_runtime::*;
+use super::scientific_summary::SummaryPart;
 use super::{
     FieldCatalog, FieldId, channel_key, electrophysiology_channel_key,
     extracted_stream_spectrum_key, extraction_title, mass_spec_dataset_field_keys, stream_bpi_key,
@@ -45,6 +46,7 @@ impl super::Dataset {
                     id,
                     local_id: local_id.to_owned(),
                     name: name.to_owned(),
+                    scientific_observation: SummaryPart::new(format!("field:{local_id}"), name),
                     capabilities,
                     dimensions,
                     units,
@@ -639,6 +641,9 @@ pub struct FieldDescriptor {
     pub id: FieldId,
     pub local_id: String,
     pub name: String,
+    /// The scientific concept represented by this field. This is required so
+    /// every new field participates in the v1 summary contract by construction.
+    pub scientific_observation: SummaryPart,
     pub capabilities: FieldCapabilities,
     pub dimensions: Vec<usize>,
     pub units: Vec<String>,

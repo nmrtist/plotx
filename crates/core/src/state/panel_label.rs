@@ -147,21 +147,25 @@ impl CanvasDocument {
         }
     }
 
-    /// Skips empty notes.
+    /// User-authored notes only. Skips empty notes and returns an empty label
+    /// when the panel letter is not displayed.
     pub fn panel_note_entries(&self) -> Vec<(ObjectId, String, String)> {
         self.panels
             .iter()
             .filter_map(|panel| {
                 let id = *panel.item_order.first()?;
                 let note = panel.note.trim();
-                if !panel.label.visible {
-                    return None;
-                }
-                let letter = match &panel.label.mode {
-                    PanelLabelMode::Auto { slot } => self.panel_label_style.format(*slot as usize),
-                    PanelLabelMode::LockedAuto { value } | PanelLabelMode::Manual { value } => {
-                        value.clone()
+                let letter = if self.panel_label_is_displayed(panel.id) {
+                    match &panel.label.mode {
+                        PanelLabelMode::Auto { slot } => {
+                            self.panel_label_style.format(*slot as usize)
+                        }
+                        PanelLabelMode::LockedAuto { value } | PanelLabelMode::Manual { value } => {
+                            value.clone()
+                        }
                     }
+                } else {
+                    String::new()
                 };
                 (!note.is_empty()).then(|| (id, letter, note.to_owned()))
             })

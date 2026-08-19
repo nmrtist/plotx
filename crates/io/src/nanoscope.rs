@@ -138,6 +138,7 @@ pub fn load(path: &Path) -> Result<LoadResult, IoError> {
     }
 
     Ok(LoadResult {
+        scientific_identity: crate::ImportedScientificIdentity::from_path(path),
         acquisition: Acquisition::Afm(Box::new(data)),
         format,
         provenance: Provenance {

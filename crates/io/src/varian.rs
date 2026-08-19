@@ -38,6 +38,15 @@ pub fn load_raw(path: &Path) -> Result<LoadResult, IoError> {
     reject_unsupported(&params)?;
     let acquisition = assemble(&dir, &params, raw)?;
     Ok(LoadResult {
+        scientific_identity: crate::ImportedScientificIdentity {
+            subject: sample_name(&dir, &params),
+            acquisition: experiment_name(&params),
+            source_label: dir
+                .file_stem()
+                .and_then(|name| name.to_str())
+                .unwrap_or("Untitled NMR")
+                .to_owned(),
+        },
         acquisition,
         format: DataFormat::VarianAgilentRaw,
         provenance: Provenance {
@@ -235,7 +244,16 @@ fn description(dir: &Path, p: &Procpar, direct: &Dim, indirect: Option<&Dim>) ->
         Some(indirect) => format!("{}/{}", direct.nucleus, indirect.nucleus),
         None => direct.nucleus.clone(),
     };
-    let data_name = ["samplename", "sample", "name", "filename"]
+    sample_name(dir, p)
+        .into_iter()
+        .chain(std::iter::once(nuclei))
+        .chain(experiment_name(p))
+        .collect::<Vec<_>>()
+        .join(" — ")
+}
+
+fn sample_name(dir: &Path, p: &Procpar) -> Option<String> {
+    ["samplename", "sample", "name", "filename"]
         .into_iter()
         .find_map(|name| p.string(name).and_then(nonempty))
         .map(str::to_owned)
@@ -244,17 +262,14 @@ fn description(dir: &Path, p: &Procpar, direct: &Dim, indirect: Option<&Dim>) ->
                 .and_then(|name| name.to_str())
                 .and_then(nonempty)
                 .map(str::to_owned)
-        });
-    let experiment = ["pslabel", "seqfil"]
+        })
+}
+
+fn experiment_name(p: &Procpar) -> Option<String> {
+    ["pslabel", "seqfil"]
         .into_iter()
         .find_map(|name| p.string(name).and_then(nonempty))
-        .map(str::to_owned);
-    data_name
-        .into_iter()
-        .chain(std::iter::once(nuclei))
-        .chain(experiment)
-        .collect::<Vec<_>>()
-        .join(" — ")
+        .map(str::to_owned)
 }
 
 fn nonempty(value: &str) -> Option<&str> {

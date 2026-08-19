@@ -64,13 +64,15 @@ pub(in crate::ui) fn canvas_settings_window(app: &mut PlotxApp, ctx: &egui::Cont
             });
 
             crate::ui::properties::panel::canvas_caption_section(app, &target, ui);
-            ui.weak("Shown below the page on the board only — not exported or presented.");
+            ui.weak(
+                "The scientific summary is generated automatically. This optional page note is shown after it on the board only.",
+            );
 
             let resp = ui.add(
                 egui::TextEdit::multiline(&mut app.doc.canvases[ci].caption)
                     .desired_width(340.0)
                     .desired_rows(3)
-                    .hint_text("e.g. Figure 1. Concentration vs. time…"),
+                    .hint_text("Optional page note…"),
             );
             if resp.gained_focus() {
                 app.session.ui.caption_edit_before = Some((
@@ -97,12 +99,12 @@ pub(in crate::ui) fn canvas_settings_window(app: &mut PlotxApp, ctx: &egui::Cont
     }
 }
 
-/// Notes are auto-listed below the page on the board.
+/// User notes are listed after the automatic scientific summary.
 fn panels_section(app: &mut PlotxApp, ci: usize, ui: &mut Ui) {
     ui.label(crate::typography::headline("Panels"));
     ui.add_space(6.0);
 
-    ui.weak("Letters are top-left in each plot; notes list below the page (board only).");
+    ui.weak("Letters identify multi-panel plots; optional notes follow the scientific summary.");
     ui.add_space(4.0);
 
     let order = app.doc.canvases[ci].plot_reading_order();

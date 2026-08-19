@@ -76,6 +76,38 @@ fn source_prefix(dir: &Path) -> String {
     }
 }
 
+fn scientific_identity(
+    dir: &Path,
+    params: Option<&JcampParams>,
+) -> crate::ImportedScientificIdentity {
+    let source_label = dir
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("Untitled NMR")
+        .to_owned();
+    let subject = dir
+        .parent()
+        .and_then(Path::file_name)
+        .and_then(|value| value.to_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned);
+    let acquisition = params
+        .and_then(|params| params.string("EXP").or_else(|| params.string("PULPROG")))
+        .map(|value| {
+            value
+                .trim_matches(|c| c == '<' || c == '>')
+                .trim()
+                .to_owned()
+        })
+        .filter(|value| !value.is_empty());
+    crate::ImportedScientificIdentity {
+        subject,
+        acquisition,
+        source_label,
+    }
+}
+
 // The first non-empty line of a processed-data `title` file, preferring proc no.
 // 1 and otherwise the lowest-numbered proc dir carrying a non-empty title.
 fn pdata_title(dir: &Path) -> Option<String> {
@@ -118,13 +150,16 @@ pub fn read_bruker(path: &Path) -> Result<Acquisition, IoError> {
 
 pub fn load_raw(path: &Path) -> Result<LoadResult, IoError> {
     let (dir, data_path) = resolve_bruker(path);
+    let params = JcampParams::parse(&std::fs::read_to_string(dir.join("acqus"))?);
     let mut parameter_paths = vec![dir.join("acqus")];
     if data_path.file_name().and_then(|s| s.to_str()) == Some("ser") && dir.join("acqu2s").is_file()
     {
         parameter_paths.push(dir.join("acqu2s"));
     }
+    let acquisition = read_bruker(path)?;
     Ok(LoadResult {
-        acquisition: read_bruker(path)?,
+        scientific_identity: scientific_identity(&dir, Some(&params)),
+        acquisition,
         format: DataFormat::BrukerRaw,
         provenance: Provenance {
             selected_path: path.to_path_buf(),
@@ -295,13 +330,7 @@ fn read_bruker_2d(
     let direct = dim_from(f2, group_delay(f2));
     let indirect = dim_from(&f1, 0.0);
 
-    let experiment = f2
-        .string("PULPROG")
-        .map(|s| {
-            s.trim_matches(|c| c == '<' || c == '>')
-                .to_ascii_lowercase()
-        })
-        .filter(|s| !s.is_empty());
+    let experiment = scientific_identity(dir, Some(f2)).acquisition;
 
     let source = format!(
         "{} (Bruker TopSpin 2D, {sample:?}, {cols}×{rows})",
@@ -719,6 +748,12 @@ mod tests {
         std::fs::remove_file(expno.join("pdata").join("1").join("title")).unwrap();
         std::fs::remove_file(expno.join("pdata").join("2").join("title")).unwrap();
         assert_eq!(source_prefix(&expno), "Sucrose (expno 3)");
+
+        let params = JcampParams::parse("##$EXP= <COSY>\n##$PULPROG= <cosygpppqf>\n");
+        let identity = scientific_identity(&expno, Some(&params));
+        assert_eq!(identity.subject.as_deref(), Some("Sucrose"));
+        assert_eq!(identity.acquisition.as_deref(), Some("COSY"));
+        assert_eq!(identity.source_label, "3");
 
         std::fs::remove_dir_all(&base).unwrap();
     }

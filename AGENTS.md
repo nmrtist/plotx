@@ -47,6 +47,8 @@ These instructions apply to the entire repository.
 - Encoding applicability is attached to field rendering capabilities, never to
   a data-domain enum. New domains gain an encoding by exposing its capability;
   do not add domain branches or domain names to encoding/property registries.
+- Scientific summaries take identity from importers, observation from field
+  descriptors, and context from active bindings; panel notes are user-authored.
 - A persisted default, an invocation input, and result provenance are lifecycle
   copies of one value, not parallel sources of state. Resolve them in priority
   order: explicit input, target provenance, then default.

@@ -16,24 +16,16 @@ pub(crate) fn handle_frame_caption_interactions(
         let page = bt.page_screen_rect(canvas);
         let font = egui::FontId::proportional((11.0 * bt.zoom).clamp(7.0, 28.0));
         let mut y = page.bottom() + CAPTION_GAP_PX;
-        if !canvas.caption.trim().is_empty() {
-            let galley = ui.painter().layout(
-                canvas.caption.clone(),
-                font.clone(),
-                color,
-                page.width().max(1.0),
-            );
-            y += galley.size().y;
-        }
-
-        let entries = canvas.panel_note_entries();
-        for (object_id, letter, note) in entries {
-            let text = format!("{letter} - {note}");
+        for line in frame_caption_lines(app, ci) {
+            let text = line.text;
             let galley = ui
                 .painter()
                 .layout(text, font.clone(), color, page.width().max(1.0));
             let row = egui::Rect::from_min_size(Pos2::new(page.left(), y), galley.size());
             y += galley.size().y;
+            let Some(object_id) = line.panel_note else {
+                continue;
+            };
             if !screen.intersects(row) {
                 continue;
             }
@@ -43,7 +35,7 @@ pub(crate) fn handle_frame_caption_interactions(
                     ui.id().with(("panel_note_row", ci, object_id)),
                     Sense::click(),
                 )
-                .on_hover_text("Click to edit this panel description.");
+                .on_hover_text("Click to edit this panel note.");
             if resp.hovered() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                 consumed = true;
@@ -57,11 +49,11 @@ pub(crate) fn handle_frame_caption_interactions(
             resp.context_menu(|ui| {
                 app.session.active_canvas = Some(ci);
                 app.select_object(ci, object_id);
-                if ui.button("Edit description in place").clicked() {
+                if ui.button("Edit note in place").clicked() {
                     open_inline_panel_note_editor(app, ci, object_id);
                     ui.close();
                 }
-                if ui.button("Edit description in dialog").clicked() {
+                if ui.button("Edit note in dialog").clicked() {
                     app.session.ui.panel_note_inline_edit = None;
                     open_panel_note_editor(app, ci, object_id);
                     ui.close();
@@ -159,23 +151,13 @@ fn panel_note_row_rect(
     let color = ui.visuals().text_color();
     let font = egui::FontId::proportional((11.0 * bt.zoom).clamp(7.0, 28.0));
     let mut y = page.bottom() + CAPTION_GAP_PX;
-    if !canvas.caption.trim().is_empty() {
-        let galley = ui.painter().layout(
-            canvas.caption.clone(),
-            font.clone(),
-            color,
-            page.width().max(1.0),
-        );
-        y += galley.size().y;
-    }
-
-    for (id, letter, note) in canvas.panel_note_entries() {
-        let text = format!("{letter} - {note}");
+    for line in frame_caption_lines(app, ci) {
+        let text = line.text;
         let galley = ui
             .painter()
             .layout(text, font.clone(), color, page.width().max(1.0));
         let row = egui::Rect::from_min_size(Pos2::new(page.left(), y), galley.size());
-        if id == object_id {
+        if line.panel_note == Some(object_id) {
             return Some(row);
         }
         y += galley.size().y;
@@ -197,7 +179,7 @@ fn commit_inline_panel_note_edit(app: &mut PlotxApp) {
         return;
     };
     app.execute_action(Action::set_panel_meta(ci, id, before, after));
-    app.session.status = "Panel description updated.".to_owned();
+    app.session.status = "Panel note updated.".to_owned();
 }
 
 fn cancel_inline_panel_note_edit(app: &mut PlotxApp) {
@@ -208,5 +190,5 @@ fn cancel_inline_panel_note_edit(app: &mut PlotxApp) {
     if let Some(canvas) = app.doc.canvases.get_mut(ci) {
         canvas.set_panel_meta_for_content(id, before);
     }
-    app.session.status = "Panel description edit cancelled.".to_owned();
+    app.session.status = "Panel note edit cancelled.".to_owned();
 }

@@ -67,6 +67,7 @@ pub struct ExtractedMassSpectrum {
 pub struct MassSpecDataset {
     pub resource_id: DatasetId,
     pub field_catalog: FieldCatalog,
+    pub scientific_identity: plotx_io::ImportedScientificIdentity,
     pub run: MassSpecRun,
     pub name: Option<String>,
     pub lineage: Option<DatasetLineage>,
@@ -118,6 +119,8 @@ impl MassSpecDataset {
         .then_some(self.active_stream)
     }
     pub fn load(run: MassSpecRun) -> Self {
+        let scientific_identity =
+            plotx_io::ImportedScientificIdentity::from_path(std::path::Path::new(&run.source));
         let active_stream =
             first_ms_stream(&run).expect("a validated LC–MS run has a readable primary stream");
         let mut field_catalog = mass_spec_field_catalog(&run);
@@ -125,6 +128,7 @@ impl MassSpecDataset {
         Self {
             resource_id: DatasetId::new(),
             field_catalog,
+            scientific_identity,
             run,
             name: None,
             lineage: None,

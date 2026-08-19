@@ -32,7 +32,7 @@ pub(crate) fn handle_panel_label_interactions(
     let id = ui.id().with(("panel_label", ci, object_id));
     let resp = ui
         .interact(label_rect, id, Sense::click_and_drag())
-        .on_hover_text("Double-click to edit this panel description");
+        .on_hover_text("Double-click to edit this panel note");
     let mut consumed =
         label_hovered || resp.hovered() || matches!(app.interaction(), Interaction::PanelLabel(_));
 
@@ -41,8 +41,7 @@ pub(crate) fn handle_panel_label_interactions(
         if matches!(app.interaction(), Interaction::Object(_)) {
             app.reset_interaction();
         }
-        app.session.status =
-            "Panel letter selected. Double-click to edit its description.".to_owned();
+        app.session.status = "Panel letter selected. Double-click to edit its note.".to_owned();
         if let (Some(pointer), Some(panel)) = (
             hover,
             app.doc.canvases[ci].panel_meta_for_content(object_id),
@@ -65,7 +64,7 @@ pub(crate) fn handle_panel_label_interactions(
 
     resp.context_menu(|ui| {
         app.select_panel_label(ci, object_id);
-        if ui.button("Edit panel description").clicked() {
+        if ui.button("Edit panel note").clicked() {
             open_panel_note_editor(app, ci, object_id);
             ui.close();
         }

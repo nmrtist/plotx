@@ -247,6 +247,7 @@ pub fn load(path: &Path) -> Result<LoadResult, IoError> {
     };
     run.validate().map_err(invalid)?;
     Ok(LoadResult {
+        scientific_identity: crate::ImportedScientificIdentity::from_path(path),
         acquisition: Acquisition::MassSpec(Box::new(run)),
         format: DataFormat::WatersMassLynxRaw,
         provenance: provenance(&bundle),

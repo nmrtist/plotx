@@ -52,6 +52,11 @@ impl NmrDataset {
         Self {
             resource_id: DatasetId::new(),
             field_catalog,
+            scientific_identity: plotx_io::ImportedScientificIdentity {
+                subject: None,
+                acquisition: None,
+                source_label: source.clone(),
+            },
             data,
             base: processed.clone(),
             pipeline,

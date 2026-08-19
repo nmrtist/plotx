@@ -98,7 +98,7 @@ pub fn load_processed(path: &Path) -> Result<LoadResult, IoError> {
     let procs_path = resolved.proc_dir.join("procs");
     let procs = JcampParams::parse(&std::fs::read_to_string(&procs_path)?);
     let mut warnings = Vec::new();
-    let (acquisition, format, mut parameter_paths) = if resolved.two_d {
+    let (mut acquisition, format, mut parameter_paths) = if resolved.two_d {
         let proc2s_path = resolved.proc_dir.join("proc2s");
         let proc2s = JcampParams::parse(&std::fs::read_to_string(&proc2s_path)?);
         (
@@ -132,6 +132,18 @@ pub fn load_processed(path: &Path) -> Result<LoadResult, IoError> {
             vec![procs_path],
         )
     };
+    let experiment_dir = resolved.proc_dir.parent().and_then(Path::parent);
+    let scientific_identity = experiment_dir
+        .map(|dir| {
+            let params = std::fs::read_to_string(dir.join("acqus"))
+                .ok()
+                .map(|text| JcampParams::parse(&text));
+            scientific_identity(dir, params.as_ref())
+        })
+        .unwrap_or_else(|| crate::ImportedScientificIdentity::from_path(path));
+    if let Acquisition::D2(data) = &mut acquisition {
+        data.experiment.clone_from(&scientific_identity.acquisition);
+    }
     if let Some(acqus) = acquisition_params_for(&resolved.proc_dir, "acqus") {
         parameter_paths.push(acqus);
     }
@@ -141,6 +153,7 @@ pub fn load_processed(path: &Path) -> Result<LoadResult, IoError> {
         parameter_paths.push(acqu2s);
     }
     Ok(LoadResult {
+        scientific_identity,
         acquisition,
         format,
         provenance: Provenance {
@@ -312,10 +325,7 @@ fn read_processed_2d(
 }
 
 fn processed_source_prefix(proc_dir: &Path) -> String {
-    let experiment = proc_dir
-        .parent()
-        .and_then(Path::parent)
-        .and_then(Path::parent);
+    let experiment = proc_dir.parent().and_then(Path::parent);
     experiment
         .map(source_prefix)
         .unwrap_or_else(|| proc_dir.display().to_string())

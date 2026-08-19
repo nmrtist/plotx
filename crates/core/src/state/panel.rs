@@ -328,8 +328,7 @@ impl CanvasDocument {
         }
     }
 
-    /// Give loose panel-capable content its default one-item semantic panel while
-    /// preserving its page position and existing display name as the panel note.
+    /// Give loose panel-capable content its default one-item semantic panel.
     pub fn create_panel_for_content(&mut self, content: ContentId) -> Option<PanelId> {
         if let Some(panel) = self.parent_panel(content) {
             return Some(panel);
@@ -351,7 +350,6 @@ impl CanvasDocument {
         }
         let panel = self.panel_mut(panel_id)?;
         panel.item_order.push(content);
-        panel.note = name;
         Some(panel_id)
     }
 
