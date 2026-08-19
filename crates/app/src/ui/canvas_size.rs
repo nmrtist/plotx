@@ -371,7 +371,10 @@ pub(crate) fn page_size_chrome(
         .order(egui::Order::Middle)
         .pivot(egui::Align2::LEFT_BOTTOM)
         .fixed_pos(pos)
+        .constrain_to(view)
         .show(&ctx, |ui| {
+            ui.set_clip_rect(view);
+            ui.set_max_width((view.right() - pos.x).max(1.0));
             ui.horizontal(|ui| {
                 if ui
                     .small_button(label)

@@ -14,13 +14,13 @@ pub(super) fn board_views_section(app: &mut PlotxApp, ui: &mut Ui) {
             let can_save = !app.session.ui.board_view_name.trim().is_empty();
             if ui
                 .add_enabled(can_save, egui::Button::new("Save").small())
-                .on_hover_text("Bookmark the current board zoom and pan")
+                .on_hover_text("Bookmark the current board framing")
                 .clicked()
             {
                 let view = NamedView {
                     name: app.session.ui.board_view_name.trim().to_owned(),
                     zoom: app.session.board.zoom,
-                    pan: app.session.board.pan,
+                    world_center: app.session.board.world_center,
                 };
                 app.execute_action(Action::board_view_insert(
                     app.session.board_views.len(),
@@ -57,11 +57,11 @@ pub(super) fn board_views_section(app: &mut PlotxApp, ui: &mut Ui) {
     ui.add_space(4.0);
 
     if let Some(i) = jump {
-        let (zoom, pan) = (
+        let (zoom, world_center) = (
             app.session.board_views[i].zoom,
-            app.session.board_views[i].pan,
+            app.session.board_views[i].world_center,
         );
-        crate::ui::canvas::request_board_fit_viewport(app, ui.ctx(), zoom, pan);
+        crate::ui::canvas::request_board_fit_viewport(app, ui.ctx(), zoom, world_center);
         app.session.status = format!("Jumped to view “{}”.", app.session.board_views[i].name);
     }
     if let Some(i) = delete {

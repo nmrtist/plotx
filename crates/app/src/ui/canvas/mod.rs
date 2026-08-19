@@ -10,8 +10,8 @@ use plotx_core::state::{
     PanelDrag, PanelId, PanelLabelDrag, PanelNoteEditState, PhaseDrag, PhaseDragKind, PhaseOrient,
     PlotxApp, Region, RegionDrag, RegionDragKind, RegionId, RegionSelection, ResizeHandle,
     SHEET_COL_W_PT, SHEET_HEADER_H_PT, SHEET_MAX_ROWS, SHEET_ROW_H_PT, Selection, SelectionDrag,
-    TableDataset, TextEditState, TileDropCacheKey, TileDropPreview, Tool, ZoomAxis, ZoomDrag,
-    board_frame_id, board_frame_ref, board_frames, frame_board_pos, frame_board_rect,
+    TableDataset, TextEditState, TileDropCacheKey, TileDropPreview, Tool, ViewportMode, ZoomAxis,
+    ZoomDrag, board_frame_id, board_frame_ref, board_frames, frame_board_pos, frame_board_rect,
     set_frame_board_pos, toggle_frame_selection_synced,
 };
 use plotx_core::{Integral2D, IntegralResult};
@@ -134,15 +134,15 @@ pub fn render_central(app: &mut PlotxApp, ui: &mut Ui) {
     canvas_breadcrumb(app, ci, ui);
     let avail = ui.available_rect_before_wrap();
     let (resp, painter) = ui.allocate_painter(avail.size(), Sense::click_and_drag());
-    let rect = resp.rect;
+    let geometry = super::workspace_geometry(app, resp.rect, ui.ctx());
+    let rect = geometry.board_rect;
+    let painter = painter.with_clip_rect(rect);
     ui.ctx().data_mut(|data| {
         data.insert_temp(egui::Id::new("plotx.canvas.navigation_rect"), rect);
     });
     let chrome = ChromeStyle::from_visuals(ui.visuals(), app.settings.appearance.canvas_accent);
-    ensure_board_view(app, rect);
     consume_board_reveal(app, ui.ctx());
-    let safe_fit = super::tools::task_card::safe_fit_rect(app, rect);
-    drive_board_fit(app, ui, rect, safe_fit);
+    drive_board_fit(app, ui, &geometry);
 
     // Raw-pointer gestures must not start through UI layered over the canvas.
     let pointer_hits_canvas_layer = ui

@@ -657,8 +657,8 @@ pub struct Session {
     pub board: BoardViewport,
     /// Saved board bookmarks (named viewports) the user can jump back to.
     pub board_views: Vec<NamedView>,
-    /// What the board is animating a zoom-to-fit toward, if any.
-    pub board_fit: Option<BoardFitTarget>,
+    /// Whether the user owns the camera or a persistent fit intent does.
+    pub viewport_mode: ViewportMode,
     /// One-shot core-to-UI request to animate toward a newly created frame.
     pub board_reveal: Option<BoardFrameId>,
     pub view: PrimaryView,

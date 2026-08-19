@@ -145,8 +145,7 @@ static BINDINGS: &[CommandBinding] = &[
         id: commands::CommandId::ZoomToSelection,
         primary: plain(egui::Key::F),
         aliases: &[],
-        // Owned by `handle_fit_shortcut`, which adds selection-aware status.
-        dispatch: false,
+        dispatch: true,
         menu_accelerator: false,
     },
     // §8.5 channel 3 / §12: bare `+` and `-` step the canvas-steppable setting.
@@ -434,26 +433,6 @@ pub(super) fn handle_rename_shortcut(app: &mut PlotxApp, ctx: &egui::Context) {
             }
         }
     }
-}
-
-/// F zooms the board to fit the frame selection, or every frame when nothing is
-/// selected.
-pub(super) fn handle_fit_shortcut(app: &mut PlotxApp, ctx: &egui::Context) {
-    if ctx.egui_wants_keyboard_input() {
-        return;
-    }
-    let fit =
-        ctx.input(|i| !i.modifiers.command && !i.modifiers.ctrl && i.key_pressed(egui::Key::F));
-    if !fit {
-        return;
-    }
-    canvas::zoom_to_selection(app, ctx);
-    let n = app.session.ui.frame_selection.len();
-    app.session.status = if n > 1 {
-        format!("Zoomed to {n} selected frames.")
-    } else {
-        "Zoomed to fit.".to_owned()
-    };
 }
 
 /// Enter springs the board to zoom-to-fit the active frame — the lone selected

@@ -132,7 +132,7 @@ fn board_view_bookmarks_are_undoable() {
     let view = crate::state::NamedView {
         name: "overview".to_owned(),
         zoom: 1.5,
-        pan: [10.0, 20.0],
+        world_center: [10.0, 20.0],
     };
 
     app.execute_action(Action::board_view_insert(0, view.clone()));
@@ -159,7 +159,7 @@ fn board_view_replay_degrades_symmetrically_on_stale_lists() {
     let view = |name: &str| crate::state::NamedView {
         name: name.to_owned(),
         zoom: 1.0,
-        pan: [0.0, 0.0],
+        world_center: [0.0, 0.0],
     };
     app.execute_action(Action::board_view_insert(0, view("a")));
     app.execute_action(Action::board_view_insert(1, view("b")));

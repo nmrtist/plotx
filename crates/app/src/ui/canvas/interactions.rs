@@ -236,21 +236,6 @@ pub(crate) fn finish_zoom_drag(
     app.session.status = "Zoomed selection.".into();
 }
 
-pub(crate) fn ensure_board_view(app: &mut PlotxApp, rect: egui::Rect) {
-    // A gesture owns the viewport: never re-fit under an active drag, even if a
-    // fit shortcut re-armed `auto_fit` mid-gesture (see `freeze_board_for_gesture`).
-    if app.session.ui.gesture_active() {
-        return;
-    }
-    if !app.session.board.auto_fit {
-        return;
-    }
-    if let Some(bbox) = all_frames_bbox(app) {
-        let safe = crate::ui::tools::task_card::safe_fit_rect(app, rect);
-        app.session.board = board_fit_bbox_with_chrome_in_rect(bbox, rect, safe);
-    }
-}
-
 /// Single-click select only — the actual data drag is owned by the data block's
 /// per-tool handler.
 pub(crate) fn handle_data_tool_target(

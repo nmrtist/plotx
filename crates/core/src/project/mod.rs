@@ -130,7 +130,7 @@ impl WorkspaceSnapshot {
             secondary_sidebar_visible: app.session.secondary_sidebar_visible,
             board: BoardDto {
                 zoom: app.session.board.zoom,
-                pan: app.session.board.pan,
+                world_center: app.session.board.world_center,
             },
             board_views: app
                 .session
@@ -139,7 +139,7 @@ impl WorkspaceSnapshot {
                 .map(|view| BoardViewDto {
                     name: view.name.clone(),
                     zoom: view.zoom,
-                    pan: view.pan,
+                    world_center: view.world_center,
                 })
                 .collect(),
             figure_typography: app.doc.style_library.figure_typography,
@@ -559,9 +559,9 @@ pub fn load_project(path: &Path) -> Result<PlotxApp> {
     if let Some(board) = workspace.board {
         app.session.board = crate::state::BoardViewport {
             zoom: board.zoom,
-            pan: board.pan,
-            auto_fit: true,
+            world_center: board.world_center,
         };
+        app.session.viewport_mode = crate::state::ViewportMode::Manual;
     }
     app.session.board_views = workspace
         .board_views
@@ -569,7 +569,7 @@ pub fn load_project(path: &Path) -> Result<PlotxApp> {
         .map(|v| crate::state::NamedView {
             name: v.name.clone(),
             zoom: v.zoom,
-            pan: v.pan,
+            world_center: v.world_center,
         })
         .collect();
     app.doc.save_include_view_snapshots = manifest.save_profile.include_view_snapshots;

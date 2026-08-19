@@ -141,26 +141,27 @@ pub(crate) fn clear_canvas_interaction_state(
 }
 
 /// The single page/object/screen coordinate transform for the board:
-/// `world_pt = canvas.board_pos + page_pt` then `screen = origin + pan + world_pt * zoom`.
+/// `world_pt = canvas.board_pos + page_pt`, then
+/// `screen = visible_center + (world_pt - world_center) * zoom`.
 #[derive(Clone, Copy)]
 pub(crate) struct BoardTransform {
-    pub origin: Pos2,
-    pub pan: egui::Vec2,
+    pub visible_center: Pos2,
+    pub world_center: Pos2,
     pub zoom: f32,
 }
 
 impl BoardTransform {
     pub fn from_board(board: BoardViewport, screen: egui::Rect) -> Self {
         Self {
-            origin: screen.min,
-            pan: egui::vec2(board.pan[0], board.pan[1]),
+            visible_center: screen.center(),
+            world_center: Pos2::new(board.world_center[0], board.world_center[1]),
             zoom: board.zoom,
         }
     }
 
     pub fn board_rect_screen(&self, r: PlotRect) -> egui::Rect {
         egui::Rect::from_min_size(
-            self.origin + self.pan + egui::vec2(r.left, r.top) * self.zoom,
+            self.visible_center + (egui::pos2(r.left, r.top) - self.world_center) * self.zoom,
             egui::vec2(r.width * self.zoom, r.height * self.zoom),
         )
     }
@@ -213,8 +214,8 @@ impl BoardTransform {
     /// Screen px → board world (pt), before any per-page `board_pos` offset.
     pub fn screen_to_world(&self, p: Pos2) -> Pos2 {
         Pos2::new(
-            (p.x - self.origin.x - self.pan.x) / self.zoom,
-            (p.y - self.origin.y - self.pan.y) / self.zoom,
+            self.world_center.x + (p.x - self.visible_center.x) / self.zoom,
+            self.world_center.y + (p.y - self.visible_center.y) / self.zoom,
         )
     }
 
@@ -354,14 +355,13 @@ fn board_fit_bbox_in_rect(
     let h = (max_y - min_y).max(1.0);
     let safe_w = safe.width().max(1.0);
     let safe_h = safe.height().max(1.0);
-    let zoom = ((safe_w / w).min(safe_h / h) * 0.9).clamp(0.1, FIT_ZOOM_MAX);
+    let zoom = ((safe_w / w).min(safe_h / h) * 0.9).clamp(f32::MIN_POSITIVE, FIT_ZOOM_MAX);
     BoardViewport {
         zoom,
-        pan: [
-            safe.center().x - viewport.left() - (min_x + w * 0.5) * zoom,
-            safe.center().y - viewport.top() - (min_y + h * 0.5) * zoom,
+        world_center: [
+            min_x + w * 0.5 - (safe.center().x - viewport.center().x) / zoom,
+            min_y + h * 0.5 - (safe.center().y - viewport.center().y) / zoom,
         ],
-        auto_fit: true,
     }
 }
 
@@ -476,17 +476,17 @@ mod tests {
     }
 
     #[test]
-    fn board_transform_page_rect_matches_origin_pan_boardpos() {
+    fn board_transform_page_rect_uses_visible_and_world_centers() {
         let canvas = board_canvas();
         let bt = BoardTransform {
-            origin: Pos2::new(100.0, 50.0),
-            pan: egui::vec2(10.0, -20.0),
+            visible_center: Pos2::new(100.0, 50.0),
+            world_center: Pos2::new(-5.0, 10.0),
             zoom: 2.0,
         };
         let rect = bt.page_screen_rect(&canvas);
         let [w, h] = canvas.size_pt();
-        assert!((rect.min.x - (100.0 + 10.0 + 30.0 * 2.0)).abs() < 1e-3);
-        assert!((rect.min.y - (50.0 - 20.0 + 40.0 * 2.0)).abs() < 1e-3);
+        assert!((rect.min.x - (100.0 + (30.0 + 5.0) * 2.0)).abs() < 1e-3);
+        assert!((rect.min.y - (50.0 + (40.0 - 10.0) * 2.0)).abs() < 1e-3);
         assert!((rect.width() - w * 2.0).abs() < 1e-3);
         assert!((rect.height() - h * 2.0).abs() < 1e-3);
     }
@@ -495,8 +495,8 @@ mod tests {
     fn board_transform_screen_to_page_roundtrip() {
         let canvas = board_canvas();
         let bt = BoardTransform {
-            origin: Pos2::new(100.0, 50.0),
-            pan: egui::vec2(10.0, -20.0),
+            visible_center: Pos2::new(100.0, 50.0),
+            world_center: Pos2::new(-5.0, 10.0),
             zoom: 2.0,
         };
         let page = bt.page_screen_rect(&canvas);
@@ -514,8 +514,8 @@ mod tests {
             .objects
             .push(text_object(5, ObjectFrame::new(12.0, 8.0, 40.0, 20.0)));
         let bt = BoardTransform {
-            origin: Pos2::new(100.0, 50.0),
-            pan: egui::vec2(10.0, -20.0),
+            visible_center: Pos2::new(100.0, 50.0),
+            world_center: Pos2::new(-5.0, 10.0),
             zoom: 2.0,
         };
         let page = bt.page_screen_rect(&canvas);
@@ -550,7 +550,7 @@ mod tests {
     }
 
     #[test]
-    fn board_fit_fills_large_viewports_beyond_former_cap() {
+    fn board_fit_scales_to_fill_large_viewports() {
         // A Nature double-column page on a 2.5K-class canvas area must fill the
         // limiting dimension (90% margin), not stall at the old 1.4 zoom cap.
         let screen = egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(2400.0, 1300.0));
@@ -576,21 +576,35 @@ mod tests {
     }
 
     #[test]
+    fn board_fit_can_zoom_below_point_one_to_keep_the_whole_target_visible() {
+        let screen = egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(320.0, 240.0));
+        let bbox = (0.0, 0.0, 20_000.0, 10_000.0);
+        let vp = board_fit_bbox(bbox, screen);
+        let target = BoardTransform::from_board(vp, screen).board_rect_screen(PlotRect::new(
+            bbox.0,
+            bbox.1,
+            bbox.2 - bbox.0,
+            bbox.3 - bbox.1,
+        ));
+
+        assert!(vp.zoom < 0.1);
+        assert!(screen.contains(target.min) && screen.contains(target.max));
+        assert!((target.center() - screen.center()).length() < 0.01);
+    }
+
+    #[test]
     fn board_fit_centers_the_target_inside_an_offset_safe_rect() {
         let viewport = egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(1000.0, 700.0));
         let safe = egui::Rect::from_min_max(Pos2::ZERO, Pos2::new(640.0, 700.0));
         let bbox = (400.0, 200.0, 600.0, 300.0);
         let vp = board_fit_bbox_with_chrome_in_rect(bbox, viewport, safe);
-        let target = egui::Rect::from_min_max(
-            Pos2::new(
-                viewport.left() + vp.pan[0] + bbox.0 * vp.zoom,
-                viewport.top() + vp.pan[1] + bbox.1 * vp.zoom,
-            ),
-            Pos2::new(
-                viewport.left() + vp.pan[0] + bbox.2 * vp.zoom,
-                viewport.top() + vp.pan[1] + bbox.3 * vp.zoom,
-            ),
-        );
+        let transform = BoardTransform::from_board(vp, viewport);
+        let target = transform.board_rect_screen(PlotRect::new(
+            bbox.0,
+            bbox.1,
+            bbox.2 - bbox.0,
+            bbox.3 - bbox.1,
+        ));
         assert!(safe.contains(target.min) && safe.contains(target.max));
         assert!((target.center().x - safe.center().x).abs() < 0.01);
         assert!(target.top() >= safe.top() + FIT_CHROME_PX - 0.01);
@@ -625,15 +639,14 @@ mod tests {
         let bt = BoardTransform::from_board(vp, screen);
         let cx = (bbox.0 + bbox.2) * 0.5;
         let cy = (bbox.1 + bbox.3) * 0.5;
-        let sx = screen.min.x + vp.pan[0] + cx * vp.zoom;
-        let sy = screen.min.y + vp.pan[1] + cy * vp.zoom;
+        let sx = screen.center().x + (cx - vp.world_center[0]) * vp.zoom;
+        let sy = screen.center().y + (cy - vp.world_center[1]) * vp.zoom;
         assert!((sx - screen.center().x).abs() < 1e-2);
         assert!((sy - screen.center().y).abs() < 1e-2);
 
         let pa = bt.page_screen_rect(&canvases[0]);
         let pb = bt.page_screen_rect(&canvases[1]);
-        assert!((pa.min.x - (screen.min.x + vp.pan[0])).abs() < 1e-2);
-        assert!((pb.min.x - (screen.min.x + vp.pan[0] + rb.left * vp.zoom)).abs() < 1e-2);
+        assert!((pb.min.x - pa.min.x - rb.left * vp.zoom).abs() < 1e-2);
     }
 
     #[test]
@@ -759,8 +772,7 @@ mod tests {
         app.session.active_canvas = Some(0);
         app.session.board = BoardViewport {
             zoom: 1.0,
-            pan: [0.0, 0.0],
-            auto_fit: false,
+            world_center: [0.0, 0.0],
         };
         let screen = egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(500.0, 400.0));
         let transform = BoardTransform::from_board(app.session.board, screen);

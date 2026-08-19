@@ -18,12 +18,6 @@ ignore = [
     # libraries.
     { id = "RUSTSEC-2026-0192", reason = "ttf-parser is transitive and has no safe upgrade" },
     { id = "RUSTSEC-2026-0206", reason = "rustybuzz is transitive and has no safe upgrade" },
-    # quick-xml 0.39 is pinned by wayland-scanner (Linux graph), a compile-time
-    # proc-macro that only parses the Wayland protocol XML bundled with its
-    # dependents: never untrusted input, never in shipped binaries. Remove when
-    # wayland-scanner moves to quick-xml >= 0.41.
-    { id = "RUSTSEC-2026-0194", reason = "quick-xml is build-time only via wayland-scanner; no safe upgrade" },
-    { id = "RUSTSEC-2026-0195", reason = "quick-xml is build-time only via wayland-scanner; no safe upgrade" },
     { id = "RUSTSEC-2026-0249", reason = "smartstring is transitive through rhai; no safe upgrade is available" },
 ]
 

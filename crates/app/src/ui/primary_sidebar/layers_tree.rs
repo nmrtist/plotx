@@ -1,9 +1,7 @@
 use egui::Ui;
 use egui_phosphor::regular as icon;
 use plotx_core::actions::{Action, PanelState};
-use plotx_core::state::{
-    CanvasObjectKind, ContentId, Panel, PanelId, PanelLabelMode, PlotxApp, SelectionPath,
-};
+use plotx_core::state::{ContentId, Panel, PanelId, PanelLabelMode, PlotxApp, SelectionPath};
 
 pub(super) fn render_panels(app: &mut PlotxApp, ci: usize, ui: &mut Ui) {
     let panels: Vec<_> = app.doc.canvases[ci]
@@ -40,69 +38,67 @@ fn render_panel(app: &mut PlotxApp, ci: usize, panel_id: PanelId, ui: &mut Ui) {
     let mut flags = None;
     let mut drop_content = None;
     let display_name = panel_tree_name(app, ci, &panel);
-    ui.horizontal(|ui| {
-        if ui
-            .small_button(if open {
-                icon::CARET_DOWN
-            } else {
-                icon::CARET_RIGHT
-            })
-            .clicked()
-        {
-            open = !open;
-            ui.data_mut(|data| data.insert_temp(collapse_id, open));
-        }
-        let mut visible = panel.visible;
-        if ui
-            .checkbox(&mut visible, "")
-            .on_hover_text("Visible")
-            .changed()
-        {
-            flags = Some((visible, panel.locked));
-        }
-        ui.weak(icon::RECTANGLE).on_hover_text("Panel");
-        let response = ui.add(
-            egui::Button::selectable(selected, display_name).sense(egui::Sense::click_and_drag()),
-        );
-        if response.drag_started() {
-            app.session.ui.panel_drop_target = None;
-        }
-        if let Some(content) = app.session.ui.layers_drag_content
-            && response.hovered()
-            && !panel.locked
-            && app.doc.canvases[ci].parent_panel(content) != Some(panel_id)
-        {
-            app.session.ui.panel_drop_target = Some(panel_id);
-            if ui.input(|input| input.pointer.primary_released()) {
-                drop_content = Some(content);
-            }
-        }
-        if app.session.ui.panel_drop_target == Some(panel_id) {
-            ui.painter().rect_stroke(
-                response.rect,
-                2.0,
-                egui::Stroke::new(1.5_f32, ui.visuals().selection.stroke.color),
-                egui::StrokeKind::Inside,
-            );
-        }
-        if response.clicked() || (response.secondary_clicked() && !selected) {
-            select_panel = true;
-        }
-        if response.double_clicked() {
-            enter_panel = true;
-        }
-        response.context_menu(|ui| panel_context_menu(app, ui));
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let mut locked = panel.locked;
+    let (visible_flags, locked_flags) = super::layer_controls::row(
+        ui,
+        |ui| {
             if ui
-                .checkbox(&mut locked, "")
-                .on_hover_text("Locked")
-                .changed()
+                .small_button(if open {
+                    icon::CARET_DOWN
+                } else {
+                    icon::CARET_RIGHT
+                })
+                .clicked()
             {
-                flags = Some((panel.visible, locked));
+                open = !open;
+                ui.data_mut(|data| data.insert_temp(collapse_id, open));
             }
-        });
-    });
+            let mut visible = panel.visible;
+            if super::layer_controls::visibility_button(ui, &mut visible).changed() {
+                flags = Some((visible, panel.locked));
+            }
+            ui.weak(icon::RECTANGLE).on_hover_text("Panel");
+            let response = super::layer_controls::truncated_selectable(ui, selected, display_name)
+                .interact(egui::Sense::click_and_drag());
+            if response.drag_started() {
+                app.session.ui.panel_drop_target = None;
+            }
+            if let Some(content) = app.session.ui.layers_drag_content
+                && response.hovered()
+                && !panel.locked
+                && app.doc.canvases[ci].parent_panel(content) != Some(panel_id)
+            {
+                app.session.ui.panel_drop_target = Some(panel_id);
+                if ui.input(|input| input.pointer.primary_released()) {
+                    drop_content = Some(content);
+                }
+            }
+            if app.session.ui.panel_drop_target == Some(panel_id) {
+                ui.painter().rect_stroke(
+                    response.rect,
+                    2.0,
+                    egui::Stroke::new(1.5_f32, ui.visuals().selection.stroke.color),
+                    egui::StrokeKind::Inside,
+                );
+            }
+            if response.clicked() || (response.secondary_clicked() && !selected) {
+                select_panel = true;
+            }
+            if response.double_clicked() {
+                enter_panel = true;
+            }
+            response.context_menu(|ui| panel_context_menu(app, ui));
+            flags
+        },
+        |ui| {
+            let mut locked = panel.locked;
+            if super::layer_controls::lock_button(ui, &mut locked).changed() {
+                Some((panel.visible, locked))
+            } else {
+                None
+            }
+        },
+    );
+    flags = visible_flags.or(locked_flags);
     if let Some(content) = drop_content {
         app.select_content(ci, content);
         crate::ui::commands::execute_without_clipboard(
@@ -137,10 +133,14 @@ fn render_panel(app: &mut PlotxApp, ci: usize, panel_id: PanelId, ui: &mut Ui) {
             render_content(app, ci, panel_id, content, ui);
         }
         if panel.item_order.is_empty() {
-            ui.horizontal(|ui| {
-                ui.add_space(36.0);
-                ui.weak("Empty panel — add or move content here.");
-            });
+            super::layer_controls::row(
+                ui,
+                |ui| {
+                    ui.add_space(36.0);
+                    ui.add(egui::Label::new("Empty panel — add or move content here.").truncate());
+                },
+                |_| {},
+            );
         }
     }
 }
@@ -173,65 +173,65 @@ fn render_content(app: &mut PlotxApp, ci: usize, panel: PanelId, content: Conten
         .filter(|candidate| candidate.id != panel && !candidate.locked)
         .map(|candidate| (candidate.id, candidate.name.clone()))
         .collect();
-    ui.horizontal(|ui| {
-        ui.add_space(24.0);
-        let mut visible = item.visible;
-        if ui
-            .checkbox(&mut visible, "")
-            .on_hover_text("Visible")
-            .changed()
-        {
-            flags = Some((visible, item.locked));
-        }
-        ui.weak(kind_glyph(&item.kind))
-            .on_hover_text(kind_label(&item.kind));
-        let response = ui.add(
-            egui::Button::selectable(selected, item.name.clone())
-                .sense(egui::Sense::click_and_drag()),
-        );
-        if response.drag_started() {
-            app.session.ui.layers_drag_content = Some(content);
-        }
-        if response.clicked() || (response.secondary_clicked() && !selected) {
-            select = true;
-        }
-        response.context_menu(|ui| {
-            if ui.button("Move out of panel").clicked() {
-                app.select_content(ci, content);
-                crate::ui::commands::execute_without_clipboard(
-                    crate::ui::commands::CommandId::MoveContentToPanel(None),
-                    app,
-                    ui.ctx(),
-                );
-                ui.close();
+    let (visible_flags, locked_flags) = super::layer_controls::row(
+        ui,
+        |ui| {
+            ui.add_space(24.0);
+            let mut visible = item.visible;
+            if super::layer_controls::visibility_button(ui, &mut visible).changed() {
+                flags = Some((visible, item.locked));
             }
-            if !destinations.is_empty() {
-                ui.menu_button("Move to panel", |ui| {
-                    for (target, name) in &destinations {
-                        if ui.button(name).clicked() {
-                            app.select_content(ci, content);
-                            crate::ui::commands::execute_without_clipboard(
-                                crate::ui::commands::CommandId::MoveContentToPanel(Some(*target)),
-                                app,
-                                ui.ctx(),
-                            );
-                            ui.close();
+            ui.weak(super::layer_controls::kind_glyph(&item.kind))
+                .on_hover_text(super::layer_controls::kind_label(&item.kind));
+            let response =
+                super::layer_controls::truncated_selectable(ui, selected, item.name.clone())
+                    .interact(egui::Sense::click_and_drag());
+            if response.drag_started() {
+                app.session.ui.layers_drag_content = Some(content);
+            }
+            if response.clicked() || (response.secondary_clicked() && !selected) {
+                select = true;
+            }
+            response.context_menu(|ui| {
+                if ui.button("Move out of panel").clicked() {
+                    app.select_content(ci, content);
+                    crate::ui::commands::execute_without_clipboard(
+                        crate::ui::commands::CommandId::MoveContentToPanel(None),
+                        app,
+                        ui.ctx(),
+                    );
+                    ui.close();
+                }
+                if !destinations.is_empty() {
+                    ui.menu_button("Move to panel", |ui| {
+                        for (target, name) in &destinations {
+                            if ui.button(name).clicked() {
+                                app.select_content(ci, content);
+                                crate::ui::commands::execute_without_clipboard(
+                                    crate::ui::commands::CommandId::MoveContentToPanel(Some(
+                                        *target,
+                                    )),
+                                    app,
+                                    ui.ctx(),
+                                );
+                                ui.close();
+                            }
                         }
-                    }
-                });
-            }
-        });
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    });
+                }
+            });
+            flags
+        },
+        |ui| {
             let mut locked = item.locked;
-            if ui
-                .checkbox(&mut locked, "")
-                .on_hover_text("Locked")
-                .changed()
-            {
-                flags = Some((item.visible, locked));
+            if super::layer_controls::lock_button(ui, &mut locked).changed() {
+                Some((item.visible, locked))
+            } else {
+                None
             }
-        });
-    });
+        },
+    );
+    flags = visible_flags.or(locked_flags);
     if let Some((visible, locked)) = flags {
         app.execute_action(Action::set_object_flags(
             ci,
@@ -303,23 +303,5 @@ fn replace_panel(
             before,
             after: PanelState::of(&page),
         });
-    }
-}
-
-fn kind_glyph(kind: &CanvasObjectKind) -> &'static str {
-    match kind {
-        CanvasObjectKind::Plot(_) => icon::CHART_LINE,
-        CanvasObjectKind::Text(_) => "T",
-        CanvasObjectKind::Shape(_) => icon::SHAPES,
-        CanvasObjectKind::RasterImage(_) => icon::FILE,
-    }
-}
-
-fn kind_label(kind: &CanvasObjectKind) -> &'static str {
-    match kind {
-        CanvasObjectKind::Plot(_) => "Plot",
-        CanvasObjectKind::Text(_) => "Text",
-        CanvasObjectKind::Shape(_) => "Shape",
-        CanvasObjectKind::RasterImage(_) => "Image",
     }
 }

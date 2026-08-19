@@ -242,19 +242,20 @@ fn project_roundtrip_preserves_data_recipe_and_view() {
     app.doc.canvases[0].panel_label_style = crate::state::PanelLabelStyle::UpperAlpha;
     app.session.board = crate::state::BoardViewport {
         zoom: 1.75,
-        pan: [-40.0, 12.0],
-        auto_fit: true,
+        world_center: [-40.0, 12.0],
     };
+    app.session.primary_sidebar_width = 317.0;
+    app.session.secondary_sidebar_width = 411.0;
     app.session.board_views = vec![
         crate::state::NamedView {
             name: "overview".to_owned(),
             zoom: 0.5,
-            pan: [10.0, 20.0],
+            world_center: [10.0, 20.0],
         },
         crate::state::NamedView {
             name: "detail".to_owned(),
             zoom: 3.0,
-            pan: [-5.0, -8.0],
+            world_center: [-5.0, -8.0],
         },
     ];
     let axis_overrides = AxisOverrides {
@@ -302,7 +303,7 @@ fn project_roundtrip_preserves_data_recipe_and_view() {
     assert_eq!(loaded.session.board_views.len(), 2);
     assert_eq!(loaded.session.board_views[0].name, "overview");
     assert_eq!(loaded.session.board_views[1].zoom, 3.0);
-    assert_eq!(loaded.session.board_views[1].pan, [-5.0, -8.0]);
+    assert_eq!(loaded.session.board_views[1].world_center, [-5.0, -8.0]);
     // Document typography survives the round-trip and is re-stamped onto the
     // rebuilt figures.
     assert_eq!(
@@ -324,7 +325,9 @@ fn project_roundtrip_preserves_data_recipe_and_view() {
         crate::state::PanelLabelStyle::UpperAlpha
     );
     assert_eq!(loaded.session.board.zoom, 1.75);
-    assert_eq!(loaded.session.board.pan, [-40.0, 12.0]);
+    assert_eq!(loaded.session.board.world_center, [-40.0, 12.0]);
+    assert_eq!(loaded.session.primary_sidebar_width, 317.0);
+    assert_eq!(loaded.session.secondary_sidebar_width, 411.0);
     assert_eq!(
         loaded.doc.canvases[0].layout,
         PageLayout {

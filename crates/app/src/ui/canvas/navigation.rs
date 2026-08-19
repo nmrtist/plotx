@@ -186,7 +186,7 @@ pub(crate) fn handle_navigation(app: &mut PlotxApp, ci: usize, rect: egui::Rect,
             && delta != Vec2::ZERO
             && let Some(plot) = plot_inner_rect(app, dci, did, rect)
         {
-            app.session.board_fit = None;
+            app.session.viewport_mode = ViewportMode::Manual;
             apply_plot_pan(app, dci, did, plot, delta);
             ui.ctx().request_repaint();
         }
@@ -220,7 +220,7 @@ pub(crate) fn handle_navigation(app: &mut PlotxApp, ci: usize, rect: egui::Rect,
                     Some((id, outer, plot)) => {
                         app.finish_pending_wheel_property(now, true);
                         let scale = (1.0 / f64::from(zoom_delta)).clamp(0.2, 5.0);
-                        app.session.board_fit = None;
+                        app.session.viewport_mode = ViewportMode::Manual;
                         zoom_plot_viewport(
                             app,
                             ci,
@@ -235,7 +235,7 @@ pub(crate) fn handle_navigation(app: &mut PlotxApp, ci: usize, rect: egui::Rect,
                         );
                     }
                     None => {
-                        app.session.board_fit = None;
+                        app.session.viewport_mode = ViewportMode::Manual;
                         zoom_board_view(app, rect, p, zoom_delta);
                         ui.ctx().request_repaint();
                     }
@@ -256,14 +256,14 @@ pub(crate) fn handle_navigation(app: &mut PlotxApp, ci: usize, rect: egui::Rect,
                             };
                             let scale =
                                 f64::from((-amount * WHEEL_ZOOM_SPEED).exp()).clamp(0.2, 5.0);
-                            app.session.board_fit = None;
+                            app.session.viewport_mode = ViewportMode::Manual;
                             zoom_plot_viewport(app, ci, id, outer, plot, p, scale, axes, now, ui);
                             true
                         }
                     }
                     None => {
                         let factor = (amount * WHEEL_ZOOM_SPEED).exp();
-                        app.session.board_fit = None;
+                        app.session.viewport_mode = ViewportMode::Manual;
                         zoom_board_view(app, rect, p, factor);
                         ui.ctx().request_repaint();
                         true
@@ -329,23 +329,21 @@ pub(crate) fn handle_navigation(app: &mut PlotxApp, ci: usize, rect: egui::Rect,
 }
 
 pub(crate) fn pan_board_view(app: &mut PlotxApp, delta: Vec2) {
-    app.session.board_fit = None;
-    app.session.board.auto_fit = false;
-    app.session.board.pan[0] += delta.x;
-    app.session.board.pan[1] += delta.y;
+    app.session.viewport_mode = ViewportMode::Manual;
+    let zoom = app.session.board.zoom.max(0.01);
+    app.session.board.world_center[0] -= delta.x / zoom;
+    app.session.board.world_center[1] -= delta.y / zoom;
 }
 
 pub(crate) fn zoom_board_view(app: &mut PlotxApp, rect: egui::Rect, anchor: Pos2, factor: f32) {
     let old_zoom = app.session.board.zoom.max(0.01);
     let new_zoom = (old_zoom * factor).clamp(0.05, 8.0);
-    let world_x = (anchor.x - rect.left() - app.session.board.pan[0]) / old_zoom;
-    let world_y = (anchor.y - rect.top() - app.session.board.pan[1]) / old_zoom;
+    let offset = anchor - rect.center();
+    let world_x = app.session.board.world_center[0] + offset.x / old_zoom;
+    let world_y = app.session.board.world_center[1] + offset.y / old_zoom;
     app.session.board.zoom = new_zoom;
-    app.session.board.pan = [
-        anchor.x - rect.left() - world_x * new_zoom,
-        anchor.y - rect.top() - world_y * new_zoom,
-    ];
-    app.session.board.auto_fit = false;
+    app.session.board.world_center = [world_x - offset.x / new_zoom, world_y - offset.y / new_zoom];
+    app.session.viewport_mode = ViewportMode::Manual;
 }
 
 /// The pan gesture's undo bracket is owned by the caller (`handle_navigation`).
@@ -433,7 +431,7 @@ pub(crate) fn pan_plot_viewport(
     if !update_pending_viewport_edit(app, ci, object_id, now) {
         return;
     }
-    app.session.board_fit = None;
+    app.session.viewport_mode = ViewportMode::Manual;
     apply_plot_pan(app, ci, object_id, plot, delta);
 }
 

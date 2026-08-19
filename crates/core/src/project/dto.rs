@@ -634,14 +634,14 @@ pub struct Workspace {
 #[derive(Serialize, Deserialize, Clone, Copy)]
 pub struct BoardDto {
     pub zoom: f32,
-    pub pan: [f32; 2],
+    pub world_center: [f32; 2],
 }
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct BoardViewDto {
     pub name: String,
     pub zoom: f32,
-    pub pan: [f32; 2],
+    pub world_center: [f32; 2],
 }
 
 #[derive(Serialize, Deserialize)]

@@ -16,7 +16,6 @@ const TOP_OFFSET: f32 = 8.0;
 const CHROME: f32 = 64.0;
 /// Below this the body is useless anyway; the card is allowed to overhang.
 const FLOOR: f32 = 120.0;
-const COLLAPSED_HEIGHT: f32 = 96.0;
 const MIN_SAFE_EDGE: f32 = 72.0;
 const MIN_CARD_WIDTH: f32 = 120.0;
 
@@ -36,7 +35,8 @@ pub(super) struct TaskCardGeometry {
 /// to the screen and slides it up over the Ribbon, hiding the very buttons that
 /// opened it. Clamping the min keeps a short window shrinking instead.
 pub(super) fn geometry(host: &Ui, preferred_min_body: f32) -> TaskCardGeometry {
-    let host_rect = host.max_rect();
+    let host_rect =
+        crate::ui::workspace_geometry::board_rect(host.ctx()).unwrap_or_else(|| host.max_rect());
     let width = card_width(host_rect);
     let pos = host_rect.right_top() + egui::vec2(-width - MARGIN, TOP_OFFSET);
     let max_body_height = (host_rect.bottom() - pos.y - CHROME).max(FLOOR);
@@ -56,7 +56,7 @@ fn card_width(host: egui::Rect) -> f32 {
     )
 }
 
-fn visible_card_collapsed(app: &PlotxApp) -> Option<bool> {
+pub(crate) fn visible_area_id(app: &PlotxApp) -> Option<Id> {
     let active = app.active_dataset();
     match app.session.ui.task_dock_active? {
         TaskDockTab::Processing => app
@@ -65,63 +65,42 @@ fn visible_card_collapsed(app: &PlotxApp) -> Option<bool> {
             .processing_task_dataset
             .and_then(|id| app.doc.dataset_index(id))
             .filter(|dataset| Some(*dataset) == active)
-            .map(|_| app.session.ui.processing_task_collapsed),
+            .map(|_| Id::new("processing_task_card")),
         TaskDockTab::Regions => app
             .session
             .ui
             .region_task_dataset
             .and_then(|id| app.doc.dataset_index(id))
             .filter(|dataset| Some(*dataset) == active)
-            .map(|_| app.session.ui.region_task_collapsed),
+            .map(|_| Id::new("region_task_card")),
         TaskDockTab::CurveFit => app
             .session
             .ui
             .curve_fit_task_dataset
             .filter(|dataset| Some(*dataset) == active)
-            .map(|_| app.session.ui.curve_fit_task_collapsed),
+            .map(|_| Id::new("curve_fit_task_card")),
         TaskDockTab::Statistics => app
             .session
             .ui
             .stat_task_dataset
             .filter(|dataset| Some(*dataset) == active)
-            .map(|_| app.session.ui.stat_task_collapsed),
+            .map(|_| Id::new("statistics_task_card")),
     }
 }
 
-/// Largest practical board-fit rectangle not covered by the visible task card.
-/// Persistent sidebars are already excluded from `host`; expanded cards reserve
-/// the right dock strip, while a collapsed one leaves the full-width band below
-/// its header available.
-pub(crate) fn safe_fit_rect(app: &PlotxApp, host: egui::Rect) -> egui::Rect {
-    let Some(collapsed) = visible_card_collapsed(app) else {
-        return host;
-    };
-    if collapsed {
-        if host.height() <= MIN_SAFE_EDGE {
-            return host;
-        }
-        let top = (host.top() + TOP_OFFSET + COLLAPSED_HEIGHT + MARGIN)
-            .min(host.bottom() - MIN_SAFE_EDGE);
-        return egui::Rect::from_min_max(egui::pos2(host.left(), top), host.max);
-    }
-    if host.width() <= MIN_SAFE_EDGE {
-        return host;
-    }
-    let right = (host.right() - card_width(host) - MARGIN * 2.0)
-        .clamp(host.left() + MIN_SAFE_EDGE, host.right());
-    egui::Rect::from_min_max(host.min, egui::pos2(right, host.bottom()))
-}
-
-/// A foreground task card that starts at `pos` and follows the shared title-bar
-/// drag position maintained by [`header`].
+/// A task card that starts at `pos` and follows the shared title-bar drag
+/// position maintained by [`header`]. It stays inside the central board and
+/// below popup/dialog layers.
 pub(super) fn area(host: &Ui, id: Id, pos: Pos2) -> Area {
     let stored = host
         .ctx()
         .data(|data| data.get_temp::<Pos2>(id.with("position")));
+    let bounds =
+        crate::ui::workspace_geometry::board_rect(host.ctx()).unwrap_or_else(|| host.max_rect());
     let area = Area::new(id)
-        .order(Order::Foreground)
+        .order(Order::Middle)
         .movable(false)
-        .constrain_to(host.max_rect());
+        .constrain_to(bounds);
     if let Some(stored) = stored {
         area.current_pos(stored)
     } else {
@@ -321,54 +300,48 @@ mod tests {
     }
 
     #[test]
-    fn expanded_card_reserves_the_right_dock_strip() {
-        let app = app_with_task(TaskDockTab::Processing, false);
-        let host = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 700.0));
-        let safe = safe_fit_rect(&app, host);
-        assert_eq!(safe.left(), host.left());
-        assert!(safe.right() < host.right() - WIDTH);
-        assert_eq!(safe.height(), host.height());
+    fn visible_task_uses_the_area_id_that_is_actually_rendered() {
+        let processing = app_with_task(TaskDockTab::Processing, false);
+        let regions = app_with_task(TaskDockTab::Regions, true);
+
+        assert_eq!(
+            visible_area_id(&processing),
+            Some(Id::new("processing_task_card"))
+        );
+        assert_eq!(visible_area_id(&regions), Some(Id::new("region_task_card")));
     }
 
     #[test]
-    fn collapsed_card_uses_the_full_width_below_its_header() {
-        let app = app_with_task(TaskDockTab::Regions, true);
-        let host = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 700.0));
-        let safe = safe_fit_rect(&app, host);
-        assert_eq!(safe.width(), host.width());
-        assert!(safe.top() > host.top());
+    fn task_card_geometry_uses_the_central_board_boundary() {
+        let app = PlotxApp::new();
+        let ctx = egui::Context::default();
+        let screen = egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(1000.0, 700.0));
+        let board = egui::Rect::from_min_max(egui::pos2(180.0, 80.0), egui::pos2(760.0, 680.0));
+        let observed = Cell::new(None);
+
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(screen),
+                ..Default::default()
+            },
+            |ui| {
+                crate::ui::workspace_geometry::resolve(&app, board, ui.ctx());
+                observed.set(Some(geometry(ui, 200.0)));
+            },
+        );
+
+        let card = observed.take().expect("task-card geometry");
+        assert!(card.pos.x >= board.left());
+        assert!(card.pos.x + card.width + MARGIN <= board.right());
+        assert!(card.pos.y >= board.top());
     }
 
     #[test]
-    fn narrow_hosts_keep_valid_nonempty_fit_geometry() {
-        let app = app_with_task(TaskDockTab::Processing, false);
-        let host = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(250.0, 140.0));
-        let safe = safe_fit_rect(&app, host);
-        assert!(safe.is_finite());
-        assert!(card_width(host) < WIDTH);
-        assert!(safe.width() >= MIN_SAFE_EDGE && safe.height() > 0.0);
-    }
+    fn narrow_boards_keep_a_valid_card_width() {
+        let board = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(250.0, 140.0));
 
-    #[test]
-    fn sub_minimum_width_expanded_card_uses_the_recoverable_host_rect() {
-        let app = app_with_task(TaskDockTab::Processing, false);
-        let host = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(48.0, 140.0));
-
-        let safe = safe_fit_rect(&app, host);
-
-        assert_eq!(safe, host);
-        assert!(safe.is_finite());
-    }
-
-    #[test]
-    fn sub_minimum_height_collapsed_card_uses_the_recoverable_host_rect() {
-        let app = app_with_task(TaskDockTab::Regions, true);
-        let host = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(250.0, 48.0));
-
-        let safe = safe_fit_rect(&app, host);
-
-        assert_eq!(safe, host);
-        assert!(safe.is_finite());
+        assert!(card_width(board) < WIDTH);
+        assert!(card_width(board) >= MIN_CARD_WIDTH);
     }
 
     #[test]

@@ -35,6 +35,8 @@ fn zoomed_plot_fixture() -> (PlotxApp, ObjectId, PlotRect) {
         ))),
     });
     app.doc.canvases.push(canvas);
+    app.session.board.world_center = [200.0, 150.0];
+    app.session.viewport_mode = ViewportMode::Manual;
     (
         app,
         PLOT_ID,
@@ -83,8 +85,7 @@ fn a_double_click_release_beats_the_zero_distance_box_zoom_and_resets_the_plot()
     app.set_tool(Tool::BrowseZoom);
     app.session.board = BoardViewport {
         zoom: 1.0,
-        pan: [0.0, 0.0],
-        auto_fit: false,
+        world_center: [500.0, 400.0],
     };
     let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 800.0));
     let plot = plot_inner_rect(&app, 0, object, screen).expect("plot is on the board");
@@ -144,8 +145,7 @@ fn a_double_click_during_a_pan_commits_the_pan_before_it_resets() {
     let object = ids[0];
     app.session.board = BoardViewport {
         zoom: 1.0,
-        pan: [0.0, 0.0],
-        auto_fit: false,
+        world_center: [500.0, 400.0],
     };
     let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 800.0));
     let plot = plot_inner_rect(&app, 0, object, screen).expect("plot is on the board");
@@ -222,8 +222,7 @@ fn assert_axis_double_click_resets_only(axis: ZoomAxis) {
     let object = ids[0];
     app.session.board = BoardViewport {
         zoom: 1.0,
-        pan: [0.0, 0.0],
-        auto_fit: false,
+        world_center: [500.0, 400.0],
     };
     let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 800.0));
     let outer = object_screen_rect(app.session.board, &app.doc.canvases[0], object, screen)
@@ -481,7 +480,7 @@ fn horizontal_non_precise_scroll_is_ignored() {
 #[test]
 fn point_scroll_over_plot_pans_viewport_without_moving_board() {
     let (mut app, _, _) = zoomed_plot_fixture();
-    app.session.board.auto_fit = false;
+    app.session.viewport_mode = ViewportMode::Manual;
     let before_viewport = plot_viewport(&app);
     let before_board = app.session.board;
 
@@ -507,7 +506,7 @@ fn point_scroll_over_plot_pans_viewport_without_moving_board() {
 #[test]
 fn command_point_scroll_over_plot_pans_board_without_changing_viewport() {
     let (mut app, _, _) = zoomed_plot_fixture();
-    app.session.board.auto_fit = false;
+    app.session.viewport_mode = ViewportMode::Manual;
     let before_viewport = plot_viewport(&app);
     let modifiers = egui::Modifiers {
         command: true,
@@ -523,7 +522,7 @@ fn command_point_scroll_over_plot_pans_board_without_changing_viewport() {
 
     assert!(consumed);
     assert_eq!(plot_viewport(&app), before_viewport);
-    assert_eq!(app.session.board.pan, [4.0, -3.0]);
+    assert_eq!(app.session.board.world_center, [196.0, 153.0]);
 }
 
 #[cfg(target_os = "macos")]
@@ -531,7 +530,7 @@ fn assert_modified_point_scroll_keeps_board_target_after_modifier_release(
     modifiers: egui::Modifiers,
 ) {
     let (mut app, _, _) = zoomed_plot_fixture();
-    app.session.board.auto_fit = false;
+    app.session.viewport_mode = ViewportMode::Manual;
     let before_viewport = plot_viewport(&app);
     let ctx = egui::Context::default();
     let pointer = Pos2::new(100.0, 60.0);
@@ -553,7 +552,7 @@ fn assert_modified_point_scroll_keeps_board_target_after_modifier_release(
 
     assert!(start_consumed);
     assert_eq!(plot_viewport(&app), before_viewport);
-    assert_eq!(app.session.board.pan, [4.0, -3.0]);
+    assert_eq!(app.session.board.world_center, [196.0, 153.0]);
 
     let (move_consumed, _) = run_navigation_events_on(
         &ctx,
@@ -569,7 +568,7 @@ fn assert_modified_point_scroll_keeps_board_target_after_modifier_release(
 
     assert!(move_consumed);
     assert_eq!(plot_viewport(&app), before_viewport);
-    assert_eq!(app.session.board.pan, [6.0, -5.0]);
+    assert_eq!(app.session.board.world_center, [194.0, 155.0]);
 }
 
 #[cfg(target_os = "macos")]
@@ -593,7 +592,7 @@ fn control_point_scroll_keeps_board_target_after_modifier_release() {
 #[cfg(target_os = "macos")]
 fn assert_board_gesture_finish_releases_target(finish_phase: egui::TouchPhase) {
     let (mut app, _, _) = zoomed_plot_fixture();
-    app.session.board.auto_fit = false;
+    app.session.viewport_mode = ViewportMode::Manual;
     let ctx = egui::Context::default();
     let pointer = Pos2::new(100.0, 60.0);
     let command = egui::Modifiers {
@@ -644,7 +643,7 @@ fn assert_board_gesture_finish_releases_target(finish_phase: egui::TouchPhase) {
 
     assert!(consumed);
     assert_ne!(plot_viewport(&app), before_viewport);
-    assert_eq!(app.session.board.pan, [4.0, -3.0]);
+    assert_eq!(app.session.board.world_center, [196.0, 153.0]);
 }
 
 #[cfg(target_os = "macos")]
@@ -663,7 +662,7 @@ fn command_point_scroll_releases_board_target_on_cancel() {
 #[test]
 fn point_scroll_over_blank_board_pans_both_axes() {
     let (mut app, _, _) = zoomed_plot_fixture();
-    app.session.board.auto_fit = false;
+    app.session.viewport_mode = ViewportMode::Manual;
     let before_viewport = plot_viewport(&app);
 
     let (consumed, _) = run_navigation_frame(
@@ -675,14 +674,14 @@ fn point_scroll_over_blank_board_pans_both_axes() {
 
     assert!(consumed);
     assert_eq!(plot_viewport(&app), before_viewport);
-    assert_eq!(app.session.board.pan, [4.0, -3.0]);
+    assert_eq!(app.session.board.world_center, [196.0, 153.0]);
 }
 
 #[cfg(target_os = "macos")]
 #[test]
 fn native_pinch_has_priority_over_command_point_scroll() {
     let (mut app, _, _) = zoomed_plot_fixture();
-    app.session.board.auto_fit = false;
+    app.session.viewport_mode = ViewportMode::Manual;
     let modifiers = egui::Modifiers {
         command: true,
         ..Default::default()
@@ -700,14 +699,14 @@ fn native_pinch_has_priority_over_command_point_scroll() {
 
     assert!(consumed);
     assert!((app.session.board.zoom - 1.25).abs() < f32::EPSILON);
-    assert_eq!(app.session.board.pan, [-25.0, -15.0]);
+    assert_eq!(app.session.board.world_center, [180.0, 132.0]);
 }
 
 #[cfg(target_os = "macos")]
 #[test]
 fn native_pinch_does_not_inherit_board_target_from_point_gesture() {
     let (mut app, _, _) = zoomed_plot_fixture();
-    app.session.board.auto_fit = false;
+    app.session.viewport_mode = ViewportMode::Manual;
     let ctx = egui::Context::default();
     let pointer = Pos2::new(100.0, 60.0);
     let command = egui::Modifiers {
@@ -744,21 +743,19 @@ fn native_pinch_does_not_inherit_board_target_from_point_gesture() {
     assert!(after_viewport.view_x.span() < before_viewport.view_x.span());
     assert!(after_viewport.view_y.span() < before_viewport.view_y.span());
     assert_eq!(app.session.board.zoom, 1.0);
-    assert_eq!(app.session.board.pan, [4.0, -3.0]);
+    assert_eq!(app.session.board.world_center, [196.0, 153.0]);
 }
 
 #[test]
 fn board_pan_clears_fit_and_moves_both_axes() {
     let mut app = PlotxApp::new();
-    app.session.board.pan = [10.0, -4.0];
-    app.session.board.auto_fit = true;
-    app.session.board_fit = Some(BoardFitTarget::Region([0.0, 0.0, 1.0, 1.0]));
+    app.session.board.world_center = [10.0, -4.0];
+    app.session.viewport_mode = ViewportMode::Fit(BoardFitTarget::Region([0.0, 0.0, 1.0, 1.0]));
 
     pan_board_view(&mut app, Vec2::new(7.0, -3.0));
 
-    assert_eq!(app.session.board.pan, [17.0, -7.0]);
-    assert!(!app.session.board.auto_fit);
-    assert!(app.session.board_fit.is_none());
+    assert_eq!(app.session.board.world_center, [3.0, -1.0]);
+    assert_eq!(app.session.viewport_mode, ViewportMode::Manual);
 }
 
 #[test]

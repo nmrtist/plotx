@@ -118,25 +118,6 @@ impl ObjectFrame {
     }
 }
 
-/// Pan/zoom of the board that holds every page-frame in world (pt) space.
-/// `auto_fit` refits the active page to the screen until the user pans/zooms.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct BoardViewport {
-    pub zoom: f32,
-    pub pan: [f32; 2],
-    pub auto_fit: bool,
-}
-
-impl Default for BoardViewport {
-    fn default() -> Self {
-        Self {
-            zoom: 1.0,
-            pan: [0.0, 0.0],
-            auto_fit: true,
-        }
-    }
-}
-
 /// Legacy fallback resting position on the board (pt) for a page loaded from an
 /// old `.plotx` that predates saved `board_pos`: a tidy index-keyed grid. Live
 /// creation uses the collision-aware flow in `crate::state::next_board_frame_pos`
@@ -165,28 +146,6 @@ pub enum FrameRef {
 pub enum BoardFrameId {
     Page(CanvasId),
     Sheet(DatasetId),
-}
-
-/// What an in-flight board zoom-to-fit glides toward.
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum BoardFitTarget {
-    /// A single frame, re-read each tick so the glide tracks it if it moves.
-    Frame(BoardFrameId),
-    /// A fixed world-pt region `(min_x, min_y, max_x, max_y)` — e.g. the bounding
-    /// box of a multi-frame selection.
-    Region([f32; 4]),
-    /// An exact board viewport (zoom + pan), e.g. a saved named view.
-    Viewport { zoom: f32, pan: [f32; 2] },
-}
-
-/// A saved board bookmark: a named board viewport the user can jump back to. The
-/// scalable answer to co-viewing many chart/data frames — save a framing, name
-/// it, return to it later.
-#[derive(Clone, Debug, PartialEq)]
-pub struct NamedView {
-    pub name: String,
-    pub zoom: f32,
-    pub pan: [f32; 2],
 }
 
 /// How a multi-dataset plot combines its members. Line kinds: `Superimposed`

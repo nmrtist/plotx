@@ -11,19 +11,18 @@ pub(crate) const FRAME_HEADER_PX: f32 = 18.0;
 pub(crate) const FIT_CHROME_PX: f32 = FRAME_HEADER_PX + 30.0;
 
 const FIT_ZOOM_ID: &str = "board_fit_zoom";
-const FIT_PAN_X_ID: &str = "board_fit_pan_x";
-const FIT_PAN_Y_ID: &str = "board_fit_pan_y";
-const FIT_SETTLE_EPS: f32 = 1e-3;
+const FIT_CENTER_X_ID: &str = "board_fit_center_x";
+const FIT_CENTER_Y_ID: &str = "board_fit_center_y";
+const FIT_CANDIDATE_ID: &str = "board_fit_candidate";
+const FIT_CANDIDATE_HYSTERESIS: f32 = 0.95;
 
-/// Begin a spring-animated zoom-to-fit onto `frame` (a page or a sheet). Clears
-/// `auto_fit` so the all-frames fit stops fighting the glide, and seeds the
-/// springs from the live board so the animation starts where the view is now
-/// instead of snapping.
+/// Begin a persistent spring-animated fit onto `frame` (a page or a sheet),
+/// seeding the springs from the live camera so the transition does not snap.
 pub(crate) fn request_board_fit(app: &mut PlotxApp, ctx: &egui::Context, frame: FrameRef) {
     let Some(frame) = board_frame_id(app, frame) else {
         return;
     };
-    app.session.board_fit = Some(BoardFitTarget::Frame(frame));
+    app.session.viewport_mode = ViewportMode::Fit(BoardFitTarget::Frame(frame));
     seed_board_fit_springs(app, ctx);
 }
 
@@ -32,13 +31,13 @@ pub(crate) fn consume_board_reveal(app: &mut PlotxApp, ctx: &egui::Context) {
     if let Some(frame) = app.session.board_reveal.take()
         && board_frame_ref(app, frame).is_some()
     {
-        app.session.board_fit = Some(BoardFitTarget::Frame(frame));
+        app.session.viewport_mode = ViewportMode::Fit(BoardFitTarget::Frame(frame));
         seed_board_fit_springs(app, ctx);
     }
 }
 
 pub(crate) fn request_board_fit_region(app: &mut PlotxApp, ctx: &egui::Context, bbox: [f32; 4]) {
-    app.session.board_fit = Some(BoardFitTarget::Region(bbox));
+    app.session.viewport_mode = ViewportMode::Fit(BoardFitTarget::Region(bbox));
     seed_board_fit_springs(app, ctx);
 }
 
@@ -46,9 +45,9 @@ pub(crate) fn request_board_fit_viewport(
     app: &mut PlotxApp,
     ctx: &egui::Context,
     zoom: f32,
-    pan: [f32; 2],
+    world_center: [f32; 2],
 ) {
-    app.session.board_fit = Some(BoardFitTarget::Viewport { zoom, pan });
+    app.session.viewport_mode = ViewportMode::Fit(BoardFitTarget::Viewport { zoom, world_center });
     seed_board_fit_springs(app, ctx);
 }
 
@@ -61,25 +60,30 @@ pub(crate) fn request_board_fit_viewport(
 /// outright (not merely pause it) and stop auto-fit. Call once at every gesture
 /// start; `UiState::gesture_active` then keeps the animators out until it ends.
 pub(crate) fn freeze_board_for_gesture(app: &mut PlotxApp) {
-    app.session.board_fit = None;
-    app.session.board.auto_fit = false;
+    app.session.viewport_mode = ViewportMode::Manual;
 }
 
-/// Clear `auto_fit` and seed the fit springs from the live board so the glide
-/// starts where the view is now instead of snapping.
+/// Seed the fit springs from the live camera.
 fn seed_board_fit_springs(app: &mut PlotxApp, ctx: &egui::Context) {
-    app.session.board.auto_fit = false;
     crate::ui::switcher::seed_spring(ctx, egui::Id::new(FIT_ZOOM_ID), app.session.board.zoom);
-    crate::ui::switcher::seed_spring(ctx, egui::Id::new(FIT_PAN_X_ID), app.session.board.pan[0]);
-    crate::ui::switcher::seed_spring(ctx, egui::Id::new(FIT_PAN_Y_ID), app.session.board.pan[1]);
+    crate::ui::switcher::seed_spring(
+        ctx,
+        egui::Id::new(FIT_CENTER_X_ID),
+        app.session.board.world_center[0],
+    );
+    crate::ui::switcher::seed_spring(
+        ctx,
+        egui::Id::new(FIT_CENTER_Y_ID),
+        app.session.board.world_center[1],
+    );
 }
 
 pub(crate) fn frame_zoom_menu(app: &mut PlotxApp, ui: &mut Ui) {
     let n = app.session.ui.frame_selection.len();
-    let label = if n > 1 {
-        format!("Zoom to {n} selected frames")
-    } else {
-        "Zoom to fit all frames".to_owned()
+    let label = match n {
+        0 => "Zoom to fit all frames".to_owned(),
+        1 => "Zoom to selected frame".to_owned(),
+        _ => format!("Zoom to {n} selected frames"),
     };
     if ui.button(label).clicked() {
         zoom_to_selection(app, ui.ctx());
@@ -107,60 +111,105 @@ pub(crate) fn zoom_to_selection(app: &mut PlotxApp, ctx: &egui::Context) {
     }
 }
 
-pub(crate) fn drive_board_fit(app: &mut PlotxApp, ui: &Ui, screen: egui::Rect, safe: egui::Rect) {
+pub(crate) fn drive_board_fit(
+    app: &mut PlotxApp,
+    ui: &Ui,
+    geometry: &crate::ui::workspace_geometry::WorkspaceGeometry,
+) {
     if app.session.ui.gesture_active() {
         debug_assert!(
-            app.session.board_fit.is_none(),
-            "a gesture must freeze board_fit; something re-armed it mid-gesture"
+            matches!(app.session.viewport_mode, ViewportMode::Manual),
+            "a gesture must leave the viewport in manual mode"
         );
         return;
     }
-    let Some(fit) = app.session.board_fit else {
+    let ViewportMode::Fit(fit) = app.session.viewport_mode else {
         return;
     };
-    let (target_zoom, target_pan) = match fit {
+    let (target_zoom, target_center) = match fit {
         BoardFitTarget::Frame(frame) => {
             match board_frame_ref(app, frame).and_then(|frame| frame_board_rect(app, frame)) {
                 Some(r) => {
-                    let vp = board_fit_bbox_with_chrome_in_rect(
+                    let vp = fit_bbox_around_occluders(
                         (r.left, r.top, r.right(), r.bottom()),
-                        screen,
-                        safe,
+                        geometry,
+                        ui.ctx(),
                     );
-                    (vp.zoom, vp.pan)
+                    (vp.zoom, vp.world_center)
                 }
                 None => {
-                    app.session.board_fit = None;
+                    app.session.viewport_mode = ViewportMode::Manual;
                     return;
                 }
             }
         }
-        BoardFitTarget::Region(b) => {
-            let vp = board_fit_bbox_with_chrome_in_rect((b[0], b[1], b[2], b[3]), screen, safe);
-            (vp.zoom, vp.pan)
+        BoardFitTarget::AllFrames => {
+            let Some(b) = all_frames_bbox(app) else {
+                return;
+            };
+            let vp = fit_bbox_around_occluders(b, geometry, ui.ctx());
+            (vp.zoom, vp.world_center)
         }
-        BoardFitTarget::Viewport { zoom, pan } => (zoom, pan),
+        BoardFitTarget::Region(b) => {
+            let vp = fit_bbox_around_occluders((b[0], b[1], b[2], b[3]), geometry, ui.ctx());
+            (vp.zoom, vp.world_center)
+        }
+        BoardFitTarget::Viewport { zoom, world_center } => (zoom, world_center),
     };
     let target = BoardViewport {
         zoom: target_zoom,
-        pan: target_pan,
-        auto_fit: false,
+        world_center: target_center,
     };
     let ctx = ui.ctx();
     let dt = ui.input(|i| i.stable_dt);
     app.session.board.zoom =
         crate::ui::switcher::animate_spring(ctx, egui::Id::new(FIT_ZOOM_ID), target.zoom, dt);
-    app.session.board.pan[0] =
-        crate::ui::switcher::animate_spring(ctx, egui::Id::new(FIT_PAN_X_ID), target.pan[0], dt);
-    app.session.board.pan[1] =
-        crate::ui::switcher::animate_spring(ctx, egui::Id::new(FIT_PAN_Y_ID), target.pan[1], dt);
-    app.session.board.auto_fit = false;
-    if (app.session.board.zoom - target.zoom).abs() < FIT_SETTLE_EPS
-        && (app.session.board.pan[0] - target.pan[0]).abs() < FIT_SETTLE_EPS
-        && (app.session.board.pan[1] - target.pan[1]).abs() < FIT_SETTLE_EPS
-    {
-        app.session.board_fit = None;
+    app.session.board.world_center[0] = crate::ui::switcher::animate_spring(
+        ctx,
+        egui::Id::new(FIT_CENTER_X_ID),
+        target.world_center[0],
+        dt,
+    );
+    app.session.board.world_center[1] = crate::ui::switcher::animate_spring(
+        ctx,
+        egui::Id::new(FIT_CENTER_Y_ID),
+        target.world_center[1],
+        dt,
+    );
+}
+
+fn fit_bbox_around_occluders(
+    bbox: (f32, f32, f32, f32),
+    geometry: &crate::ui::workspace_geometry::WorkspaceGeometry,
+    ctx: &egui::Context,
+) -> BoardViewport {
+    let mut best = None;
+    for (index, safe) in geometry.fit_candidates().enumerate() {
+        let viewport = board_fit_bbox_with_chrome_in_rect(bbox, geometry.board_rect, safe);
+        if best
+            .as_ref()
+            .is_none_or(|(_, current): &(usize, BoardViewport)| viewport.zoom > current.zoom)
+        {
+            best = Some((index, viewport));
+        }
     }
+    let (best_index, best_viewport) = best.expect("board geometry always has a fit candidate");
+    let id = egui::Id::new(FIT_CANDIDATE_ID);
+    let previous_index = ctx.data(|data| data.get_temp::<usize>(id));
+    let chosen = previous_index
+        .filter(|index| *index != best_index)
+        .and_then(|index| {
+            geometry.fit_candidates().nth(index).map(|safe| {
+                (
+                    index,
+                    board_fit_bbox_with_chrome_in_rect(bbox, geometry.board_rect, safe),
+                )
+            })
+        })
+        .filter(|(_, viewport)| viewport.zoom >= best_viewport.zoom * FIT_CANDIDATE_HYSTERESIS)
+        .unwrap_or((best_index, best_viewport));
+    ctx.data_mut(|data| data.insert_temp(id, chosen.0));
+    chosen.1
 }
 
 /// Rounding of a header strip's top corners; the frame shadow shares it so the
@@ -641,6 +690,7 @@ fn handle_frame_drag(app: &mut PlotxApp, rect: egui::Rect, ui: &Ui) -> bool {
             })
             .collect::<Vec<_>>();
         if !before.is_empty() {
+            freeze_board_for_gesture(app);
             let start = BoardTransform::from_board(app.session.board, rect).screen_to_world(p);
             app.begin_interaction(Interaction::Frame(FrameDrag {
                 frame: frame_id,
@@ -678,8 +728,6 @@ fn handle_frame_drag(app: &mut PlotxApp, rect: egui::Rect, ui: &Ui) -> bool {
                 set_frame_board_pos(app, frame, [before[0] + delta[0], before[1] + delta[1]]);
             }
         }
-        app.session.board_fit = None;
-        app.session.board.auto_fit = false;
         ui.ctx().request_repaint();
     }
 

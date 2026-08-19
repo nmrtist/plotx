@@ -31,6 +31,7 @@ mod scientific_script;
 mod secondary_sidebar;
 mod settings_dialog;
 mod shortcuts;
+mod sidebars;
 mod switcher;
 #[cfg(not(target_os = "macos"))]
 mod title_bar;
@@ -38,6 +39,7 @@ pub(crate) mod tools;
 mod trace_alignment;
 mod trace_composer;
 mod windows;
+mod workspace_geometry;
 
 use data_sheet::*;
 use diagnostics::*;
@@ -54,6 +56,7 @@ pub(crate) use settings_dialog::apply_chrome_theme;
 use settings_dialog::{settings_window, sync_chrome_theme};
 use shortcuts::*;
 use windows::*;
+use workspace_geometry::resolve as workspace_geometry;
 
 pub fn render(
     app: &mut PlotxApp,
@@ -110,7 +113,6 @@ pub fn render(
         handle_command_shortcuts(app, clipboard_table_paste, &ctx);
         handle_escape_shortcut(app, &ctx);
         handle_rename_shortcut(app, &ctx);
-        handle_fit_shortcut(app, &ctx);
         handle_focus_shortcut(app, &ctx);
         handle_hierarchy_traversal(app, &ctx);
         handle_delete_shortcut(app, &ctx);
@@ -141,7 +143,7 @@ pub fn render(
     render_status(app, ui, dark);
 
     let workspace_width = ui.available_width();
-    render_sidebars(app, ui, dark, workspace_width);
+    sidebars::render(app, ui, dark, workspace_width);
 
     // A sidebar may have changed an expanded Phase step before the canvas paints.
     app.sync_phase_interaction();
@@ -352,108 +354,6 @@ fn feedback_banner(app: &mut PlotxApp, ui: &mut Ui, dark: bool) {
                     },
                 );
         });
-}
-
-fn render_sidebars(app: &mut PlotxApp, ui: &mut Ui, dark: bool, workspace_width: f32) {
-    let compact = workspace_width < 1200.0;
-    let inspector_visible = app.session.secondary_sidebar_visible;
-    if !inspector_visible {
-        app.finish_axis_overrides_edit();
-    }
-    object_inspector::finish_series_edit_if_inactive(app, inspector_visible);
-    if app.session.primary_sidebar_visible {
-        let panel = egui::Panel::left("primary_sidebar")
-            .frame(egui::Frame::NONE.inner_margin(egui::Margin {
-                left: 8,
-                right: 0,
-                top: 4,
-                bottom: 8,
-            }))
-            .show_separator_line(false);
-        let panel = if compact {
-            panel
-                .resizable(true)
-                .default_size(180.0)
-                .size_range(150.0..=420.0)
-        } else {
-            panel
-                .resizable(true)
-                .default_size(app.session.primary_sidebar_width)
-                .size_range(190.0..=420.0)
-        };
-        let response = show_resizable_sidebar(
-            panel,
-            ui,
-            Id::new("primary_sidebar"),
-            SidebarEdge::Right,
-            |ui| {
-                let size = ui.available_size();
-                let frame = card_frame(dark, egui::Margin::ZERO);
-                let inset = frame.total_margin().sum();
-                frame
-                    .show(ui, |ui| {
-                        ui.set_min_size((size - inset).max(Vec2::ZERO));
-                        primary_sidebar::render(app, ui);
-                    })
-                    .response
-                    .rect
-            },
-        );
-        paint_sidebar_resize_edge(
-            ui,
-            Id::new("primary_sidebar"),
-            response.inner,
-            SidebarEdge::Right,
-            dark,
-        );
-    }
-
-    if app.session.secondary_sidebar_visible {
-        let panel = egui::Panel::right("secondary_sidebar")
-            .frame(egui::Frame::NONE.inner_margin(egui::Margin {
-                left: 0,
-                right: 8,
-                top: 4,
-                bottom: 8,
-            }))
-            .show_separator_line(false);
-        let panel = if compact {
-            panel
-                .resizable(true)
-                .default_size(230.0)
-                .size_range(180.0..=460.0)
-        } else {
-            panel
-                .resizable(true)
-                .default_size(app.session.secondary_sidebar_width)
-                .size_range(230.0..=460.0)
-        };
-        let response = show_resizable_sidebar(
-            panel,
-            ui,
-            Id::new("secondary_sidebar"),
-            SidebarEdge::Left,
-            |ui| {
-                let size = ui.available_size();
-                let frame = card_frame(dark, egui::Margin::ZERO);
-                let inset = frame.total_margin().sum();
-                frame
-                    .show(ui, |ui| {
-                        ui.set_min_size((size - inset).max(Vec2::ZERO));
-                        secondary_sidebar::render(app, ui);
-                    })
-                    .response
-                    .rect
-            },
-        );
-        paint_sidebar_resize_edge(
-            ui,
-            Id::new("secondary_sidebar"),
-            response.inner,
-            SidebarEdge::Left,
-            dark,
-        );
-    }
 }
 
 #[derive(Clone, Copy)]

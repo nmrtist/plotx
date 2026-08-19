@@ -76,8 +76,8 @@ pub(super) fn paint_document(app: &PlotxApp, ci: usize, rect: egui::Rect, painte
         plotx_render::DocumentViewport {
             zoom,
             pan: [
-                app.session.board.pan[0] + bp[0] * zoom,
-                app.session.board.pan[1] + bp[1] * zoom,
+                rect.width() * 0.5 + (bp[0] - app.session.board.world_center[0]) * zoom,
+                rect.height() * 0.5 + (bp[1] - app.session.board.world_center[1]) * zoom,
             ],
         },
     );

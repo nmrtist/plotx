@@ -3,8 +3,8 @@
 //! within the repository size limit.
 
 use plotx_core::state::{
-    CanvasDocument, CommandPaletteState, LineShapeKind, ObjectFrame, PlotxApp, ProjectTransition,
-    Tool, ToolGroup,
+    CanvasDocument, CommandPaletteState, FrameRef, LineShapeKind, ObjectFrame, PlotxApp,
+    ProjectTransition, Tool, ToolGroup,
 };
 
 use super::clipboard_table::ClipboardTablePaste;
@@ -118,8 +118,21 @@ fn execute_inner(
         CommandId::ToggleSecondarySidebar => {
             app.session.secondary_sidebar_visible = !app.session.secondary_sidebar_visible;
         }
-        CommandId::ZoomToFit => app.zoom_active_canvas_to_fit(),
-        CommandId::ZoomToSelection => super::canvas::zoom_to_selection(app, ctx),
+        CommandId::ZoomToFit => {
+            if let Some(canvas) = app.session.active_canvas {
+                super::canvas::request_board_fit(app, ctx, FrameRef::Page(canvas));
+                app.session.status = "Fit page to view.".into();
+            }
+        }
+        CommandId::ZoomToSelection => {
+            let count = app.session.ui.frame_selection.len();
+            super::canvas::zoom_to_selection(app, ctx);
+            app.session.status = match count {
+                0 => "Fit all frames to view.".to_owned(),
+                1 => "Fit selected frame to view.".to_owned(),
+                _ => format!("Fit {count} selected frames to view."),
+            };
+        }
         CommandId::UiScaleUp => crate::scale::nudge_ui_zoom(app, ctx, 1),
         CommandId::UiScaleDown => crate::scale::nudge_ui_zoom(app, ctx, -1),
         CommandId::UiScaleReset => crate::scale::reset_ui_zoom(app, ctx),
@@ -580,8 +593,19 @@ mod tests {
     use plotx_core::actions::Action;
     use plotx_core::properties::{AggregateValue, PropertyAddress, PropertyValue, app_preferences};
     use plotx_core::settings::Settings;
-    use plotx_core::state::CanvasDocument;
-    use plotx_core::state::DEFAULT_CANVAS_SIZE_MM;
+    use plotx_core::state::{BoardFitTarget, CanvasDocument, DEFAULT_CANVAS_SIZE_MM, ViewportMode};
+
+    fn app_with_active_canvases(count: usize) -> PlotxApp {
+        let mut app = PlotxApp::new_with_settings(Settings::default());
+        for index in 0..count {
+            app.doc.canvases.push(CanvasDocument::new(
+                format!("page {index}"),
+                DEFAULT_CANVAS_SIZE_MM,
+            ));
+        }
+        app.session.active_canvas = (count > 0).then_some(0);
+        app
+    }
 
     fn catalog_snap(app: &mut PlotxApp, enabled: bool) {
         let commit = app
@@ -592,6 +616,53 @@ mod tests {
             )
             .expect("the Preferences catalog row plans");
         app.commit_property(commit);
+    }
+
+    #[test]
+    fn zoom_to_fit_command_seeds_springs_from_the_live_camera() {
+        let mut app = app_with_active_canvases(1);
+        let ctx = egui::Context::default();
+        app.session.board.zoom = 2.5;
+        app.session.board.world_center = [30.0, -40.0];
+
+        for (id, stale) in [
+            ("board_fit_zoom", 9.0),
+            ("board_fit_center_x", 900.0),
+            ("board_fit_center_y", -900.0),
+        ] {
+            crate::ui::switcher::animate_spring(&ctx, egui::Id::new(id), stale, 0.0);
+        }
+
+        execute_without_clipboard(CommandId::ZoomToFit, &mut app, &ctx);
+
+        let page_id = app.doc.canvases[0].resource_id;
+        assert_eq!(
+            app.session.viewport_mode,
+            ViewportMode::Fit(BoardFitTarget::Frame(
+                plotx_core::state::BoardFrameId::Page(page_id)
+            ))
+        );
+        for (id, live) in [
+            ("board_fit_zoom", 2.5),
+            ("board_fit_center_x", 30.0),
+            ("board_fit_center_y", -40.0),
+        ] {
+            let seeded = crate::ui::switcher::animate_spring(&ctx, egui::Id::new(id), live, 0.0);
+            assert_eq!(seeded, live);
+        }
+        assert_eq!(app.session.status, "Fit page to view.");
+    }
+
+    #[test]
+    fn zoom_to_selection_command_reports_one_selected_frame() {
+        let mut app = app_with_active_canvases(1);
+        let ctx = egui::Context::default();
+        app.session.ui.frame_selection =
+            vec![plotx_core::state::board_frame_id(&app, FrameRef::Page(0)).unwrap()];
+
+        execute_without_clipboard(CommandId::ZoomToSelection, &mut app, &ctx);
+
+        assert_eq!(app.session.status, "Fit selected frame to view.");
     }
 
     #[test]

@@ -54,7 +54,7 @@ impl PlotxApp {
                 active_canvas: None,
                 board: BoardViewport::default(),
                 board_views: Vec::new(),
-                board_fit: None,
+                viewport_mode: ViewportMode::Fit(BoardFitTarget::AllFrames),
                 board_reveal: None,
                 view: PrimaryView::Canvas,
                 tool: Tool::Select,
@@ -649,20 +649,6 @@ impl PlotxApp {
             let size = [frame.width / MM_TO_PT, frame.height / MM_TO_PT];
             let fig = self.build_object_figure(owner, &binding, &chart, &stack, &projections, size);
             self.apply_viewport_to_plot_object(ci, id, fig);
-        }
-    }
-
-    pub fn zoom_canvas_to_fit(&mut self, ci: usize) {
-        if self.doc.canvases.get(ci).is_none() {
-            return;
-        }
-        self.session.board.auto_fit = true;
-        self.session.status = "Fit page to view.".into();
-    }
-
-    pub fn zoom_active_canvas_to_fit(&mut self) {
-        if let Some(ci) = self.session.active_canvas {
-            self.zoom_canvas_to_fit(ci);
         }
     }
 }

@@ -427,7 +427,7 @@ fn page_view_zoom_pan_does_not_change_svg_or_object_geometry() {
     let before_svg = crate::state::render_document_svg(&app.doc.canvases[0]);
 
     app.session.board.zoom = 2.0;
-    app.session.board.pan = [120.0, -40.0];
+    app.session.board.world_center = [120.0, -40.0];
 
     assert_eq!(app.doc.canvases[0].objects[0].frame, before_frame);
     assert_eq!(first_plot(&app).viewport, before_viewport);

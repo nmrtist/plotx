@@ -3,16 +3,20 @@ use egui::Ui;
 use egui_phosphor::regular as icon;
 use plotx_core::actions::{Action, ZOrder};
 use plotx_core::state::{
-    CanvasObjectKind, FrameRef, ObjectId, PlotxApp, PrimaryView, RegionSelection, RenameState,
-    RenameTarget,
+    FrameRef, ObjectId, PlotxApp, PrimaryView, RegionSelection, RenameState, RenameTarget,
 };
 mod board_views;
 mod data_browser;
+mod layer_controls;
 mod layers_tree;
 pub(crate) mod selection;
 use board_views::board_views_section;
 use data_browser::{AnalysisItem, AnalysisKind, DataTree, DatasetNode};
+use layer_controls::{
+    kind_glyph, kind_label, lock_button, row as layer_row, truncated_selectable, visibility_button,
+};
 use selection::*;
+
 pub fn render(app: &mut PlotxApp, ui: &mut Ui) {
     ui.add_space(6.0);
     switcher::segmented(ui, &mut app.session.view);
@@ -109,7 +113,7 @@ fn canvas_list(app: &mut PlotxApp, ui: &mut Ui) {
         }
         let name = app.doc.canvases[ci].name.clone();
         let selected = crate::ui::canvas::frame_is_selected(app, FrameRef::Page(ci));
-        let resp = ui.selectable_label(selected, name);
+        let resp = truncated_selectable(ui, selected, name);
         if resp.clicked() {
             claim_list_keyboard_focus(ui, &resp);
             select = Some((ci, select_modifiers(ui)));
@@ -222,81 +226,72 @@ fn object_list(app: &mut PlotxApp, ci: usize, ui: &mut Ui) {
         if app.doc.canvases[ci].parent_panel(object_id).is_some() {
             continue;
         }
-        ui.horizontal(|ui| {
-            let mut visible = app.doc.canvases[ci].objects[oi].visible;
-            if ui
-                .checkbox(&mut visible, "")
-                .on_hover_text("Visible")
-                .changed()
-            {
-                let before = (
-                    app.doc.canvases[ci].objects[oi].visible,
-                    app.doc.canvases[ci].objects[oi].locked,
-                );
-                app.execute_action(Action::set_object_flags(
-                    ci,
-                    object_id,
-                    before,
-                    (visible, before.1),
-                ));
-            }
-            ui.weak(kind_glyph(&app.doc.canvases[ci].objects[oi].kind))
-                .on_hover_text(kind_label(&app.doc.canvases[ci].objects[oi].kind));
-            if app.doc.canvases[ci]
-                .content_group(app.doc.canvases[ci].objects[oi].id)
-                .is_some()
-            {
-                ui.weak(egui::RichText::new("⛓").small())
-                    .on_hover_text("Grouped");
-            }
-            let selected = app.session.ui.selection.contains(object_id)
-                || app.session.ui.selection.object() == Some(object_id);
-            let resp = ui.add(
-                egui::Button::selectable(selected, app.doc.canvases[ci].objects[oi].name.clone())
-                    .sense(egui::Sense::click_and_drag()),
-            );
-            if resp.drag_started() {
-                app.session.ui.layers_drag_content = Some(object_id);
-            }
-            if resp.clicked() || (resp.secondary_clicked() && !selected) {
-                claim_list_keyboard_focus(ui, &resp);
-                select = Some((object_id, select_modifiers(ui)));
-            }
-            resp.context_menu(|ui| {
-                object_transfer_menu(ui, object_id, &others, &mut transfer);
-                if !panel_destinations.is_empty() {
-                    ui.menu_button("Move into panel", |ui| {
-                        for (panel, name) in &panel_destinations {
-                            if ui.button(name).clicked() {
-                                app.select_content(ci, object_id);
-                                crate::ui::commands::execute_without_clipboard(
-                                    crate::ui::commands::CommandId::MoveContentToPanel(Some(
-                                        *panel,
-                                    )),
-                                    app,
-                                    ui.ctx(),
-                                );
-                                ui.close();
-                            }
-                        }
-                    });
+        let locked_before = app.doc.canvases[ci].objects[oi].locked;
+        let (_, (lock_change, row_reorder)) = layer_row(
+            ui,
+            |ui| {
+                let mut visible = app.doc.canvases[ci].objects[oi].visible;
+                if visibility_button(ui, &mut visible).changed() {
+                    let before = (
+                        app.doc.canvases[ci].objects[oi].visible,
+                        app.doc.canvases[ci].objects[oi].locked,
+                    );
+                    app.execute_action(Action::set_object_flags(
+                        ci,
+                        object_id,
+                        before,
+                        (visible, before.1),
+                    ));
                 }
-            });
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let mut locked = app.doc.canvases[ci].objects[oi].locked;
-                if ui
-                    .checkbox(&mut locked, "")
-                    .on_hover_text("Locked")
-                    .changed()
-                    && let Some(target) = app.object_target(ci, object_id)
-                    && let Ok(commit) = app.plan_property_write(
-                        plotx_core::properties::object::LOCKED,
-                        std::slice::from_ref(&target),
-                        &plotx_core::properties::PropertyValue::Bool(locked),
-                    )
+                ui.weak(kind_glyph(&app.doc.canvases[ci].objects[oi].kind))
+                    .on_hover_text(kind_label(&app.doc.canvases[ci].objects[oi].kind));
+                if app.doc.canvases[ci]
+                    .content_group(app.doc.canvases[ci].objects[oi].id)
+                    .is_some()
                 {
-                    app.commit_property(commit);
+                    ui.weak(egui::RichText::new("⛓").small())
+                        .on_hover_text("Grouped");
                 }
+                let selected = app.session.ui.selection.contains(object_id)
+                    || app.session.ui.selection.object() == Some(object_id);
+                let resp = truncated_selectable(
+                    ui,
+                    selected,
+                    app.doc.canvases[ci].objects[oi].name.clone(),
+                )
+                .interact(egui::Sense::click_and_drag());
+                if resp.drag_started() {
+                    app.session.ui.layers_drag_content = Some(object_id);
+                }
+                if resp.clicked() || (resp.secondary_clicked() && !selected) {
+                    claim_list_keyboard_focus(ui, &resp);
+                    select = Some((object_id, select_modifiers(ui)));
+                }
+                resp.context_menu(|ui| {
+                    object_transfer_menu(ui, object_id, &others, &mut transfer);
+                    if !panel_destinations.is_empty() {
+                        ui.menu_button("Move into panel", |ui| {
+                            for (panel, name) in &panel_destinations {
+                                if ui.button(name).clicked() {
+                                    app.select_content(ci, object_id);
+                                    crate::ui::commands::execute_without_clipboard(
+                                        crate::ui::commands::CommandId::MoveContentToPanel(Some(
+                                            *panel,
+                                        )),
+                                        app,
+                                        ui.ctx(),
+                                    );
+                                    ui.close();
+                                }
+                            }
+                        });
+                    }
+                });
+            },
+            |ui| {
+                let mut locked = locked_before;
+                let lock_change = lock_button(ui, &mut locked).changed().then_some(locked);
+                let mut row_reorder = None;
                 if ui
                     .add_enabled(
                         row + 1 < count,
@@ -305,7 +300,7 @@ fn object_list(app: &mut PlotxApp, ci: usize, ui: &mut Ui) {
                     .on_hover_text("Send backward")
                     .clicked()
                 {
-                    reorder = Some((object_id, ZOrder::Backward));
+                    row_reorder = Some(ZOrder::Backward);
                 }
                 if ui
                     .add_enabled(
@@ -315,10 +310,24 @@ fn object_list(app: &mut PlotxApp, ci: usize, ui: &mut Ui) {
                     .on_hover_text("Bring forward")
                     .clicked()
                 {
-                    reorder = Some((object_id, ZOrder::Forward));
+                    row_reorder = Some(ZOrder::Forward);
                 }
-            });
-        });
+                (lock_change, row_reorder)
+            },
+        );
+        if let Some(locked) = lock_change
+            && let Some(target) = app.object_target(ci, object_id)
+            && let Ok(commit) = app.plan_property_write(
+                plotx_core::properties::object::LOCKED,
+                std::slice::from_ref(&target),
+                &plotx_core::properties::PropertyValue::Bool(locked),
+            )
+        {
+            app.commit_property(commit);
+        }
+        if let Some(operation) = row_reorder {
+            reorder = Some((object_id, operation));
+        }
     }
     if let Some((object_id, modifiers)) = select {
         app.session.ui.selection_scope = plotx_core::state::SelectionScope::Layers;
@@ -355,22 +364,6 @@ fn object_transfer_menu(
     );
     if let Some((to, is_move)) = picked {
         *transfer = Some((object_id, to, is_move));
-    }
-}
-fn kind_glyph(kind: &CanvasObjectKind) -> &'static str {
-    match kind {
-        CanvasObjectKind::Plot(_) => icon::CHART_LINE,
-        CanvasObjectKind::Text(_) => "T",
-        CanvasObjectKind::Shape(_) => icon::SHAPES,
-        CanvasObjectKind::RasterImage(_) => icon::FILE,
-    }
-}
-fn kind_label(kind: &CanvasObjectKind) -> &'static str {
-    match kind {
-        CanvasObjectKind::Plot(_) => "Plot",
-        CanvasObjectKind::Text(_) => "Text",
-        CanvasObjectKind::Shape(_) => "Shape",
-        CanvasObjectKind::RasterImage(_) => "Image",
     }
 }
 fn data_list(app: &mut PlotxApp, ui: &mut Ui) {

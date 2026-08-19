@@ -61,6 +61,8 @@ mod tests {
             canvas.create_panel("Panel".to_owned(), ObjectFrame::new(10.0, 10.0, 80.0, 60.0));
         app.doc.canvases.push(canvas);
         app.session.active_canvas = Some(0);
+        app.session.board.world_center = [200.0, 200.0];
+        app.session.viewport_mode = ViewportMode::Manual;
         (app, panel)
     }
 
