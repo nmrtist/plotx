@@ -11,6 +11,7 @@ PlotX 直接读取厂商 LC–MS、NMR、XPS、AFM 与电生理格式，无需�
 | --- | --- | --- |
 | JEOL Delta | `.jdf` | 1D、2D 及伪 2D（DOSY / T1 / T2） |
 | Bruker TopSpin | `fid` / `ser` 目录 | 1D 与 2D |
+| Varian/Agilent VnmrJ | `.fid` 目录 | 原始时域 1D 与常规 2D |
 | Waters MassLynx RAW | `.raw` 目录 | 已验证的低分辨率数据，包括 SQD2 数据 |
 | Rigaku 粉末 XRD | `.rasx`、FI `.raw`、RAS_RAW `.txt` | 衍射图样、采集元数据，以及文件提供的衰减系数 |
 | mzML | `.mzML` | 使用 32 位或 64 位、未压缩或 zlib 压缩数组的质心或轮廓 LC–MS 谱图 |
@@ -27,7 +28,7 @@ PlotX 直接读取厂商 LC–MS、NMR、XPS、AFM 与电生理格式，无需�
 ## 打开文件
 
 把文件拖到 PlotX 窗口上，或使用工具栏的打开菜单：*Open File…*、
-*Open Folder…*（用于 Bruker TopSpin 与 Waters MassLynx RAW 等采集目录）、
+*Open Folder…*（用于 Bruker TopSpin、Varian/Agilent VnmrJ 与 Waters MassLynx RAW 等采集目录）、
 *Open Project…* 或 *Import Table…*。每个导入的数据集会出现在主侧栏中，
 并自动放置到画板上。
 文件选择器可以一次选择多个 ABF。打开文件夹时会递归导入其中所有 `.abf`、
@@ -36,6 +37,15 @@ PlotX 直接读取厂商 LC–MS、NMR、XPS、AFM 与电生理格式，无需�
 父目录名会成为可编辑的初始 cell ID。
 CasaXPS `.txt` 按结构头内容识别，而不是只看扩展名；其他 `.txt` 仍进入表格导入。
 能量轴与拟合细节见 [XPS 工作流](/zh-cn/guides/xps/)。
+
+## Varian/Agilent VnmrJ
+
+要导入原始 1D 或常规 2D 采集，请选择 **Open Folder…** 并选中
+`.fid` 目录。也可以选择 **Open File…**，再选中目录内的 `fid`
+文件。请将 `fid` 和 `procpar` 保持在同一目录中。
+
+暂不支持处理后的谱图、3D 或 4D 实验、成像、伪 2D 实验、非均匀采样及
+其他数组实验。兼容性详情见[文件格式](/zh-cn/reference/file-formats/)。
 
 ## mzML
 

@@ -10,6 +10,7 @@ mod mass_spec;
 pub mod mzml;
 pub mod nanoscope;
 pub mod origin;
+pub mod varian;
 pub mod waters;
 pub mod xlsx;
 pub mod xps;
@@ -27,6 +28,7 @@ pub enum DataFormat {
     Abf2,
     JeolDelta,
     BrukerRaw,
+    VarianAgilentRaw,
     BrukerProcessed1D,
     BrukerProcessed2D,
     JcampDx1D,
@@ -47,6 +49,7 @@ impl DataFormat {
             Self::Abf2 => "abf2",
             Self::JeolDelta => "jeol-delta",
             Self::BrukerRaw => "bruker-raw",
+            Self::VarianAgilentRaw => "varian-agilent-raw",
             Self::BrukerProcessed1D => "bruker-processed-1d",
             Self::BrukerProcessed2D => "bruker-processed-2d",
             Self::JcampDx1D => "jcamp-dx-1d",
@@ -615,6 +618,12 @@ pub enum IoError {
 
     #[error("invalid XPS data: {0}")]
     InvalidXps(String),
+
+    #[error("invalid Varian/Agilent VnmrJ data: {0}")]
+    InvalidVarian(String),
+
+    #[error("unsupported Varian/Agilent VnmrJ data: {0}")]
+    UnsupportedVarian(String),
 }
 
 /// Load a dataset, auto-detecting the format from the path. A Bruker
@@ -636,6 +645,9 @@ pub fn detect_format(path: impl AsRef<Path>) -> Result<DataFormat, IoError> {
     }
     if bruker::is_bruker(path) {
         return Ok(DataFormat::BrukerRaw);
+    }
+    if varian::is_varian(path) {
+        return Ok(DataFormat::VarianAgilentRaw);
     }
     let ext = path
         .extension()
@@ -661,7 +673,7 @@ pub fn detect_format(path: impl AsRef<Path>) -> Result<DataFormat, IoError> {
         _ if abf2::is_abf2(path) => Ok(DataFormat::Abf2),
         _ if jeol::is_jdf(path) => Ok(DataFormat::JeolDelta),
         _ => Err(IoError::Unsupported(format!(
-            "unrecognised path {}: expected mzML, Rigaku FI .raw/.rasx/profile .txt, a Waters .raw directory, NanoScope .spm/.pfc, ABF2 .abf, JEOL .jdf, JCAMP-DX .dx/.jdx/.jcamp, Bruker fid/ser, or Bruker pdata",
+            "unrecognised path {}: expected mzML, Rigaku FI .raw/.rasx/profile .txt, a Waters .raw directory, NanoScope .spm/.pfc, ABF2 .abf, JEOL .jdf, JCAMP-DX .dx/.jdx/.jcamp, Bruker fid/ser or pdata, or a Varian/Agilent VnmrJ .fid directory",
             path.display()
         ))),
     }
@@ -683,6 +695,7 @@ pub fn load_path(path: impl AsRef<Path>) -> Result<LoadResult, IoError> {
             warnings: Vec::new(),
         }),
         DataFormat::BrukerRaw => bruker::load_raw(path),
+        DataFormat::VarianAgilentRaw => varian::load_raw(path),
         DataFormat::BrukerProcessed1D | DataFormat::BrukerProcessed2D => {
             bruker::load_processed(path)
         }

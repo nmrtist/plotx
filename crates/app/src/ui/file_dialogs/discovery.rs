@@ -1,9 +1,13 @@
 use std::path::{Path, PathBuf};
 
 pub(super) fn collect_data_files(folder: &Path, output: &mut Vec<PathBuf>) {
-    // A MassLynx `.raw` directory is one atomic acquisition. Its numbered
-    // payload files must never be rediscovered as independent datasets.
-    if plotx_io::waters::is_masslynx_raw(folder) {
+    // Vendor acquisition directories are atomic. Their payload files must
+    // never be rediscovered as independent datasets.
+    if plotx_io::waters::is_masslynx_raw(folder)
+        || plotx_io::bruker::detect_processed(folder).is_some()
+        || plotx_io::bruker::is_bruker_dir(folder)
+        || plotx_io::varian::is_varian(folder)
+    {
         output.push(folder.to_owned());
         return;
     }
@@ -70,6 +74,22 @@ mod tests {
         collect_data_files(&root, &mut found);
 
         assert_eq!(found, vec![xrd]);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn varian_directory_is_atomic() {
+        let root =
+            std::env::temp_dir().join(format!("plotx-varian-discovery-{}", uuid::Uuid::new_v4()));
+        let dataset = root.join("sample.fid");
+        std::fs::create_dir_all(&dataset).unwrap();
+        std::fs::write(dataset.join("procpar"), b"sw 1 1\n1 1000\n0\n").unwrap();
+        std::fs::write(dataset.join("fid"), [0; 32]).unwrap();
+
+        let mut found = Vec::new();
+        collect_data_files(&root, &mut found);
+
+        assert_eq!(found, vec![dataset]);
         std::fs::remove_dir_all(root).unwrap();
     }
 }

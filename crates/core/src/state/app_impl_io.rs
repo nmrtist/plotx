@@ -274,8 +274,8 @@ impl PlotxApp {
         }
     }
 
-    /// Open a `.zip` archive as a batch: extract it and load every JEOL `.jdf`
-    /// file and Bruker acquisition folder inside, each as its own dataset and
+    /// Open a `.zip` archive as a batch: extract it and load every supported
+    /// loose file and atomic acquisition folder inside, each as its own dataset and
     /// canvas.
     pub fn load_archive_from(&mut self, path: &std::path::Path) {
         let archive = Self::short_name(&path.to_string_lossy());

@@ -1,5 +1,5 @@
 //! Batch loading from a `.zip` archive: extract to a scratch directory, then
-//! walk the tree loading every supported loose spectrum and Bruker acquisition
+//! walk the tree loading every supported loose spectrum and acquisition
 //! folder.
 
 use crate::{IoError, LoadResult, LoadWarning, LoadWarningCode};
@@ -72,11 +72,14 @@ fn scratch_dir() -> PathBuf {
     ))
 }
 
-// Depth-first walk appending each loadable dataset. A Bruker acquisition folder
+// Depth-first walk appending each loadable dataset. An acquisition folder
 // is loaded as a unit and not descended into; any other directory is recursed;
 // loose JEOL and JCAMP-DX files are read individually.
 fn collect_acquisitions(dir: &Path, out: &mut ArchiveLoadResult) {
-    if crate::bruker::detect_processed(dir).is_some() || crate::bruker::is_bruker_dir(dir) {
+    if crate::bruker::detect_processed(dir).is_some()
+        || crate::bruker::is_bruker_dir(dir)
+        || crate::varian::is_varian(dir)
+    {
         match crate::load_path(dir) {
             Ok(result) => out.items.push(result),
             Err(error) => out.warnings.push(entry_warning(dir, error)),

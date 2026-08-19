@@ -12,6 +12,7 @@ no conversion step is needed.
 | --- | --- | --- |
 | JEOL Delta | `.jdf` | 1D, 2D, and pseudo-2D (DOSY / T1 / T2) |
 | Bruker TopSpin | `fid` / `ser` directories | 1D and 2D |
+| Varian/Agilent VnmrJ | `.fid` directory | Raw time-domain 1D and conventional 2D |
 | Waters MassLynx RAW | `.raw` directory | Validated low-resolution runs, including SQD2 data |
 | Rigaku powder XRD | `.rasx`, FI `.raw`, RAS_RAW `.txt` | Diffraction pattern, acquisition metadata, and attenuation when available |
 | mzML | `.mzML` | Centroided or profile LC–MS spectra with 32-bit or 64-bit arrays, uncompressed or zlib-compressed |
@@ -29,7 +30,8 @@ no conversion step is needed.
 
 Drag a file onto the PlotX window, or use the toolbar's open menu:
 *Open File…*, *Open Folder…* (for acquisition directories such as Bruker
-TopSpin and Waters MassLynx RAW), *Open Project…*, or *Import Table…*.
+TopSpin, Varian/Agilent VnmrJ, and Waters MassLynx RAW), *Open Project…*, or
+*Import Table…*.
 Each imported dataset appears in the Primary Side Bar and is placed on the
 board automatically.
 The file picker accepts several ABF files at once. Opening a folder recursively
@@ -40,6 +42,17 @@ becomes the initial, editable cell ID.
 CasaXPS `.txt` files are recognized from their structured header, not from the
 extension alone. Other `.txt` files continue through table import. See the
 [XPS workflow](/guides/xps/) for energy-axis and fitting details.
+
+## Varian/Agilent VnmrJ
+
+To import a raw 1D or conventional 2D acquisition, choose **Open Folder…** and
+select its `.fid` directory. You can instead choose **Open File…** and select
+the `fid` file inside. Keep the `fid` and `procpar` files together in the same
+directory.
+
+Processed spectra, 3D or 4D experiments, imaging, pseudo-2D experiments,
+non-uniform sampling, and other arrayed experiments are not supported. See
+[File formats](/reference/file-formats/) for compatibility details.
 
 ## mzML
 

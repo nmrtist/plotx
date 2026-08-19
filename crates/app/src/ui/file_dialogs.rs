@@ -393,6 +393,7 @@ pub(crate) fn open_file(app: &mut PlotxApp) {
         .add_filter("mzML mass spectrometry (*.mzML)", &["mzML"])
         .add_filter("XPS (*.vms, CasaXPS *.txt)", &["vms", "txt"])
         .add_filter("Bruker TopSpin (fid, ser)", &["fid", "ser"])
+        .add_filter("Varian/Agilent VnmrJ (fid)", &["fid"])
         .add_filter("Archive (*.zip)", &["zip"])
         .add_filter("All files", &["*"])
         .set_title("Open data or add images — format is detected automatically")
@@ -426,7 +427,7 @@ pub(crate) fn choose_project_save_path() -> Option<std::path::PathBuf> {
 
 pub(crate) fn open_folder(app: &mut PlotxApp) {
     if let Some(path) = rfd::FileDialog::new()
-        .set_title("Open a data folder (Waters MassLynx RAW, Bruker, or recursive AFM/ABF2 import)")
+        .set_title("Open a data folder (Waters MassLynx RAW, Bruker, Varian/Agilent VnmrJ, or recursive AFM/ABF2 import)")
         .pick_folder()
     {
         open_folder_path(app, &path);

@@ -59,6 +59,20 @@ A `.plotxproc` file stores one processing pipeline, without any data — save a
 recipe once and apply it to a whole series of similar experiments, on any
 machine. See [Recipes and templates](/guides/templates/).
 
+## Varian/Agilent VnmrJ raw NMR
+
+PlotX imports raw time-domain 1D and conventional 2D acquisitions. Select the
+`.fid` directory or the `fid` file inside it; the `fid` and `procpar` files must
+both be present in that directory. A `.fid` directory name by itself is not
+enough to identify a dataset.
+
+The importer accepts the common 16-bit integer, 32-bit integer, and 32-bit
+floating-point sample formats, including conventional States 2D data.
+Processed spectra, 3D or 4D experiments, imaging, pseudo-2D experiments,
+non-uniform sampling, and arrayed parameters other than phase are not
+supported. The import also stops if the recorded dimensions do not match the
+data.
+
 ## Workflow and run-record files
 
 An [automation](/guides/automation/) workflow file is a JSON description of a
