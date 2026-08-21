@@ -40,6 +40,7 @@ repository = "https://github.com/nmrtist/plotx"
 [workspace.dependencies]
 colorous = "1"
 num-complex = "0.4"
+nalgebra = { version = "0.35", default-features = false, features = ["std"] }
 rustfft = "6.4"
 serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = { version = "1.0", features = ["float_roundtrip"] }

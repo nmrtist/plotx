@@ -217,6 +217,11 @@ pub enum Action {
         before: CanvasViewport,
         after: CanvasViewport,
     },
+    SetXViewportLinks {
+        canvas: usize,
+        before: Vec<crate::state::XViewportLinkGroup>,
+        after: Vec<crate::state::XViewportLinkGroup>,
+    },
     SetAxisOverrides {
         canvas: usize,
         object: ObjectId,
@@ -588,6 +593,7 @@ impl Action {
                 .map(Self::undo_label)
                 .unwrap_or("edit"),
             Self::SetObjectViewport { .. } => "plot navigation",
+            Self::SetXViewportLinks { .. } => "linked plot navigation",
             Self::SetMassSpecStream { .. } => "mass spectrometry stream",
             Self::SetMassSpectrumExtractions { .. } => "mass spectrum extraction",
             Self::SetMassSpecIonChromatograms { .. } => "extracted ion chromatogram",
@@ -612,6 +618,7 @@ impl Action {
             Self::ReplacePanelState { .. } => false,
             Self::UpdateDatasetProcessing { before, after, .. } => before == after,
             Self::SetObjectViewport { before, after, .. } => before == after,
+            Self::SetXViewportLinks { before, after, .. } => before == after,
             Self::SetMassSpecStream { before, after, .. } => before == after,
             Self::SetMassSpectrumExtractions { before, after, .. } => before == after,
             Self::SetMassSpecIonChromatograms { before, after, .. } => before == after,

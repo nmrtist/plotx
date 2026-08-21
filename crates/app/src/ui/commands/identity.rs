@@ -175,6 +175,9 @@ pub(super) fn command_identity(
         CommandId::ApplyProcessingTemplate => {
             plain("Apply Processing Template…", Some(icon::MAGIC_WAND))
         }
+        CommandId::Craft => plain("CRAFT…", Some(icon::WAVEFORM)),
+        CommandId::RunCraft => plain("Run CRAFT", Some(icon::PLAY)),
+        CommandId::CraftComponentTable => plain("Create CRAFT Data Table", Some(icon::TABLE)),
         CommandId::SpectrumArithmetic => plain("Spectrum Arithmetic…", Some(icon::MATH_OPERATIONS)),
         CommandId::AlignSpectra => plain("Align Spectra…", Some(icon::ARROWS_LEFT_RIGHT)),
         CommandId::AlignTraces => plain("Align Traces…", Some(icon::ARROWS_LEFT_RIGHT)),
@@ -336,7 +339,7 @@ fn tool_icon(tool: Tool) -> Option<&'static str> {
         Tool::Ellipse => icon::CIRCLE,
         Tool::Line => icon::LINE_SEGMENT,
         Tool::Arrow => icon::ARROW_UP_RIGHT,
-        Tool::Regions | Tool::PeakAnalysis => return None,
+        Tool::Regions | Tool::CraftRegions | Tool::PeakAnalysis => return None,
     })
 }
 
@@ -433,6 +436,9 @@ fn simple_stable_id(id: CommandId) -> &'static str {
         CommandId::HelpManual => "help.manual",
         CommandId::SaveProcessingTemplate => "process.save_template",
         CommandId::ApplyProcessingTemplate => "process.apply_template",
+        CommandId::Craft => "process.craft",
+        CommandId::RunCraft => "process.craft.run",
+        CommandId::CraftComponentTable => "process.craft.component_table",
         CommandId::SpectrumArithmetic => "process.arithmetic",
         CommandId::AlignSpectra => "process.align_spectra",
         CommandId::AlignTraces => "analysis.align_traces",
@@ -570,6 +576,7 @@ fn tool_slug(tool: Tool) -> &'static str {
         Tool::ManualPhase => "phase",
         Tool::SelectRegion => "select_range",
         Tool::Regions => "regions",
+        Tool::CraftRegions => "craft_regions",
         Tool::Integrate => "integrate",
         Tool::Peaks => "peaks",
         Tool::InspectCursor => "inspect_cursor",

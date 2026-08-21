@@ -2,9 +2,12 @@ use plotx_core::actions::ZOrder;
 use plotx_core::export::ExportFormat;
 use plotx_core::layout::{Align, Distribute, GutterPreset, SpacingMode};
 use plotx_core::properties::PropertyStep;
-use plotx_core::state::{Dataset, PlotxApp, Tool, ToolGroup, WorkflowTab};
+#[cfg(test)]
+use plotx_core::state::WorkflowTab;
+use plotx_core::state::{Dataset, PlotxApp, Tool, ToolGroup};
 
 pub use super::command_exec::{execute, execute_without_clipboard};
+mod craft;
 mod identity;
 use identity::command_identity;
 pub(crate) use identity::recent_entry_label;
@@ -13,26 +16,10 @@ pub(super) use helpers::chart_plot_target;
 use helpers::{requires, selected_paths_unlocked, tool_commands};
 mod ribbon;
 use ribbon::ribbon_placement;
+pub use ribbon::{Applicability, RibbonPlacement};
 pub(crate) const MANUAL_URL: &str = "https://docs.plotx.nmrtist.space/";
 /// The public source repository, linked from About.
 pub(crate) const REPOSITORY_URL: &str = "https://github.com/nmrtist/plotx";
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct RibbonPlacement {
-    pub tab: WorkflowTab,
-    pub group: &'static str,
-    /// Lower values survive longer as space becomes constrained.
-    pub priority: u8,
-    pub applicability: Applicability,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Applicability {
-    Always,
-    LineAlignmentOnly,
-    TableOnly,
-    SeriesOnly,
-    Homonuclear2dOnly,
-    ToolGroup(ToolGroup),
-}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CommandId {
     NewProject,
@@ -94,6 +81,9 @@ pub enum CommandId {
     About,
     SaveProcessingTemplate,
     ApplyProcessingTemplate,
+    Craft,
+    RunCraft,
+    CraftComponentTable,
     SpectrumArithmetic,
     AlignSpectra,
     AlignTraces,
@@ -222,6 +212,9 @@ pub fn catalog(app: &PlotxApp) -> Vec<CommandDescriptor> {
         CommandId::About,
         CommandId::SaveProcessingTemplate,
         CommandId::ApplyProcessingTemplate,
+        CommandId::Craft,
+        CommandId::RunCraft,
+        CommandId::CraftComponentTable,
         CommandId::SpectrumArithmetic,
         CommandId::AlignSpectra,
         CommandId::AlignTraces,
@@ -535,6 +528,9 @@ pub fn describe(app: &PlotxApp, id: CommandId) -> CommandDescriptor {
                 .is_some_and(|di| super::processing_templates::can_use_templates(app, di)),
             "Select a non-table dataset before applying a processing template.",
         ),
+        CommandId::Craft | CommandId::RunCraft | CommandId::CraftComponentTable => {
+            craft::gate(app, id)
+        }
         CommandId::SpectrumArithmetic => requires(
             !app.spectrum_arithmetic_targets().is_empty(),
             "Load a non-empty 1D NMR spectrum before using Spectrum Arithmetic.",
@@ -780,6 +776,9 @@ pub fn describe(app: &PlotxApp, id: CommandId) -> CommandDescriptor {
 #[cfg(test)]
 #[path = "commands_alignment_tests.rs"]
 mod alignment_tests;
+#[cfg(test)]
+#[path = "commands_craft_tests.rs"]
+mod craft_tests;
 #[cfg(test)]
 #[path = "commands_mass_spec_tests.rs"]
 mod mass_spec_tests;

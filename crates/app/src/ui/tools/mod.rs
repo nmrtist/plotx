@@ -1,6 +1,7 @@
 //! Renders a single `ToolGroup` for the active dataset; new data domains plug
 //! in here without touching the sidebar or the toolbar.
 
+mod craft;
 mod cursors;
 mod curve_fit;
 mod electrophysiology;
@@ -79,6 +80,22 @@ pub(crate) fn render_statistics_task(app: &mut PlotxApp, ui: &mut Ui) {
 
 pub(crate) fn render_processing_task(app: &mut PlotxApp, ui: &mut Ui) {
     processing::render_task(app, ui);
+}
+
+pub(crate) fn render_craft_task(app: &mut PlotxApp, ui: &mut Ui) {
+    craft::render_task(app, ui);
+}
+
+pub(crate) fn open_craft_task_for_active(app: &mut PlotxApp) {
+    craft::open_for_active(app);
+}
+
+pub(crate) fn run_craft(app: &mut PlotxApp) {
+    craft::run(app);
+}
+
+pub(crate) fn create_craft_component_table(app: &mut PlotxApp) {
+    craft::create_component_table(app);
 }
 
 pub(crate) fn expand_processing_surface(app: &mut PlotxApp) {

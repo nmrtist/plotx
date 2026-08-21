@@ -1,9 +1,10 @@
 use super::field_runtime::*;
 use super::scientific_summary::SummaryPart;
 use super::{
-    FieldCatalog, FieldId, channel_key, electrophysiology_channel_key,
-    extracted_stream_spectrum_key, extraction_title, mass_spec_dataset_field_keys, stream_bpi_key,
-    stream_display_label, stream_spectrum_key, stream_tic_key, xic_key, xic_title,
+    CraftFieldKind, CraftFieldSpec, FieldCatalog, FieldId, channel_key,
+    electrophysiology_channel_key, extracted_stream_spectrum_key, extraction_title,
+    mass_spec_dataset_field_keys, stream_bpi_key, stream_display_label, stream_spectrum_key,
+    stream_tic_key, xic_key, xic_title,
 };
 use crate::automation::{
     CAP_FIELD_AFM_MAP, CAP_FIELD_BOUNDED, CAP_FIELD_COLORED_RASTER_2D, CAP_FIELD_CURVE_1D,
@@ -57,29 +58,56 @@ impl super::Dataset {
                 }
             };
         match self {
-            Self::Nmr(nmr) => nmr
-                .field_catalog
-                .id_for_key("nmr.real")
-                .into_iter()
-                .map(|id| {
-                    descriptor(
-                        id,
-                        "nmr.real",
-                        match nmr.output_domain() {
-                            plotx_io::Domain::Time => "FID",
-                            plotx_io::Domain::Frequency => "Real",
-                        },
-                        capabilities(id, &[CAP_FIELD_NMR_SIGNAL]),
-                        vec![nmr.processed.values().len()],
-                        vec![match nmr.output_domain() {
-                            plotx_io::Domain::Time => "s".to_owned(),
-                            plotx_io::Domain::Frequency => "ppm".to_owned(),
-                        }],
-                        "line",
+            Self::Nmr(nmr) => {
+                let mut fields = nmr
+                    .field_catalog
+                    .id_for_key("nmr.real")
+                    .into_iter()
+                    .map(|id| {
+                        descriptor(
+                            id,
+                            "nmr.real",
+                            match nmr.output_domain() {
+                                plotx_io::Domain::Time => "FID",
+                                plotx_io::Domain::Frequency => "Real",
+                            },
+                            capabilities(id, &[CAP_FIELD_NMR_SIGNAL]),
+                            vec![nmr.processed.values().len()],
+                            vec![match nmr.output_domain() {
+                                plotx_io::Domain::Time => "s".to_owned(),
+                                plotx_io::Domain::Frequency => "ppm".to_owned(),
+                            }],
+                            "line",
+                        )
+                        .with_line_x_unit(domain_unit(nmr.output_domain()))
+                    })
+                    .collect::<Vec<_>>();
+                fields.extend(nmr.craft_field_specs().filter_map(|spec| {
+                    let key = spec.key();
+                    let id = nmr.field_catalog.id_for_key(&key)?;
+                    let (name, extra) = match spec.kind {
+                        CraftFieldKind::Overview => ("CRAFT overview", vec![CAP_FIELD_NMR_SIGNAL]),
+                        CraftFieldKind::Groups => (
+                            "CRAFT signal groups",
+                            vec![CAP_FIELD_NMR_SIGNAL, CAP_FIELD_TRACE_COLLECTION],
+                        ),
+                        CraftFieldKind::Residual => ("CRAFT residual", vec![CAP_FIELD_NMR_SIGNAL]),
+                    };
+                    Some(
+                        descriptor(
+                            id,
+                            &key,
+                            &format!("{name} · Run {}", spec.run.0 + 1),
+                            capabilities(id, &extra),
+                            vec![nmr.processed.values().len()],
+                            vec!["ppm".to_owned()],
+                            "line",
+                        )
+                        .with_line_x_unit("ppm"),
                     )
-                    .with_line_x_unit(domain_unit(nmr.output_domain()))
-                })
-                .collect(),
+                }));
+                fields
+            }
             Self::Nmr2D(nmr) if nmr.is_true_2d() => {
                 let (dimensions, units) = match &nmr.processed {
                     plotx_processing::Processed2D::Ft(spectrum) => (
@@ -481,11 +509,16 @@ impl super::Dataset {
         }
         match self {
             Self::Nmr(nmr) => match encoding {
-                SeriesEncoding::Line(_) => Some(crate::figures::build_processed_1d_figure(
-                    &nmr.data,
-                    &nmr.processed,
-                    &nmr.peaks.resolve(),
-                )),
+                SeriesEncoding::Line(_) => nmr.craft_field_spec(id).map_or_else(
+                    || {
+                        Some(crate::figures::build_processed_1d_figure(
+                            &nmr.data,
+                            &nmr.processed,
+                            &nmr.peaks.resolve(),
+                        ))
+                    },
+                    |spec| nmr.craft_field_figure(spec),
+                ),
                 SeriesEncoding::Contour(_)
                 | SeriesEncoding::Heatmap(_)
                 | SeriesEncoding::Image(_) => None,
@@ -573,7 +606,9 @@ impl super::Dataset {
 
     fn all_field_keys(&self) -> Vec<String> {
         match self {
-            Self::Nmr(_) => vec!["nmr.real".to_owned()],
+            Self::Nmr(dataset) => std::iter::once("nmr.real".to_owned())
+                .chain(dataset.craft_field_specs().map(CraftFieldSpec::key))
+                .collect(),
             // Keep inactive 2D keys allocated so save/load rejects stale bindings
             // instead of silently reassigning them to the stack field.
             Self::Nmr2D(_) => vec![

@@ -29,6 +29,7 @@ pub(super) enum AnalysisKind {
     Region(plotx_core::state::RegionId),
     LineFit(u64),
     Multiplet(u64),
+    Craft(u64),
     CurveFitResponse(ColumnId),
     MassSpectrum(ExtractionId),
 }
@@ -41,6 +42,7 @@ impl AnalysisKind {
             Self::Region(id) => format!("region:{dataset}:{id}"),
             Self::LineFit(id) => format!("line_fit:{dataset}:{id}"),
             Self::Multiplet(id) => format!("multiplet:{dataset}:{id}"),
+            Self::Craft(id) => format!("craft:{dataset}:{id}"),
             Self::CurveFitResponse(column) => format!("curve_fit_response:{dataset}:{column}"),
             Self::MassSpectrum(id) => format!("mass_spectrum:{dataset}:{id}"),
         }
@@ -53,6 +55,7 @@ impl AnalysisKind {
             Self::Region(_) => "Region",
             Self::LineFit(_) => "Peak fit",
             Self::Multiplet(_) => "Multiplet",
+            Self::Craft(_) => "CRAFT run",
             Self::CurveFitResponse(_) => "Curve fit response",
             Self::MassSpectrum(_) => "Extracted mass spectrum",
         }
@@ -263,6 +266,16 @@ fn analysis_items(dataset: &Dataset) -> Vec<AnalysisItem> {
         result.extend(dataset.multiplets().iter().map(|multiplet| AnalysisItem {
             kind: AnalysisKind::Multiplet(multiplet.id),
             label: multiplet.descriptor(),
+        }));
+    }
+    if let Some(nmr) = dataset.as_nmr() {
+        result.extend(nmr.craft_runs.iter().map(|run| AnalysisItem {
+            kind: AnalysisKind::Craft(run.id.0),
+            label: format!(
+                "CRAFT #{} ({} components)",
+                run.id.0 + 1,
+                run.components.len()
+            ),
         }));
     }
     if let Some(table) = dataset.as_table() {

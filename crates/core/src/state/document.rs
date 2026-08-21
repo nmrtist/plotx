@@ -444,6 +444,11 @@ pub struct CanvasDocument {
     /// Ordinary, non-semantic groups. A group contains either same-scope
     /// content or panels, never a mixture.
     pub groups: Vec<LayoutGroup>,
+    /// Optional provenance for a generated analysis page. The binding targets
+    /// stable scientific resources, never dataset or canvas collection indices.
+    pub analysis_binding: Option<CanvasAnalysisBinding>,
+    /// Plot groups whose horizontal data viewport is edited as one unit.
+    pub x_viewport_links: Vec<XViewportLinkGroup>,
     pub selected_object: Option<ObjectId>,
     /// Top-left of this page on the board, in world (pt) space.
     pub board_pos: [f32; 2],
@@ -474,6 +479,8 @@ impl CanvasDocument {
             objects: Vec::new(),
             panels: Vec::new(),
             groups: Vec::new(),
+            analysis_binding: None,
+            x_viewport_links: Vec::new(),
             selected_object: None,
             board_pos: [0.0, 0.0],
             caption: String::new(),
@@ -606,7 +613,8 @@ impl CanvasDocument {
         }) {
             return Err("next panel label slot must exceed every allocated auto slot".to_owned());
         }
-        validate_panel_structure(&self.panels, ids, &self.groups)
+        validate_panel_structure(&self.panels, ids, &self.groups)?;
+        self.validate_x_viewport_links()
     }
 
     pub fn structure_warnings(&self) -> Vec<String> {
@@ -713,41 +721,5 @@ impl CanvasDocument {
             }
         }
         self.groups.retain(|group| group.members.len() >= 2);
-    }
-
-    pub fn object(&self, id: ObjectId) -> Option<&CanvasObject> {
-        self.objects.iter().find(|object| object.id == id)
-    }
-
-    pub fn object_mut(&mut self, id: ObjectId) -> Option<&mut CanvasObject> {
-        self.objects.iter_mut().find(|object| object.id == id)
-    }
-
-    pub fn first_plot_object_id(&self) -> Option<ObjectId> {
-        self.objects
-            .iter()
-            .find(|object| object.plot().is_some())
-            .map(|object| object.id)
-    }
-
-    pub fn selected_plot_object_id(&self) -> Option<ObjectId> {
-        self.selected_object
-            .and_then(|id| self.object(id).filter(|o| o.plot().is_some()).map(|_| id))
-    }
-
-    pub fn active_plot_object_id(&self) -> Option<ObjectId> {
-        self.selected_object
-            .and_then(|id| {
-                self.object(id)
-                    .filter(|object| object.plot().is_some())
-                    .map(|_| id)
-            })
-            .or_else(|| self.first_plot_object_id())
-    }
-
-    pub fn active_dataset(&self) -> Option<DatasetId> {
-        self.active_plot_object_id()
-            .and_then(|id| self.object(id))
-            .and_then(CanvasObject::dataset)
     }
 }

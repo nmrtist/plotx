@@ -36,6 +36,28 @@ impl Dataset {
     pub(super) fn validate_trace_collections(&self) -> Result<(), String> {
         let catalog = self.field_catalog();
         match self {
+            Self::Nmr(dataset) => {
+                for spec in dataset
+                    .craft_field_specs()
+                    .filter(|spec| spec.kind == super::CraftFieldKind::Groups)
+                {
+                    let field = catalog
+                        .id_for_key(&spec.key())
+                        .ok_or_else(|| "CRAFT group field is missing".to_owned())?;
+                    let collection = catalog.trace_collection(field).ok_or_else(|| {
+                        format!("CRAFT group field {field} is missing its trace collection")
+                    })?;
+                    let run = dataset.craft_run(spec.run).ok_or_else(|| {
+                        format!("CRAFT field references missing run {}", spec.run.0)
+                    })?;
+                    if collection.items.len() != run.region_summaries.len() {
+                        return Err(format!(
+                            "CRAFT Run {} trace items do not match its signal groups",
+                            spec.run.0 + 1
+                        ));
+                    }
+                }
+            }
             Self::Nmr2D(dataset) => {
                 let field = catalog
                     .id_for_key("nmr.stack")

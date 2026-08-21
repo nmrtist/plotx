@@ -3,6 +3,7 @@ use super::field_catalog::validate_series_source;
 use super::*;
 use crate::state::SeriesId;
 use crate::state::{AssetId, ImageFit, ImageInterpolation, QuarterTurn, RasterImageContent};
+use crate::state::{CanvasAnalysisBinding, CraftRunId, XViewportLinkGroup, XViewportLinkId};
 #[path = "convert_views_panel.rs"]
 mod panel_convert;
 use crate::state::{AxisProjection, AxisProjections, ProjectionSource};
@@ -296,6 +297,20 @@ pub fn canvas_to_view(
             .map(|item| item.id.to_string())
             .collect(),
         groups: canvas.groups.iter().map(group_to_dto).collect(),
+        analysis_binding: canvas.analysis_binding.map(|binding| match binding {
+            CanvasAnalysisBinding::Craft { dataset, run } => AnalysisBindingDto::Craft {
+                input: format!("recipe_{dataset}"),
+                run: run.0,
+            },
+        }),
+        x_viewport_links: canvas
+            .x_viewport_links
+            .iter()
+            .map(|group| XViewportLinkDto {
+                id: group.id.to_string(),
+                members: group.members.iter().map(ToString::to_string).collect(),
+            })
+            .collect(),
         layout: ViewLayout {
             size_mm: canvas.size_mm,
             size_preset: canvas.size_preset_id.clone(),
@@ -343,6 +358,35 @@ pub fn view_to_canvas(
         .grid
         .map(PageLayoutDto::into_layout)
         .unwrap_or_default();
+    canvas.analysis_binding = match &view.analysis_binding {
+        Some(AnalysisBindingDto::Craft { input, run }) => {
+            let index = recipe_to_dataset.get(input).copied().ok_or_else(|| {
+                ProjectError::Invalid(format!(
+                    "view {view_id} CRAFT binding references unknown recipe {input}"
+                ))
+            })?;
+            let dataset = app.doc.datasets.get(index).ok_or_else(|| {
+                ProjectError::Invalid(format!(
+                    "view {view_id} CRAFT binding references unavailable dataset index {index}"
+                ))
+            })?;
+            let run = CraftRunId(*run);
+            if !dataset
+                .as_nmr()
+                .is_some_and(|nmr| nmr.craft_run(run).is_some())
+            {
+                return Err(ProjectError::Invalid(format!(
+                    "view {view_id} references missing CRAFT run {}",
+                    run.0
+                )));
+            }
+            Some(CanvasAnalysisBinding::Craft {
+                dataset: dataset.resource_id(),
+                run,
+            })
+        }
+        None => None,
+    };
     if let Some([r, g, b]) = view.layout.background {
         canvas.background = plotx_figure::Color::rgb(r, g, b);
     }
@@ -710,6 +754,31 @@ pub fn view_to_canvas(
         )));
     }
     canvas.next_panel_label_slot = view.next_panel_label_slot;
+    canvas.x_viewport_links = view
+        .x_viewport_links
+        .iter()
+        .map(|group| {
+            Ok(XViewportLinkGroup {
+                id: group.id.parse::<XViewportLinkId>().map_err(|_| {
+                    ProjectError::Invalid(format!(
+                        "view {view_id} has invalid x viewport link id {}",
+                        group.id
+                    ))
+                })?,
+                members: group
+                    .members
+                    .iter()
+                    .map(|member| {
+                        member.parse::<ObjectId>().map_err(|_| {
+                            ProjectError::Invalid(format!(
+                                "view {view_id} has invalid linked plot id {member}"
+                            ))
+                        })
+                    })
+                    .collect::<Result<Vec<_>>>()?,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
     canvas.validate_structure().map_err(ProjectError::Invalid)?;
     Ok(canvas)
 }

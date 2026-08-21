@@ -29,17 +29,21 @@ const PANEL_LABEL_HIT_PAD_PX: f32 = 4.0;
 const SNAP_PX: f32 = 6.0;
 
 mod authoring;
+mod band_editor;
 mod board;
 mod board_caption;
 mod board_marquee;
 mod board_notes;
 mod breadcrumb;
 mod chrome;
+mod craft_regions;
+mod craft_results;
 mod cursors;
 mod furniture;
 mod geometry;
 mod image_drop;
 mod image_painting;
+mod selection_painting;
 pub(crate) use image_drop::{ImagePanelDropTarget, image_drop_target};
 mod integrals;
 mod integrals2d;
@@ -65,6 +69,8 @@ pub(crate) use board_caption::*;
 pub(crate) use board_notes::*;
 pub(crate) use breadcrumb::*;
 pub(crate) use chrome::*;
+pub(crate) use craft_regions::*;
+pub(crate) use craft_results::*;
 pub(crate) use cursors::*;
 pub(crate) use furniture::*;
 pub(crate) use geometry::*;
@@ -80,6 +86,7 @@ pub(crate) use peaks::*;
 pub(crate) use phase::*;
 pub(crate) use readout::*;
 pub(crate) use regions::*;
+pub(crate) use selection_painting::*;
 pub(crate) use slices::*;
 pub(crate) use snap::*;
 pub(crate) use symmetry::*;
@@ -353,6 +360,7 @@ pub fn render_central(app: &mut PlotxApp, ui: &mut Ui) {
                 handle_selection_drag(app, ci, object_id, di, plot, ui);
             }
             Tool::Regions => handle_region_drag(app, ci, object_id, di, plot, ui),
+            Tool::CraftRegions => handle_craft_region_drag(app, ci, object_id, di, plot, ui),
             Tool::Integrate => {
                 if app.doc.datasets[di]
                     .as_nmr2d()
@@ -380,9 +388,11 @@ pub fn render_central(app: &mut PlotxApp, ui: &mut Ui) {
 
     paint_zoom_drag(app, ci, object_id, plot, &painter, chrome);
     paint_regions(app, ci, object_id, di, plot, &painter, chrome);
+    paint_craft_regions(app, ci, object_id, di, plot, &painter, chrome);
     paint_integrals(app, ci, object_id, di, plot, &painter, chrome);
     paint_integrals_2d(app, ci, object_id, di, plot, &painter, chrome);
     paint_peaks(app, ci, object_id, di, plot, &painter, chrome);
+    handle_and_paint_craft_result(app, ci, object_id, plot, &painter, ui);
     paint_cursor_tool(app, ci, object_id, di, plot, ui, &painter, chrome);
     paint_symmetry(
         app,

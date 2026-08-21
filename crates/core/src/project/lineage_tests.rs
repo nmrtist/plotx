@@ -1,5 +1,6 @@
 use super::tests::{synthetic_1d, temp_project};
 use super::*;
+use crate::state::{DatasetLineage, DerivationKind};
 use crate::state::{
     FloatSeries, RegionColumnProvenance, RegionId, RegionMetric, TableImportSource,
     TableProvenance, materialized_float_series_table,

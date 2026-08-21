@@ -6,6 +6,7 @@ pub enum TaskDockTab {
     Regions,
     CurveFit,
     Statistics,
+    Craft,
 }
 
 impl UiState {
@@ -33,6 +34,16 @@ impl UiState {
                 self.stat_task_collapsed = false;
                 self.stat_draft = None;
             }
+            TaskDockTab::Craft => {
+                self.craft_task_dataset = None;
+                self.craft_task_collapsed = false;
+                self.craft_selected_run = None;
+                self.craft_task_page = super::CraftTaskPage::Setup;
+                self.craft_result_tab = super::CraftResultTab::Overview;
+                self.craft_component_region = None;
+                self.craft_selected_component = None;
+                self.craft_base_run = None;
+            }
         }
         if self.task_dock_active == Some(tab) {
             self.task_dock_active = [
@@ -43,6 +54,7 @@ impl UiState {
                 (TaskDockTab::Regions, self.region_task_dataset.is_some()),
                 (TaskDockTab::CurveFit, self.curve_fit_task_dataset.is_some()),
                 (TaskDockTab::Statistics, self.stat_task_dataset.is_some()),
+                (TaskDockTab::Craft, self.craft_task_dataset.is_some()),
             ]
             .into_iter()
             .find_map(|(candidate, open)| open.then_some(candidate));
@@ -60,6 +72,14 @@ impl UiState {
         self.stat_task_dataset = None;
         self.stat_task_collapsed = false;
         self.stat_draft = None;
+        self.craft_task_dataset = None;
+        self.craft_task_collapsed = false;
+        self.craft_selected_run = None;
+        self.craft_task_page = super::CraftTaskPage::Setup;
+        self.craft_result_tab = super::CraftResultTab::Overview;
+        self.craft_component_region = None;
+        self.craft_selected_component = None;
+        self.craft_base_run = None;
         self.task_dock_active = None;
     }
 }

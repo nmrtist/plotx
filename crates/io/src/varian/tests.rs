@@ -102,7 +102,7 @@ fn loads_directory_and_fid_with_provenance_and_metadata() {
         };
         assert_eq!(
             data.points,
-            vec![Complex64::new(2., 4.), Complex64::new(6., 8.)]
+            vec![Complex64::new(2., -4.), Complex64::new(6., -8.)]
         );
         assert_eq!(
             (
@@ -115,6 +115,23 @@ fn loads_directory_and_fid_with_provenance_and_metadata() {
         assert_eq!(data.nucleus, "1H");
         assert_eq!(data.source, "Test sample — 1H — PROTON");
     }
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn direct_axis_uses_vnmrj_rfl_rfp_reference_when_present() {
+    let mut procpar = base_procpar();
+    procpar.push_str(&record("rfl", 1, "1 1500"));
+    procpar.push_str(&record("rfp", 1, "1 1.25"));
+    let dir = dataset(
+        &procpar,
+        &fid_bytes(&[vec![vec![1., 2., 3., 4.]]], Encoding::I16, &[0]),
+    );
+    let loaded = load_raw(&dir).unwrap();
+    let Acquisition::D1(data) = loaded.acquisition else {
+        panic!("expected 1D")
+    };
+    assert!((data.carrier_ppm - 2.25).abs() < 1e-12);
     std::fs::remove_dir_all(dir).unwrap();
 }
 

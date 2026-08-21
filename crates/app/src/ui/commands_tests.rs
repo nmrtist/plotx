@@ -44,7 +44,7 @@ fn app_with_table(curves: usize) -> PlotxApp {
     app
 }
 
-fn app_with_nmr() -> PlotxApp {
+pub(super) fn app_with_nmr() -> PlotxApp {
     let mut app = app();
     let npoints = 256;
     let spectral_width_hz = 4_000.0;
@@ -138,6 +138,7 @@ fn time_domain_nmr_hides_frequency_analysis_and_disables_spectral_commands() {
     assert!(!describe(&app, CommandId::Multiplets).enabled);
     assert!(!describe(&app, CommandId::DetectPeaks).enabled);
     assert!(!describe(&app, CommandId::LineFit).enabled);
+    assert!(describe(&app, CommandId::Craft).enabled);
 }
 
 #[test]
@@ -184,6 +185,8 @@ fn stable_ids_cover_static_and_dynamic_commands() {
     assert_eq!(CommandId::ArrangeGrid(2, 3).stable_id(), "arrange.grid.2x3");
     assert_eq!(CommandId::Tool(Tool::LineFit).stable_id(), "tool.line_fit");
     assert_eq!(CommandId::CurveFit.stable_id(), "analysis.curve_fit");
+    assert_eq!(CommandId::Craft.stable_id(), "process.craft");
+    assert_eq!(CommandId::RunCraft.stable_id(), "process.craft.run");
     assert_eq!(
         CommandId::ExtractMassSpectrum.stable_id(),
         "analysis.extract_mass_spectrum"
@@ -254,7 +257,7 @@ fn spacing_commands_are_registered_checked_and_execute() {
 }
 
 #[test]
-fn origin_import_reuses_import_table_command_identity() {
+fn import_table_command_identity_is_stable() {
     let app = app();
     assert_eq!(CommandId::ImportTable.stable_id(), "file.import_table");
     assert_eq!(

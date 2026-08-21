@@ -106,9 +106,15 @@ struct TableSidecarV1 {
     meta: crate::state::TableMeta,
     curve_fit_analyses: Vec<crate::state::StoredCurveFitAnalysis>,
     board_pos: [f32; 2],
+    #[serde(default = "default_true")]
+    board_sheet_visible: bool,
     peaks: crate::state::PeakSet,
     line_fits: Vec<crate::state::StoredLineFit>,
     statistics: Vec<crate::state::StatAnalysis>,
+}
+
+const fn default_true() -> bool {
+    true
 }
 
 pub(crate) fn table_dataset_to_v1(
@@ -166,6 +172,7 @@ pub(crate) fn table_dataset_to_v1(
         meta: table.meta,
         curve_fit_analyses: table.curve_fit_analyses.clone(),
         board_pos: table.board_pos,
+        board_sheet_visible: table.board_sheet_visible,
         peaks: table.peaks.clone(),
         line_fits: table.line_fits.clone(),
         statistics: table.statistics.clone(),
@@ -243,6 +250,7 @@ pub(crate) fn table_dataset_from_v1(
         name: data.label.clone(),
         lineage: None,
         board_pos: sidecar.board_pos,
+        board_sheet_visible: sidecar.board_sheet_visible,
         peaks: sidecar.peaks,
         line_fits: sidecar.line_fits,
         next_line_fit_id: 0,

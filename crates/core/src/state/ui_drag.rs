@@ -6,6 +6,7 @@
 
 use super::{AxisOverrides, DatasetId, ObjectId, Region, RegionId};
 use crate::{Integral2D, IntegralResult};
+use plotx_processing::craft::{CraftRegion, CraftRegionId};
 
 /// An in-progress region-band edit on a series plot. `region_id` names the band
 /// being resized or moved (`None` while drawing a new one).
@@ -65,6 +66,23 @@ pub struct IntegralDrag {
     pub kind: RegionDragKind,
     pub integral_id: Option<u64>,
     pub before: Vec<IntegralResult>,
+    pub anchor_ppm: f64,
+    pub grab_lo: f64,
+    pub grab_hi: f64,
+    pub current_ppm: f64,
+}
+
+/// A CRAFT signal-group edit. Unlike generic regions and integrals, the
+/// snapshot belongs to the session's pending invocation and is never persisted
+/// as an analysis result on its own.
+#[derive(Clone, Debug)]
+pub struct CraftRegionDrag {
+    pub canvas: usize,
+    pub object: ObjectId,
+    pub dataset: DatasetId,
+    pub kind: RegionDragKind,
+    pub region_id: Option<CraftRegionId>,
+    pub before: Vec<CraftRegion>,
     pub anchor_ppm: f64,
     pub grab_lo: f64,
     pub grab_hi: f64,

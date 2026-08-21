@@ -13,6 +13,7 @@ path = "src/lib.rs"
 [dependencies]
 plotx-io.workspace = true
 num-complex.workspace = true
+nalgebra.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 statrs.workspace = true

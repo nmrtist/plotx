@@ -24,6 +24,8 @@ impl CommandId {
             Self::ExportData
             | Self::Export(_)
             | Self::ApplyProcessingTemplate
+            | Self::RunCraft
+            | Self::CraftComponentTable
             | Self::ApplyTheme(_) => CommandExecutionClass::ToolBacked,
             _ => CommandExecutionClass::UiOnly,
         }

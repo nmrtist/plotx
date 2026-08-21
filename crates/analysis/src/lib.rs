@@ -2,6 +2,7 @@
 //! scientific parameter estimation over processed data.
 
 pub mod alignment;
+pub mod craft;
 pub mod diffusion;
 pub mod electrophysiology;
 pub mod fit;

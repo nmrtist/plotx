@@ -18,4 +18,6 @@ datafusion = ["plotx-core/datafusion"]
 
 [dependencies]
 plotx-core.workspace = true
+plotx-io.workspace = true
+plotx-processing.workspace = true
 serde_json.workspace = true

@@ -189,6 +189,8 @@ pub struct TableDataset {
     /// `CanvasDocument.board_pos` — a sheet is a first-class board frame. Defaulted
     /// on load so projects saved before board sheets still open.
     pub board_pos: [f32; 2],
+    /// Whether this table currently occupies a sheet frame on the board.
+    pub board_sheet_visible: bool,
     pub peaks: crate::state::PeakSet,
     pub line_fits: Vec<crate::state::StoredLineFit>,
     /// Id source for stored line fits; rebuilt from the loaded fits.
@@ -216,7 +218,7 @@ impl TableDataset {
     /// the visible result. Provenance is persisted in old and new projects, so
     /// this rule needs no additional migration flag.
     pub fn board_sheet_visible(&self) -> bool {
-        self.provenance.is_none()
+        self.board_sheet_visible && self.provenance.is_none()
     }
 
     /// Construct a generic typed table with no implicit x/y assumptions.
@@ -239,6 +241,7 @@ impl TableDataset {
             name: None,
             lineage: None,
             board_pos: [0.0, 0.0],
+            board_sheet_visible: true,
             peaks: crate::state::PeakSet::default(),
             line_fits: Vec::new(),
             next_line_fit_id: 0,

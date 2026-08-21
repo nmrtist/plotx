@@ -44,12 +44,12 @@ Processing opens as a card at the upper right of the canvas — from the
 <kbd>Ctrl</kbd>+<kbd>K</kbd>. If the active dataset is not an NMR dataset, the
 status bar reads *Select an NMR dataset before opening Processing.* instead.
 
-That corner is shared with the Regions, Curve Fit, and Statistics tasks. As
-soon as two of them are open, tabs appear along the top — **Process**,
-**Regions**, **Fit**, **Stats** — and one page is shown at a time. Switching
-tabs keeps every page's settings; only closing a page with its ✕ discards them.
-Choosing a tab also makes that page's dataset the active one, so the controls
-you see always belong to the spectrum on screen.
+The card can also host the CRAFT, Regions, Curve Fit, and Statistics tasks.
+When two or more tasks are open, tabs appear along the top — **Process**,
+**CRAFT**, **Regions**, **Fit**, **Stats** — and one page is shown at a time.
+Switching tabs keeps each page's settings; close a page with ✕ to discard them.
+Selecting a tab also makes that page's dataset active, so the controls always
+belong to the spectrum on screen.
 
 Above the step list, the card names the dataset, its source (**Raw FID**, **2D
 acquisition**, or **Imported spectrum**), whether the recipe is still the
@@ -199,3 +199,6 @@ A pipeline (including the group-delay setting) can be saved as a portable
 datasets — see [Recipes and templates](/guides/templates/). To apply one
 action to many datasets at once, or to run a whole import → process → export
 workflow, see [Automation](/guides/automation/).
+
+To reduce the original complex FID directly to fitted resonance parameters,
+see [CRAFT for 1D NMR](/guides/craft/).

@@ -80,7 +80,8 @@ pub fn dataset_to_objects<'a>(
                         "peaks": &n.peaks,
                         "integrals": &n.integrals,
                         "line_fits": &n.line_fits,
-                        "multiplets": &n.multiplets
+                        "multiplets": &n.multiplets,
+                        "craft_runs": &n.craft_runs
                     }
                 }),
             };

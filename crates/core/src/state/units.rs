@@ -89,6 +89,7 @@ pub enum Tool {
     ManualPhase,
     SelectRegion,
     Regions,
+    CraftRegions,
     Integrate,
     Peaks,
     InspectCursor,
@@ -125,6 +126,7 @@ impl Tool {
             Self::ManualPhase => "Manual phase",
             Self::SelectRegion => "Analysis range",
             Self::Regions => "Regions",
+            Self::CraftRegions => "CRAFT signal groups",
             Self::Integrate => "Integrate",
             Self::Peaks => "Peaks",
             Self::InspectCursor => "Inspect cursor",
@@ -157,6 +159,7 @@ impl Tool {
             Self::ManualPhase
             | Self::SelectRegion
             | Self::Regions
+            | Self::CraftRegions
             | Self::Integrate
             | Self::Peaks
             | Self::InspectCursor
@@ -185,6 +188,7 @@ impl Tool {
                 | Tool::ManualPhase
                 | Tool::SelectRegion
                 | Tool::Regions
+                | Tool::CraftRegions
                 | Tool::Integrate
                 | Tool::Peaks
                 | Tool::InspectCursor

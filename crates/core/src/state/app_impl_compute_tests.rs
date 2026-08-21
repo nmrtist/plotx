@@ -1,7 +1,7 @@
 use super::*;
 use num_complex::Complex64;
 use plotx_io::{Dim, Domain, NmrData2D, QuadMode};
-use plotx_processing::{ProcessingStep, StepKind, StepSource};
+use plotx_processing::{ProcessingStep, ReferenceParams, StepKind, StepSource};
 use std::time::{Duration, Instant};
 
 fn data_2d(source: &str) -> NmrData2D {
@@ -29,6 +29,199 @@ fn data_2d(source: &str) -> NmrData2D {
         nus: None,
         source: source.into(),
     }
+}
+
+fn craft_data() -> plotx_io::NmrData {
+    let spectral_width_hz = 2_000.0;
+    let points = (0..256)
+        .map(|index| {
+            let time = index as f64 / spectral_width_hz;
+            Complex64::from_polar(
+                2.0 * (-4.0 * time).exp(),
+                std::f64::consts::TAU * 140.0 * time + 0.25,
+            )
+        })
+        .collect();
+    plotx_io::NmrData {
+        points,
+        domain: Domain::Time,
+        spectral_width_hz,
+        observe_freq_mhz: 400.0,
+        carrier_ppm: 4.7,
+        nucleus: "1H".into(),
+        source: "CRAFT synthetic".into(),
+        group_delay: 0.0,
+    }
+}
+
+#[test]
+fn craft_result_is_installed_with_provenance_by_dataset_identity() {
+    let mut app = PlotxApp::new();
+    app.doc
+        .datasets
+        .push(Dataset::Nmr(Box::new(NmrDataset::load(craft_data()))));
+    let nmr = app.doc.datasets[0].as_nmr_mut().unwrap();
+    let reference_id = nmr.allocate_step_id();
+    nmr.pipeline.steps.push(ProcessingStep::new(
+        reference_id,
+        StepKind::Reference(ReferenceParams {
+            at_ppm: 5.05,
+            target_ppm: 5.25,
+        }),
+        StepSource::User,
+    ));
+    nmr.rebuild();
+    let target = app.doc.datasets[0].resource_id();
+    app.session.ui.craft_task_dataset = Some(target);
+    let mut params = plotx_processing::craft::CraftParams::conventional();
+    params.filter_taps = 31;
+    params.max_fit_window_width_hz = 2_000.0;
+    params.max_downsampled_points = 512;
+    params.max_components_per_fit_window = 2;
+
+    assert!(app.request_craft_analysis(
+        0,
+        plotx_processing::craft::CraftParamOverrides::from_params(params.clone()),
+        None,
+    ));
+    let deadline = Instant::now() + Duration::from_secs(8);
+    while app.compute_busy() && Instant::now() < deadline {
+        app.poll_compute();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    app.poll_compute();
+
+    assert!(!app.compute_busy(), "CRAFT worker completed before timeout");
+    assert_eq!(app.doc.datasets[0].resource_id(), target);
+    let nmr = app.doc.datasets[0].as_nmr().unwrap();
+    assert_eq!(nmr.craft_runs.len(), 1);
+    assert_eq!(nmr.craft_runs[0].provenance.invocation.params, params);
+    assert_eq!(
+        nmr.craft_runs[0]
+            .provenance
+            .invocation
+            .reference
+            .acquisition_carrier_ppm,
+        4.7
+    );
+    assert!((nmr.craft_runs[0].provenance.invocation.reference.offset_ppm - 0.2).abs() < 1e-12);
+    assert!(!nmr.craft_runs[0].is_stale_for(&nmr.data, nmr.craft_reference()));
+    assert!(!nmr.craft_runs[0].components.is_empty());
+    assert!(
+        nmr.craft_runs
+            .iter()
+            .flat_map(|run| &run.components)
+            .any(|component| (component.chemical_shift_ppm - 5.25).abs() < 0.01)
+    );
+    assert_eq!(app.session.ui.craft_selected_run, Some(CraftRunId(0)));
+    assert_eq!(app.session.ui.craft_task_page, CraftTaskPage::Results);
+
+    let active_before = app.active_dataset();
+    let view_before = app.session.view;
+    let sheet_before = app.session.ui.sheet_open;
+    let first = app
+        .materialize_craft_component_table(0, CraftRunId(0))
+        .unwrap();
+    let second = app
+        .materialize_craft_component_table(0, CraftRunId(0))
+        .unwrap();
+    assert_eq!(first, second, "one run reuses one component table");
+    assert_eq!(app.doc.datasets.len(), 2);
+    assert_eq!(app.active_dataset(), active_before);
+    assert!(app.session.view == view_before);
+    assert_eq!(app.session.ui.sheet_open, sheet_before);
+    let table_id = app.doc.datasets[first].resource_id();
+    assert!(
+        !app.doc.datasets[first]
+            .as_table()
+            .unwrap()
+            .board_sheet_visible()
+    );
+    assert_eq!(
+        app.doc.datasets[0].as_nmr().unwrap().craft_runs[0].component_table,
+        Some(table_id)
+    );
+    app.show_craft_component_table_on_board(first).unwrap();
+    assert!(
+        app.doc.datasets[first]
+            .as_table()
+            .unwrap()
+            .board_sheet_visible()
+    );
+
+    let nmr = app.doc.datasets[0].as_nmr_mut().unwrap();
+    let reference = nmr
+        .pipeline
+        .steps
+        .iter_mut()
+        .find_map(|step| match &mut step.kind {
+            StepKind::Reference(reference) => Some(reference),
+            _ => None,
+        })
+        .unwrap();
+    reference.target_ppm += 0.1;
+    nmr.rebuild();
+    assert!(nmr.craft_runs[0].is_stale_for(&nmr.data, nmr.craft_reference()));
+}
+
+#[test]
+fn craft_rerun_keeps_requested_parent_without_hijacking_another_task() {
+    let mut app = PlotxApp::new();
+    app.doc
+        .datasets
+        .push(Dataset::Nmr(Box::new(NmrDataset::load(craft_data()))));
+    let target = app.doc.datasets[0].resource_id();
+    app.session.ui.craft_task_dataset = Some(target);
+    let mut params = plotx_processing::craft::CraftParams::conventional();
+    params.filter_taps = 31;
+    params.max_fit_window_width_hz = 2_000.0;
+    params.max_downsampled_points = 512;
+    params.max_components_per_fit_window = 2;
+    assert!(app.request_craft_analysis(
+        0,
+        plotx_processing::craft::CraftParamOverrides::from_params(params),
+        None,
+    ));
+    let deadline = Instant::now() + Duration::from_secs(8);
+    while app.compute_busy() && Instant::now() < deadline {
+        app.poll_compute();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    app.poll_compute();
+    assert_eq!(app.doc.datasets[0].as_nmr().unwrap().craft_runs.len(), 1);
+
+    assert!(app.request_craft_analysis(
+        0,
+        plotx_processing::craft::CraftParamOverrides::default(),
+        Some(CraftRunId(0)),
+    ));
+    app.doc
+        .datasets
+        .push(Dataset::Nmr(Box::new(NmrDataset::load(craft_data()))));
+    let other = app.doc.datasets[1].resource_id();
+    app.session.ui.craft_task_dataset = Some(other);
+    app.session.ui.craft_base_run = None;
+    app.session.ui.craft_selected_run = Some(CraftRunId(99));
+    app.session.ui.craft_task_page = CraftTaskPage::Setup;
+
+    let deadline = Instant::now() + Duration::from_secs(8);
+    while app.compute_busy() && Instant::now() < deadline {
+        app.poll_compute();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    app.poll_compute();
+
+    let runs = &app.doc.datasets[0].as_nmr().unwrap().craft_runs;
+    assert_eq!(runs.len(), 2);
+    assert_eq!(runs[1].provenance.parent_run, Some(CraftRunId(0)));
+    assert_eq!(app.session.ui.craft_task_dataset, Some(other));
+    assert_eq!(app.session.ui.craft_selected_run, Some(CraftRunId(99)));
+    assert_eq!(app.session.ui.craft_base_run, None);
+    assert_eq!(app.session.ui.craft_task_page, CraftTaskPage::Setup);
+    assert_eq!(
+        app.session.ui.craft_feedback.get(&target),
+        Some(&CraftRunFeedback::Completed(CraftRunId(1)))
+    );
 }
 
 #[test]

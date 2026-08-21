@@ -35,9 +35,20 @@ pub(super) struct TaskCardGeometry {
 /// to the screen and slides it up over the Ribbon, hiding the very buttons that
 /// opened it. Clamping the min keeps a short window shrinking instead.
 pub(super) fn geometry(host: &Ui, preferred_min_body: f32) -> TaskCardGeometry {
+    geometry_with_width(host, preferred_min_body, WIDTH)
+}
+
+/// Variant for analysis tasks that need a wide visual workspace. The requested
+/// width is still clamped to the central board, preserving the basic controls
+/// on small windows without making compact cards wider.
+pub(super) fn geometry_with_width(
+    host: &Ui,
+    preferred_min_body: f32,
+    preferred_width: f32,
+) -> TaskCardGeometry {
     let host_rect =
         crate::ui::workspace_geometry::board_rect(host.ctx()).unwrap_or_else(|| host.max_rect());
-    let width = card_width(host_rect);
+    let width = card_width(host_rect, preferred_width);
     let pos = host_rect.right_top() + egui::vec2(-width - MARGIN, TOP_OFFSET);
     let max_body_height = (host_rect.bottom() - pos.y - CHROME).max(FLOOR);
     TaskCardGeometry {
@@ -48,8 +59,8 @@ pub(super) fn geometry(host: &Ui, preferred_min_body: f32) -> TaskCardGeometry {
     }
 }
 
-fn card_width(host: egui::Rect) -> f32 {
-    WIDTH.min(
+fn card_width(host: egui::Rect, preferred_width: f32) -> f32 {
+    preferred_width.min(
         (host.width() - MIN_SAFE_EDGE - MARGIN * 3.0)
             .max(MIN_CARD_WIDTH)
             .min((host.width() - MARGIN * 2.0).max(1.0)),
@@ -85,6 +96,13 @@ pub(crate) fn visible_area_id(app: &PlotxApp) -> Option<Id> {
             .stat_task_dataset
             .filter(|dataset| Some(*dataset) == active)
             .map(|_| Id::new("statistics_task_card")),
+        TaskDockTab::Craft => app
+            .session
+            .ui
+            .craft_task_dataset
+            .and_then(|id| app.doc.dataset_index(id))
+            .filter(|dataset| Some(*dataset) == active)
+            .map(|_| Id::new("craft_task_card")),
     }
 }
 
@@ -196,6 +214,15 @@ pub(super) fn tab_bar(app: &mut PlotxApp, current: TaskDockTab, ui: &mut Ui) -> 
             app.session
                 .ui
                 .processing_task_dataset
+                .and_then(|id| app.doc.dataset_index(id)),
+        ),
+        (
+            TaskDockTab::Craft,
+            icon::WAVEFORM,
+            "CRAFT",
+            app.session
+                .ui
+                .craft_task_dataset
                 .and_then(|id| app.doc.dataset_index(id)),
         ),
         (
@@ -340,8 +367,8 @@ mod tests {
     fn narrow_boards_keep_a_valid_card_width() {
         let board = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(250.0, 140.0));
 
-        assert!(card_width(board) < WIDTH);
-        assert!(card_width(board) >= MIN_CARD_WIDTH);
+        assert!(card_width(board, WIDTH) < WIDTH);
+        assert!(card_width(board, WIDTH) >= MIN_CARD_WIDTH);
     }
 
     #[test]

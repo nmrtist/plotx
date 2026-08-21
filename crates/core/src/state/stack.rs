@@ -537,6 +537,17 @@ impl PlotxApp {
         self.insert_stack_canvas(&sel, series, false);
     }
 
+    /// Create a standard single-dataset spectrum page through the same binding,
+    /// chart and panel path used by stacked data. Analysis tools call this only
+    /// after an explicit user request when no eligible source plot exists.
+    pub fn insert_dataset_canvas(&mut self, dataset: usize) -> bool {
+        let Some(source) = self.doc.datasets.get(dataset) else {
+            return false;
+        };
+        let series = SeriesBinding::from_dataset_all(source);
+        self.insert_stack_canvas(&[dataset], series, false)
+    }
+
     pub(super) fn insert_stack_canvas(
         &mut self,
         selection: &[usize],

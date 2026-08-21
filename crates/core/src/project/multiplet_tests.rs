@@ -44,7 +44,7 @@ fn multiplets_survive_project_roundtrip() {
 }
 
 #[test]
-fn recipe_without_multiplets_key_loads_with_empty() {
+fn recipe_without_multiplets_key_is_rejected() {
     let mut dataset = NmrDataset::load(synthetic_1d());
     dataset.multiplets.push(sample_multiplet());
     dataset.next_multiplet_id = 4;
@@ -59,12 +59,22 @@ fn recipe_without_multiplets_key_loads_with_empty() {
         input: "data_000000".to_owned(),
         parameters: RecipeParameters::default(),
         extensions: serde_json::json!({
-            "plotx.analysis": { "peaks": crate::state::PeakSet::default(), "integrals": [] }
+            "plotx.analysis": {
+                "peaks": crate::state::PeakSet::default(),
+                "integrals": [],
+                "line_fits": [],
+                "craft_runs": []
+            }
         }),
     };
 
-    apply_1d_recipe(&mut dataset, &recipe).unwrap();
+    let error = apply_1d_recipe(&mut dataset, &recipe).unwrap_err();
 
-    assert!(dataset.multiplets.is_empty());
-    assert_eq!(dataset.next_multiplet_id, 0);
+    assert!(
+        error
+            .to_string()
+            .contains("missing required field multiplets")
+    );
+    assert_eq!(dataset.multiplets, vec![sample_multiplet()]);
+    assert_eq!(dataset.next_multiplet_id, 4);
 }

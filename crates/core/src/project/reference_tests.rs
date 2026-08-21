@@ -159,6 +159,8 @@ fn loading_a_maximum_object_id_reports_exhaustion() {
         "panels": [],
         "loose_item_order": [u64::MAX.to_string()],
         "groups": [],
+        "analysis_binding": null,
+        "x_viewport_links": [],
         "objects": [{
             "id": u64::MAX.to_string(),
             "name": "Label",
@@ -220,6 +222,8 @@ fn loading_a_maximum_series_id_reports_exhaustion() {
         "panels": [],
         "loose_item_order": ["1"],
         "groups": [],
+        "analysis_binding": null,
+        "x_viewport_links": [],
         "objects": [{
             "id": "1",
             "name": "Plot",

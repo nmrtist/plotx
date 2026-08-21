@@ -1,7 +1,26 @@
 use plotx_core::export::ExportFormat;
 use plotx_core::state::{Tool, ToolGroup, WorkflowTab};
 
-use super::{Applicability, CommandId, RibbonPlacement};
+use super::CommandId;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RibbonPlacement {
+    pub tab: WorkflowTab,
+    pub group: &'static str,
+    /// Lower values survive longer as space becomes constrained.
+    pub priority: u8,
+    pub applicability: Applicability,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Applicability {
+    Always,
+    LineAlignmentOnly,
+    TableOnly,
+    SeriesOnly,
+    Homonuclear2dOnly,
+    ToolGroup(ToolGroup),
+}
 
 pub(super) fn ribbon_placement(id: CommandId) -> Option<RibbonPlacement> {
     use Applicability::{Always, Homonuclear2dOnly, LineAlignmentOnly, SeriesOnly, TableOnly};
@@ -31,7 +50,7 @@ pub(super) fn ribbon_placement(id: CommandId) -> Option<RibbonPlacement> {
         CommandId::Tool(Tool::Symmetry) => (Analyze, "Review", 1, Homonuclear2dOnly),
         CommandId::AlignTraces => (Analyze, "Align", 1, LineAlignmentOnly),
         CommandId::Tool(Tool::ManualPhase) => (Process, "Correct", 0, Always),
-        CommandId::SpectrumArithmetic | CommandId::AlignSpectra => {
+        CommandId::SpectrumArithmetic | CommandId::AlignSpectra | CommandId::Craft => {
             (Process, "Transform", 1, Always)
         }
         CommandId::ApplyProcessingTemplate | CommandId::SaveProcessingTemplate => {

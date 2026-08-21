@@ -8,16 +8,18 @@ use std::time::{Duration, Instant};
 use plotx_analysis::diffusion::{DiffusionMap, diffusion_map_cancellable};
 use plotx_analysis::ilt::{IltResult, ilt_map_cancellable};
 use plotx_figure::Figure;
-use plotx_io::{DiffusionMeta, NmrData2D};
+use plotx_io::{DiffusionMeta, NmrData, NmrData2D};
 use plotx_processing::{
-    Params2D, Processed2D, StackSpectrum, process_2d_cancellable, reapply_2d_cancellable,
+    Params2D, Processed2D, StackSpectrum,
+    craft::{CraftInvocation, CraftResult, process_craft_cancellable},
+    process_2d_cancellable, reapply_2d_cancellable,
 };
 
 use super::{
     ContourGeometry, ContourGeometryCacheKey, EstimateKey, EstimateResult, FieldId, FieldRef,
     FieldRuntime, FieldSummary, FieldVersion, ScalarGrid2D, VersionedFieldRef, nmr_scalar_grid,
 };
-use super::{DatasetId, DosyResultProvenance};
+use super::{CraftRunId, DatasetId, DosyResultProvenance};
 use crate::{IltParams, build_dosy_figure_cancellable, build_ilt_figure_cancellable};
 
 #[path = "compute_field.rs"]
@@ -35,6 +37,7 @@ pub enum ComputeKind {
     Ilt,
     Dosy,
     Processing2D,
+    Craft,
 }
 
 impl ComputeKind {
@@ -43,6 +46,7 @@ impl ComputeKind {
             Self::Ilt => "ILT DOSY computation",
             Self::Dosy => "DOSY computation",
             Self::Processing2D => "2D processing",
+            Self::Craft => "CRAFT analysis",
         }
     }
 }
@@ -112,6 +116,15 @@ enum Job {
         meta: DiffusionMeta,
         nucleus: String,
         source: String,
+    },
+    Craft {
+        generation: u64,
+        dataset: DatasetId,
+        epoch: u64,
+        token: Arc<AtomicBool>,
+        data: Arc<NmrData>,
+        invocation: Box<CraftInvocation>,
+        parent_run: Option<CraftRunId>,
     },
     Process2D {
         version: FieldVersion,
@@ -186,6 +199,20 @@ pub enum Done {
         result: DiffusionMap,
         provenance: DosyResultProvenance,
         figure: Arc<Figure>,
+    },
+    Craft {
+        generation: u64,
+        dataset: DatasetId,
+        epoch: u64,
+        result: CraftResult,
+        invocation: Box<CraftInvocation>,
+        parent_run: Option<CraftRunId>,
+    },
+    CraftFailed {
+        generation: u64,
+        dataset: DatasetId,
+        epoch: u64,
+        message: String,
     },
     Processing2D {
         version: FieldVersion,
@@ -370,6 +397,47 @@ impl ComputeService {
         Ok(())
     }
 
+    pub fn enqueue_craft(
+        &mut self,
+        dataset: DatasetId,
+        epoch: u64,
+        data: Arc<NmrData>,
+        invocation: CraftInvocation,
+        parent_run: Option<CraftRunId>,
+    ) -> Result<(), EnqueueError> {
+        if let Some(kind) = self.blocking_work_for(dataset) {
+            return Err(EnqueueError::Busy(kind));
+        }
+        let generation = self.next_generation(dataset, ComputeKind::Craft);
+        let token = Arc::new(AtomicBool::new(false));
+        self.active.insert(
+            (dataset, ComputeKind::Craft),
+            ActiveJob {
+                generation,
+                started_at: Instant::now(),
+                token: Arc::clone(&token),
+                processing_input: None,
+            },
+        );
+        if self
+            .job_tx
+            .send(Job::Craft {
+                generation,
+                dataset,
+                epoch,
+                token,
+                data,
+                invocation: Box::new(invocation),
+                parent_run,
+            })
+            .is_err()
+        {
+            self.cancel_failed_enqueue(dataset, ComputeKind::Craft, generation);
+            return Err(EnqueueError::WorkersUnavailable);
+        }
+        Ok(())
+    }
+
     /// Queue a retransform-from-FID. Returns the user-initiated analyses this
     /// request aborted, so the caller can say so.
     pub(crate) fn request_2d_full(
@@ -515,6 +583,8 @@ impl ComputeService {
                 }
                 Done::Ilt { .. }
                 | Done::Dosy { .. }
+                | Done::Craft { .. }
+                | Done::CraftFailed { .. }
                 | Done::Processing2D { .. }
                 | Done::Cancelled { .. }
                 | Done::Failed { .. } => {}
@@ -606,7 +676,7 @@ impl ComputeService {
                 aborted.push(*kind);
             }
         }
-        for kind in [ComputeKind::Ilt, ComputeKind::Dosy] {
+        for kind in [ComputeKind::Ilt, ComputeKind::Dosy, ComputeKind::Craft] {
             self.latest.remove(&(dataset, kind));
         }
         aborted
@@ -663,6 +733,16 @@ fn done_identity(done: &Done) -> Option<(DatasetId, ComputeKind, u64)> {
             generation,
             ..
         } => Some((*dataset, ComputeKind::Dosy, *generation)),
+        Done::Craft {
+            dataset,
+            generation,
+            ..
+        }
+        | Done::CraftFailed {
+            dataset,
+            generation,
+            ..
+        } => Some((*dataset, ComputeKind::Craft, *generation)),
         Done::Processing2D {
             dataset, version, ..
         } => Some((*dataset, ComputeKind::Processing2D, version.0)),

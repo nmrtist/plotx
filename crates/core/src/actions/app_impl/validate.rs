@@ -307,6 +307,22 @@ pub(super) fn validate_action(
                 )));
             }
         }
+        Action::SetXViewportLinks {
+            canvas,
+            before,
+            after,
+        } => {
+            let Some(page) = app.doc.canvases.get(*canvas) else {
+                return Err(ActionApplyError::StaleTarget(format!("canvas {canvas}")));
+            };
+            for links in [before, after] {
+                let mut candidate = page.clone();
+                candidate.x_viewport_links.clone_from(links);
+                candidate
+                    .validate_x_viewport_links()
+                    .map_err(ActionApplyError::InvalidValue)?;
+            }
+        }
         _ => {}
     }
     Ok(())

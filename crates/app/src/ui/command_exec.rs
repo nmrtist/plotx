@@ -165,6 +165,9 @@ fn execute_inner(
                 }
             }
         }
+        CommandId::Craft => super::tools::open_craft_task_for_active(app),
+        CommandId::RunCraft => super::tools::run_craft(app),
+        CommandId::CraftComponentTable => super::tools::create_craft_component_table(app),
         CommandId::SpectrumArithmetic => super::arithmetic::open_spectrum_arithmetic_dialog(app),
         CommandId::AlignSpectra => super::align::open_align_spectra_dialog(app),
         CommandId::AlignTraces => super::trace_alignment::open_active_trace_alignment_dialog(app),

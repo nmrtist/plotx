@@ -58,7 +58,73 @@ impl PlotxApp {
             plot.normalize_viewport(&mut before);
             plot.normalize_viewport(&mut after);
         }
-        self.execute_action(Action::set_object_viewport(canvas, object, before, after));
+        let linked = self
+            .doc
+            .canvases
+            .get(canvas)
+            .map(|page| page.linked_x_members(object).to_vec())
+            .unwrap_or_default();
+        if linked.len() < 2 {
+            self.execute_action(Action::set_object_viewport(canvas, object, before, after));
+            return;
+        }
+        let mut actions = Vec::with_capacity(linked.len());
+        for member in linked {
+            if member == object {
+                actions.push(Action::set_object_viewport(
+                    canvas,
+                    member,
+                    before.clone(),
+                    after.clone(),
+                ));
+                continue;
+            }
+            let Some(plot) = self.doc.canvases[canvas]
+                .object(member)
+                .and_then(|object| object.plot())
+            else {
+                continue;
+            };
+            let figure = plot.figure();
+            let mut member_before = plot.viewport.clone();
+            let mut member_after = plot.viewport.clone();
+            if member_after.view_x == after.view_x {
+                member_before.set_linked_x(figure, before.view_x);
+            }
+            member_after.set_linked_x(figure, after.view_x);
+            actions.push(Action::set_object_viewport(
+                canvas,
+                member,
+                member_before,
+                member_after,
+            ));
+        }
+        self.execute_action(Action::Composite(actions));
+    }
+
+    /// Mirror the source plot's live horizontal viewport into its linked peers.
+    /// Gesture completion records the same peers as one composite undo action.
+    pub fn sync_linked_x_viewports(&mut self, canvas: usize, object: ObjectId) {
+        let Some((range, members)) = self.doc.canvases.get(canvas).and_then(|page| {
+            let range = page.object(object)?.plot()?.viewport.view_x;
+            Some((range, page.linked_x_members(object).to_vec()))
+        }) else {
+            return;
+        };
+        for member in members {
+            if member == object {
+                continue;
+            }
+            let Some(plot) = self.doc.canvases[canvas]
+                .object_mut(member)
+                .and_then(|object| object.plot_mut())
+            else {
+                continue;
+            };
+            let figure = plot.figure().clone();
+            plot.viewport.set_linked_x(&figure, range);
+            plot.apply_viewport();
+        }
     }
 
     /// Apply a live Inspector value. Transitions back to `None` rebuild once to

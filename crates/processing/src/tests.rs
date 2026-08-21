@@ -183,7 +183,6 @@ fn disabled_step_is_skipped() {
     for (x, y) in disabled.values.iter().zip(&bare.values) {
         assert!((x - y).norm() < 1e-12);
     }
-    // Sanity: enabling it actually changes the transform.
     let enabled = transform_base(&data, &with, true);
     let diff: f64 = enabled
         .values
@@ -464,6 +463,31 @@ fn reference_step_shifts_ppm_axis() {
     for (x, y) in a.ppm.iter().zip(&b.ppm) {
         assert!((y - x - 1.5).abs() < 1e-9);
     }
+}
+
+#[test]
+fn pipeline_reference_offset_matches_all_enabled_reference_steps() {
+    let mut disabled = step(StepKind::Reference(ReferenceParams {
+        at_ppm: 4.0,
+        target_ppm: 20.0,
+    }));
+    disabled.enabled = false;
+    let pipeline = AxisPipeline {
+        steps: vec![
+            step(StepKind::Fft),
+            step(StepKind::Reference(ReferenceParams {
+                at_ppm: 1.0,
+                target_ppm: 1.2,
+            })),
+            disabled,
+            step(StepKind::Reference(ReferenceParams {
+                at_ppm: 3.0,
+                target_ppm: 2.95,
+            })),
+        ],
+    };
+
+    assert!((pipeline.chemical_shift_reference_offset_ppm() - 0.15).abs() < 1e-12);
 }
 
 #[test]

@@ -290,10 +290,29 @@ pub struct ViewObject {
     pub panels: Vec<ViewPanel>,
     pub loose_item_order: Vec<String>,
     pub groups: Vec<ViewGroup>,
+    /// `null` identifies an ordinary author-created page.
+    pub analysis_binding: Option<AnalysisBindingDto>,
+    /// Empty for pages without linked horizontal axes.
+    #[serde(default)]
+    pub x_viewport_links: Vec<XViewportLinkDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub viewport: Option<ViewportDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub snapshot: Option<ViewSnapshot>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "kind", deny_unknown_fields)]
+pub enum AnalysisBindingDto {
+    #[serde(rename = "craft")]
+    Craft { input: String, run: u64 },
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct XViewportLinkDto {
+    pub id: String,
+    pub members: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize)]

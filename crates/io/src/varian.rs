@@ -34,7 +34,16 @@ pub fn load_raw(path: &Path) -> Result<LoadResult, IoError> {
         ));
     }
     let params = Procpar::parse(&std::fs::read_to_string(&procpar_path)?)?;
-    let raw = fid::parse(&std::fs::read(&data_path)?)?;
+    let mut raw = fid::parse(&std::fs::read(&data_path)?)?;
+    // VNMR stores direct-dimension quadrature with the opposite sense to the
+    // forward-FFT convention used by PlotX. Normalize it at the importer seam
+    // so every downstream transform and time-domain model shares one axis
+    // convention.
+    for trace in &mut raw.traces {
+        for point in trace {
+            point.im = -point.im;
+        }
+    }
     reject_unsupported(&params)?;
     let acquisition = assemble(&dir, &params, raw)?;
     Ok(LoadResult {
@@ -161,7 +170,18 @@ fn phase_layout(p: &Procpar) -> Result<(usize, QuadMode), IoError> {
 }
 
 fn direct_dim(p: &Procpar) -> Result<Dim, IoError> {
-    dim(p, "sw", "sfrq", "tof", "tn")
+    let mut direct = dim(p, "sw", "sfrq", "tof", "tn")?;
+    // VNMRJ uses rfl/rfp to recalibrate the displayed direct-axis reference.
+    // With a full spectral width, rfl is measured from the high-frequency
+    // edge and rfp is the chemical shift assigned at that location.
+    if let Some(rfl) = p.number("rfl").filter(|value| value.is_finite()) {
+        let rfp = p
+            .number("rfp")
+            .filter(|value| value.is_finite())
+            .unwrap_or(0.0);
+        direct.carrier_ppm = rfp + (direct.spectral_width_hz * 0.5 - rfl) / direct.observe_freq_mhz;
+    }
+    Ok(direct)
 }
 fn indirect_dim(p: &Procpar, seq: Option<&str>, direct: &Dim) -> Result<Dim, IoError> {
     let homo = seq.is_some_and(|s| {

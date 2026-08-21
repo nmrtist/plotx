@@ -1,55 +1,33 @@
 use super::*;
 use crate::actions::PendingWheelPropertyEdit;
 use crate::operation::{OperationHistory, OperationId, OperationReport};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
-
 #[path = "ui_state_xps.rs"]
 mod xps;
 pub use xps::{PropertyTextEditState, XpsWorkbenchTab};
-
 mod task_dock;
 pub use task_dock::TaskDockTab;
-
+#[path = "ui_state_craft.rs"]
+mod craft;
+pub use craft::{
+    CraftAnalysisIntent, CraftComponentSort, CraftResolutionCache, CraftResultTab,
+    CraftRunFeedback, CraftSpectrumChannel, CraftTaskPage,
+};
 #[path = "ui_layout_drag.rs"]
 mod layout_drag;
 pub use layout_drag::*;
-
 mod trace_composer;
 pub use trace_composer::{TraceComposerItem, TraceComposerState};
 mod trace_alignment;
 pub use trace_alignment::TraceAlignmentDialogState;
-
-/// Which sidebar entry an in-progress inline rename targets.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum RenameTarget {
-    Canvas(usize),
-    Data(usize),
-}
-
-/// An active inline rename: the entry being edited plus its working buffer.
-/// `focus` requests keyboard focus for one frame after the edit box appears.
-pub struct RenameState {
-    pub target: RenameTarget,
-    pub buffer: String,
-    pub focus: bool,
-}
-
-pub struct PanelNoteEditState {
-    pub canvas: usize,
-    pub object: ObjectId,
-    pub buffer: String,
-    pub focus: bool,
-}
-
-pub struct TextEditState {
-    pub canvas: usize,
-    pub object: ObjectId,
-    pub buffer: String,
-    pub focus: bool,
-}
-
+#[path = "ui_state_rename.rs"]
+mod rename;
+pub use rename::{RenameState, RenameTarget};
+#[path = "ui_state_text.rs"]
+mod text_edit;
+pub use text_edit::{PanelNoteEditState, TextEditState};
 /// In-progress rubber-band while a shape Author tool draws a new object. `start`
 /// and `current` are page-space (pt) pointer positions.
 #[derive(Clone, Copy, Debug)]
@@ -370,9 +348,25 @@ pub struct UiState {
     pub stat_task_dataset: Option<usize>,
     /// Whether the Statistics task card is reduced to its one-line summary.
     pub stat_task_collapsed: bool,
-    /// In-progress statistics configuration for `stat_task_dataset`. Rebuilt when
-    /// the card opens for a different table.
+    /// In-progress statistics configuration, rebuilt for a different table.
     pub stat_draft: Option<StatDraft>,
+    pub craft_task_dataset: Option<DatasetId>,
+    pub craft_task_collapsed: bool,
+    pub craft_overrides_dataset: Option<DatasetId>,
+    pub craft_overrides: plotx_processing::craft::CraftParamOverrides,
+    pub craft_feedback: HashMap<DatasetId, CraftRunFeedback>,
+    pub craft_resolution_cache: Option<CraftResolutionCache>,
+    pub craft_base_run: Option<CraftRunId>,
+    pub craft_analysis_intent: CraftAnalysisIntent,
+    pub craft_spectrum_channel: CraftSpectrumChannel,
+    pub craft_selected_run: Option<CraftRunId>,
+    pub craft_task_page: CraftTaskPage,
+    pub craft_result_tab: CraftResultTab,
+    pub craft_component_sort: CraftComponentSort,
+    pub craft_component_region: Option<plotx_processing::craft::CraftRegionId>,
+    pub craft_selected_component: Option<plotx_processing::craft::CraftComponentId>,
+    pub craft_selected_region: Option<plotx_processing::craft::CraftRegionId>,
+    pub craft_normalize_groups: bool,
     /// Draft name for the next saved board view (the bookmarks section's input).
     pub board_view_name: String,
     pub canvas_size_unit: CanvasSizeUnit,
@@ -553,6 +547,23 @@ impl Default for UiState {
             stat_task_dataset: None,
             stat_task_collapsed: false,
             stat_draft: None,
+            craft_task_dataset: None,
+            craft_task_collapsed: false,
+            craft_overrides_dataset: None,
+            craft_overrides: plotx_processing::craft::CraftParamOverrides::default(),
+            craft_feedback: HashMap::new(),
+            craft_resolution_cache: None,
+            craft_base_run: None,
+            craft_analysis_intent: CraftAnalysisIntent::default(),
+            craft_spectrum_channel: CraftSpectrumChannel::default(),
+            craft_selected_run: None,
+            craft_task_page: CraftTaskPage::Setup,
+            craft_result_tab: CraftResultTab::Overview,
+            craft_component_sort: CraftComponentSort::ChemicalShift,
+            craft_component_region: None,
+            craft_selected_component: None,
+            craft_selected_region: None,
+            craft_normalize_groups: false,
             board_view_name: String::new(),
             canvas_size_unit: CanvasSizeUnit::Mm,
             panel_note_inline_edit: None,

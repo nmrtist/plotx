@@ -1,13 +1,6 @@
+use super::band_editor::{BandHit, band_hit, edited_band_bounds};
 use super::*;
 
-const REGION_EDGE_PX: f32 = 5.0;
-
-enum RegionHit {
-    Edge { id: RegionId, lo_edge: bool },
-    Inside { id: RegionId },
-}
-
-/// Which region band (if any) the screen x `px` lands on, edges taking priority.
 fn region_hit(
     regions: &[Region],
     plot: PlotRect,
@@ -15,33 +8,17 @@ fn region_hit(
     xspan: f64,
     xrev: bool,
     px: f32,
-) -> Option<RegionHit> {
-    for r in regions {
-        let sxlo = x_to_screen(r.lo, plot, xmin, xspan, xrev);
-        let sxhi = x_to_screen(r.hi, plot, xmin, xspan, xrev);
-        if (px - sxlo).abs() <= REGION_EDGE_PX {
-            return Some(RegionHit::Edge {
-                id: r.id,
-                lo_edge: true,
-            });
-        }
-        if (px - sxhi).abs() <= REGION_EDGE_PX {
-            return Some(RegionHit::Edge {
-                id: r.id,
-                lo_edge: false,
-            });
-        }
-    }
-    for r in regions {
-        let left = x_to_screen(r.lo, plot, xmin, xspan, xrev)
-            .min(x_to_screen(r.hi, plot, xmin, xspan, xrev));
-        let right = x_to_screen(r.lo, plot, xmin, xspan, xrev)
-            .max(x_to_screen(r.hi, plot, xmin, xspan, xrev));
-        if px >= left && px <= right {
-            return Some(RegionHit::Inside { id: r.id });
-        }
-    }
-    None
+) -> Option<BandHit<RegionId>> {
+    band_hit(
+        regions
+            .iter()
+            .map(|region| (region.id, region.lo, region.hi)),
+        plot,
+        xmin,
+        xspan,
+        xrev,
+        px,
+    )
 }
 
 pub(crate) fn handle_region_drag(
@@ -118,10 +95,8 @@ pub(crate) fn handle_region_drag(
         region_hit(regions, plot, xmin, xspan, xrev, p.x)
     };
     match hit {
-        Some(RegionHit::Edge { .. }) => {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal)
-        }
-        Some(RegionHit::Inside { .. }) => ui.ctx().set_cursor_icon(egui::CursorIcon::Grab),
+        Some(BandHit::Edge { .. }) => ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal),
+        Some(BandHit::Inside { .. }) => ui.ctx().set_cursor_icon(egui::CursorIcon::Grab),
         None => ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair),
     }
 
@@ -145,7 +120,7 @@ pub(crate) fn handle_region_drag(
             current_ppm: ppm,
         };
         match hit {
-            Some(RegionHit::Edge { id, lo_edge }) => {
+            Some(BandHit::Edge { id, lo_edge }) => {
                 drag.kind = if lo_edge {
                     RegionDragKind::EdgeLo
                 } else {
@@ -154,7 +129,7 @@ pub(crate) fn handle_region_drag(
                 drag.region_id = Some(id);
                 app.session.ui.selected_region = Some(RegionSelection::new(drag.dataset, id));
             }
-            Some(RegionHit::Inside { id }) => {
+            Some(BandHit::Inside { id }) => {
                 if let Some(r) = drag.before.iter().find(|r| r.id == id) {
                     drag.grab_lo = r.lo;
                     drag.grab_hi = r.hi;
@@ -199,16 +174,9 @@ fn apply_region_drag_live(app: &mut PlotxApp, dataset: usize, ppm: f64) {
     let Some(r) = state.regions.iter_mut().find(|r| r.id == id) else {
         return;
     };
-    match kind {
-        RegionDragKind::EdgeLo => r.lo = ppm,
-        RegionDragKind::EdgeHi => r.hi = ppm,
-        RegionDragKind::Move => {
-            let d = ppm - anchor;
-            r.lo = grab_lo + d;
-            r.hi = grab_hi + d;
-        }
-        RegionDragKind::NewBand => {}
-    }
+    let (lo, hi) = edited_band_bounds(kind, anchor, grab_lo, grab_hi, ppm);
+    r.lo = lo;
+    r.hi = hi;
 }
 
 fn finish_region_drag(app: &mut PlotxApp, dataset: usize, xspan: f64) {

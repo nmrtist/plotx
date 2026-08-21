@@ -51,6 +51,7 @@ uuid_id!(DatasetId);
 uuid_id!(CanvasId);
 uuid_id!(PanelId);
 uuid_id!(AssetId);
+uuid_id!(XViewportLinkId);
 
 macro_rules! local_id {
     ($name:ident) => {

@@ -16,6 +16,9 @@ fn enqueue_error_status(error: EnqueueError) -> String {
         EnqueueError::Busy(ComputeKind::Dosy) => {
             "A DOSY computation is already running for this dataset.".into()
         }
+        EnqueueError::Busy(ComputeKind::Craft) => {
+            "A CRAFT analysis is already running for this dataset.".into()
+        }
         EnqueueError::WorkersUnavailable => {
             "Background computation is unavailable in this session; the analysis was not started."
                 .into()
@@ -159,9 +162,134 @@ impl PlotxApp {
             ComputeKind::Ilt => "ILT DOSY computation cancelled.",
             ComputeKind::Dosy => "DOSY computation cancelled.",
             ComputeKind::Processing2D => "2D processing cancelled.",
+            ComputeKind::Craft => "CRAFT analysis cancelled.",
         }
         .into();
+        if kind == ComputeKind::Craft {
+            self.session
+                .ui
+                .craft_feedback
+                .insert(dataset_id, CraftRunFeedback::Cancelled);
+        }
         true
+    }
+
+    pub fn request_craft_analysis(
+        &mut self,
+        dataset: usize,
+        overrides: plotx_processing::craft::CraftParamOverrides,
+        base_run: Option<CraftRunId>,
+    ) -> bool {
+        let Some(nmr) = self.doc.datasets.get(dataset).and_then(Dataset::as_nmr) else {
+            self.session.status = "CRAFT requires a one-dimensional NMR dataset.".into();
+            return false;
+        };
+        if nmr.data.domain != Domain::Time {
+            self.session.status = "CRAFT requires the original time-domain FID.".into();
+            return false;
+        }
+        let dataset_id = nmr.resource_id;
+        let reference = nmr.craft_reference();
+        let provenance =
+            base_run.and_then(|id| nmr.craft_run(id).map(|run| &run.provenance.invocation));
+        let invocation = plotx_processing::craft::resolve_craft_invocation(
+            &nmr.data, reference, &overrides, provenance,
+        );
+        if let Err(error) = invocation.validate(&nmr.data) {
+            self.session.status = error.to_string();
+            self.session.ui.craft_feedback.insert(
+                dataset_id,
+                CraftRunFeedback::Failed {
+                    message: error.to_string(),
+                },
+            );
+            return false;
+        }
+        let data = std::sync::Arc::new(nmr.data.clone());
+        let parent_run = invocation
+            .sources
+            .uses_result_provenance()
+            .then_some(base_run)
+            .flatten();
+        let outcome = self.session.compute.enqueue_craft(
+            dataset_id,
+            self.session.dataset_epoch,
+            data,
+            invocation.clone(),
+            parent_run,
+        );
+        let started = outcome.is_ok();
+        if started {
+            self.session.ui.craft_feedback.insert(
+                dataset_id,
+                CraftRunFeedback::Running(Box::new(invocation.clone())),
+            );
+        }
+        self.session.status = match outcome {
+            Ok(()) => "Running CRAFT analysis…".into(),
+            Err(error) => enqueue_error_status(error),
+        };
+        started
+    }
+
+    pub fn materialize_craft_component_table(
+        &mut self,
+        dataset: usize,
+        run_id: CraftRunId,
+    ) -> Result<usize, String> {
+        let nmr = self
+            .doc
+            .datasets
+            .get(dataset)
+            .and_then(Dataset::as_nmr)
+            .ok_or_else(|| "The CRAFT source dataset is no longer available.".to_owned())?;
+        let source_id = nmr.resource_id;
+        let source_name = nmr.name.clone().unwrap_or_else(|| "NMR".into());
+        let run = nmr
+            .craft_run(run_id)
+            .ok_or_else(|| "The selected CRAFT run is no longer available.".to_owned())?;
+        if let Some(existing) = run.component_table
+            && let Some(index) = self.doc.dataset_index(existing)
+        {
+            return Ok(index);
+        }
+        let mut table = craft_component_table(run)?;
+        table.lineage = Some(DatasetLineage::new(
+            DerivationKind::CraftComponentTable,
+            [source_id],
+        ));
+        let name = format!("{source_name} CRAFT {} components", run_id.0 + 1);
+        table.name = Some(name);
+        let sheet = table.board_rect_pt();
+        table.board_pos = crate::state::next_board_frame_pos(self, [sheet.width, sheet.height]);
+        table.board_sheet_visible = false;
+        let table_id = table.resource_id;
+        let table_index = self.doc.datasets.len();
+        self.doc.datasets.push(Dataset::Table(Box::new(table)));
+        let nmr = self.doc.datasets[dataset]
+            .as_nmr_mut()
+            .expect("the validated CRAFT source remains an NMR dataset");
+        let run = nmr
+            .craft_runs
+            .iter_mut()
+            .find(|run| run.id == run_id)
+            .expect("the validated CRAFT run remains attached to its source");
+        run.component_table = Some(table_id);
+        self.mark_document_dirty();
+        Ok(table_index)
+    }
+
+    pub fn show_craft_component_table_on_board(&mut self, table: usize) -> Result<(), String> {
+        let table = self
+            .doc
+            .datasets
+            .get_mut(table)
+            .and_then(Dataset::as_table_mut)
+            .ok_or_else(|| "The CRAFT component table is no longer available.".to_owned())?;
+        table.board_sheet_visible = true;
+        self.mark_document_dirty();
+        self.session.status = "Added the CRAFT component table to the board.".into();
+        Ok(())
     }
 
     /// Drain finished compute jobs and apply the current ones. Stale results —
@@ -270,6 +398,88 @@ impl PlotxApp {
                     } else {
                         self.session.status =
                             "DOSY map is empty: no columns fit above the noise threshold.".into();
+                    }
+                }
+                Done::Craft {
+                    generation,
+                    dataset,
+                    epoch,
+                    result,
+                    invocation,
+                    parent_run,
+                } => {
+                    if epoch != self.session.dataset_epoch
+                        || !self
+                            .session
+                            .compute
+                            .is_current(dataset, ComputeKind::Craft, generation)
+                    {
+                        continue;
+                    }
+                    let Some(dataset_index) = self.doc.dataset_index(dataset) else {
+                        continue;
+                    };
+                    let Some(nmr) = self
+                        .doc
+                        .datasets
+                        .get_mut(dataset_index)
+                        .and_then(Dataset::as_nmr_mut)
+                    else {
+                        continue;
+                    };
+                    let component_count = result.components.len();
+                    let status = result.diagnostics.status;
+                    let run_id = nmr.allocate_craft_run_id();
+                    let run = StoredCraftRun::from_result(
+                        run_id,
+                        &nmr.data,
+                        *invocation,
+                        parent_run,
+                        result,
+                    );
+                    nmr.store_craft_run(run);
+                    self.session
+                        .ui
+                        .craft_feedback
+                        .insert(dataset, CraftRunFeedback::Completed(run_id));
+                    if self.session.ui.craft_task_dataset == Some(dataset) {
+                        self.session.ui.craft_selected_run = Some(run_id);
+                        self.session.ui.craft_base_run = Some(run_id);
+                        self.session.ui.craft_task_page = CraftTaskPage::Results;
+                        self.session.ui.craft_result_tab = CraftResultTab::Overview;
+                        self.session.ui.craft_component_region = None;
+                    }
+                    self.mark_document_dirty();
+                    self.session.status = format!(
+                        "CRAFT analysis {} with {component_count} components (run {}).",
+                        match status {
+                            plotx_processing::craft::CraftRunStatus::Complete => "completed",
+                            plotx_processing::craft::CraftRunStatus::Partial => {
+                                "completed with warnings"
+                            }
+                        },
+                        run_id.0 + 1
+                    );
+                }
+                Done::CraftFailed {
+                    generation,
+                    dataset,
+                    epoch,
+                    message,
+                } => {
+                    if epoch == self.session.dataset_epoch
+                        && self
+                            .session
+                            .compute
+                            .is_current(dataset, ComputeKind::Craft, generation)
+                    {
+                        self.session.status = format!("CRAFT analysis failed: {message}");
+                        self.session.ui.craft_feedback.insert(
+                            dataset,
+                            CraftRunFeedback::Failed {
+                                message: message.clone(),
+                            },
+                        );
                     }
                 }
                 Done::Processing2D {

@@ -377,6 +377,7 @@ pub(crate) fn apply_plot_pan(
     .clamp_to(plot_object.viewport.full_y);
     plot_object.viewport.auto_y = false;
     plot_object.apply_viewport();
+    app.sync_linked_x_viewports(ci, object_id);
     app.mark_document_dirty();
 }
 
@@ -788,6 +789,7 @@ pub(crate) fn zoom_plot_viewport(
         plot_object.viewport.zoom_y(anchor, scale);
     }
     plot_object.apply_viewport();
+    app.sync_linked_x_viewports(ci, object_id);
     app.mark_document_dirty();
     ui.ctx()
         .request_repaint_after(std::time::Duration::from_millis(200));

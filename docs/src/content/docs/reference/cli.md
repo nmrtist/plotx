@@ -15,10 +15,11 @@ need it, build it from a checkout — see the
 use the in-app Automation window, which runs the same workflows.
 :::
 
-## Inspect and process single files
+## Inspect and process data
 
 ```sh
 plotx-cli inspect <input> [--json]
+plotx-cli craft <input> --output <result.json> [--region <start-ppm:end-ppm>]... [--expected-ratio <value>]...
 plotx-cli process <input> --scheme <recipe.plotxproc> --output <path> [--format svg|pdf|png|tiff|jpeg]
 ```
 
@@ -33,6 +34,25 @@ how many regions have a binding-energy axis or remain kinetic-only.
 [processing recipe](/guides/templates/), and one figure export. When
 `--format` is omitted, the format is inferred from the output file's
 extension.
+
+`craft` runs CRAFT on a one-dimensional complex FID. A raw acquisition
+directory is treated as one input, even when it contains processed-data
+subdirectories. A batch directory analyzes only its immediate child directories
+that PlotX recognizes as raw acquisitions; a directory with none is rejected.
+Repeat `--region <start-ppm:end-ppm>` to fit selected ppm intervals. Omit it to
+use the full acquired bandwidth. The output is a `plotx.craft.batch.v1` JSON
+report containing each input's fitted components, per-region coherent amplitudes,
+an amplitude ratio when exactly two regions are supplied, diagnostics, and
+quality checks. Wide selections are still reported under the regions you gave.
+
+When exactly two regions are supplied, repeat `--expected-ratio` once per input
+to compare the measured ratio with a reference value. The report records the
+relative error and passes the check when it is within 5%. `all_succeeded` tells
+you whether every calculation completed. `all_quality_checks_passed` is stricter:
+it is false when an input or fit has a warning, produces no components for a
+selected region, or reaches a diagnostic limit. Treat a false quality result as
+an indication that the data needs scientific review, even when the command
+completed.
 
 ## Run a workflow
 

@@ -38,6 +38,18 @@ impl Action {
         }
     }
 
+    pub fn set_x_viewport_links(
+        canvas: usize,
+        before: Vec<crate::state::XViewportLinkGroup>,
+        after: Vec<crate::state::XViewportLinkGroup>,
+    ) -> Self {
+        Self::SetXViewportLinks {
+            canvas,
+            before,
+            after,
+        }
+    }
+
     pub fn set_axis_overrides(
         canvas: usize,
         object: ObjectId,
@@ -404,11 +416,25 @@ impl Action {
     pub fn delete_object(app: &PlotxApp, canvas: usize, id: ObjectId) -> Option<Self> {
         let c = app.doc.canvases.get(canvas)?;
         let index = c.objects.iter().position(|o| o.id == id)?;
-        Some(Self::DeleteObject {
+        let delete = Self::DeleteObject {
             canvas,
             index,
             object: Box::new(c.objects[index].clone()),
             selection_before: app.session.ui.selection.clone(),
+        };
+        let before = c.x_viewport_links.clone();
+        let mut after = before.clone();
+        after.retain_mut(|group| {
+            group.members.retain(|member| *member != id);
+            group.members.len() >= 2
+        });
+        Some(if before == after {
+            delete
+        } else {
+            Self::Composite(vec![
+                Self::set_x_viewport_links(canvas, before, after),
+                delete,
+            ])
         })
     }
 

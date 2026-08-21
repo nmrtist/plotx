@@ -93,6 +93,38 @@ pub(super) fn run_job(job: Job) -> Done {
                 },
             }
         }
+        Job::Craft {
+            generation,
+            dataset,
+            epoch,
+            token,
+            data,
+            invocation,
+            parent_run,
+        } => {
+            let cancelled = || token.load(Ordering::Relaxed);
+            match process_craft_cancellable(&data, &invocation, &cancelled) {
+                Ok(result) if !cancelled() => Done::Craft {
+                    generation,
+                    dataset,
+                    epoch,
+                    result,
+                    invocation,
+                    parent_run,
+                },
+                Err(plotx_processing::craft::CraftError::Cancelled) | Ok(_) => Done::Cancelled {
+                    generation,
+                    dataset,
+                    kind: ComputeKind::Craft,
+                },
+                Err(error) => Done::CraftFailed {
+                    generation,
+                    dataset,
+                    epoch,
+                    message: error.to_string(),
+                },
+            }
+        }
         Job::Process2D {
             version,
             dataset,

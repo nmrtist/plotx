@@ -39,6 +39,7 @@ pub enum Interaction {
     Phase(PhaseDrag),
     Furniture(FurnitureDrag),
     Region(RegionDrag),
+    CraftRegion(CraftRegionDrag),
     Integral(IntegralDrag),
     Integral2D(Integral2DDrag),
     PeakThreshold(PeakThresholdDrag),
@@ -80,6 +81,7 @@ impl Interaction {
             | Interaction::Phase(_)
             | Interaction::Furniture(_)
             | Interaction::Region(_)
+            | Interaction::CraftRegion(_)
             | Interaction::Integral(_)
             | Interaction::Integral2D(_)
             | Interaction::PeakThreshold(_)
@@ -101,6 +103,7 @@ impl Interaction {
             Interaction::Pan(d) => Some(d.canvas),
             Interaction::Furniture(d) => Some(d.canvas),
             Interaction::Region(d) => Some(d.canvas),
+            Interaction::CraftRegion(d) => Some(d.canvas),
             Interaction::Integral(d) => Some(d.canvas),
             Interaction::Integral2D(d) => Some(d.canvas),
             Interaction::PeakThreshold(d) => Some(d.canvas),

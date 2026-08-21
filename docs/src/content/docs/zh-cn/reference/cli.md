@@ -13,10 +13,11 @@ description: 不打开应用即可运行导入、处理、导出和已保存的�
 使用应用内的自动化窗口，它运行同样的工作流。
 :::
 
-## 检查与处理单个文件
+## 检查与处理数据
 
 ```sh
 plotx-cli inspect <input> [--json]
+plotx-cli craft <input> --output <result.json> [--region <start-ppm:end-ppm>]... [--expected-ratio <value>]...
 plotx-cli process <input> --scheme <recipe.plotxproc> --output <path> [--format svg|pdf|png|tiff|jpeg]
 ```
 
@@ -28,6 +29,20 @@ plotx-cli process <input> --scheme <recipe.plotxproc> --output <path> [--format 
 
 `process` 是"一次导入、一个[处理配方](/zh-cn/guides/templates/)、一次
 图形导出"的便捷路径。省略 `--format` 时按输出文件扩展名推断格式。
+
+`craft` 对一个一维复数 FID 运行 CRAFT。如果 `<input>` 本身是原始采集目录，
+即使其中包含已处理数据子目录，也只会把它作为一个输入。批目录只分析可识别为
+原始采集的直接子目录；没有原始采集时会拒绝该目录。重复使用
+`--region <start-ppm:end-ppm>` 可把拟合限制在指定的 ppm 区间；省略时使用完整
+采集带宽。输出采用 `plotx.craft.batch.v1` JSON 格式，包含每个输入的拟合分量、
+各区域相干振幅、恰好两个区域时的振幅比、诊断和质量检查。即使选择范围较宽，
+结果也仍按你给出的区域汇总。
+
+恰好指定两个区域时，可按输入顺序重复 `--expected-ratio`，将测得的振幅比与参考值
+比较。报告会记录相对误差，误差不超过 5% 时通过检查。`all_succeeded` 表示所有
+计算是否完成；`all_quality_checks_passed` 的要求更严格：输入或拟合出现警告、
+选定区域没有分量，或达到诊断限制时都会为 `false`。即使命令完成，质量结果为
+`false` 也表示数据需要进一步的科学复核。
 
 ## 运行工作流
 

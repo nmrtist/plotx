@@ -135,6 +135,8 @@ fn settle_estimates(service: &mut ComputeService) {
                 | crate::state::Done::BuildContourFailed { .. }
                 | crate::state::Done::Ilt { .. }
                 | crate::state::Done::Dosy { .. }
+                | crate::state::Done::Craft { .. }
+                | crate::state::Done::CraftFailed { .. }
                 | crate::state::Done::Processing2D { .. }
                 | crate::state::Done::Cancelled { .. }
                 | crate::state::Done::Failed { .. } => {

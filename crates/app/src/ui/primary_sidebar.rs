@@ -718,6 +718,13 @@ fn select_analysis(app: &mut PlotxApp, ui: &Ui, di: usize, item: &AnalysisItem, 
                 request_tool_group(app, plotx_core::state::ToolGroup::LineFit);
             }
         }
+        AnalysisKind::Craft(id) => {
+            app.session.ui.craft_selected_run = Some(plotx_core::state::CraftRunId(id));
+            if open {
+                crate::ui::tools::open_craft_task_for_active(app);
+                app.session.ui.craft_selected_run = Some(plotx_core::state::CraftRunId(id));
+            }
+        }
         AnalysisKind::CurveFitResponse(column) => {
             app.session.ui.fit_dataset = Some(di);
             app.session.ui.fit_column = Some(column);

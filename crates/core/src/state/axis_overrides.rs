@@ -129,6 +129,13 @@ impl CanvasViewport {
         }
     }
 
+    pub fn set_linked_x(&mut self, fig: &Figure, range: AxisRange) {
+        self.view_x = range.clamp_to(self.full_x);
+        if self.auto_y {
+            self.refresh_auto_y(fig);
+        }
+    }
+
     pub fn zoom_y(&mut self, anchor: f64, scale: f64) {
         self.view_y = self.view_y.zoom_around(self.full_y, anchor, scale);
         self.auto_y = false;

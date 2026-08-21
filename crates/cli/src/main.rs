@@ -10,21 +10,26 @@ use std::collections::VecDeque;
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
+mod craft;
+
 const HELP: &str = r#"plotx-cli - headless PlotX workflows
 
 USAGE:
   plotx-cli inspect <input> [--json]
+  plotx-cli craft <input> --output <result.json> [--region <start:end>]... [--expected-ratio <value>]...
   plotx-cli process <input> --scheme <file> --output <path> [--format svg|pdf|png|tiff|jpeg]
   plotx-cli batch --workflow <workflow.json> --manifest <manifest.json>
 
 COMMANDS:
   inspect   Detect, load and describe one supported dataset.
+  craft     Analyze one FID or every immediate child acquisition in a directory.
   process   Load one dataset, apply one .plotxproc scheme, create a default
             canvas, and export it. If --format is omitted, infer it from output.
   batch     Execute a tool-based v1 DAG and atomically write its run manifest.
 
 OUTPUT:
   inspect writes a stable text report, or plotx.inspect.v1 JSON with --json.
+  craft writes a plotx.craft.batch.v1 JSON report. Regions are specified in ppm.
   process writes one plotx.process.v1 JSON result to stdout.
   batch writes the same plotx.run-manifest.v1 JSON saved at --manifest.
   Operational diagnostics and errors are written only to stderr.
@@ -53,7 +58,7 @@ enum Status {
     Internal = 70,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 enum Command {
     Inspect {
         input: PathBuf,
@@ -64,6 +69,12 @@ enum Command {
         scheme: PathBuf,
         output: PathBuf,
         format: OutputFormat,
+    },
+    Craft {
+        input: PathBuf,
+        output: PathBuf,
+        regions: Vec<plotx_processing::craft::CraftRegion>,
+        expected_ratios: Vec<f64>,
     },
     Batch {
         workflow: PathBuf,
@@ -125,6 +136,8 @@ enum Flag {
     Format,
     Workflow,
     Manifest,
+    Region,
+    ExpectedRatio,
 }
 
 impl Flag {
@@ -137,6 +150,8 @@ impl Flag {
             Some("--format") => Ok(Some(Self::Format)),
             Some("--workflow") => Ok(Some(Self::Workflow)),
             Some("--manifest") => Ok(Some(Self::Manifest)),
+            Some("--region") => Ok(Some(Self::Region)),
+            Some("--expected-ratio") => Ok(Some(Self::ExpectedRatio)),
             Some(value) if value.starts_with('-') => {
                 Err(ParseError::new(format!("unknown option: {value}")))
             }
@@ -153,11 +168,13 @@ impl Flag {
             Self::Format => "--format",
             Self::Workflow => "--workflow",
             Self::Manifest => "--manifest",
+            Self::Region => "--region",
+            Self::ExpectedRatio => "--expected-ratio",
         }
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 enum ParseOutcome {
     Command(Command),
     Help,
@@ -184,11 +201,78 @@ where
     match command.to_str() {
         Some("--help" | "-h") => Ok(ParseOutcome::Help),
         Some("inspect") => parse_inspect(args),
+        Some("craft") => parse_craft(args),
         Some("process") => parse_process(args),
         Some("batch") => parse_batch(args),
         Some(value) => Err(ParseError::new(format!("unknown command: {value}"))),
         None => Err(ParseError::new("command is not valid Unicode")),
     }
+}
+
+fn parse_craft(mut args: VecDeque<OsString>) -> Result<ParseOutcome, ParseError> {
+    let mut input = None;
+    let mut output = None;
+    let mut regions = Vec::new();
+    let mut expected_ratios = Vec::new();
+    while let Some(token) = args.pop_front() {
+        match Flag::parse(&token)? {
+            Some(Flag::Help) => return Ok(ParseOutcome::Help),
+            Some(Flag::Output) if output.is_none() => {
+                output = Some(PathBuf::from(take_value(&mut args, Flag::Output)?));
+            }
+            Some(Flag::Region) => {
+                // Negative chemical shifts begin with `-`, so region values
+                // cannot use the generic option-rejecting value parser.
+                let value = args
+                    .pop_front()
+                    .ok_or_else(|| ParseError::new("--region requires a value"))?;
+                let value = value
+                    .to_str()
+                    .ok_or_else(|| ParseError::new("--region must be valid Unicode"))?;
+                let (start, end) = value
+                    .split_once(':')
+                    .ok_or_else(|| ParseError::new("--region must use <start-ppm>:<end-ppm>"))?;
+                let parse_ppm = |text: &str| {
+                    text.parse::<f64>()
+                        .map_err(|_| ParseError::new("--region bounds must be finite numbers"))
+                        .and_then(|value| {
+                            value.is_finite().then_some(value).ok_or_else(|| {
+                                ParseError::new("--region bounds must be finite numbers")
+                            })
+                        })
+                };
+                regions.push(plotx_processing::craft::CraftRegion::new(
+                    plotx_processing::craft::CraftRegionId(regions.len() as u64),
+                    parse_ppm(start)?,
+                    parse_ppm(end)?,
+                ));
+            }
+            Some(Flag::ExpectedRatio) => {
+                let value = take_value(&mut args, Flag::ExpectedRatio)?
+                    .to_str()
+                    .and_then(|value| value.parse::<f64>().ok())
+                    .filter(|value| value.is_finite() && *value > 0.0)
+                    .ok_or_else(|| {
+                        ParseError::new("--expected-ratio must be a positive finite number")
+                    })?;
+                expected_ratios.push(value);
+            }
+            Some(flag) => {
+                return Err(ParseError::new(format!(
+                    "{} is invalid or was provided more than once for craft",
+                    flag.spelling()
+                )));
+            }
+            None if input.is_none() => input = Some(PathBuf::from(token)),
+            None => return Err(ParseError::new("craft accepts exactly one input")),
+        }
+    }
+    Ok(ParseOutcome::Command(Command::Craft {
+        input: input.ok_or_else(|| ParseError::new("craft requires <input>"))?,
+        output: output.ok_or_else(|| ParseError::new("craft requires --output <result.json>"))?,
+        regions,
+        expected_ratios,
+    }))
 }
 
 fn parse_batch(mut args: VecDeque<OsString>) -> Result<ParseOutcome, ParseError> {
@@ -345,6 +429,22 @@ fn run(command: Command) -> Status {
                     }
                 }
                 Err(error) => fail(error),
+            }
+        }
+        Command::Craft {
+            input,
+            output,
+            regions,
+            expected_ratios,
+        } => {
+            eprintln!("plotx-cli: running CRAFT for {}", input.display());
+            match craft::run(&input, &output, regions, expected_ratios) {
+                Ok(true) => Status::Success,
+                Ok(false) => Status::BatchFailed,
+                Err(error) => {
+                    eprintln!("plotx-cli: CRAFT failed: {error}");
+                    Status::Input
+                }
             }
         }
         Command::Process {
@@ -571,6 +671,42 @@ mod tests {
             }))
         );
         assert!(parse(&["plotx-cli", "process", "sample.jdf"]).is_err());
+    }
+
+    #[test]
+    fn craft_parser_accepts_multiple_and_negative_ppm_regions() {
+        assert_eq!(
+            parse(&[
+                "plotx-cli",
+                "craft",
+                "acquisitions",
+                "--region",
+                "-0.5:0.2",
+                "--region",
+                "6.3:6.5",
+                "--expected-ratio",
+                "0.75",
+                "--output",
+                "result.json",
+            ]),
+            Ok(ParseOutcome::Command(Command::Craft {
+                input: "acquisitions".into(),
+                output: "result.json".into(),
+                regions: vec![
+                    plotx_processing::craft::CraftRegion::new(
+                        plotx_processing::craft::CraftRegionId(0),
+                        -0.5,
+                        0.2,
+                    ),
+                    plotx_processing::craft::CraftRegion::new(
+                        plotx_processing::craft::CraftRegionId(1),
+                        6.3,
+                        6.5,
+                    ),
+                ],
+                expected_ratios: vec![0.75],
+            }))
+        );
     }
 
     #[test]

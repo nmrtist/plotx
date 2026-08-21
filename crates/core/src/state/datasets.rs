@@ -59,6 +59,11 @@ pub struct NmrDataset {
     pub multiplets: Vec<StoredMultiplet>,
     /// Id source for stored multiplets; rebuilt from the loaded list.
     pub next_multiplet_id: u64,
+    pub craft_runs: Vec<StoredCraftRun>,
+    /// Id source for completed CRAFT analyses; rebuilt from persisted runs.
+    pub next_craft_run_id: u64,
+    pub(crate) craft_spectrum_cache:
+        std::sync::Arc<std::sync::Mutex<super::craft_fields::CraftSpectrumCache>>,
 }
 
 impl NmrDataset {
@@ -96,6 +101,9 @@ impl NmrDataset {
             next_line_fit_id: 0,
             multiplets: Vec::new(),
             next_multiplet_id: 0,
+            craft_runs: Vec::new(),
+            next_craft_run_id: 0,
+            craft_spectrum_cache: Default::default(),
         };
         // Currently a no-op: the 1D templates already number 0..n and the
         // allocator starts at 0. Kept so `load` establishes the "ids are unique
@@ -107,12 +115,14 @@ impl NmrDataset {
 
     /// Cheap re-apply of the frequency-domain steps from the cached `base`.
     pub fn rebuild(&mut self) {
+        self.clear_craft_spectrum_cache();
         self.processed = reapply_output(&self.base, &self.pipeline);
     }
 
     /// Rebuild `base` from the acquisition, including a real output-domain
     /// transition when FFT was added or removed.
     pub fn retransform(&mut self) {
+        self.clear_craft_spectrum_cache();
         self.base = transform_output_base(&self.data, &self.pipeline, self.group_delay_correct)
             .expect("live processing pipelines are reconciled before application");
         self.rebuild();

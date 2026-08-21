@@ -36,6 +36,7 @@ export default defineConfig({
 						{ slug: 'guides/organizing-data' },
 						{ slug: 'guides/tables' },
 						{ slug: 'guides/processing' },
+						{ slug: 'guides/craft' },
 					],
 				},
 				{

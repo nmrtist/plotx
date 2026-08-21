@@ -50,10 +50,16 @@ pub(super) fn data_sheet_window(app: &mut PlotxApp, ctx: &egui::Context) {
         })
         .collect::<Vec<_>>();
     let title = format!("Data sheet — {}", app.doc.datasets[di].display_name());
+    let available = ctx.content_rect().size();
+    let maximum = egui::vec2(
+        (available.x * 0.8).max(320.0),
+        (available.y * 0.8).max(240.0),
+    );
     egui::Window::new(title)
         .collapsible(false)
         .resizable(true)
         .default_size([620.0, 380.0])
+        .max_size(maximum)
         .open(&mut open)
         .show(ctx, |ui| {
             if let Some(elapsed) = app.table_transform_progress() {

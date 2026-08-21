@@ -45,6 +45,11 @@ impl PlotxApp {
             } => {
                 self.set_object_viewport(*canvas, *object, before);
             }
+            Action::SetXViewportLinks { canvas, before, .. } => {
+                self.doc.canvases[*canvas]
+                    .x_viewport_links
+                    .clone_from(before);
+            }
             Action::SetAxisOverrides {
                 canvas,
                 object,

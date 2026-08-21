@@ -121,7 +121,7 @@ impl PlotxApp {
         self.insert_table_dataset(dataset, name)
     }
 
-    fn insert_table_dataset(&mut self, dataset: TableDataset, name: String) -> usize {
+    pub(crate) fn insert_table_dataset(&mut self, dataset: TableDataset, name: String) -> usize {
         let dataset_index = self.doc.datasets.len();
         let action = Action::insert_dataset_with_default_canvas(
             self,

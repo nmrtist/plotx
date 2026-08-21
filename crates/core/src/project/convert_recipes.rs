@@ -2,7 +2,7 @@
 //! pipelines and analysis extensions onto freshly decoded data objects.
 
 use super::*;
-use crate::state::{PeakMark, PeakOrigin, PeakSet};
+use serde::de::DeserializeOwned;
 
 pub fn apply_1d_recipe(dataset: &mut NmrDataset, recipe: &RecipeObject) -> Result<()> {
     let p = &recipe.parameters;
@@ -20,69 +20,48 @@ pub fn apply_1d_recipe(dataset: &mut NmrDataset, recipe: &RecipeObject) -> Resul
     dataset.repair_step_allocator();
     dataset.group_delay_correct = p.group_delay_correct;
     dataset.has_imaginary = true;
-    if let Some(analysis) = recipe.extensions.get("plotx.analysis") {
-        dataset.peaks = analysis
-            .get("peaks")
-            .cloned()
-            .and_then(|v| serde_json::from_value(v).ok())
-            .unwrap_or_else(|| legacy_peaks(analysis));
-        dataset.integrals = match analysis.get("integrals") {
-            Some(value) => serde_json::from_value(value.clone()).map_err(|error| {
-                ProjectError::Invalid(format!("plotx.analysis.integrals is malformed: {error}"))
-            })?,
-            None => Vec::new(),
-        };
-        dataset.reseed_integral_ids();
-        dataset.line_fits = analysis
-            .get("line_fits")
-            .cloned()
-            .and_then(|v| serde_json::from_value(v).ok())
-            .unwrap_or_default();
-        dataset.next_line_fit_id = dataset
-            .line_fits
-            .iter()
-            .map(|f| f.id.saturating_add(1))
-            .max()
-            .unwrap_or(0);
-        dataset.multiplets = analysis
-            .get("multiplets")
-            .cloned()
-            .and_then(|v| serde_json::from_value(v).ok())
-            .unwrap_or_default();
-        dataset.next_multiplet_id = dataset
-            .multiplets
-            .iter()
-            .map(|m| m.id.saturating_add(1))
-            .max()
-            .unwrap_or(0);
-    }
+    let analysis = recipe.extensions.get("plotx.analysis").ok_or_else(|| {
+        ProjectError::Invalid("1D NMR recipe is missing plotx.analysis".to_owned())
+    })?;
+    let peaks = required_analysis_field(analysis, "peaks")?;
+    let integrals = required_analysis_field(analysis, "integrals")?;
+    let line_fits = required_analysis_field(analysis, "line_fits")?;
+    let multiplets = required_analysis_field(analysis, "multiplets")?;
+    let craft_runs = required_analysis_field(analysis, "craft_runs")?;
+
+    dataset.peaks = peaks;
+    dataset.integrals = integrals;
+    dataset.reseed_integral_ids();
+    dataset.line_fits = line_fits;
+    dataset.next_line_fit_id = dataset
+        .line_fits
+        .iter()
+        .map(|fit| fit.id.saturating_add(1))
+        .max()
+        .unwrap_or(0);
+    dataset.multiplets = multiplets;
+    dataset.next_multiplet_id = dataset
+        .multiplets
+        .iter()
+        .map(|multiplet| multiplet.id.saturating_add(1))
+        .max()
+        .unwrap_or(0);
+    dataset.craft_runs = craft_runs;
+    dataset.next_craft_run_id = 0;
+    dataset.repair_craft_run_allocator();
     Ok(())
 }
 
-fn legacy_peaks(analysis: &serde_json::Value) -> PeakSet {
-    let mut peaks = PeakSet::default();
-    if let Some(arr) = analysis.get("annotations").and_then(|v| v.as_array()) {
-        for a in arr {
-            let (Some(x), Some(y)) = (
-                a.get("ppm").and_then(serde_json::Value::as_f64),
-                a.get("intensity").and_then(serde_json::Value::as_f64),
-            ) else {
-                continue;
-            };
-            let id = peaks.next_id();
-            peaks.marks.push(PeakMark {
-                id,
-                x,
-                y,
-                origin: PeakOrigin::Manual,
-                label: a
-                    .get("text")
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::to_owned),
-            });
-        }
-    }
-    peaks
+fn required_analysis_field<T: DeserializeOwned>(
+    analysis: &serde_json::Value,
+    field: &'static str,
+) -> Result<T> {
+    let value = analysis.get(field).ok_or_else(|| {
+        ProjectError::Invalid(format!("plotx.analysis is missing required field {field}"))
+    })?;
+    serde_json::from_value(value.clone()).map_err(|error| {
+        ProjectError::Invalid(format!("plotx.analysis.{field} is malformed: {error}"))
+    })
 }
 
 pub(super) fn read_region_analysis(

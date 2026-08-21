@@ -73,6 +73,9 @@ impl NmrDataset {
             next_line_fit_id: 0,
             multiplets: Vec::new(),
             next_multiplet_id: 0,
+            craft_runs: Vec::new(),
+            next_craft_run_id: 0,
+            craft_spectrum_cache: Default::default(),
         }
     }
 }

@@ -113,7 +113,7 @@ fn table_statistics_survive_project_roundtrip() {
 }
 
 #[test]
-fn recipe_without_line_fits_key_loads_with_empty_fits() {
+fn recipe_without_line_fits_key_is_rejected() {
     let mut dataset = NmrDataset::load(synthetic_1d());
     dataset.line_fits.push(sample_line_fit());
     dataset.next_line_fit_id = 8;
@@ -128,12 +128,22 @@ fn recipe_without_line_fits_key_loads_with_empty_fits() {
         input: "data_000000".to_owned(),
         parameters: RecipeParameters::default(),
         extensions: serde_json::json!({
-            "plotx.analysis": { "peaks": crate::state::PeakSet::default(), "integrals": [] }
+            "plotx.analysis": {
+                "peaks": crate::state::PeakSet::default(),
+                "integrals": [],
+                "multiplets": [],
+                "craft_runs": []
+            }
         }),
     };
 
-    apply_1d_recipe(&mut dataset, &recipe).unwrap();
+    let error = apply_1d_recipe(&mut dataset, &recipe).unwrap_err();
 
-    assert!(dataset.line_fits.is_empty());
-    assert_eq!(dataset.next_line_fit_id, 0);
+    assert!(
+        error
+            .to_string()
+            .contains("missing required field line_fits")
+    );
+    assert_eq!(dataset.line_fits, vec![sample_line_fit()]);
+    assert_eq!(dataset.next_line_fit_id, 8);
 }

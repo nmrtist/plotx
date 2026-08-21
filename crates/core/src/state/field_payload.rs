@@ -3,7 +3,7 @@
 //! uses. Renderers and derived-data workers only ever see the results.
 
 use super::field_runtime::*;
-use super::{FieldCatalog, FieldId};
+use super::{FieldCatalog, FieldId, craft_curve_payload};
 use std::sync::Arc;
 
 impl super::Dataset {
@@ -17,23 +17,29 @@ impl super::Dataset {
         #[cfg(test)]
         crate::contour_probe::record_field_payload();
         match self {
-            Self::Nmr(nmr) => (nmr.field_catalog.id_for_key("nmr.real") == Some(id)).then(|| {
-                let (x, values) = match &nmr.processed {
-                    plotx_processing::Processed1D::Time(trace) => (&trace.time_s, &trace.values),
-                    plotx_processing::Processed1D::Frequency(spectrum) => {
-                        (&spectrum.ppm, &spectrum.values)
-                    }
-                };
-                FieldPayload::Curve1D(Curve1D {
-                    x: Arc::from(x.clone()),
-                    values: Arc::from(
-                        values
-                            .iter()
-                            .map(|value| value.re as f32)
-                            .collect::<Vec<_>>(),
-                    ),
-                })
-            }),
+            Self::Nmr(nmr) => {
+                if nmr.field_catalog.id_for_key("nmr.real") == Some(id) {
+                    let (x, values) = match &nmr.processed {
+                        plotx_processing::Processed1D::Time(trace) => {
+                            (&trace.time_s, &trace.values)
+                        }
+                        plotx_processing::Processed1D::Frequency(spectrum) => {
+                            (&spectrum.ppm, &spectrum.values)
+                        }
+                    };
+                    Some(FieldPayload::Curve1D(Curve1D {
+                        x: Arc::from(x.clone()),
+                        values: Arc::from(
+                            values
+                                .iter()
+                                .map(|value| value.re as f32)
+                                .collect::<Vec<_>>(),
+                        ),
+                    }))
+                } else {
+                    craft_curve_payload(nmr, id)
+                }
+            }
             Self::Nmr2D(nmr) => nmr_field_payload(nmr, id),
             Self::Table(table) => {
                 (table.field_catalog.id_for_key("table.default_series") == Some(id)).then(|| {
@@ -187,8 +193,9 @@ impl super::Dataset {
     /// truth cannot reappear.
     pub fn field_representation(&self, id: FieldId) -> Option<FieldRepresentation> {
         match self {
-            Self::Nmr(nmr) => (nmr.field_catalog.id_for_key("nmr.real") == Some(id))
-                .then_some(FieldRepresentation::Curve1D),
+            Self::Nmr(nmr) => (nmr.field_catalog.id_for_key("nmr.real") == Some(id)
+                || nmr.craft_field_spec(id).is_some())
+            .then_some(FieldRepresentation::Curve1D),
             Self::Nmr2D(nmr) => nmr_field_representation(nmr, id),
             Self::Table(table) => (table.field_catalog.id_for_key("table.default_series")
                 == Some(id))

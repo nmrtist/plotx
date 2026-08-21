@@ -5,6 +5,7 @@ pub mod arithmetic;
 pub mod autophase;
 pub mod baseline;
 pub mod cleanup;
+pub mod craft;
 pub mod fft;
 pub mod fft2;
 pub mod nus;
@@ -610,6 +611,22 @@ impl AxisPipeline {
         self.steps
             .iter()
             .any(|step| step.enabled && matches!(step.kind, StepKind::Fft))
+    }
+
+    /// Net chemical-shift translation contributed by enabled reference steps.
+    ///
+    /// This is the axis calibration shared by displayed spectra and analyses
+    /// that operate on the original FID. Keeping the reduction on the pipeline
+    /// prevents those consumers from reimplementing reference-step semantics.
+    pub fn chemical_shift_reference_offset_ppm(&self) -> f64 {
+        self.steps
+            .iter()
+            .filter(|step| step.enabled)
+            .filter_map(|step| match step.kind {
+                StepKind::Reference(reference) => Some(reference.target_ppm - reference.at_ppm),
+                _ => None,
+            })
+            .sum()
     }
 
     /// The zero-fill target for this axis: the last enabled `ZeroFill` step, or

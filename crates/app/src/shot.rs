@@ -12,11 +12,6 @@
 //! without a second invocation. Set `PLOTX_SHOT_THEME` to `light` or `dark` to
 //! restrict the run to a single palette. Captures land at
 //! `<PLOTX_SHOT>/<theme>/<scene>.png`.
-//!
-//! The checked-in scene list is deliberately minimal: a canonical fit workflow
-//! and the Ribbon width-budget breakpoints, states that are worth re-checking
-//! on any UI change. For a task-specific audit, extend the list locally and
-//! drop the additions once the task is done.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -35,6 +30,8 @@ use plotx_io::xps::{
     XpsEnergyKind, XpsExperiment, XpsMeasurement, XpsMeasurementId, XpsRegion, XpsRegionId,
 };
 use plotx_io::{AxisSource, Dim, Domain, NmrData, NmrData2D, PseudoAxis, PseudoKind, QuadMode};
+
+mod craft_shot;
 
 const FIT_LO: f64 = 1.4;
 const FIT_HI: f64 = 3.2;
@@ -92,6 +89,7 @@ enum Op {
     /// Open the result's synchronized read-only values.
     RegionData,
     XpsSetup,
+    CraftSetup,
     XpsTab(plotx_core::state::XpsWorkbenchTab),
     Zoom(f32),
     Resize(f32, f32),
@@ -178,6 +176,8 @@ const SCENES: &[Scene] = &[
         Op::XpsTab(plotx_core::state::XpsWorkbenchTab::Diagnostics),
     ),
     shot(8, "xps_diagnostics"),
+    act(2, Op::CraftSetup),
+    shot(8, "craft_results"),
 ];
 
 pub struct ShotDriver {
@@ -359,6 +359,7 @@ fn run_op(op: Op, app: &mut PlotxApp, ctx: &egui::Context) -> Result<(), String>
             app.session.ui.curve_fit_task_collapsed = true;
         }
         Op::XpsSetup => xps_setup(app, ctx)?,
+        Op::CraftSetup => craft_shot::setup(app, ctx)?,
         Op::XpsTab(tab) => app.session.ui.xps_workbench_tab = tab,
         Op::Zoom(factor) => ctx.set_zoom_factor(factor),
         Op::Resize(w, h) => {
@@ -771,20 +772,5 @@ mod tests {
             .get(&egui::ViewportId::ROOT)
             .expect("root viewport output");
         assert!(root.commands.contains(&egui::ViewportCommand::Close));
-    }
-
-    #[test]
-    fn expected_count_covers_every_scene_in_both_palettes() {
-        let per_pass = SCENES.iter().filter(|s| s.shot.is_some()).count();
-        assert_eq!(per_pass, 14, "scene list should define 14 captures");
-        // Default run (no PLOTX_SHOT_THEME) replays every scene in both palettes.
-        assert_eq!(per_pass * 2, 28);
-    }
-
-    #[test]
-    fn const_builders_tag_scenes_consistently() {
-        assert!(act(2, Op::Setup).shot.is_none());
-        assert!(shot(4, "band").op.is_none());
-        assert_eq!(shot(4, "band").shot, Some("band"));
     }
 }

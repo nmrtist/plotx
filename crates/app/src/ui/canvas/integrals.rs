@@ -1,19 +1,5 @@
+use super::band_editor::{BandHit, band_hit, edited_band_bounds};
 use super::*;
-
-const INTEGRAL_EDGE_PX: f32 = 5.0;
-
-enum IntegralHit {
-    Edge { id: u64, lo_edge: bool },
-    Inside { id: u64 },
-}
-
-impl IntegralHit {
-    fn id(&self) -> u64 {
-        match self {
-            IntegralHit::Edge { id, .. } | IntegralHit::Inside { id } => *id,
-        }
-    }
-}
 
 /// Which integral band (if any) the screen x `px` lands on, edges taking priority.
 fn integral_hit(
@@ -23,31 +9,17 @@ fn integral_hit(
     xspan: f64,
     xrev: bool,
     px: f32,
-) -> Option<IntegralHit> {
-    for integ in integrals {
-        let sxlo = x_to_screen(integ.start_ppm, plot, xmin, xspan, xrev);
-        let sxhi = x_to_screen(integ.end_ppm, plot, xmin, xspan, xrev);
-        if (px - sxlo).abs() <= INTEGRAL_EDGE_PX {
-            return Some(IntegralHit::Edge {
-                id: integ.id,
-                lo_edge: true,
-            });
-        }
-        if (px - sxhi).abs() <= INTEGRAL_EDGE_PX {
-            return Some(IntegralHit::Edge {
-                id: integ.id,
-                lo_edge: false,
-            });
-        }
-    }
-    for integ in integrals {
-        let a = x_to_screen(integ.start_ppm, plot, xmin, xspan, xrev);
-        let b = x_to_screen(integ.end_ppm, plot, xmin, xspan, xrev);
-        if px >= a.min(b) && px <= a.max(b) {
-            return Some(IntegralHit::Inside { id: integ.id });
-        }
-    }
-    None
+) -> Option<BandHit<u64>> {
+    band_hit(
+        integrals
+            .iter()
+            .map(|integral| (integral.id, integral.start_ppm, integral.end_ppm)),
+        plot,
+        xmin,
+        xspan,
+        xrev,
+        px,
+    )
 }
 
 pub(crate) fn handle_integral_drag(
@@ -131,10 +103,8 @@ pub(crate) fn handle_integral_drag(
         integral_hit(integrals, plot, xmin, xspan, xrev, p.x)
     };
     match hit {
-        Some(IntegralHit::Edge { .. }) => {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal)
-        }
-        Some(IntegralHit::Inside { .. }) => ui.ctx().set_cursor_icon(egui::CursorIcon::Grab),
+        Some(BandHit::Edge { .. }) => ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal),
+        Some(BandHit::Inside { .. }) => ui.ctx().set_cursor_icon(egui::CursorIcon::Grab),
         None => ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair),
     }
 
@@ -158,7 +128,7 @@ pub(crate) fn handle_integral_drag(
             current_ppm: ppm,
         };
         match hit {
-            Some(IntegralHit::Edge { id, lo_edge }) => {
+            Some(BandHit::Edge { id, lo_edge }) => {
                 drag.kind = if lo_edge {
                     RegionDragKind::EdgeLo
                 } else {
@@ -167,7 +137,7 @@ pub(crate) fn handle_integral_drag(
                 drag.integral_id = Some(id);
                 app.session.ui.selected_integral = Some(id);
             }
-            Some(IntegralHit::Inside { id }) => {
+            Some(BandHit::Inside { id }) => {
                 if let Some(integ) = drag.before.iter().find(|i| i.id == id) {
                     drag.grab_lo = integ.start_ppm;
                     drag.grab_hi = integ.end_ppm;
@@ -210,16 +180,9 @@ fn apply_integral_drag_live(app: &mut PlotxApp, dataset: usize, ppm: f64) {
         return;
     };
     if let Some(integ) = n.integrals.iter_mut().find(|i| i.id == id) {
-        match kind {
-            RegionDragKind::EdgeLo => integ.start_ppm = ppm,
-            RegionDragKind::EdgeHi => integ.end_ppm = ppm,
-            RegionDragKind::Move => {
-                let d = ppm - anchor;
-                integ.start_ppm = grab_lo + d;
-                integ.end_ppm = grab_hi + d;
-            }
-            RegionDragKind::NewBand => {}
-        }
+        let (lo, hi) = edited_band_bounds(kind, anchor, grab_lo, grab_hi, ppm);
+        integ.start_ppm = lo;
+        integ.end_ppm = hi;
     }
     n.recompute_integrals();
     app.sync_integral_curves_for(dataset);
@@ -292,7 +255,7 @@ fn integral_context_menu(
     if resp.secondary_clicked() {
         app.session.ui.selected_integral = hover.and_then(|p| {
             let integrals = &app.doc.datasets[dataset].as_nmr().unwrap().integrals;
-            integral_hit(integrals, plot, xmin, xspan, xrev, p.x).map(|h| h.id())
+            integral_hit(integrals, plot, xmin, xspan, xrev, p.x).map(BandHit::id)
         });
     }
     resp.context_menu(|ui| {

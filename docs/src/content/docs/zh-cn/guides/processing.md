@@ -35,11 +35,10 @@ XPS 为每个谱区使用独立的有序 recipe，而不是 NMR 管线。recipe 
 数据集，状态栏会提示 *Select an NMR dataset before opening Processing.*，卡片
 不会打开。
 
-这个角落由 Processing、Regions、Curve Fit、Statistics 几个任务共用。同时打开
-两个及以上时，卡片顶部会出现 **Process**、**Regions**、**Fit**、**Stats**
-标签，一次显示一页。切换标签会保留各页已有的设置，只有用 ✕ 关闭某一页才会
-丢弃它；选中某个标签也会把该页对应的数据集设为当前数据集，因此你看到的控件
-始终属于画布上的这张谱。
+该卡片也可以承载 CRAFT、Regions、Curve Fit 和 Statistics 任务。同时打开两个及以上
+任务时，卡片顶部会出现 **Process**、**CRAFT**、**Regions**、**Fit**、**Stats**
+标签，一次显示一页。切换标签会保留各页设置；用 ✕ 关闭某一页才会丢弃它。选中某个
+标签也会把该页的数据集设为当前数据集，因此控件始终属于画布上的这张谱。
 
 步骤列表上方标出数据集名称、数据来源（**Raw FID**、**2D acquisition** 或
 **Imported spectrum**）、配方是否仍为默认，以及当前管线的输出是
@@ -170,3 +169,6 @@ FFT 是一个普通的 *Time to Frequency* 类型步骤，而不是列表中固�
 并应用到其他数据集——参见[配方与模板](/zh-cn/guides/templates/)。要把
 同一个操作一次应用到多个数据集，或运行完整的导入 → 处理 → 导出工作流，
 参见[自动化](/zh-cn/guides/automation/)。
+
+若要把原始复数 FID 直接约化为拟合共振参数，请参见
+[用 CRAFT 处理 1D NMR](/zh-cn/guides/craft/)。

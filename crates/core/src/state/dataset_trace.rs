@@ -1,4 +1,4 @@
-use super::{Dataset, Trace1d};
+use super::{CraftFieldKind, Dataset, Trace1d};
 
 impl Dataset {
     pub fn trace_item_figure(
@@ -10,6 +10,18 @@ impl Dataset {
         let index = collection.items.iter().position(|entry| entry.id == item)?;
         let label = collection.item(item)?.automatic_label()?;
         match self {
+            Self::Nmr(data) => {
+                let spec = data.craft_field_spec(field)?;
+                if spec.kind != CraftFieldKind::Groups {
+                    return None;
+                }
+                let region = data
+                    .craft_run(spec.run)?
+                    .region_summaries
+                    .get(index)?
+                    .region;
+                data.craft_group_figure(spec, region, label)
+            }
             Self::Nmr2D(data) => {
                 let plotx_processing::Processed2D::Stack(stack) = &data.processed else {
                     return None;
