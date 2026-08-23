@@ -121,6 +121,7 @@ struct Shell {
     batch_workflow: ui::batch_workflow::AutomationUi,
     shot: Option<shot::ShotDriver>,
     scale: scale::ScaleDriver,
+    last_window_title: Option<String>,
     #[cfg(target_os = "macos")]
     native_menu: ui::native_menu::NativeMenu,
 }
@@ -163,6 +164,7 @@ impl eframe::App for Shell {
             &mut self.app,
             &mut self.clipboard_table_paste,
             &mut self.batch_workflow,
+            &mut self.last_window_title,
             ui,
             recovery_blocked,
             ribbon_chrome,
@@ -758,6 +760,7 @@ fn main() -> eframe::Result<()> {
                 // The screenshot harness scripts its own zoom; adaptive scale
                 // must not fight it.
                 scale: scale::ScaleDriver::new(!shot_active),
+                last_window_title: None,
                 #[cfg(target_os = "macos")]
                 native_menu,
             }))

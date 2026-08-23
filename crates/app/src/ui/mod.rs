@@ -62,12 +62,17 @@ pub fn render(
     app: &mut PlotxApp,
     clipboard_table_paste: &mut clipboard_table::ClipboardTablePaste,
     batch_workflow: &mut batch_workflow::AutomationUi,
+    last_window_title: &mut Option<String>,
     ui: &mut Ui,
     input_blocked: bool,
     ribbon_chrome: RibbonChrome,
 ) {
     let ctx = ui.ctx().clone();
-    ctx.send_viewport_cmd(egui::ViewportCommand::Title(project_window_title(app)));
+    let title = project_window_title(app);
+    if last_window_title.as_deref() != Some(title.as_str()) {
+        ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+        *last_window_title = Some(title);
+    }
     sync_chrome_theme(&ctx, app.settings.appearance.theme);
     clipboard_table_paste.begin_frame(app, &ctx);
     file_dialogs::image_import::poll(app, &ctx);
