@@ -335,7 +335,9 @@ pub fn complex_from_bytes(raw: &[u8]) -> Result<Vec<Complex64>> {
         )));
     }
     Ok(raw
-        .chunks_exact(16)
+        .as_chunks::<16>()
+        .0
+        .iter()
         .map(|chunk| {
             let mut re = [0u8; 8];
             let mut im = [0u8; 8];

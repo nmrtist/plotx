@@ -306,8 +306,10 @@ impl Dc {
             let output = std::slice::from_raw_parts_mut(bits.cast::<u8>(), image.len());
             for (source, target) in image
                 .as_raw()
-                .chunks_exact(4)
-                .zip(output.chunks_exact_mut(4))
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .zip(output.as_chunks_mut::<4>().0.iter_mut())
             {
                 let alpha = u16::from(source[3]);
                 target.copy_from_slice(&[

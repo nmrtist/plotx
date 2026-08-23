@@ -563,7 +563,7 @@ pub(super) fn build_dibv5(width: u32, height: u32, rgba: &[u8], dpi: u16) -> Vec
     u32le(&mut out, 0);
     u32le(&mut out, 0);
     u32le(&mut out, 0);
-    for px in rgba.chunks_exact(4) {
+    for px in rgba.as_chunks::<4>().0 {
         out.extend_from_slice(&[px[2], px[1], px[0], px[3]]);
     }
     out

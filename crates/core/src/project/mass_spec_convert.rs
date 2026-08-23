@@ -347,7 +347,7 @@ fn write_f64s(output: &mut impl Write, values: &[f64]) -> Result<()> {
     // intensity vector.
     let mut buffer = [0_u8; VALUES_PER_CHUNK * 8];
     for chunk in values.chunks(VALUES_PER_CHUNK) {
-        for (slot, value) in buffer.chunks_exact_mut(8).zip(chunk) {
+        for (slot, value) in buffer.as_chunks_mut::<8>().0.iter_mut().zip(chunk) {
             slot.copy_from_slice(&value.to_le_bytes());
         }
         output.write_all(&buffer[..chunk.len() * 8])?;

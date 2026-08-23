@@ -133,7 +133,7 @@ impl RasterImage {
     /// Discards alpha by compositing onto an opaque RGB background.
     pub fn to_rgb_over(&self, background: [u8; 3]) -> Vec<u8> {
         let mut out = Vec::with_capacity(self.rgba.len() / 4 * 3);
-        for pixel in self.rgba.chunks_exact(4) {
+        for pixel in self.rgba.as_chunks::<4>().0 {
             let alpha = pixel[3] as u16;
             let inverse = 255 - alpha;
             for channel in 0..3 {

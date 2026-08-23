@@ -472,7 +472,9 @@ mod tests {
         bytes[RAW_POINT_COUNT_OFFSET..RAW_POINT_COUNT_OFFSET + 4]
             .copy_from_slice(&3_u32.to_le_bytes());
         for (chunk, value) in bytes[RAW_HEADER_LEN..]
-            .chunks_exact_mut(4)
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
             .zip([10.0_f32, 20.0, 12.0])
         {
             chunk.copy_from_slice(&value.to_le_bytes());

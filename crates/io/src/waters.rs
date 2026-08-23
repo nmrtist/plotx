@@ -321,7 +321,7 @@ fn inspect_layout(idx: &[u8], dat: &[u8]) -> Result<Layout, IoError> {
 fn parse_idx22(idx: &[u8], dat_len: usize) -> Result<Layout, IoError> {
     let count = idx.len() / IDX22_STRIDE;
     let mut scans = Vec::with_capacity(count);
-    for (scan, record) in idx.chunks_exact(IDX22_STRIDE).enumerate() {
+    for (scan, record) in idx.as_chunks::<IDX22_STRIDE>().0.iter().enumerate() {
         let retention_time_min = read_f32(record, 12)? as f64;
         if !retention_time_min.is_finite() {
             return Err(invalid(format!(
@@ -353,7 +353,7 @@ fn parse_idx22(idx: &[u8], dat_len: usize) -> Result<Layout, IoError> {
 fn parse_idx30(idx: &[u8], dat_len: usize) -> Result<Layout, IoError> {
     let count = idx.len() / IDX30_STRIDE;
     let mut scans = Vec::with_capacity(count);
-    for (scan, record) in idx.chunks_exact(IDX30_STRIDE).enumerate() {
+    for (scan, record) in idx.as_chunks::<IDX30_STRIDE>().0.iter().enumerate() {
         let retention_time_min = read_f32(record, 12)? as f64;
         if !retention_time_min.is_finite() {
             return Err(invalid(format!(
@@ -493,7 +493,7 @@ fn decode_low_resolution6(
         })?;
         let mut coordinates = Vec::with_capacity(scan.count);
         let mut values = Vec::with_capacity(scan.count);
-        for pair in bytes.chunks_exact(6) {
+        for pair in bytes.as_chunks::<6>().0 {
             let raw = read_u32(pair, 2)?;
             let base = raw >> 9;
             let coordinate_exponent =

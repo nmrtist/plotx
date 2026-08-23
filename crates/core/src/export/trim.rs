@@ -34,8 +34,8 @@ pub(crate) fn raster_visible_bounds(
         });
     }
     let mut bounds: Option<PixelBounds> = None;
-    for (index, pixel) in image.rgba().chunks_exact(4).enumerate() {
-        if pixel == background {
+    for (index, pixel) in image.rgba().as_chunks::<4>().0.iter().enumerate() {
+        if *pixel == background {
             continue;
         }
         let x = u32::try_from(index % width).map_err(|_| RasterError::PixelDimensionsOverflow)?;

@@ -431,7 +431,9 @@ struct CraftProblem<'a> {
 impl CraftProblem<'_> {
     fn decode(&self, params: &[f64]) -> Vec<DecodedComponent> {
         params
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .map(|chunk| {
                 let (frequency_hz, frequency_scale) =
                     from_unbounded(chunk[2], self.bounds.frequency_hz);
@@ -531,7 +533,9 @@ fn solve_complex_amplitudes(
     Some(
         solution
             .as_slice()
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|pair| Complex64::new(pair[0], pair[1]))
             .collect(),
     )

@@ -76,7 +76,9 @@ pub(super) fn parse_function_table(bytes: &[u8]) -> Result<Vec<FunctionRecord>, 
         )));
     }
     bytes
-        .chunks_exact(FUNCTION_RECORD_SIZE)
+        .as_chunks::<FUNCTION_RECORD_SIZE>()
+        .0
+        .iter()
         .enumerate()
         .map(|(index, record)| {
             let low = read_f32(record, 160)? as f64;

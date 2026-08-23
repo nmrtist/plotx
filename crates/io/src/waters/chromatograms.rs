@@ -114,7 +114,7 @@ fn parse_data(
     }
     let mut time_offset = None;
     let mut value_offset = None;
-    for record in bytes[32..descriptor_end].chunks_exact(48) {
+    for record in bytes[32..descriptor_end].as_chunks::<48>().0 {
         let encoding = read_u16(record, 2)?;
         let offset = usize::from(read_u16(record, 4)?);
         let name = vendor_text(&record[6..48]).to_ascii_lowercase();
