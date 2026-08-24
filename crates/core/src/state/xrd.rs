@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 pub struct XrdDataset {
     pub resource_id: DatasetId,
     pub field_catalog: FieldCatalog,
-    pub scientific_identity: plotx_io::ImportedScientificIdentity,
+    pub acquisition_identity: plotx_io::AcquisitionIdentity,
     pub data: XrdData,
     pub params: XrdProcessing,
     pub processed: ProcessedXrd,
@@ -22,8 +22,8 @@ pub struct XrdDataset {
 
 impl XrdDataset {
     pub fn load(data: XrdData) -> Self {
-        let scientific_identity =
-            plotx_io::ImportedScientificIdentity::from_path(std::path::Path::new(&data.source));
+        let acquisition_identity =
+            plotx_io::AcquisitionIdentity::from_path(std::path::Path::new(&data.source));
         let params = XrdProcessing::default();
         let processed = process(&data.two_theta_deg, &data.intensity, params)
             .expect("validated XRD acquisition has matching axes");
@@ -32,7 +32,7 @@ impl XrdDataset {
         Self {
             resource_id: DatasetId::new(),
             field_catalog,
-            scientific_identity,
+            acquisition_identity,
             data,
             params,
             processed,

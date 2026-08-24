@@ -5,16 +5,20 @@ use crate::export::{
 };
 use crate::state::{
     AxisOverrides, AxisProjections, CanvasDocument, CanvasObject, CanvasObjectKind, CanvasViewport,
-    ChartSpec, DEFAULT_CANVAS_SIZE_MM, DataBinding, Dataset, MM_TO_PT, Nmr2DDataset, NmrDataset,
-    ObjectFrame, ObjectId, PlotObject, PlotxApp, StackMode, StackSpec, default_chart_type,
+    ChartSpec, DEFAULT_CANVAS_SIZE_MM, DataBinding, Dataset, MM_TO_PT, ObjectFrame, ObjectId,
+    PlotObject, PlotxApp, StackMode, StackSpec, default_chart_type,
 };
 use plotx_figure::{Axis, Figure};
 use plotx_io::{Acquisition, DataFormat, Domain, LoadWarning, LoadWarningCode, Provenance};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-mod scientific_identity;
-pub use scientific_identity::dataset_from_loaded_acquisition;
+#[path = "workflow/dataset.rs"]
+mod dataset;
+pub use dataset::{
+    dataset_from_acquisition, dataset_from_acquisition_with_equal_scale_preference,
+    dataset_from_loaded_acquisition, dataset_title,
+};
 #[path = "workflow/mass_spec_layout.rs"]
 mod mass_spec_layout;
 #[path = "workflow/trace_collection.rs"]
@@ -171,8 +175,9 @@ pub fn load_dataset(path: &Path) -> Result<LoadedDataset, WorkflowError> {
         &loaded.warnings,
         &loaded.acquisition,
     );
+    let (acquisition, acquisition_identity, _, _, nmr_origin, _) = loaded.into_parts();
     let (dataset, source) =
-        dataset_from_loaded_acquisition(loaded.acquisition, loaded.scientific_identity, true);
+        dataset_from_loaded_acquisition(acquisition, acquisition_identity, nmr_origin, true);
     Ok(LoadedDataset {
         dataset,
         inspection,
@@ -229,103 +234,6 @@ pub fn process_file(
         inspection: loaded.inspection,
         output_paths,
     })
-}
-
-pub fn dataset_from_acquisition(acquisition: Acquisition) -> (Dataset, String) {
-    dataset_from_acquisition_with_equal_scale_preference(acquisition, true)
-}
-
-pub fn dataset_from_acquisition_with_equal_scale_preference(
-    acquisition: Acquisition,
-    equal_scale_homonuclear_2d_imports: bool,
-) -> (Dataset, String) {
-    match acquisition {
-        Acquisition::D1(data) => {
-            let source = data.source.clone();
-            (Dataset::Nmr(Box::new(NmrDataset::load(data))), source)
-        }
-        Acquisition::D2(data) => {
-            let source = data.source.clone();
-            (
-                Dataset::Nmr2D(Box::new(Nmr2DDataset::load_with_equal_scale_preference(
-                    *data,
-                    equal_scale_homonuclear_2d_imports,
-                ))),
-                source,
-            )
-        }
-        Acquisition::Electrophysiology(data) => {
-            let source = data.source.clone();
-            (
-                Dataset::Electrophysiology(Box::new(crate::state::ElectrophysiologyDataset::load(
-                    *data,
-                ))),
-                source,
-            )
-        }
-        Acquisition::Afm(data) => {
-            let source = data.source.clone();
-            (
-                Dataset::Afm(Box::new(crate::state::AfmDataset::load(*data))),
-                source,
-            )
-        }
-        Acquisition::MassSpec(data) => {
-            let source = data.source.clone();
-            (
-                Dataset::MassSpec(Box::new(crate::state::MassSpecDataset::load(*data))),
-                source,
-            )
-        }
-        Acquisition::Xrd(data) => {
-            let source = data.source.clone();
-            (
-                Dataset::Xrd(Box::new(crate::state::XrdDataset::load(*data))),
-                source,
-            )
-        }
-        Acquisition::Xps(data) => {
-            let source = data.source.clone();
-            (
-                Dataset::Xps(Box::new(crate::state::XpsDataset::load(*data))),
-                source,
-            )
-        }
-    }
-}
-
-pub fn dataset_title(dataset: &Dataset) -> String {
-    match dataset {
-        Dataset::Nmr(nmr) => nmr
-            .name
-            .clone()
-            .unwrap_or_else(|| short_name(&nmr.data.source)),
-        Dataset::Nmr2D(nmr) => nmr
-            .name
-            .clone()
-            .unwrap_or_else(|| short_name(&nmr.data.source)),
-        Dataset::Table(table) => table.name.clone().unwrap_or_else(|| table.summary()),
-        Dataset::Electrophysiology(data) => data
-            .name
-            .clone()
-            .unwrap_or_else(|| short_name(&data.data.source)),
-        Dataset::Afm(data) => data
-            .name
-            .clone()
-            .unwrap_or_else(|| short_name(&data.data.source)),
-        Dataset::MassSpec(data) => data
-            .name
-            .clone()
-            .unwrap_or_else(|| short_name(&data.run.source)),
-        Dataset::Xrd(data) => data
-            .name
-            .clone()
-            .unwrap_or_else(|| short_name(&data.data.source)),
-        Dataset::Xps(data) => data
-            .name
-            .clone()
-            .unwrap_or_else(|| short_name(&data.experiment.source)),
-    }
 }
 
 pub fn build_dataset_figure(dataset: &Dataset, chart: &ChartSpec, size_mm: [f32; 2]) -> Figure {

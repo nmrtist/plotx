@@ -3,9 +3,11 @@
 
 use crate::{
     Acquisition, DataFormat, Dim, Domain, IoError, LoadResult, LoadWarning, LoadWarningCode,
-    NmrData, NmrData2D, Provenance, QuadMode,
+    NmrData, NmrData2D, NmrFormat, NmrInstrumentOrigin, NmrOrigin, NmrPortableMetadata,
+    NmrSourceFormat, NmrSourceParameters, Provenance, QuadMode,
 };
 use num_complex::Complex64;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -76,10 +78,7 @@ fn source_prefix(dir: &Path) -> String {
     }
 }
 
-fn scientific_identity(
-    dir: &Path,
-    params: Option<&JcampParams>,
-) -> crate::ImportedScientificIdentity {
+fn acquisition_identity(dir: &Path, params: Option<&JcampParams>) -> crate::AcquisitionIdentity {
     let source_label = dir
         .file_name()
         .and_then(|value| value.to_str())
@@ -101,7 +100,7 @@ fn scientific_identity(
                 .to_owned()
         })
         .filter(|value| !value.is_empty());
-    crate::ImportedScientificIdentity {
+    crate::AcquisitionIdentity {
         subject,
         acquisition,
         source_label,
@@ -150,25 +149,61 @@ pub fn read_bruker(path: &Path) -> Result<Acquisition, IoError> {
 
 pub fn load_raw(path: &Path) -> Result<LoadResult, IoError> {
     let (dir, data_path) = resolve_bruker(path);
-    let params = JcampParams::parse(&std::fs::read_to_string(dir.join("acqus"))?);
+    let acqus = std::fs::read_to_string(dir.join("acqus"))?;
+    let params = JcampParams::parse(&acqus);
     let mut parameter_paths = vec![dir.join("acqus")];
     if data_path.file_name().and_then(|s| s.to_str()) == Some("ser") && dir.join("acqu2s").is_file()
     {
         parameter_paths.push(dir.join("acqu2s"));
     }
     let acquisition = read_bruker(path)?;
-    Ok(LoadResult {
-        scientific_identity: scientific_identity(&dir, Some(&params)),
+    let data_bytes = std::fs::read(&data_path)?;
+    let mut digest = Sha256::new();
+    digest.update(b"fid\0");
+    digest.update(&data_bytes);
+    digest.update(b"acqus\0");
+    digest.update(acqus.as_bytes());
+    let title = pdata_title(&dir);
+    if let Some(title) = &title {
+        digest.update(b"title\0");
+        digest.update(title.as_bytes());
+    }
+    let pulse_program = params
+        .string("PULPROG")
+        .map(|value| value.trim_matches(['<', '>']).to_owned());
+    Ok(LoadResult::new(
         acquisition,
-        format: DataFormat::BrukerRaw,
-        provenance: Provenance {
+        acquisition_identity(&dir, Some(&params)),
+        DataFormat::Nmr(NmrFormat::BrukerRaw),
+        Provenance {
             selected_path: path.to_path_buf(),
             data_path,
             parameter_paths,
             companion_paths: Vec::new(),
         },
-        warnings: Vec::new(),
-    })
+        Vec::new(),
+    )
+    .with_nmr_origin(NmrOrigin::Instrument {
+        instrument: NmrInstrumentOrigin {
+            format: NmrSourceFormat::BrukerRaw,
+            source_sha256: digest.finalize().into(),
+            portable: NmrPortableMetadata {
+                solvent: params
+                    .string("SOLVENT")
+                    .map(|value| value.trim_matches(['<', '>']).to_owned()),
+                temperature_k: params.f64("TE").filter(|value| value.is_finite()),
+                transients: params
+                    .usize("NS")
+                    .and_then(|value| u64::try_from(value).ok()),
+                pulse_sequence: pulse_program.clone(),
+            },
+            parameters: NmrSourceParameters::Bruker {
+                acqus,
+                title,
+                pulse_program,
+            },
+        },
+    }))
 }
 
 fn read_bruker_1d(dir: &Path, fid_path: &Path, params: &JcampParams) -> Result<NmrData, IoError> {
@@ -330,7 +365,7 @@ fn read_bruker_2d(
     let direct = dim_from(f2, group_delay(f2));
     let indirect = dim_from(&f1, 0.0);
 
-    let experiment = scientific_identity(dir, Some(f2)).acquisition;
+    let experiment = acquisition_identity(dir, Some(f2)).acquisition;
 
     let source = format!(
         "{} (Bruker TopSpin 2D, {sample:?}, {cols}×{rows})",
@@ -593,40 +628,12 @@ impl Reader<'_> {
 }
 
 #[cfg(test)]
+#[path = "bruker/parser_tests.rs"]
+mod parser_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn parses_scalar_and_skips_arrays() {
-        let text = "\
-##TITLE= params
-##$TD= 16384
-##$NUC1= <1H>
-##$SW_h= 9615.38461538464
-##$GRPDLY= 76
-##$XGF= (0..3)
-0 0 0 0
-##$O1= 2820.61
-";
-        let p = JcampParams::parse(text);
-        assert_eq!(p.usize("TD"), Some(16384));
-        assert_eq!(p.string("NUC1").as_deref(), Some("<1H>"));
-        assert_eq!(p.f64("GRPDLY"), Some(76.0));
-        assert_eq!(p.f64("O1"), Some(2820.61));
-        assert_eq!(p.string("XGF"), None);
-    }
-
-    #[test]
-    fn group_delay_prefers_explicit_grpdly() {
-        let p = JcampParams::parse("##$GRPDLY= 67.98\n##$DSPFVS= 21\n##$DECIM= 2080\n");
-        assert!((group_delay(&p) - 67.98).abs() < 1e-9);
-    }
-
-    #[test]
-    fn group_delay_falls_back_to_table() {
-        let p = JcampParams::parse("##$GRPDLY= -1\n##$DSPFVS= 12\n##$DECIM= 16\n");
-        assert!((group_delay(&p) - 71.625).abs() < 1e-9);
-    }
 
     #[test]
     fn accepts_dir_or_fid_file() {
@@ -662,6 +669,15 @@ mod tests {
             vec![Complex64::new(1.0, 2.0), Complex64::new(3.0, 4.0)]
         );
         assert_eq!(from_dir.points, from_file.points);
+
+        let mut loaded = load_raw(&dir).unwrap();
+        let origin = loaded.take_nmr_origin().unwrap();
+        let instrument = origin.instrument().expect("raw Bruker origin");
+        assert_eq!(instrument.format, NmrSourceFormat::BrukerRaw);
+        assert!(matches!(
+            instrument.parameters,
+            NmrSourceParameters::Bruker { .. }
+        ));
 
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -750,28 +766,11 @@ mod tests {
         assert_eq!(source_prefix(&expno), "Sucrose (expno 3)");
 
         let params = JcampParams::parse("##$EXP= <COSY>\n##$PULPROG= <cosygpppqf>\n");
-        let identity = scientific_identity(&expno, Some(&params));
+        let identity = acquisition_identity(&expno, Some(&params));
         assert_eq!(identity.subject.as_deref(), Some("Sucrose"));
         assert_eq!(identity.acquisition.as_deref(), Some("COSY"));
         assert_eq!(identity.source_label, "3");
 
         std::fs::remove_dir_all(&base).unwrap();
-    }
-
-    #[test]
-    fn deinterleaves_complex_f64() {
-        // TD = 4 real values → 2 complex points: (1+2i), (3+4i).
-        let mut buf = Vec::new();
-        for v in [1.0f64, 2.0, 3.0, 4.0] {
-            buf.extend_from_slice(&v.to_le_bytes());
-        }
-        let r = Reader {
-            bytes: &buf,
-            endian: Endian::Little,
-        };
-        let p0 = Complex64::new(r.real(0, SampleFmt::F64), r.real(8, SampleFmt::F64));
-        let p1 = Complex64::new(r.real(16, SampleFmt::F64), r.real(24, SampleFmt::F64));
-        assert_eq!(p0, Complex64::new(1.0, 2.0));
-        assert_eq!(p1, Complex64::new(3.0, 4.0));
     }
 }

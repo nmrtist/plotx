@@ -25,7 +25,7 @@ fn reads_16_and_32_bit_images_and_normalizes_direction() {
         let (data, warnings) = parse(
             &synthetic(word),
             Path::new("image.spm"),
-            DataFormat::BrukerNanoScopeSpm,
+            DataFormat::Afm(crate::AfmFormat::BrukerNanoScopeSpm),
         )
         .unwrap();
         assert!(warnings.is_empty());
@@ -42,7 +42,7 @@ fn deflection_error_raster_remains_an_image_channel() {
     let (data, warnings) = parse(
         &bytes,
         Path::new("image.spm"),
-        DataFormat::BrukerNanoScopeSpm,
+        DataFormat::Afm(crate::AfmFormat::BrukerNanoScopeSpm),
     )
     .unwrap();
     assert!(warnings.is_empty());
@@ -87,7 +87,7 @@ fn malformed_optional_force_block_does_not_abort_valid_images() {
     let (data, warnings) = parse(
         &header,
         Path::new("mixed.spm"),
-        DataFormat::BrukerNanoScopeSpm,
+        DataFormat::Afm(crate::AfmFormat::BrukerNanoScopeSpm),
     )
     .unwrap();
     assert_eq!(data.images.len(), 1);
@@ -103,7 +103,7 @@ fn rejects_truncated_blocks() {
     let error = parse(
         &bytes,
         Path::new("image.spm"),
-        DataFormat::BrukerNanoScopeSpm,
+        DataFormat::Afm(crate::AfmFormat::BrukerNanoScopeSpm),
     )
     .unwrap_err();
     assert!(error.to_string().contains("no readable"));
@@ -113,7 +113,7 @@ fn rejects_truncated_blocks() {
 fn peakforce_order_is_a_permutation() {
     let (order, approach, z) = force_axis(
         512,
-        DataFormat::BrukerPeakForceCapture,
+        DataFormat::Afm(crate::AfmFormat::BrukerPeakForceCapture),
         Some(2000.0),
         Some(100.0),
         0.25,
@@ -129,7 +129,7 @@ fn peakforce_order_is_a_permutation() {
 fn peakforce_sync_distance_uses_two_microsecond_steps() {
     let (order, _, _) = force_axis(
         512,
-        DataFormat::BrukerPeakForceCapture,
+        DataFormat::Afm(crate::AfmFormat::BrukerPeakForceCapture),
         Some(2.0),
         Some(100.0),
         141.15,
@@ -201,7 +201,7 @@ fn single_force_curve_does_not_use_scan_image_dimensions() {
         &bytes,
         (&section, 0, bytes.len(), 512, 2, 2),
         &globals,
-        DataFormat::BrukerNanoScopeSpm,
+        DataFormat::Afm(crate::AfmFormat::BrukerNanoScopeSpm),
     )
     .unwrap();
     assert_eq!([force.grid_width, force.grid_height], [1, 1]);

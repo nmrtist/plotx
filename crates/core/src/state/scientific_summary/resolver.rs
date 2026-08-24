@@ -255,7 +255,7 @@ fn provider_summary(
 }
 
 fn subject_part(dataset: &Dataset, app: &PlotxApp) -> SummaryPart {
-    let identity = dataset.scientific_identity();
+    let identity = dataset.acquisition_identity();
     let inherited = dataset
         .lineage()
         .and_then(|lineage| inherited_subject(app, &lineage.sources));
@@ -300,10 +300,10 @@ fn inherited_subject(app: &PlotxApp, sources: &[DatasetId]) -> Option<String> {
             .and_then(|index| app.doc.datasets.get(index))
             .map(|dataset| {
                 dataset
-                    .scientific_identity()
+                    .acquisition_identity()
                     .subject
                     .clone()
-                    .unwrap_or_else(|| dataset.scientific_identity().source_label.clone())
+                    .unwrap_or_else(|| dataset.acquisition_identity().source_label.clone())
             })
     });
     let first = values.next()?;
@@ -317,7 +317,7 @@ fn acquisition_part(dataset: &Dataset, preferred: Option<&str>) -> Option<Summar
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_owned)
-        .or_else(|| dataset.scientific_identity().acquisition.clone())
+        .or_else(|| dataset.acquisition_identity().acquisition.clone())
         .map(|text| SummaryPart::new(format!("acquisition:{}", normalize_key(&text)), text))
 }
 
@@ -535,7 +535,7 @@ mod tests {
         TraceCollectionCatalog, TraceCollectionId, TraceItemDescriptor, TraceItemId,
         TraceItemParameter, TraceParameterValue,
     };
-    use plotx_io::{Dim, Domain, ImportedScientificIdentity, NmrData, NmrData2D, QuadMode};
+    use plotx_io::{AcquisitionIdentity, Dim, Domain, NmrData, NmrData2D, QuadMode};
     use plotx_processing::Slice1D;
 
     fn nmr(domain: Domain, subject: &str, acquisition: &str) -> Dataset {
@@ -549,7 +549,7 @@ mod tests {
             source: "fid".to_owned(),
             group_delay: 0.0,
         });
-        data.scientific_identity = ImportedScientificIdentity {
+        data.acquisition_identity = AcquisitionIdentity {
             subject: Some(subject.to_owned()),
             acquisition: Some(acquisition.to_owned()),
             source_label: "fid".to_owned(),
@@ -736,7 +736,7 @@ mod tests {
             "summary-test",
         )
         .unwrap();
-        table.scientific_identity.subject = Some("Sample".to_owned());
+        table.acquisition_identity.subject = Some("Sample".to_owned());
         let baseline = table.series_bindings[1].value_column;
         let dataset = Dataset::Table(Box::new(table));
         let mut app = PlotxApp::default();

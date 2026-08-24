@@ -1,11 +1,14 @@
 //! JEOL Delta `.jdf` reader.
 
 use crate::{
-    Acquisition, DataFormat, DiffusionMeta, Dim, Domain, ImportedScientificIdentity, IoError,
-    LoadResult, NmrData, NmrData2D, Provenance, PseudoAxis, PseudoKind, QuadMode,
+    Acquisition, AcquisitionIdentity, DataFormat, DiffusionMeta, Dim, Domain, IoError, LoadResult,
+    NmrData, NmrData2D, NmrFormat, NmrInstrumentOrigin, NmrOrigin, NmrPortableMetadata,
+    NmrSourceFormat, NmrSourceParameters, Provenance, PseudoAxis, PseudoKind, QuadMode,
     gradient_shape_factor, gyromagnetic_ratio,
 };
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use num_complex::Complex64;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -82,20 +85,43 @@ pub fn load_jdf_path(path: &Path) -> Result<LoadResult, IoError> {
         Endian::Little
     };
     let params = Params::parse(&bytes, off::PARAM_LIST, endian);
-    let mut scientific_identity = ImportedScientificIdentity::from_path(path);
-    scientific_identity.acquisition = experiment_name(&params);
-    Ok(LoadResult {
+    let mut acquisition_identity = AcquisitionIdentity::from_path(path);
+    acquisition_identity.acquisition = experiment_name(&params);
+    let header = Reader {
+        bytes: &bytes,
+        endian: Endian::Big,
+    };
+    let data_start = (header.u32(off::DATA_START) as usize).clamp(HEADER_LEN, bytes.len());
+    Ok(LoadResult::new(
         acquisition,
-        scientific_identity,
-        format: DataFormat::JeolDelta,
-        provenance: Provenance {
+        acquisition_identity,
+        DataFormat::Nmr(NmrFormat::JeolDelta),
+        Provenance {
             selected_path: path.to_path_buf(),
             data_path: path.to_path_buf(),
             parameter_paths: Vec::new(),
             companion_paths: Vec::new(),
         },
-        warnings: Vec::new(),
-    })
+        Vec::new(),
+    )
+    .with_nmr_origin(NmrOrigin::Instrument {
+        instrument: NmrInstrumentOrigin {
+            format: NmrSourceFormat::JeolDelta,
+            source_sha256: Sha256::digest(&bytes).into(),
+            portable: NmrPortableMetadata {
+                solvent: params.string_ci("solvent"),
+                temperature_k: None,
+                transients: params
+                    .f64("scans")
+                    .filter(|value| *value > 0.0 && value.fract() == 0.0)
+                    .map(|value| value as u64),
+                pulse_sequence: experiment_name(&params),
+            },
+            parameters: NmrSourceParameters::Jeol {
+                metadata_base64: STANDARD.encode(&bytes[..data_start]),
+            },
+        },
+    }))
 }
 
 pub fn read_jdf_bytes(bytes: &[u8], source: String) -> Result<Acquisition, IoError> {

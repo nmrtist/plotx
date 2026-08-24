@@ -45,7 +45,7 @@ pub struct StoredXpsFit {
 pub struct XpsDataset {
     pub resource_id: DatasetId,
     pub field_catalog: FieldCatalog,
-    pub scientific_identity: plotx_io::ImportedScientificIdentity,
+    pub acquisition_identity: plotx_io::AcquisitionIdentity,
     pub experiment: Arc<XpsExperiment>,
     pub name: Option<String>,
     pub lineage: Option<DatasetLineage>,
@@ -59,9 +59,8 @@ pub struct XpsDataset {
 
 impl XpsDataset {
     pub fn load(experiment: XpsExperiment) -> Self {
-        let scientific_identity = plotx_io::ImportedScientificIdentity::from_path(
-            std::path::Path::new(&experiment.source),
-        );
+        let acquisition_identity =
+            plotx_io::AcquisitionIdentity::from_path(std::path::Path::new(&experiment.source));
         let active_region = experiment
             .regions
             .iter()
@@ -97,7 +96,7 @@ impl XpsDataset {
         Self {
             resource_id: DatasetId::new(),
             field_catalog,
-            scientific_identity,
+            acquisition_identity,
             experiment: Arc::new(experiment),
             name: None,
             lineage: None,

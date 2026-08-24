@@ -2,15 +2,16 @@
 //! parameter files under a `pdata` directory.
 
 use super::*;
+use crate::NmrFormat;
 
 /// Identify a processed payload from a proc directory, a `1r`/`1i`/`2rr`
 /// file, a `pdata` directory, or an experiment directory containing `pdata`.
 pub fn detect_processed(path: &Path) -> Option<DataFormat> {
     let resolved = resolve_processed(path)?;
     Some(if resolved.two_d {
-        DataFormat::BrukerProcessed2D
+        DataFormat::Nmr(NmrFormat::BrukerProcessed2D)
     } else {
-        DataFormat::BrukerProcessed1D
+        DataFormat::Nmr(NmrFormat::BrukerProcessed1D)
     })
 }
 
@@ -108,7 +109,7 @@ pub fn load_processed(path: &Path) -> Result<LoadResult, IoError> {
                 &procs,
                 &proc2s,
             )?)),
-            DataFormat::BrukerProcessed2D,
+            DataFormat::Nmr(NmrFormat::BrukerProcessed2D),
             vec![procs_path, proc2s_path],
         )
     } else {
@@ -128,21 +129,22 @@ pub fn load_processed(path: &Path) -> Result<LoadResult, IoError> {
                 imag_path.is_file().then_some(imag_path.as_path()),
                 &procs,
             )?),
-            DataFormat::BrukerProcessed1D,
+            DataFormat::Nmr(NmrFormat::BrukerProcessed1D),
             vec![procs_path],
         )
     };
     let experiment_dir = resolved.proc_dir.parent().and_then(Path::parent);
-    let scientific_identity = experiment_dir
+    let acquisition_identity = experiment_dir
         .map(|dir| {
             let params = std::fs::read_to_string(dir.join("acqus"))
                 .ok()
                 .map(|text| JcampParams::parse(&text));
-            scientific_identity(dir, params.as_ref())
+            super::acquisition_identity(dir, params.as_ref())
         })
-        .unwrap_or_else(|| crate::ImportedScientificIdentity::from_path(path));
+        .unwrap_or_else(|| crate::AcquisitionIdentity::from_path(path));
     if let Acquisition::D2(data) = &mut acquisition {
-        data.experiment.clone_from(&scientific_identity.acquisition);
+        data.experiment
+            .clone_from(&acquisition_identity.acquisition);
     }
     if let Some(acqus) = acquisition_params_for(&resolved.proc_dir, "acqus") {
         parameter_paths.push(acqus);
@@ -152,18 +154,18 @@ pub fn load_processed(path: &Path) -> Result<LoadResult, IoError> {
     {
         parameter_paths.push(acqu2s);
     }
-    Ok(LoadResult {
-        scientific_identity,
+    Ok(LoadResult::new(
         acquisition,
+        acquisition_identity,
         format,
-        provenance: Provenance {
+        Provenance {
             selected_path: path.to_path_buf(),
             data_path: resolved.data_path,
             parameter_paths,
             companion_paths: Vec::new(),
         },
         warnings,
-    })
+    ))
 }
 
 fn acquisition_params_for(proc_dir: &Path, name: &str) -> Option<PathBuf> {

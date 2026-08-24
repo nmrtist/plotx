@@ -138,7 +138,7 @@ pub(super) fn electrophysiology_from_object(
     recording.region_analysis.validate().map_err(|error| {
         ProjectError::Invalid(format!("invalid region analysis state: {error}"))
     })?;
-    recording.scientific_identity = super::convert::read_scientific_identity(data)?;
+    recording.acquisition_identity = super::convert::read_acquisition_identity(data)?;
     let dataset = Dataset::Electrophysiology(Box::new(recording));
     dataset
         .validate_field_catalog()

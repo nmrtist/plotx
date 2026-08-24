@@ -3,8 +3,8 @@
 use crate::{
     Acquisition, AcquisitionStream, AcquisitionStreamId, ChromatogramChannel,
     ChromatogramChannelId, ChromatogramKind, DataFormat, IoError, LoadResult, LoadWarning,
-    LoadWarningCode, MassSpecRun, MassSpectrum, Polarity, Provenance, SpectrumId,
-    SpectrumRepresentation, StreamRole,
+    LoadWarningCode, MassSpecRun, MassSpectrometryFormat, MassSpectrum, Polarity, Provenance,
+    SpectrumId, SpectrumRepresentation, StreamRole,
 };
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -246,13 +246,13 @@ pub fn load(path: &Path) -> Result<LoadResult, IoError> {
         import_warnings: warning_messages,
     };
     run.validate().map_err(invalid)?;
-    Ok(LoadResult {
-        scientific_identity: crate::ImportedScientificIdentity::from_path(path),
-        acquisition: Acquisition::MassSpec(Box::new(run)),
-        format: DataFormat::WatersMassLynxRaw,
-        provenance: provenance(&bundle),
+    Ok(LoadResult::new(
+        Acquisition::MassSpec(Box::new(run)),
+        crate::AcquisitionIdentity::from_path(path),
+        DataFormat::MassSpectrometry(MassSpectrometryFormat::WatersMassLynxRaw),
+        provenance(&bundle),
         warnings,
-    })
+    ))
 }
 
 fn validate_function_files(

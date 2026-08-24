@@ -56,7 +56,8 @@ pub fn dataset_to_objects<'a>(
                 },
                 extensions: serde_json::json!({
                     "plotx.nmr": {
-                        "source": &n.data.source
+                        "source": &n.data.source,
+                        "origin": &n.origin
                     },
                     "plotx.fields": &n.field_catalog
                 }),
@@ -106,6 +107,7 @@ pub fn dataset_to_objects<'a>(
                 extensions: serde_json::json!({
                     "plotx.nmr": {
                         "source": &n.data.source,
+                        "origin": &n.origin,
                         "quad": quad_to_str(n.data.quad),
                         "indirect_conjugate": n.data.indirect_conjugate,
                         "experiment_hint": &n.data.experiment,
@@ -317,34 +319,34 @@ pub fn dataset_to_objects<'a>(
         }
         Dataset::Xps(xps) => super::xps_convert::to_objects(xps, data_id, recipe_id),
     };
-    write_scientific_identity(&mut objects.data, dataset.scientific_identity())?;
+    write_acquisition_identity(&mut objects.data, dataset.acquisition_identity())?;
     Ok(objects)
 }
 
-pub(super) fn write_scientific_identity(
+pub(super) fn write_acquisition_identity(
     data: &mut DataObject,
-    identity: &plotx_io::ImportedScientificIdentity,
+    identity: &plotx_io::AcquisitionIdentity,
 ) -> Result<()> {
     let extensions = data.extensions.as_object_mut().ok_or_else(|| {
         ProjectError::Invalid(format!("dataset {} extensions are not an object", data.id))
     })?;
     extensions.insert(
-        "plotx.scientific_identity".to_owned(),
+        "plotx.acquisition_identity".to_owned(),
         serde_json::to_value(identity)?,
     );
     Ok(())
 }
 
-pub(super) fn read_scientific_identity(
+pub(super) fn read_acquisition_identity(
     data: &DataObject,
-) -> Result<plotx_io::ImportedScientificIdentity> {
+) -> Result<plotx_io::AcquisitionIdentity> {
     let value = data
         .extensions
-        .get("plotx.scientific_identity")
+        .get("plotx.acquisition_identity")
         .cloned()
         .ok_or_else(|| {
             ProjectError::Invalid(format!(
-                "dataset {} is missing plotx.scientific_identity",
+                "dataset {} is missing plotx.acquisition_identity",
                 data.id
             ))
         })?;
@@ -386,7 +388,7 @@ pub fn object_to_dataset(
             .validate()
             .map_err(|error| ProjectError::Invalid(error.to_owned()))?;
         let mut dataset = crate::state::XrdDataset::load(decoded);
-        dataset.scientific_identity = read_scientific_identity(data)?;
+        dataset.acquisition_identity = read_acquisition_identity(data)?;
         dataset.field_catalog = read_field_catalog(data)?;
         dataset.name = data.label.clone();
         if let Some(value) = recipe
@@ -425,7 +427,7 @@ pub fn object_to_dataset(
             ProjectLoadLimits::default().max_entry_bytes,
             |reader| super::mass_spec_convert::decode(reader),
         )?;
-        dataset.scientific_identity = read_scientific_identity(data)?;
+        dataset.acquisition_identity = read_acquisition_identity(data)?;
         dataset.field_catalog = read_field_catalog(data)?;
         dataset.name = data.label.clone();
         dataset.repair_selection().map_err(ProjectError::Invalid)?;
@@ -445,7 +447,7 @@ pub fn object_to_dataset(
             |reader| super::afm_convert::decode_afm(reader),
         )?;
         let mut dataset = crate::state::AfmDataset::load(decoded);
-        dataset.scientific_identity = read_scientific_identity(data)?;
+        dataset.acquisition_identity = read_acquisition_identity(data)?;
         dataset.field_catalog = read_field_catalog(data)?;
         dataset.name = data.label.clone();
         if let Some(state) = data.extensions.get("plotx.afm")
@@ -544,17 +546,20 @@ pub fn object_to_dataset(
                     values.len()
                 )));
             }
-            let mut dataset = NmrDataset::load(NmrData {
-                points: values,
-                domain: domain_from_str(&data.payload.domain),
-                spectral_width_hz: required(dim.spectral_width_hz, "spectral_width_hz")?,
-                observe_freq_mhz: required(dim.observe_freq_mhz, "observe_freq_mhz")?,
-                carrier_ppm: required(dim.carrier_ppm, "carrier_ppm")?,
-                nucleus: dim.nucleus.clone().unwrap_or_else(|| "X".to_owned()),
-                source: nmr_source(data),
-                group_delay: dim.group_delay.unwrap_or(0.0),
-            });
-            dataset.scientific_identity = read_scientific_identity(data)?;
+            let mut dataset = NmrDataset::load_with_origin(
+                NmrData {
+                    points: values,
+                    domain: domain_from_str(&data.payload.domain),
+                    spectral_width_hz: required(dim.spectral_width_hz, "spectral_width_hz")?,
+                    observe_freq_mhz: required(dim.observe_freq_mhz, "observe_freq_mhz")?,
+                    carrier_ppm: required(dim.carrier_ppm, "carrier_ppm")?,
+                    nucleus: dim.nucleus.clone().unwrap_or_else(|| "X".to_owned()),
+                    source: nmr_source(data),
+                    group_delay: dim.group_delay.unwrap_or(0.0),
+                },
+                read_nmr_origin(data)?,
+            );
+            dataset.acquisition_identity = read_acquisition_identity(data)?;
             dataset.field_catalog = read_field_catalog(data)?;
             apply_1d_recipe(&mut dataset, recipe)?;
             dataset.name = data.label.clone();
@@ -603,22 +608,26 @@ pub fn object_to_dataset(
                 .ok_or_else(|| {
                     ProjectError::Invalid("2D data missing indirect dimension".to_owned())
                 })?;
-            let mut dataset = Nmr2DDataset::load(NmrData2D {
-                data: values,
-                rows,
-                cols,
-                domain: domain_from_str(&data.payload.domain),
-                direct: dim_from_dimension(direct)?,
-                indirect: dim_from_dimension(indirect)?,
-                quad: quad_from_str(nmr_ext_str(data, "quad").unwrap_or("complex")),
-                indirect_conjugate: nmr_ext_bool(data, "indirect_conjugate").unwrap_or(false),
-                experiment: nmr_ext_str(data, "experiment_hint").map(str::to_owned),
-                pseudo_axis: read_pseudo_axis(data),
-                diffusion: read_diffusion(data),
-                nus: None,
-                source: nmr_source(data),
-            });
-            dataset.scientific_identity = read_scientific_identity(data)?;
+            let mut dataset = Nmr2DDataset::load_with_origin_and_equal_scale_preference(
+                NmrData2D {
+                    data: values,
+                    rows,
+                    cols,
+                    domain: domain_from_str(&data.payload.domain),
+                    direct: dim_from_dimension(direct)?,
+                    indirect: dim_from_dimension(indirect)?,
+                    quad: quad_from_str(nmr_ext_str(data, "quad").unwrap_or("complex")),
+                    indirect_conjugate: nmr_ext_bool(data, "indirect_conjugate").unwrap_or(false),
+                    experiment: nmr_ext_str(data, "experiment_hint").map(str::to_owned),
+                    pseudo_axis: read_pseudo_axis(data),
+                    diffusion: read_diffusion(data),
+                    nus: None,
+                    source: nmr_source(data),
+                },
+                read_nmr_origin(data)?,
+                true,
+            );
+            dataset.acquisition_identity = read_acquisition_identity(data)?;
             dataset.field_catalog = read_field_catalog(data)?;
             apply_2d_recipe(&mut dataset, recipe)?;
             read_region_analysis(&mut dataset, recipe)?;

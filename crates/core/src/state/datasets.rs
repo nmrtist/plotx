@@ -35,7 +35,10 @@ pub struct NmrDataset {
     /// Persisted child-field identity allocator and key mapping.
     pub field_catalog: FieldCatalog,
     pub data: NmrData,
-    pub scientific_identity: plotx_io::ImportedScientificIdentity,
+    /// Required v1 origin contract. `Derived` is a real scientific state, not
+    /// a fallback for projects that omitted the field.
+    pub origin: plotx_io::NmrOrigin,
+    pub acquisition_identity: plotx_io::AcquisitionIdentity,
     pub base: Processed1D,
     pub pipeline: AxisPipeline,
     /// Persistent owner-local allocator; excluded from processing undo snapshots.
@@ -68,8 +71,12 @@ pub struct NmrDataset {
 
 impl NmrDataset {
     pub fn load(data: NmrData) -> Self {
-        let scientific_identity =
-            plotx_io::ImportedScientificIdentity::from_path(std::path::Path::new(&data.source));
+        Self::load_with_origin(data, plotx_io::NmrOrigin::Derived)
+    }
+
+    pub fn load_with_origin(data: NmrData, origin: plotx_io::NmrOrigin) -> Self {
+        let acquisition_identity =
+            plotx_io::AcquisitionIdentity::from_path(std::path::Path::new(&data.source));
         let pipeline = match data.domain {
             Domain::Time => AxisPipeline::default_1d(),
             Domain::Frequency => AxisPipeline::frequency_1d(),
@@ -85,7 +92,8 @@ impl NmrDataset {
             resource_id: DatasetId::new(),
             field_catalog,
             data,
-            scientific_identity,
+            origin,
+            acquisition_identity,
             base,
             pipeline,
             next_step_id: 0,
@@ -182,7 +190,8 @@ pub struct Nmr2DDataset {
     /// Persisted child-field identity allocator and key mapping.
     pub field_catalog: FieldCatalog,
     pub data: Arc<NmrData2D>,
-    pub scientific_identity: plotx_io::ImportedScientificIdentity,
+    pub origin: plotx_io::NmrOrigin,
+    pub acquisition_identity: plotx_io::AcquisitionIdentity,
     pub params: Params2D,
     /// Persistent owner-local allocator shared by both axes.
     pub next_step_id: u64,
@@ -241,15 +250,27 @@ pub struct Nmr2DDataset {
 }
 impl Nmr2DDataset {
     pub fn load(data: NmrData2D) -> Self {
-        Self::load_with_equal_scale_preference(data, true)
+        Self::load_with_origin_and_equal_scale_preference(data, plotx_io::NmrOrigin::Derived, true)
     }
 
     pub fn load_with_equal_scale_preference(
         data: NmrData2D,
         equal_scale_homonuclear_2d_imports: bool,
     ) -> Self {
-        let scientific_identity =
-            plotx_io::ImportedScientificIdentity::from_path(std::path::Path::new(&data.source));
+        Self::load_with_origin_and_equal_scale_preference(
+            data,
+            plotx_io::NmrOrigin::Derived,
+            equal_scale_homonuclear_2d_imports,
+        )
+    }
+
+    pub fn load_with_origin_and_equal_scale_preference(
+        data: NmrData2D,
+        origin: plotx_io::NmrOrigin,
+        equal_scale_homonuclear_2d_imports: bool,
+    ) -> Self {
+        let acquisition_identity =
+            plotx_io::AcquisitionIdentity::from_path(std::path::Path::new(&data.source));
         let preset = recommend_preset(&data);
         let params = match data.domain {
             Domain::Time => Params2D::default_for(preset),
@@ -277,7 +298,8 @@ impl Nmr2DDataset {
             resource_id: DatasetId::new(),
             field_catalog,
             data: Arc::new(data),
-            scientific_identity,
+            origin,
+            acquisition_identity,
             base_params: params.clone(),
             base_stale: false,
             params,

@@ -90,7 +90,7 @@ fn loads_directory_and_fid_with_provenance_and_metadata() {
     );
     assert_eq!(
         crate::detect_format(&dir).unwrap(),
-        DataFormat::VarianAgilentRaw
+        DataFormat::Nmr(crate::NmrFormat::VarianAgilentRaw)
     );
     for selected in [&dir, &dir.join("fid")] {
         let loaded = load_raw(selected).unwrap();

@@ -47,7 +47,7 @@ fn params_with(strings: &[(&str, &str)]) -> Params {
 }
 
 #[test]
-fn experiment_name_is_cleaned_for_scientific_identity() {
+fn experiment_name_is_cleaned_for_acquisition_identity() {
     let params = params_with(&[(
         "experiment",
         r"C:\Program Files\JEOL\experiments\13c_eb_sn.jxp",

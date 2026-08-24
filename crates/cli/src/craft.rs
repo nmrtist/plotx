@@ -227,7 +227,9 @@ fn acquisition_inputs(input: &Path) -> Result<Vec<PathBuf>, String> {
 fn is_raw_acquisition(path: &Path) -> bool {
     matches!(
         plotx_io::detect_format(path),
-        Ok(plotx_io::DataFormat::BrukerRaw | plotx_io::DataFormat::VarianAgilentRaw)
+        Ok(plotx_io::DataFormat::Nmr(
+            plotx_io::NmrFormat::BrukerRaw | plotx_io::NmrFormat::VarianAgilentRaw,
+        ))
     )
 }
 

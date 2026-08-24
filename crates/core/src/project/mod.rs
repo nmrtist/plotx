@@ -644,6 +644,8 @@ fn validate_resource_ids(doc: &crate::state::Document, require_image_assets: boo
 }
 
 #[cfg(test)]
+mod acquisition_identity_tests;
+#[cfg(test)]
 mod cleanup_tests;
 #[cfg(test)]
 mod craft_tests;
@@ -667,8 +669,6 @@ mod pseudo_tests;
 mod reference_tests;
 #[cfg(test)]
 mod schema_tests;
-#[cfg(test)]
-mod scientific_identity_tests;
 #[cfg(test)]
 mod step_identity_tests;
 #[cfg(test)]

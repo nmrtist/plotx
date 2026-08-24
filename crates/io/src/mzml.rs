@@ -6,8 +6,8 @@
 
 use crate::{
     Acquisition, AcquisitionStream, AcquisitionStreamId, DataFormat, IoError, LoadResult,
-    MassSpecRun, MassSpectrum, Polarity, Provenance, SpectrumId, SpectrumRepresentation,
-    StreamRole,
+    MassSpecRun, MassSpectrometryFormat, MassSpectrum, Polarity, Provenance, SpectrumId,
+    SpectrumRepresentation, StreamRole,
 };
 use base64::Engine as _;
 use flate2::{Decompress, FlushDecompress, Status};
@@ -132,18 +132,18 @@ pub fn load(path: &Path) -> Result<LoadResult, IoError> {
             path: Some(path.to_owned()),
         })
         .collect();
-    Ok(LoadResult {
-        scientific_identity: crate::ImportedScientificIdentity::from_path(path),
-        acquisition: Acquisition::MassSpec(Box::new(run)),
-        format: DataFormat::MzMl,
-        provenance: Provenance {
+    Ok(LoadResult::new(
+        Acquisition::MassSpec(Box::new(run)),
+        crate::AcquisitionIdentity::from_path(path),
+        DataFormat::MassSpectrometry(MassSpectrometryFormat::MzMl),
+        Provenance {
             selected_path: path.to_owned(),
             data_path: path.to_owned(),
             parameter_paths: Vec::new(),
             companion_paths: Vec::new(),
         },
         warnings,
-    })
+    ))
 }
 
 pub fn parse(input: impl BufRead, source: String) -> Result<MassSpecRun, IoError> {

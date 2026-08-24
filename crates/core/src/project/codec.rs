@@ -383,6 +383,26 @@ pub fn nmr_source(data: &DataObject) -> String {
         .unwrap_or_else(|| data.id.clone())
 }
 
+pub fn read_nmr_origin(data: &DataObject) -> Result<plotx_io::NmrOrigin> {
+    let value = data
+        .extensions
+        .get("plotx.nmr")
+        .and_then(|value| value.get("origin"))
+        .cloned()
+        .ok_or_else(|| {
+            ProjectError::Invalid(format!(
+                "NMR dataset {} is missing required plotx.nmr.origin",
+                data.id
+            ))
+        })?;
+    serde_json::from_value(value).map_err(|error| {
+        ProjectError::Invalid(format!(
+            "NMR dataset {} has invalid plotx.nmr.origin: {error}",
+            data.id
+        ))
+    })
+}
+
 pub fn nmr_ext_str<'a>(data: &'a DataObject, key: &str) -> Option<&'a str> {
     data.extensions
         .get("plotx.nmr")

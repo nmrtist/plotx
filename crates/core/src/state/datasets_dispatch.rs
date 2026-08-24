@@ -1,28 +1,28 @@
 use super::*;
 impl Dataset {
-    pub fn scientific_identity(&self) -> &plotx_io::ImportedScientificIdentity {
+    pub fn acquisition_identity(&self) -> &plotx_io::AcquisitionIdentity {
         match self {
-            Dataset::Nmr(data) => &data.scientific_identity,
-            Dataset::Nmr2D(data) => &data.scientific_identity,
-            Dataset::Table(data) => &data.scientific_identity,
-            Dataset::Electrophysiology(data) => &data.scientific_identity,
-            Dataset::Afm(data) => &data.scientific_identity,
-            Dataset::MassSpec(data) => &data.scientific_identity,
-            Dataset::Xrd(data) => &data.scientific_identity,
-            Dataset::Xps(data) => &data.scientific_identity,
+            Dataset::Nmr(data) => &data.acquisition_identity,
+            Dataset::Nmr2D(data) => &data.acquisition_identity,
+            Dataset::Table(data) => &data.acquisition_identity,
+            Dataset::Electrophysiology(data) => &data.acquisition_identity,
+            Dataset::Afm(data) => &data.acquisition_identity,
+            Dataset::MassSpec(data) => &data.acquisition_identity,
+            Dataset::Xrd(data) => &data.acquisition_identity,
+            Dataset::Xps(data) => &data.acquisition_identity,
         }
     }
 
-    pub fn set_scientific_identity(&mut self, identity: plotx_io::ImportedScientificIdentity) {
+    pub fn set_acquisition_identity(&mut self, identity: plotx_io::AcquisitionIdentity) {
         match self {
-            Dataset::Nmr(data) => data.scientific_identity = identity,
-            Dataset::Nmr2D(data) => data.scientific_identity = identity,
-            Dataset::Table(data) => data.scientific_identity = identity,
-            Dataset::Electrophysiology(data) => data.scientific_identity = identity,
-            Dataset::Afm(data) => data.scientific_identity = identity,
-            Dataset::MassSpec(data) => data.scientific_identity = identity,
-            Dataset::Xrd(data) => data.scientific_identity = identity,
-            Dataset::Xps(data) => data.scientific_identity = identity,
+            Dataset::Nmr(data) => data.acquisition_identity = identity,
+            Dataset::Nmr2D(data) => data.acquisition_identity = identity,
+            Dataset::Table(data) => data.acquisition_identity = identity,
+            Dataset::Electrophysiology(data) => data.acquisition_identity = identity,
+            Dataset::Afm(data) => data.acquisition_identity = identity,
+            Dataset::MassSpec(data) => data.acquisition_identity = identity,
+            Dataset::Xrd(data) => data.acquisition_identity = identity,
+            Dataset::Xps(data) => data.acquisition_identity = identity,
         }
     }
 

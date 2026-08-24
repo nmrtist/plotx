@@ -221,10 +221,10 @@ impl PlotxApp {
         let operation_id = self.session.begin_operation();
         match plotx_io::load_path(path) {
             Ok(result) => {
-                let format = result.format.as_str();
-                let warnings = result.warnings;
-                let source =
-                    self.insert_acquisition(result.acquisition, result.scientific_identity);
+                let (acquisition, acquisition_identity, format, _, nmr_origin, warnings) =
+                    result.into_parts();
+                let format = format.as_str();
+                let source = self.insert_acquisition(acquisition, acquisition_identity, nmr_origin);
                 let mut report = if warnings.is_empty() {
                     OperationReport::success(
                         operation_id,
@@ -300,8 +300,10 @@ impl PlotxApp {
                 let count = result.items.len();
                 let mut warnings = result.warnings;
                 for item in result.items {
-                    warnings.extend(item.warnings);
-                    self.insert_acquisition(item.acquisition, item.scientific_identity);
+                    let (acquisition, acquisition_identity, _, _, nmr_origin, item_warnings) =
+                        item.into_parts();
+                    warnings.extend(item_warnings);
+                    self.insert_acquisition(acquisition, acquisition_identity, nmr_origin);
                 }
                 let summary = if warnings.is_empty() {
                     format!("Loaded {count} spectra from {archive}")
@@ -366,11 +368,13 @@ impl PlotxApp {
     fn insert_acquisition(
         &mut self,
         acq: plotx_io::Acquisition,
-        scientific_identity: plotx_io::ImportedScientificIdentity,
+        acquisition_identity: plotx_io::AcquisitionIdentity,
+        nmr_origin: Option<plotx_io::NmrOrigin>,
     ) -> String {
         let (dataset, source) = crate::workflow::dataset_from_loaded_acquisition(
             acq,
-            scientific_identity,
+            acquisition_identity,
+            nmr_origin,
             self.settings.general.equal_scale_homonuclear_2d_imports,
         );
         let name = Self::short_name(&source);

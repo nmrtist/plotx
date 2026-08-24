@@ -33,16 +33,19 @@ fn loads_big_endian_scaled_1r_from_experiment_directory() {
 
     assert_eq!(
         plotx_io::detect_format(&experiment).unwrap(),
-        DataFormat::BrukerProcessed1D
+        DataFormat::Nmr(plotx_io::NmrFormat::BrukerProcessed1D)
     );
     let loaded = plotx_io::load_path(&experiment).unwrap();
-    assert_eq!(loaded.format, DataFormat::BrukerProcessed1D);
     assert_eq!(
-        loaded.scientific_identity.subject.as_deref(),
+        loaded.format,
+        DataFormat::Nmr(plotx_io::NmrFormat::BrukerProcessed1D)
+    );
+    assert_eq!(
+        loaded.acquisition_identity.subject.as_deref(),
         Some("sample")
     );
     assert_eq!(
-        loaded.scientific_identity.acquisition.as_deref(),
+        loaded.acquisition_identity.acquisition.as_deref(),
         Some("PROTON")
     );
     assert!(
@@ -99,9 +102,12 @@ fn loads_2rr_and_reverses_both_frequency_axes() {
     std::fs::write(proc_dir.join("2rr"), bytes).unwrap();
 
     let loaded = plotx_io::load_path(&proc_dir).unwrap();
-    assert_eq!(loaded.format, DataFormat::BrukerProcessed2D);
     assert_eq!(
-        loaded.scientific_identity.subject.as_deref(),
+        loaded.format,
+        DataFormat::Nmr(plotx_io::NmrFormat::BrukerProcessed2D)
+    );
+    assert_eq!(
+        loaded.acquisition_identity.subject.as_deref(),
         Some("sample")
     );
     let data = match loaded.acquisition {

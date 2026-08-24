@@ -1,4 +1,4 @@
-use crate::{Acquisition, DataFormat, IoError, LoadResult, Provenance, XrdData};
+use crate::{Acquisition, DataFormat, IoError, LoadResult, Provenance, XrdData, XrdFormat};
 use quick_xml::Reader;
 use quick_xml::events::Event;
 use std::fs::File;
@@ -135,7 +135,7 @@ pub fn load_raw(path: &Path) -> Result<LoadResult, IoError> {
         scan_step_deg: Some(step),
         scan_speed_deg_min: Some(raw_f32(&header, RAW_SPEED_OFFSET)? as f64),
     };
-    result(path, DataFormat::RigakuRaw, data)
+    result(path, DataFormat::Xrd(XrdFormat::RigakuRaw), data)
 }
 
 fn raw_u16(bytes: &[u8], offset: usize) -> Result<u16, IoError> {
@@ -183,7 +183,7 @@ pub fn load_profile(path: &Path) -> Result<LoadResult, IoError> {
     let profile = parse_profile(reader)?;
     result(
         path,
-        DataFormat::RigakuProfile,
+        DataFormat::Xrd(XrdFormat::RigakuProfile),
         XrdData {
             two_theta_deg: profile.two_theta_deg,
             intensity: profile.intensity,
@@ -210,7 +210,7 @@ pub fn load_rasx(path: &Path) -> Result<LoadResult, IoError> {
     let conditions = parse_conditions(Cursor::new(xml))?;
     result(
         path,
-        DataFormat::RigakuRasx,
+        DataFormat::Xrd(XrdFormat::RigakuRasx),
         XrdData {
             two_theta_deg: profile.two_theta_deg,
             intensity: profile.intensity,
@@ -259,18 +259,18 @@ fn read_rasx_entry<R: Read + Seek>(
 fn result(path: &Path, format: DataFormat, data: XrdData) -> Result<LoadResult, IoError> {
     data.validate()
         .map_err(|error| IoError::InvalidXrd(error.into()))?;
-    Ok(LoadResult {
-        scientific_identity: crate::ImportedScientificIdentity::from_path(path),
-        acquisition: Acquisition::Xrd(Box::new(data)),
+    Ok(LoadResult::new(
+        Acquisition::Xrd(Box::new(data)),
+        crate::AcquisitionIdentity::from_path(path),
         format,
-        provenance: Provenance {
+        Provenance {
             selected_path: path.to_path_buf(),
             data_path: path.to_path_buf(),
             parameter_paths: Vec::new(),
             companion_paths: Vec::new(),
         },
-        warnings: Vec::new(),
-    })
+        Vec::new(),
+    ))
 }
 
 fn parse_profile(reader: impl BufRead) -> Result<Profile, IoError> {
@@ -486,7 +486,7 @@ mod tests {
         let Acquisition::Xrd(data) = loaded.acquisition else {
             panic!("expected XRD")
         };
-        assert_eq!(loaded.format, DataFormat::RigakuRaw);
+        assert_eq!(loaded.format, DataFormat::Xrd(XrdFormat::RigakuRaw));
         assert_eq!(data.intensity, vec![10.0, 20.0, 12.0]);
         assert!((data.two_theta_deg[2] - 3.02).abs() < 1e-6);
         assert_eq!(data.target.as_deref(), Some("Cu"));

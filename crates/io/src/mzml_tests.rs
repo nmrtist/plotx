@@ -225,7 +225,10 @@ fn rejects_numpress_and_implausible_declared_length_before_binary_decode() {
 #[test]
 fn extension_dispatch_is_ascii_case_insensitive() {
     for name in ["run.mzML", "run.MZML"] {
-        assert_eq!(crate::detect_format(name).unwrap(), DataFormat::MzMl);
+        assert_eq!(
+            crate::detect_format(name).unwrap(),
+            DataFormat::MassSpectrometry(crate::MassSpectrometryFormat::MzMl)
+        );
     }
 }
 

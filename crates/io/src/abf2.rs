@@ -65,22 +65,23 @@ pub fn is_abf2(path: &Path) -> bool {
 pub fn load(path: &Path) -> Result<LoadResult, IoError> {
     let bytes = std::fs::read(path)?;
     let (data, warnings) = parse(&bytes, path.to_string_lossy().into_owned())?;
-    Ok(LoadResult {
-        scientific_identity: crate::ImportedScientificIdentity {
+    let protocol = data.protocol.clone();
+    Ok(LoadResult::new(
+        Acquisition::Electrophysiology(Box::new(data)),
+        crate::AcquisitionIdentity {
             subject: None,
-            acquisition: data.protocol.clone(),
-            source_label: crate::ImportedScientificIdentity::from_path(path).source_label,
+            acquisition: protocol,
+            source_label: crate::AcquisitionIdentity::from_path(path).source_label,
         },
-        acquisition: Acquisition::Electrophysiology(Box::new(data)),
-        format: DataFormat::Abf2,
-        provenance: Provenance {
+        DataFormat::Electrophysiology(crate::ElectrophysiologyFormat::Abf2),
+        Provenance {
             selected_path: path.to_owned(),
             data_path: path.to_owned(),
             parameter_paths: Vec::new(),
             companion_paths: Vec::new(),
         },
         warnings,
-    })
+    ))
 }
 
 pub fn parse(

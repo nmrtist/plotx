@@ -1,5 +1,6 @@
 use crate::{
     Acquisition, DataFormat, IoError, LoadResult, LoadWarning, LoadWarningCode, Provenance,
+    XpsFormat,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -223,13 +224,13 @@ pub fn is_casaxps_content(text: &str) -> bool {
 pub fn load_vamas(path: &Path) -> Result<LoadResult, IoError> {
     let text = read_text(path)?;
     let experiment = parse_vamas(&text, path.display().to_string())?;
-    load_result(path, DataFormat::VamasXps, experiment)
+    load_result(path, DataFormat::Xps(XpsFormat::VamasXps), experiment)
 }
 
 pub fn load_casaxps(path: &Path) -> Result<LoadResult, IoError> {
     let text = read_text(path)?;
     let experiment = parse_casaxps(&text, path.display().to_string())?;
-    load_result(path, DataFormat::CasaXpsText, experiment)
+    load_result(path, DataFormat::Xps(XpsFormat::CasaXpsText), experiment)
 }
 
 fn load_result(
@@ -238,6 +239,10 @@ fn load_result(
     experiment: XpsExperiment,
 ) -> Result<LoadResult, IoError> {
     experiment.validate().map_err(IoError::InvalidXps)?;
+    let subject = experiment
+        .measurements
+        .first()
+        .map(|item| item.label.clone());
     let warnings = experiment
         .import_warnings
         .iter()
@@ -247,25 +252,22 @@ fn load_result(
             path: Some(path.to_owned()),
         })
         .collect();
-    Ok(LoadResult {
-        scientific_identity: crate::ImportedScientificIdentity {
-            subject: experiment
-                .measurements
-                .first()
-                .map(|item| item.label.clone()),
+    Ok(LoadResult::new(
+        Acquisition::Xps(Box::new(experiment)),
+        crate::AcquisitionIdentity {
+            subject,
             acquisition: None,
-            source_label: crate::ImportedScientificIdentity::from_path(path).source_label,
+            source_label: crate::AcquisitionIdentity::from_path(path).source_label,
         },
-        acquisition: Acquisition::Xps(Box::new(experiment)),
         format,
-        provenance: Provenance {
+        Provenance {
             selected_path: path.into(),
             data_path: path.into(),
             parameter_paths: Vec::new(),
             companion_paths: Vec::new(),
         },
         warnings,
-    })
+    ))
 }
 
 fn parse_numbers(line: &str, label: &str) -> Result<Vec<f64>, IoError> {

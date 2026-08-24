@@ -4,11 +4,13 @@ pub mod abf2;
 pub mod archive;
 pub mod bruker;
 pub mod delimited;
+mod format;
 pub mod jcamp_dx;
 pub mod jeol;
 mod mass_spec;
 pub mod mzml;
 pub mod nanoscope;
+mod nmr_origin;
 pub mod origin;
 pub mod varian;
 pub mod waters;
@@ -16,55 +18,11 @@ pub mod xlsx;
 pub mod xps;
 pub mod xrd;
 
+pub use format::*;
 pub use mass_spec::*;
 
 use num_complex::Complex64;
 use std::path::{Path, PathBuf};
-
-/// A format identified before parsing. Detection and loading are deliberately
-/// separate so GUI, CLI, and archive workflows share one dispatch contract.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DataFormat {
-    Abf2,
-    JeolDelta,
-    BrukerRaw,
-    VarianAgilentRaw,
-    BrukerProcessed1D,
-    BrukerProcessed2D,
-    JcampDx1D,
-    BrukerNanoScopeSpm,
-    BrukerPeakForceCapture,
-    WatersMassLynxRaw,
-    MzMl,
-    RigakuRasx,
-    RigakuRaw,
-    RigakuProfile,
-    VamasXps,
-    CasaXpsText,
-}
-
-impl DataFormat {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Abf2 => "abf2",
-            Self::JeolDelta => "jeol-delta",
-            Self::BrukerRaw => "bruker-raw",
-            Self::VarianAgilentRaw => "varian-agilent-raw",
-            Self::BrukerProcessed1D => "bruker-processed-1d",
-            Self::BrukerProcessed2D => "bruker-processed-2d",
-            Self::JcampDx1D => "jcamp-dx-1d",
-            Self::BrukerNanoScopeSpm => "bruker-nanoscope-spm",
-            Self::BrukerPeakForceCapture => "bruker-peakforce-capture",
-            Self::WatersMassLynxRaw => "waters-masslynx-raw",
-            Self::MzMl => "mzml",
-            Self::RigakuRasx => "rigaku-rasx",
-            Self::RigakuRaw => "rigaku-raw-fi",
-            Self::RigakuProfile => "rigaku-profile",
-            Self::VamasXps => "vamas-xps",
-            Self::CasaXpsText => "casaxps-text",
-        }
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Provenance {
@@ -104,14 +62,67 @@ pub struct LoadResult {
     /// Normalized, user-facing identity recovered by the importer. This is
     /// deliberately separate from provenance paths and parser diagnostics: the
     /// application must never reverse-parse `source` strings to name a sample.
-    pub scientific_identity: ImportedScientificIdentity,
+    pub acquisition_identity: AcquisitionIdentity,
     pub format: DataFormat,
     pub provenance: Provenance,
+    nmr_origin: Option<NmrOrigin>,
     pub warnings: Vec<LoadWarning>,
 }
 
+impl LoadResult {
+    pub fn new(
+        acquisition: Acquisition,
+        acquisition_identity: AcquisitionIdentity,
+        format: DataFormat,
+        provenance: Provenance,
+        warnings: Vec<LoadWarning>,
+    ) -> Self {
+        Self {
+            acquisition,
+            acquisition_identity,
+            format,
+            provenance,
+            nmr_origin: None,
+            warnings,
+        }
+    }
+
+    pub fn with_nmr_origin(mut self, origin: NmrOrigin) -> Self {
+        self.nmr_origin = Some(origin);
+        self
+    }
+
+    pub fn take_nmr_origin(&mut self) -> Option<NmrOrigin> {
+        self.nmr_origin.take()
+    }
+
+    pub fn into_parts(
+        self,
+    ) -> (
+        Acquisition,
+        AcquisitionIdentity,
+        DataFormat,
+        Provenance,
+        Option<NmrOrigin>,
+        Vec<LoadWarning>,
+    ) {
+        (
+            self.acquisition,
+            self.acquisition_identity,
+            self.format,
+            self.provenance,
+            self.nmr_origin,
+            self.warnings,
+        )
+    }
+}
+
+pub use nmr_origin::{
+    NmrInstrumentOrigin, NmrOrigin, NmrPortableMetadata, NmrSourceFormat, NmrSourceParameters,
+};
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ImportedScientificIdentity {
+pub struct AcquisitionIdentity {
     /// The specimen, recording, run, or other scientific subject.
     pub subject: Option<String>,
     /// The acquisition experiment, protocol, or method when the format names it.
@@ -120,7 +131,7 @@ pub struct ImportedScientificIdentity {
     pub source_label: String,
 }
 
-impl ImportedScientificIdentity {
+impl AcquisitionIdentity {
     pub fn from_path(path: &Path) -> Self {
         let source_label = path
             .file_stem()
@@ -656,6 +667,9 @@ pub enum IoError {
 
     #[error("unsupported Varian/Agilent VnmrJ data: {0}")]
     UnsupportedVarian(String),
+
+    #[error("NMR conversion failed: {0}")]
+    NmrConversion(String),
 }
 
 /// Load a dataset, auto-detecting the format from the path. A Bruker
@@ -664,22 +678,24 @@ pub enum IoError {
 pub fn detect_format(path: impl AsRef<Path>) -> Result<DataFormat, IoError> {
     let path = path.as_ref();
     if xps::is_vamas_xps(path) {
-        return Ok(DataFormat::VamasXps);
+        return Ok(DataFormat::Xps(XpsFormat::VamasXps));
     }
     if xps::is_casaxps_text(path) {
-        return Ok(DataFormat::CasaXpsText);
+        return Ok(DataFormat::Xps(XpsFormat::CasaXpsText));
     }
     if waters::is_masslynx_raw(path) {
-        return Ok(DataFormat::WatersMassLynxRaw);
+        return Ok(DataFormat::MassSpectrometry(
+            MassSpectrometryFormat::WatersMassLynxRaw,
+        ));
     }
     if let Some(format) = bruker::detect_processed(path) {
         return Ok(format);
     }
     if bruker::is_bruker(path) {
-        return Ok(DataFormat::BrukerRaw);
+        return Ok(DataFormat::Nmr(NmrFormat::BrukerRaw));
     }
     if varian::is_varian(path) {
-        return Ok(DataFormat::VarianAgilentRaw);
+        return Ok(DataFormat::Nmr(NmrFormat::VarianAgilentRaw));
     }
     let ext = path
         .extension()
@@ -687,23 +703,31 @@ pub fn detect_format(path: impl AsRef<Path>) -> Result<DataFormat, IoError> {
         .unwrap_or("")
         .to_ascii_lowercase();
     match ext.as_str() {
-        "rasx" => Ok(DataFormat::RigakuRasx),
-        "raw" if xrd::is_rigaku_raw(path) => Ok(DataFormat::RigakuRaw),
-        "txt" if xrd::is_rigaku_profile(path) => Ok(DataFormat::RigakuProfile),
+        "rasx" => Ok(DataFormat::Xrd(XrdFormat::RigakuRasx)),
+        "raw" if xrd::is_rigaku_raw(path) => Ok(DataFormat::Xrd(XrdFormat::RigakuRaw)),
+        "txt" if xrd::is_rigaku_profile(path) => Ok(DataFormat::Xrd(XrdFormat::RigakuProfile)),
         "raw" if path.is_file() => Err(IoError::Unsupported(format!(
             "unsupported XRD .raw variant; this build recognizes the Rigaku FI layout, .rasx, and exported profile .txt ({})",
             path.display()
         ))),
-        "spm" if nanoscope::is_nanoscope(path) => Ok(DataFormat::BrukerNanoScopeSpm),
-        "pfc" if nanoscope::is_nanoscope(path) => Ok(DataFormat::BrukerPeakForceCapture),
-        "abf" if abf2::is_abf2(path) => Ok(DataFormat::Abf2),
-        "jdf" => Ok(DataFormat::JeolDelta),
-        "dx" | "jdx" | "jcamp" => Ok(DataFormat::JcampDx1D),
-        "mzml" => Ok(DataFormat::MzMl),
+        "spm" if nanoscope::is_nanoscope(path) => {
+            Ok(DataFormat::Afm(AfmFormat::BrukerNanoScopeSpm))
+        }
+        "pfc" if nanoscope::is_nanoscope(path) => {
+            Ok(DataFormat::Afm(AfmFormat::BrukerPeakForceCapture))
+        }
+        "abf" if abf2::is_abf2(path) => {
+            Ok(DataFormat::Electrophysiology(ElectrophysiologyFormat::Abf2))
+        }
+        "jdf" => Ok(DataFormat::Nmr(NmrFormat::JeolDelta)),
+        "dx" | "jdx" | "jcamp" => Ok(DataFormat::Nmr(NmrFormat::JcampDx1D)),
+        "mzml" => Ok(DataFormat::MassSpectrometry(MassSpectrometryFormat::MzMl)),
         // Fall back to a content sniff so extensionless or mislabelled files
         // are still recognised by their magic bytes.
-        _ if abf2::is_abf2(path) => Ok(DataFormat::Abf2),
-        _ if jeol::is_jdf(path) => Ok(DataFormat::JeolDelta),
+        _ if abf2::is_abf2(path) => {
+            Ok(DataFormat::Electrophysiology(ElectrophysiologyFormat::Abf2))
+        }
+        _ if jeol::is_jdf(path) => Ok(DataFormat::Nmr(NmrFormat::JeolDelta)),
         _ => Err(IoError::Unsupported(format!(
             "unrecognised path {}: expected mzML, Rigaku FI .raw/.rasx/profile .txt, a Waters .raw directory, NanoScope .spm/.pfc, ABF2 .abf, JEOL .jdf, JCAMP-DX .dx/.jdx/.jcamp, Bruker fid/ser or pdata, or a Varian/Agilent VnmrJ .fid directory",
             path.display()
@@ -714,24 +738,26 @@ pub fn detect_format(path: impl AsRef<Path>) -> Result<DataFormat, IoError> {
 pub fn load_path(path: impl AsRef<Path>) -> Result<LoadResult, IoError> {
     let path = path.as_ref();
     match detect_format(path)? {
-        DataFormat::Abf2 => abf2::load(path),
-        DataFormat::JeolDelta => jeol::load_jdf_path(path),
-        DataFormat::BrukerRaw => bruker::load_raw(path),
-        DataFormat::VarianAgilentRaw => varian::load_raw(path),
-        DataFormat::BrukerProcessed1D | DataFormat::BrukerProcessed2D => {
+        DataFormat::Electrophysiology(ElectrophysiologyFormat::Abf2) => abf2::load(path),
+        DataFormat::Nmr(NmrFormat::JeolDelta) => jeol::load_jdf_path(path),
+        DataFormat::Nmr(NmrFormat::BrukerRaw) => bruker::load_raw(path),
+        DataFormat::Nmr(NmrFormat::VarianAgilentRaw) => varian::load_raw(path),
+        DataFormat::Nmr(NmrFormat::BrukerProcessed1D | NmrFormat::BrukerProcessed2D) => {
             bruker::load_processed(path)
         }
-        DataFormat::JcampDx1D => jcamp_dx::load(path),
-        DataFormat::BrukerNanoScopeSpm | DataFormat::BrukerPeakForceCapture => {
+        DataFormat::Nmr(NmrFormat::JcampDx1D) => jcamp_dx::load(path),
+        DataFormat::Afm(AfmFormat::BrukerNanoScopeSpm | AfmFormat::BrukerPeakForceCapture) => {
             nanoscope::load(path)
         }
-        DataFormat::WatersMassLynxRaw => waters::load(path),
-        DataFormat::MzMl => mzml::load(path),
-        DataFormat::RigakuRasx => xrd::load_rasx(path),
-        DataFormat::RigakuRaw => xrd::load_raw(path),
-        DataFormat::RigakuProfile => xrd::load_profile(path),
-        DataFormat::VamasXps => xps::load_vamas(path),
-        DataFormat::CasaXpsText => xps::load_casaxps(path),
+        DataFormat::MassSpectrometry(MassSpectrometryFormat::WatersMassLynxRaw) => {
+            waters::load(path)
+        }
+        DataFormat::MassSpectrometry(MassSpectrometryFormat::MzMl) => mzml::load(path),
+        DataFormat::Xrd(XrdFormat::RigakuRasx) => xrd::load_rasx(path),
+        DataFormat::Xrd(XrdFormat::RigakuRaw) => xrd::load_raw(path),
+        DataFormat::Xrd(XrdFormat::RigakuProfile) => xrd::load_profile(path),
+        DataFormat::Xps(XpsFormat::VamasXps) => xps::load_vamas(path),
+        DataFormat::Xps(XpsFormat::CasaXpsText) => xps::load_casaxps(path),
     }
 }
 pub mod image;

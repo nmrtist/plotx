@@ -171,7 +171,7 @@ pub struct TableDataset {
     pub resource_id: crate::state::DatasetId,
     /// Persisted identity for the table's default series field.
     pub field_catalog: crate::state::FieldCatalog,
-    pub scientific_identity: plotx_io::ImportedScientificIdentity,
+    pub acquisition_identity: plotx_io::AcquisitionIdentity,
     /// Executable extraction recipe used to refresh this immutable table.
     pub provenance: Option<TableProvenance>,
     /// Domain constants consumed by analysis bindings.
@@ -228,7 +228,7 @@ impl TableDataset {
         Self {
             resource_id: new_resource_id(),
             field_catalog,
-            scientific_identity: plotx_io::ImportedScientificIdentity {
+            acquisition_identity: plotx_io::AcquisitionIdentity {
                 subject: None,
                 acquisition: None,
                 source_label: "Data table".to_owned(),

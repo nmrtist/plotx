@@ -77,7 +77,7 @@ pub struct ElectrophysiologyDataset {
     pub resource_id: DatasetId,
     /// Persisted mapping from stable channel keys to dataset-local field ids.
     pub field_catalog: FieldCatalog,
-    pub scientific_identity: plotx_io::ImportedScientificIdentity,
+    pub acquisition_identity: plotx_io::AcquisitionIdentity,
     pub data: ElectrophysiologyData,
     /// Calculated from loaded samples and omitted from project metadata.
     #[serde(skip, default)]
@@ -171,8 +171,8 @@ pub(crate) fn resolve_abf_stimulus(data: &ElectrophysiologyData) -> Option<Resol
 
 impl ElectrophysiologyDataset {
     pub fn load(data: ElectrophysiologyData) -> Self {
-        let scientific_identity =
-            plotx_io::ImportedScientificIdentity::from_path(std::path::Path::new(&data.source));
+        let acquisition_identity =
+            plotx_io::AcquisitionIdentity::from_path(std::path::Path::new(&data.source));
         let stimulus = data
             .sweeps
             .iter()
@@ -203,7 +203,7 @@ impl ElectrophysiologyDataset {
         Self {
             resource_id: new_resource_id(),
             field_catalog,
-            scientific_identity,
+            acquisition_identity,
             data,
             field_keys: OnceLock::from(field_keys),
             name: None,

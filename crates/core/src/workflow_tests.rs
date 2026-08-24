@@ -79,7 +79,7 @@ fn import_preference_seeds_one_persistent_plot_override() {
 #[test]
 fn inspection_contract_reports_canonical_shape_and_domain() {
     let report = inspection_report(
-        DataFormat::JcampDx1D,
+        DataFormat::Nmr(plotx_io::NmrFormat::JcampDx1D),
         &Provenance {
             selected_path: "sample.dx".into(),
             data_path: "sample.dx".into(),

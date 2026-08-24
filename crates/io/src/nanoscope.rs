@@ -6,8 +6,8 @@
 //! vocabulary with different optional fields.
 
 use crate::{
-    Acquisition, AfmData, AfmForceSet, AfmFrameDirection, AfmImageChannel, AfmScale, DataFormat,
-    IoError, LoadResult, LoadWarning, LoadWarningCode, Provenance,
+    Acquisition, AfmData, AfmForceSet, AfmFormat, AfmFrameDirection, AfmImageChannel, AfmScale,
+    DataFormat, IoError, LoadResult, LoadWarning, LoadWarningCode, Provenance,
 };
 use std::collections::HashMap;
 use std::fs::{self, File};
@@ -79,23 +79,25 @@ pub fn load(path: &Path) -> Result<LoadResult, IoError> {
         .and_then(|value| value.to_str())
         .is_some_and(|value| value.eq_ignore_ascii_case("pfc"))
     {
-        DataFormat::BrukerPeakForceCapture
+        DataFormat::Afm(AfmFormat::BrukerPeakForceCapture)
     } else {
-        DataFormat::BrukerNanoScopeSpm
+        DataFormat::Afm(AfmFormat::BrukerNanoScopeSpm)
     };
     let (mut data, mut warnings) = parse(&bytes, path, format)?;
     let mut companion_paths = Vec::new();
 
-    if format == DataFormat::BrukerPeakForceCapture {
+    if format == DataFormat::Afm(AfmFormat::BrukerPeakForceCapture) {
         let mut mismatch = None;
         for companion in companion_candidates(path) {
             let Ok(companion_bytes) = fs::read(&companion) else {
                 mismatch = Some(companion);
                 continue;
             };
-            let Ok((sidecar, sidecar_warnings)) =
-                parse(&companion_bytes, &companion, DataFormat::BrukerNanoScopeSpm)
-            else {
+            let Ok((sidecar, sidecar_warnings)) = parse(
+                &companion_bytes,
+                &companion,
+                DataFormat::Afm(AfmFormat::BrukerNanoScopeSpm),
+            ) else {
                 mismatch = Some(companion);
                 continue;
             };
@@ -137,18 +139,18 @@ pub fn load(path: &Path) -> Result<LoadResult, IoError> {
         }
     }
 
-    Ok(LoadResult {
-        scientific_identity: crate::ImportedScientificIdentity::from_path(path),
-        acquisition: Acquisition::Afm(Box::new(data)),
+    Ok(LoadResult::new(
+        Acquisition::Afm(Box::new(data)),
+        crate::AcquisitionIdentity::from_path(path),
         format,
-        provenance: Provenance {
+        Provenance {
             selected_path: path.to_path_buf(),
             data_path: path.to_path_buf(),
             parameter_paths: Vec::new(),
             companion_paths,
         },
         warnings,
-    })
+    ))
 }
 
 fn parse(
@@ -184,7 +186,8 @@ fn parse(
         let lower_section = section.name.to_ascii_lowercase();
         let image_bytes = width.saturating_mul(height).saturating_mul(bytes_per_pixel);
         let is_force = lower_section.contains("force image")
-            || (format == DataFormat::BrukerPeakForceCapture && length > image_bytes);
+            || (format == DataFormat::Afm(AfmFormat::BrukerPeakForceCapture)
+                && length > image_bytes);
 
         if is_force {
             force_candidates.push((section, offset, length, width, height, bytes_per_pixel));
@@ -211,7 +214,10 @@ fn parse(
     let forces = if let Some(candidate) = force_candidates.into_iter().max_by_key(|v| v.2) {
         match parse_force(bytes, candidate, &globals, format) {
             Ok(force) => Some(force),
-            Err(error) if format != DataFormat::BrukerPeakForceCapture && !images.is_empty() => {
+            Err(error)
+                if format != DataFormat::Afm(AfmFormat::BrukerPeakForceCapture)
+                    && !images.is_empty() =>
+            {
                 warnings.push(warning(
                     LoadWarningCode::OptionalChannelSkipped,
                     format!("skipped invalid optional force block: {error}"),
@@ -321,7 +327,7 @@ fn parse_force(
         .ok_or_else(|| invalid("force grid dimensions overflow"))?;
     let use_proposed_grid = proposed_pixels > 0
         && count % proposed_pixels == 0
-        && (format == DataFormat::BrukerPeakForceCapture
+        && (format == DataFormat::Afm(AfmFormat::BrukerPeakForceCapture)
             || section.value(&["Force/line"]).is_some()
             || globals.contains_key("force/line"));
     let (grid_width, grid_height) = if use_proposed_grid {
@@ -356,7 +362,7 @@ fn parse_force(
         ));
     }
     let mut raw = read_integers(bytes, offset, length, word)?;
-    if format == DataFormat::BrukerPeakForceCapture && word == 4 {
+    if format == DataFormat::Afm(AfmFormat::BrukerPeakForceCapture) && word == 4 {
         replace_force_sentinels(&mut raw, samples_per_curve);
     }
     normalize_force_grid(
@@ -472,7 +478,10 @@ fn force_axis(
     amplitude: Option<f64>,
     sync: f64,
 ) -> (Vec<usize>, usize, Option<Vec<f64>>) {
-    if format != DataFormat::BrukerPeakForceCapture || frequency.is_none() || amplitude.is_none() {
+    if format != DataFormat::Afm(AfmFormat::BrukerPeakForceCapture)
+        || frequency.is_none()
+        || amplitude.is_none()
+    {
         return ((0..samples).collect(), samples / 2, None);
     }
     // NanoScope records Sync Distance QNM in 2 µs steps. Convert that delay to

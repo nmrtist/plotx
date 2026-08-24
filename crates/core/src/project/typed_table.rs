@@ -195,7 +195,7 @@ pub(crate) fn table_dataset_to_v1(
         },
         extensions: serde_json::json!({
             "plotx.table.v1": sidecar,
-            "plotx.scientific_identity": &table.scientific_identity,
+            "plotx.acquisition_identity": &table.acquisition_identity,
         }),
     };
     let recipe = RecipeObject {
@@ -241,7 +241,7 @@ pub(crate) fn table_dataset_from_v1(
             ProjectError::Invalid(format!("table has invalid stable id {}", data.id))
         })?,
         field_catalog: sidecar.field_catalog,
-        scientific_identity: super::convert::read_scientific_identity(data)?,
+        acquisition_identity: super::convert::read_acquisition_identity(data)?,
         provenance: sidecar.provenance,
         meta: sidecar.meta,
         curve_fit_analyses: sidecar.curve_fit_analyses,

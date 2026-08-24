@@ -83,7 +83,7 @@ mod tests {
     use super::*;
     use crate::state::{Dataset, NmrDataset, PlotxApp};
     use num_complex::Complex64;
-    use plotx_io::{Domain, ImportedScientificIdentity, NmrData};
+    use plotx_io::{AcquisitionIdentity, Domain, NmrData};
 
     fn nmr_dataset() -> Dataset {
         let mut dataset = NmrDataset::load(NmrData {
@@ -96,7 +96,7 @@ mod tests {
             source: "raw/exp1/fid".to_owned(),
             group_delay: 0.0,
         });
-        dataset.scientific_identity = ImportedScientificIdentity {
+        dataset.acquisition_identity = AcquisitionIdentity {
             subject: Some("Sample A".to_owned()),
             acquisition: Some("zg30".to_owned()),
             source_label: "fid".to_owned(),

@@ -52,12 +52,13 @@ impl NmrDataset {
         Self {
             resource_id: DatasetId::new(),
             field_catalog,
-            scientific_identity: plotx_io::ImportedScientificIdentity {
+            acquisition_identity: plotx_io::AcquisitionIdentity {
                 subject: None,
                 acquisition: None,
                 source_label: source.clone(),
             },
             data,
+            origin: plotx_io::NmrOrigin::Derived,
             base: processed.clone(),
             pipeline,
             next_step_id: 0,

@@ -3,7 +3,7 @@
 //! This module deliberately owns the JCAMP label-record and ASDF semantics. It
 //! is not related to Bruker's similarly shaped parameter files.
 
-use crate::{Acquisition, DataFormat, Domain, IoError, LoadResult, NmrData, Provenance};
+use crate::{Acquisition, DataFormat, Domain, IoError, LoadResult, NmrData, NmrFormat, Provenance};
 use num_complex::Complex64;
 use std::collections::HashMap;
 use std::path::Path;
@@ -98,18 +98,18 @@ pub fn has_jcamp_extension(path: &Path) -> bool {
 pub fn load(path: &Path) -> Result<LoadResult, IoError> {
     let bytes = std::fs::read(path)?;
     let acquisition = parse_bytes(&bytes, path.to_string_lossy().as_ref())?;
-    Ok(LoadResult {
-        scientific_identity: crate::ImportedScientificIdentity::from_path(path),
+    Ok(LoadResult::new(
         acquisition,
-        format: DataFormat::JcampDx1D,
-        provenance: Provenance {
+        crate::AcquisitionIdentity::from_path(path),
+        DataFormat::Nmr(NmrFormat::JcampDx1D),
+        Provenance {
             selected_path: path.to_path_buf(),
             data_path: path.to_path_buf(),
             parameter_paths: Vec::new(),
             companion_paths: Vec::new(),
         },
-        warnings: Vec::new(),
-    })
+        Vec::new(),
+    ))
 }
 
 fn parse_bytes(bytes: &[u8], source: &str) -> Result<Acquisition, JcampDxError> {

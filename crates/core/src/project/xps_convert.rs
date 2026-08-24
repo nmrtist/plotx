@@ -84,7 +84,7 @@ pub(super) fn from_objects(
     )?;
     experiment.validate().map_err(ProjectError::Invalid)?;
     let mut dataset = crate::state::XpsDataset::load(experiment);
-    dataset.scientific_identity = super::convert::read_scientific_identity(data)?;
+    dataset.acquisition_identity = super::convert::read_acquisition_identity(data)?;
     dataset.field_catalog = super::field_catalog::read(data)?;
     dataset.name = data.label.clone();
     let state = recipe

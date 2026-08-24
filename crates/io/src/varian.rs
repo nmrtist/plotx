@@ -4,8 +4,8 @@ mod fid;
 mod procpar;
 
 use crate::{
-    Acquisition, DataFormat, Dim, Domain, IoError, LoadResult, NmrData, NmrData2D, Provenance,
-    QuadMode,
+    Acquisition, DataFormat, Dim, Domain, IoError, LoadResult, NmrData, NmrData2D, NmrFormat,
+    Provenance, QuadMode,
 };
 use procpar::Procpar;
 use std::path::{Path, PathBuf};
@@ -46,8 +46,9 @@ pub fn load_raw(path: &Path) -> Result<LoadResult, IoError> {
     }
     reject_unsupported(&params)?;
     let acquisition = assemble(&dir, &params, raw)?;
-    Ok(LoadResult {
-        scientific_identity: crate::ImportedScientificIdentity {
+    Ok(LoadResult::new(
+        acquisition,
+        crate::AcquisitionIdentity {
             subject: sample_name(&dir, &params),
             acquisition: experiment_name(&params),
             source_label: dir
@@ -56,16 +57,15 @@ pub fn load_raw(path: &Path) -> Result<LoadResult, IoError> {
                 .unwrap_or("Untitled NMR")
                 .to_owned(),
         },
-        acquisition,
-        format: DataFormat::VarianAgilentRaw,
-        provenance: Provenance {
+        DataFormat::Nmr(NmrFormat::VarianAgilentRaw),
+        Provenance {
             selected_path: path.to_path_buf(),
             data_path,
             parameter_paths: vec![procpar_path],
             companion_paths: Vec::new(),
         },
-        warnings: Vec::new(),
-    })
+        Vec::new(),
+    ))
 }
 
 fn reject_unsupported(p: &Procpar) -> Result<(), IoError> {
