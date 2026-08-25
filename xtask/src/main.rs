@@ -142,8 +142,6 @@ fn pr_check(stage: Option<PrCheckStage>) -> Result<(), String> {
                     "--exclude",
                     "plotx-substrait",
                     "--locked",
-                    "--profile",
-                    "pr-check",
                     "--quiet",
                 ],
             },
@@ -276,7 +274,6 @@ fn cargo_output(repo_root: &Path, args: &[&str]) -> Result<Output, String> {
         .args(args)
         .current_dir(repo_root)
         .env("CARGO_TERM_COLOR", "always")
-        .env("CARGO_PROFILE_DEV_DEBUG", "line-tables-only")
         .output()
         .map_err(|error| format!("failed to run cargo {}: {error}", args.join(" ")))
 }

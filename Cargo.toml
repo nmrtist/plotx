@@ -113,6 +113,9 @@ plotx-figure = { path = "crates/figure" }
 plotx-render = { path = "crates/render" }
 plotx-core = { path = "crates/core", default-features = false }
 
+[profile.dev]
+debug = 0
+
 # Keep numerical hot paths responsive in debug builds.
 [profile.dev.package.plotx-analysis]
 opt-level = 3
@@ -124,17 +127,8 @@ opt-level = 3
 [profile.dev.package.rustfft]
 opt-level = 2
 
-[profile.pr-check]
-inherits = "dev"
-debug = 0
-incremental = false
-
-[profile.pr-check.package."*"]
-opt-level = 0
-
 [profile.release]
-lto = "thin"
-codegen-units = 1
-debug = "line-tables-only"
-split-debuginfo = "packed"
+lto = false
+codegen-units = 16
+debug = 0
 strip = true
