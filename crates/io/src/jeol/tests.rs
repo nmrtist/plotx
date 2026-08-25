@@ -1,5 +1,6 @@
 use super::*;
 use crate::AxisSource;
+use crate::jeol::ruler::prefix_exponent;
 
 #[test]
 fn prefix_exponent_ladder() {
@@ -127,6 +128,7 @@ fn round_trips_a_hand_built_1d_le_file() {
     buf[off::ENDIAN] = 1; // little-endian body
     buf[off::DATA_DIMENSION_NUMBER] = 1;
     buf[off::DATA_AXIS_TYPE] = AXIS_COMPLEX;
+    buf[off::DATA_AXIS_UNITS + 1] = UNIT_SECOND;
     buf[off::DATA_POINTS..off::DATA_POINTS + 4].copy_from_slice(&(npoints as u32).to_be_bytes());
     buf[off::BASE_FREQ..off::BASE_FREQ + 8].copy_from_slice(&600.17f64.to_be_bytes());
     // SW = (npoints-1)/acq = 1000 Hz.
@@ -172,6 +174,151 @@ fn round_trips_a_hand_built_1d_le_file() {
 }
 
 #[test]
+fn recognizes_a_processed_1d_axis_without_applying_fft() {
+    let data = processed_1d(0x01, UNIT_PPM, -10.0, 10.0, 100.0);
+
+    assert_eq!(data.domain, Domain::Frequency);
+    assert_eq!(data.spectral_width_hz, 2000.0);
+    assert_eq!(data.carrier_ppm, 0.0);
+    assert_eq!(
+        data.points.iter().map(|point| point.re).collect::<Vec<_>>(),
+        vec![1.0, 2.0, 3.0, 4.0]
+    );
+}
+
+#[test]
+fn normalizes_a_descending_processed_axis_and_its_samples() {
+    let data = processed_1d(0x01, UNIT_PPM, 10.0, -10.0, 100.0);
+
+    assert_eq!(data.spectral_width_hz, 2000.0);
+    assert_eq!(data.carrier_ppm, 0.0);
+    assert_eq!(
+        data.points.iter().map(|point| point.re).collect::<Vec<_>>(),
+        vec![4.0, 3.0, 2.0, 1.0]
+    );
+}
+
+#[test]
+fn processed_axis_uses_all_stored_points_not_the_time_domain_offset_stop() {
+    let mut buf = processed_1d_bytes(0x01, UNIT_PPM, -10.0, 10.0, 100.0);
+    buf[off::DATA_OFFSET_STOP..off::DATA_OFFSET_STOP + 4].copy_from_slice(&2u32.to_be_bytes());
+
+    let Acquisition::D1(data) = read_jdf_bytes(&buf, "processed-window.jdf".into()).unwrap() else {
+        panic!("expected 1D NMR");
+    };
+    assert_eq!(data.len(), 4);
+    assert_eq!(data.spectral_width_hz, 2000.0);
+}
+
+#[test]
+fn converts_hertz_axis_to_frequency_metadata() {
+    let data = processed_1d(0x01, UNIT_HERTZ, 1000.0, 3000.0, 400.0);
+
+    assert_eq!(data.domain, Domain::Frequency);
+    assert_eq!(data.spectral_width_hz, 2000.0);
+    assert_eq!(data.carrier_ppm, 5.0);
+}
+
+#[test]
+fn applies_axis_prefix_before_converting_frequency_metadata() {
+    let data = processed_1d(0xF1, UNIT_HERTZ, -1.0, 3.0, 400.0);
+
+    assert_eq!(data.spectral_width_hz, 4000.0);
+    assert_eq!(data.carrier_ppm, 2.5);
+}
+
+#[test]
+fn applies_axis_prefix_to_fid_acquisition_time() {
+    let data = processed_1d(0x11, UNIT_SECOND, 0.0, 3.0, 400.0);
+
+    assert_eq!(data.domain, Domain::Time);
+    assert!((data.spectral_width_hz - 1000.0).abs() < 1e-9);
+}
+
+#[test]
+fn rejects_an_unknown_axis_unit() {
+    let mut buf = vec![0u8; HEADER_LEN + 16];
+    buf[..8].copy_from_slice(MAGIC);
+    buf[off::DATA_DIMENSION_NUMBER] = 1;
+    buf[off::DATA_AXIS_TYPE] = AXIS_COMPLEX;
+    buf[off::DATA_POINTS..off::DATA_POINTS + 4].copy_from_slice(&1u32.to_be_bytes());
+
+    let err = read_jdf_bytes(&buf, "unknown-unit.jdf".into()).unwrap_err();
+    assert!(
+        matches!(err, IoError::Unsupported(ref message) if message.contains("unknown JEOL unit")),
+        "got {err:?}"
+    );
+}
+
+#[test]
+fn rejects_invalid_frequency_metadata_instead_of_inventing_defaults() {
+    let mut buf = processed_1d_bytes(0x01, UNIT_HERTZ, 1.0, 1.0, 0.0);
+    let err = read_jdf_bytes(&buf, "invalid-frequency.jdf".into()).unwrap_err();
+    assert!(
+        matches!(err, IoError::Unsupported(ref message) if message.contains("observe frequency")),
+        "got {err:?}"
+    );
+
+    buf[off::BASE_FREQ..off::BASE_FREQ + 8].copy_from_slice(&400.0f64.to_be_bytes());
+    let err = read_jdf_bytes(&buf, "invalid-span.jdf".into()).unwrap_err();
+    assert!(
+        matches!(err, IoError::Unsupported(ref message) if message.contains("axis span")),
+        "got {err:?}"
+    );
+}
+
+fn processed_1d(
+    unit_scaler: u8,
+    unit: u8,
+    axis_start: f64,
+    axis_stop: f64,
+    observe_freq_mhz: f64,
+) -> NmrData {
+    let buf = processed_1d_bytes(unit_scaler, unit, axis_start, axis_stop, observe_freq_mhz);
+    let Acquisition::D1(data) = read_jdf_bytes(&buf, "axis.jdf".into()).unwrap() else {
+        panic!("expected 1D NMR");
+    };
+    data
+}
+
+fn processed_1d_bytes(
+    unit_scaler: u8,
+    unit: u8,
+    axis_start: f64,
+    axis_stop: f64,
+    observe_freq_mhz: f64,
+) -> Vec<u8> {
+    let npoints = 4usize;
+    let data_start = HEADER_LEN + 16;
+    let data_len = npoints * 8 * 2;
+    let mut buf = vec![0u8; data_start + data_len];
+
+    buf[..8].copy_from_slice(MAGIC);
+    buf[off::ENDIAN] = 1;
+    buf[off::DATA_DIMENSION_NUMBER] = 1;
+    buf[off::DATA_AXIS_TYPE] = AXIS_COMPLEX;
+    buf[off::DATA_AXIS_UNITS] = unit_scaler;
+    buf[off::DATA_AXIS_UNITS + 1] = unit;
+    buf[off::DATA_POINTS..off::DATA_POINTS + 4].copy_from_slice(&(npoints as u32).to_be_bytes());
+    buf[off::DATA_OFFSET_STOP..off::DATA_OFFSET_STOP + 4]
+        .copy_from_slice(&((npoints - 1) as u32).to_be_bytes());
+    buf[off::BASE_FREQ..off::BASE_FREQ + 8].copy_from_slice(&observe_freq_mhz.to_be_bytes());
+    buf[off::DATA_AXIS_START..off::DATA_AXIS_START + 8].copy_from_slice(&axis_start.to_be_bytes());
+    buf[off::DATA_AXIS_STOP..off::DATA_AXIS_STOP + 8].copy_from_slice(&axis_stop.to_be_bytes());
+    buf[off::DATA_START..off::DATA_START + 4].copy_from_slice(&(data_start as u32).to_be_bytes());
+    buf[off::DATA_LENGTH..off::DATA_LENGTH + 8].copy_from_slice(&(data_len as u64).to_be_bytes());
+
+    for i in 0..npoints {
+        let real = data_start + i * 8;
+        let imag = data_start + npoints * 8 + i * 8;
+        buf[real..real + 8].copy_from_slice(&(i as f64 + 1.0).to_le_bytes());
+        buf[imag..imag + 8].copy_from_slice(&0.0f64.to_le_bytes());
+    }
+
+    buf
+}
+
+#[test]
 fn uses_real_point_count_over_padded_count_for_1d() {
     // 8 padded points, only 4 real (DATA_OFFSET_STOP = 3). The FID must be
     // truncated to 4 and the sweep width computed from the real count, not the
@@ -189,6 +336,7 @@ fn uses_real_point_count_over_padded_count_for_1d() {
     buf[off::ENDIAN] = 1;
     buf[off::DATA_DIMENSION_NUMBER] = 1;
     buf[off::DATA_AXIS_TYPE] = AXIS_COMPLEX;
+    buf[off::DATA_AXIS_UNITS + 1] = UNIT_SECOND;
     buf[off::DATA_POINTS..off::DATA_POINTS + 4].copy_from_slice(&(npad as u32).to_be_bytes());
     buf[off::DATA_OFFSET_STOP..off::DATA_OFFSET_STOP + 4]
         .copy_from_slice(&((nreal - 1) as u32).to_be_bytes());
@@ -248,6 +396,7 @@ fn rejects_ambiguous_sample_width() {
     buf[off::ENDIAN] = 1;
     buf[off::DATA_DIMENSION_NUMBER] = 1;
     buf[off::DATA_AXIS_TYPE] = AXIS_COMPLEX;
+    buf[off::DATA_AXIS_UNITS + 1] = UNIT_SECOND;
     buf[off::DATA_POINTS..off::DATA_POINTS + 4].copy_from_slice(&(npoints as u32).to_be_bytes());
     buf[off::DATA_START..off::DATA_START + 4].copy_from_slice(&(data_start as u32).to_be_bytes());
     buf[off::DATA_LENGTH..off::DATA_LENGTH + 8].copy_from_slice(&(data_len as u64).to_be_bytes());

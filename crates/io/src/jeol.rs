@@ -9,17 +9,18 @@ use crate::{
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use num_complex::Complex64;
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
 use std::path::Path;
 
 mod filter;
 mod nus;
+mod params;
 mod ruler;
 use filter::group_delay;
 use nus::detect_nus;
 #[cfg(test)]
 use nus::extract_nuslist;
-use ruler::{ascii_trim, kind_for_unit, prefix_exponent, scan_embedded_axis};
+use params::Params;
+use ruler::{kind_for_unit, prefix_exponent, scan_embedded_axis};
 
 const MAGIC: &[u8; 8] = b"JEOL.NMR";
 const HEADER_LEN: usize = 1360;
@@ -32,6 +33,7 @@ mod off {
     pub const MAJOR_VERSION: usize = 9; // u8
     pub const DATA_DIMENSION_NUMBER: usize = 12; // u8
     pub const DATA_AXIS_TYPE: usize = 24; // 8 × u8 (0 None, 1 Real, 3 Complex, ...)
+    pub const DATA_AXIS_UNITS: usize = 32; // 8 × (unit prefix/power u8, base unit u8)
     pub const DATA_POINTS: usize = 176; // 8 × u32 (per axis, padded to a tile edge)
     pub const DATA_OFFSET_STOP: usize = 240; // 8 × u32 (per axis, last real index)
     pub const DATA_AXIS_START: usize = 272; // 8 × f64 (axis low end)
@@ -44,6 +46,35 @@ mod off {
 
 const AXIS_COMPLEX: u8 = 3;
 const AXIS_REAL_COMPLEX: u8 = 4;
+const UNIT_HERTZ: u8 = 13;
+const UNIT_PPM: u8 = 26;
+const UNIT_SECOND: u8 = 28;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AxisUnit {
+    Hertz,
+    Ppm,
+    Second,
+}
+
+impl AxisUnit {
+    fn decode(bytes: &[u8], axis: usize) -> Result<(Self, f64), IoError> {
+        let at = off::DATA_AXIS_UNITS + axis * 2;
+        let unit = match bytes[at + 1] {
+            UNIT_HERTZ => Self::Hertz,
+            UNIT_PPM => Self::Ppm,
+            UNIT_SECOND => Self::Second,
+            unit => {
+                return Err(IoError::Unsupported(format!(
+                    "unknown JEOL unit {unit} for axis {}",
+                    axis + 1
+                )));
+            }
+        };
+        let scale = 10f64.powi(prefix_exponent(bytes[at]));
+        Ok((unit, scale))
+    }
+}
 
 // Edge of the square submatrix tiles nD data is stored in. Data_Points are
 // padded up to a multiple of this along every axis. True-2D data uses the 32
@@ -174,21 +205,32 @@ fn read_jdf_1d(bytes: &[u8], source: String, body_endian: Endian) -> Result<NmrD
             "header reports zero data points".into(),
         ));
     }
+    let raw_axis_start = h.f64(off::DATA_AXIS_START);
+    let raw_axis_stop = h.f64(off::DATA_AXIS_STOP);
+    let (axis_unit, axis_scale) = AxisUnit::decode(bytes, 0)?;
+    let axis_start = raw_axis_start * axis_scale;
+    let axis_stop = raw_axis_stop * axis_scale;
+    let domain = match axis_unit {
+        AxisUnit::Hertz | AxisUnit::Ppm => Domain::Frequency,
+        AxisUnit::Second => Domain::Time,
+    };
     // DATA_POINTS is padded to a tile edge; DATA_OFFSET_STOP is the last real
-    // index, so real count = stop+1 (mirrors the 2D path); reading the padded count
-    // pulls in trailing zeros and scales the sweep width. Fall back when unset (0).
-    let real_n = {
+    // time-domain index, so real count = stop+1. Processed spectra use the full
+    // DATA_POINTS array; their offset-stop describes the processing window, not
+    // trailing storage padding, and truncating there shifts every ppm coordinate.
+    let real_n = if domain == Domain::Time {
         let stop = h.u32(off::DATA_OFFSET_STOP) as usize;
         if stop > 0 {
             (stop + 1).min(npoints)
         } else {
             npoints
         }
+    } else {
+        npoints
     };
 
     let base_freq_mhz = h.f64(off::BASE_FREQ);
-    // For a FID this axis is the acquisition time in seconds (start → stop).
-    let acq_time_s = (h.f64(off::DATA_AXIS_STOP) - h.f64(off::DATA_AXIS_START)).abs();
+    let axis_span = (axis_stop - axis_start).abs();
 
     let params = Params::parse(bytes, off::PARAM_LIST, body_endian);
 
@@ -242,24 +284,43 @@ fn read_jdf_1d(bytes: &[u8], source: String, body_endian: Endian) -> Result<NmrD
     // JEOL stores the FID with the opposite quadrature sense to a naive forward
     // FFT; conjugating it here (negating the imaginary channel) makes a plain
     // forward FFT downstream yield the correct ppm ordering.
-    let points: Vec<Complex64> = real
+    let mut points: Vec<Complex64> = real
         .into_iter()
         .zip(imag)
         .map(|(re, im)| Complex64::new(re, -im))
         .collect();
 
-    let observe_freq_mhz = if base_freq_mhz.is_finite() && base_freq_mhz > 1.0 {
-        base_freq_mhz
-    } else {
-        400.0
-    };
+    if !base_freq_mhz.is_finite() || base_freq_mhz <= 1.0 {
+        return Err(IoError::Unsupported(format!(
+            "invalid JEOL observe frequency {base_freq_mhz} MHz"
+        )));
+    }
+    let observe_freq_mhz = base_freq_mhz;
     // Sweep width = 1/dwell; the last FID point sits at (N-1)·dwell = acq_time.
-    let spectral_width_hz = if acq_time_s.is_finite() && acq_time_s > 0.0 && real_n > 1 {
-        (real_n as f64 - 1.0) / acq_time_s
-    } else {
-        observe_freq_mhz * 20.0
+    let spectral_width_hz = match axis_unit {
+        AxisUnit::Second if axis_span.is_finite() && axis_span > 0.0 && real_n > 1 => {
+            (real_n as f64 - 1.0) / axis_span
+        }
+        AxisUnit::Hertz if axis_span.is_finite() && axis_span > 0.0 => axis_span,
+        AxisUnit::Ppm if axis_span.is_finite() && axis_span > 0.0 => axis_span * observe_freq_mhz,
+        _ => {
+            return Err(IoError::Unsupported(format!(
+                "invalid JEOL axis span from {raw_axis_start} to {raw_axis_stop}"
+            )));
+        }
     };
-    let carrier_ppm = params.f64("X_OFFSET").unwrap_or(0.0);
+    let axis_midpoint = (axis_start + axis_stop) / 2.0;
+    let carrier_ppm = match axis_unit {
+        AxisUnit::Hertz => axis_midpoint / observe_freq_mhz,
+        AxisUnit::Ppm => axis_midpoint,
+        AxisUnit::Second => params.f64("X_OFFSET").unwrap_or(0.0),
+    };
+
+    // Stored processed spectra run from high to low ppm. PlotX's imported
+    // frequency representation is low to high, matching its generated axis.
+    if domain == Domain::Frequency && axis_stop < axis_start {
+        points.reverse();
+    }
 
     let nucleus = params
         .string("X_DOMAIN")
@@ -274,7 +335,7 @@ fn read_jdf_1d(bytes: &[u8], source: String, body_endian: Endian) -> Result<NmrD
 
     Ok(NmrData {
         points,
-        domain: Domain::Time,
+        domain,
         spectral_width_hz,
         observe_freq_mhz,
         carrier_ppm,
@@ -579,108 +640,6 @@ fn guess_nucleus(mhz: f64) -> String {
         "13C".into()
     } else {
         "X".into()
-    }
-}
-
-struct Params {
-    f64s: HashMap<String, f64>,
-    /// SI-normalized numeric values (raw value with its scaler prefix folded in).
-    si: HashMap<String, f64>,
-    strings: HashMap<String, String>,
-}
-
-impl Params {
-    // Offsets within one fixed-size record, from the record start.
-    const SCALER: usize = 0x06; // u8: SI-prefix nibble (high nibble) on the value
-    const VALUE: usize = 0x10; // value payload (f64 uses the first 8 bytes)
-    const VALUE_TYPE: usize = 0x20; // u32: 0 = string, 2 = f64
-    const NAME: usize = 0x24; // 28-byte name, space/NUL padded
-    const NAME_LEN: usize = 28;
-
-    fn empty() -> Self {
-        Self {
-            f64s: HashMap::new(),
-            si: HashMap::new(),
-            strings: HashMap::new(),
-        }
-    }
-
-    // List header at `at` (body endianness): record_size u32, low_index u32,
-    // high_index u32, total_size u32; then fixed-size records.
-    fn parse(bytes: &[u8], at: usize, endian: Endian) -> Self {
-        let r = Reader { bytes, endian };
-        if at + 16 > bytes.len() {
-            return Self::empty();
-        }
-        let rec_size = r.u32(at) as usize;
-        let high = r.u32(at + 8) as usize;
-        if !(Self::NAME + Self::NAME_LEN..=4096).contains(&rec_size) {
-            return Self::empty();
-        }
-        let count = high.saturating_add(1).min(4096);
-        let base = at + 16;
-
-        let mut out = Self::empty();
-        for i in 0..count {
-            let rec = base + i * rec_size;
-            if rec + rec_size > bytes.len() {
-                break;
-            }
-            let name = ascii_trim(&bytes[rec + Self::NAME..rec + Self::NAME + Self::NAME_LEN]);
-            if name.is_empty() {
-                continue;
-            }
-            match r.u32(rec + Self::VALUE_TYPE) {
-                2 => {
-                    let raw = r.f64(rec + Self::VALUE);
-                    let scaler = bytes[rec + Self::SCALER];
-                    let si = raw * 10f64.powi(prefix_exponent(scaler));
-                    out.si.insert(name.clone(), si);
-                    out.f64s.insert(name, raw);
-                }
-                0 => {
-                    let s = ascii_trim(&bytes[rec + Self::VALUE..rec + Self::VALUE + 16]);
-                    if !s.is_empty() {
-                        out.strings.insert(name, s);
-                    }
-                }
-                _ => {}
-            }
-        }
-        out
-    }
-
-    fn f64(&self, name: &str) -> Option<f64> {
-        self.f64s.get(name).copied().filter(|v| v.is_finite())
-    }
-
-    fn string(&self, name: &str) -> Option<String> {
-        self.strings.get(name).cloned()
-    }
-
-    /// SI-normalized value of a numeric parameter, matched case-insensitively so
-    /// system params (`X_OFFSET`) and experiment params (`delta`) both resolve.
-    fn si(&self, name: &str) -> Option<f64> {
-        if let Some(v) = self.si.get(name) {
-            return Some(*v).filter(|v| v.is_finite());
-        }
-        let key = name.to_ascii_lowercase();
-        self.si
-            .iter()
-            .find(|(k, _)| k.to_ascii_lowercase() == key)
-            .map(|(_, v)| *v)
-            .filter(|v| v.is_finite())
-    }
-
-    fn string_ci(&self, name: &str) -> Option<String> {
-        if let Some(s) = self.strings.get(name) {
-            return Some(s.clone());
-        }
-        let key = name.to_ascii_lowercase();
-        self.strings
-            .iter()
-            .find(|(k, _)| k.to_ascii_lowercase() == key)
-            .map(|(_, v)| v.clone())
     }
 }
 
