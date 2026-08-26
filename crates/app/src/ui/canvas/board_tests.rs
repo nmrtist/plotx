@@ -20,6 +20,7 @@ fn screen() -> egui::Rect {
 fn workspace(board_rect: egui::Rect) -> crate::ui::workspace_geometry::WorkspaceGeometry {
     crate::ui::workspace_geometry::WorkspaceGeometry {
         board_rect,
+        task_card_bounds: board_rect,
         fit_occluders: Vec::new(),
         revision: 0,
     }
@@ -235,6 +236,7 @@ fn fit_uses_the_open_space_below_a_floating_task_card_when_it_is_better() {
     let board = egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(1000.0, 700.0));
     let geometry = crate::ui::workspace_geometry::WorkspaceGeometry {
         board_rect: board,
+        task_card_bounds: board,
         fit_occluders: vec![egui::Rect::from_min_max(
             egui::pos2(680.0, 0.0),
             egui::pos2(1000.0, 420.0),
@@ -263,6 +265,7 @@ fn floating_task_cards_do_not_change_a_manual_camera() {
     let board = screen();
     let geometry = crate::ui::workspace_geometry::WorkspaceGeometry {
         board_rect: board,
+        task_card_bounds: board,
         fit_occluders: vec![egui::Rect::from_min_max(
             egui::pos2(1500.0, 0.0),
             egui::pos2(2000.0, 900.0),

@@ -99,7 +99,7 @@ fn dpi_edit_roundtrips_and_supplies_the_next_export_default() {
         crate::settings::save_to_path(&path, settings)
     });
 
-    let loaded = crate::settings::load_from_paths(&path, None);
+    let loaded = crate::settings::load_from_path(&path);
     if path.exists() {
         std::fs::remove_file(&path).expect("remove test settings");
     }

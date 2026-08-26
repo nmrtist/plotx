@@ -18,6 +18,10 @@ struct SidebarRects {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct WorkspaceGeometry {
     pub board_rect: Rect,
+    /// Bounds available to floating task cards. Horizontal bounds preserve the
+    /// sidebar gaps; the bottom follows the persistent sidebars rather than a
+    /// shorter canvas child so a maximized card aligns with their edge.
+    pub task_card_bounds: Rect,
     pub fit_occluders: Vec<Rect>,
     pub revision: u64,
 }
@@ -70,6 +74,10 @@ pub(super) fn resolve(app: &PlotxApp, host_rect: Rect, ctx: &egui::Context) -> W
     if board_rect.min.x >= board_rect.max.x {
         board_rect = host_rect;
     }
+    let mut task_card_bounds = board_rect;
+    if let Some(sidebar) = sidebars.secondary.or(sidebars.primary) {
+        task_card_bounds.max.y = sidebar.bottom();
+    }
     let fit_occluders = super::tools::task_card::visible_area_id(app)
         .and_then(|id| ctx.memory(|memory| memory.area_rect(id)))
         .map(|rect| rect.expand(OCCLUDER_CLEARANCE).intersect(board_rect))
@@ -78,14 +86,17 @@ pub(super) fn resolve(app: &PlotxApp, host_rect: Rect, ctx: &egui::Context) -> W
         .collect();
     let id = Id::new(GEOMETRY_ID);
     let previous = ctx.data(|data| data.get_temp::<WorkspaceGeometry>(id));
-    let changed = previous
-        .as_ref()
-        .is_none_or(|old| old.board_rect != board_rect || old.fit_occluders != fit_occluders);
+    let changed = previous.as_ref().is_none_or(|old| {
+        old.board_rect != board_rect
+            || old.task_card_bounds != task_card_bounds
+            || old.fit_occluders != fit_occluders
+    });
     let revision = previous
         .as_ref()
         .map_or(0, |old| old.revision.saturating_add(u64::from(changed)));
     let geometry = WorkspaceGeometry {
         board_rect,
+        task_card_bounds,
         fit_occluders,
         revision,
     };
@@ -93,10 +104,10 @@ pub(super) fn resolve(app: &PlotxApp, host_rect: Rect, ctx: &egui::Context) -> W
     geometry
 }
 
-pub(crate) fn board_rect(ctx: &egui::Context) -> Option<Rect> {
+pub(crate) fn task_card_bounds(ctx: &egui::Context) -> Option<Rect> {
     ctx.data(|data| {
         data.get_temp::<WorkspaceGeometry>(Id::new(GEOMETRY_ID))
-            .map(|geometry| geometry.board_rect)
+            .map(|geometry| geometry.task_card_bounds)
     })
 }
 
@@ -126,6 +137,7 @@ mod tests {
         let card = Rect::from_min_max(egui::pos2(680.0, 20.0), egui::pos2(990.0, 420.0));
         let geometry = WorkspaceGeometry {
             board_rect: board,
+            task_card_bounds: board,
             fit_occluders: vec![card],
             revision: 0,
         };
@@ -156,5 +168,6 @@ mod tests {
 
         assert_eq!(geometry.board_rect.left(), primary.right() + SIDEBAR_GAP);
         assert_eq!(geometry.board_rect.right(), secondary.left() - SIDEBAR_GAP);
+        assert_eq!(geometry.task_card_bounds.bottom(), secondary.bottom());
     }
 }

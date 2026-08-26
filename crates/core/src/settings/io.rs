@@ -1,4 +1,4 @@
-use super::{SETTINGS_SCHEMA_VERSION, Settings, migrate, paths};
+use super::{SETTINGS_SCHEMA_VERSION, Settings, paths};
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -9,7 +9,7 @@ pub fn load() -> Settings {
     let Some(path) = paths::settings_file() else {
         return Settings::default();
     };
-    load_from_paths(&path, paths::legacy_preferences_file().as_deref())
+    load_from_path(&path)
 }
 
 pub fn save(settings: &Settings) -> io::Result<()> {
@@ -19,14 +19,9 @@ pub fn save(settings: &Settings) -> io::Result<()> {
     save_to_path(&path, settings)
 }
 
-pub(crate) fn load_from_paths(path: &Path, legacy: Option<&Path>) -> Settings {
+pub(crate) fn load_from_path(path: &Path) -> Settings {
     if let Ok(data) = std::fs::read(path) {
         return load_from_bytes(&data, Some(path));
-    }
-    if let Some(legacy) = legacy
-        && let Ok(data) = std::fs::read(legacy)
-    {
-        return load_from_bytes(&data, None);
     }
     Settings::default()
 }
@@ -42,6 +37,7 @@ pub(crate) fn save_to_path(path: &Path, settings: &Settings) -> io::Result<()> {
         .general
         .project_backup_generations
         .min(super::MAX_PROJECT_BACKUP_GENERATIONS);
+    settings.window.task_cards.sanitize();
     let data = serde_json::to_vec_pretty(&settings).map_err(io::Error::other)?;
     let tmp = temporary_path(path);
     std::fs::write(&tmp, data)?;
@@ -62,13 +58,7 @@ fn load_from_bytes(data: &[u8], quarantine_path: Option<&Path>) -> Settings {
         }
         return Settings::default();
     };
-    let from = raw
-        .get("schema_version")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0)
-        .min(u32::MAX as u64) as u32;
-    let migrated = migrate::migrate(raw, from);
-    let mut settings: Settings = serde_json::from_value(migrated).unwrap_or_default();
+    let mut settings: Settings = serde_json::from_value(raw).unwrap_or_default();
     settings.schema_version = SETTINGS_SCHEMA_VERSION;
     settings.general.project_backup_generations = settings
         .general
@@ -78,6 +68,7 @@ fn load_from_bytes(data: &[u8], quarantine_path: Option<&Path>) -> Settings {
     // live list the Preferences panel shows, so a hand-edited file would
     // otherwise display more entries than the cap promises.
     settings.recent.files.truncate(super::MAX_RECENT_FILES);
+    settings.window.task_cards.sanitize();
     // `app_version` deliberately keeps the value the file was written with:
     // it is how the shell detects "first launch after an update". Saving
     // stamps the current version (see `save_to_path`).

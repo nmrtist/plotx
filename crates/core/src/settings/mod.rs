@@ -1,5 +1,4 @@
 mod io;
-mod migrate;
 mod model;
 mod paths;
 
@@ -9,7 +8,7 @@ pub use io::load;
 // disagreeing.
 pub(crate) use io::save;
 #[cfg(test)]
-pub(crate) use io::{load_from_paths, save_to_path};
+pub(crate) use io::{load_from_path, save_to_path};
 pub use model::*;
 pub use paths::{config_dir, data_local_dir};
 

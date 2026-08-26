@@ -225,6 +225,86 @@ pub struct WindowState {
     pub main: Option<WindowGeometry>,
     #[serde(default)]
     pub last_open_directory: Option<PathBuf>,
+    /// User-selected sizes for the floating canvas task cards. These are UI
+    /// preferences, not project content; a temporarily small window clamps the
+    /// rendered size without overwriting them.
+    #[serde(default)]
+    pub task_cards: TaskCardSettings,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TaskCardSize {
+    #[serde(default)]
+    pub width: f32,
+    /// Height of the scrollable body. Header and tab chrome are measured by
+    /// the UI and do not need a guessed persisted allowance.
+    #[serde(default)]
+    pub body_height: f32,
+}
+
+impl TaskCardSize {
+    pub const fn new(width: f32, body_height: f32) -> Self {
+        Self { width, body_height }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TaskCardSettings {
+    #[serde(default = "default_processing_card_size")]
+    pub processing: TaskCardSize,
+    #[serde(default = "default_craft_card_size")]
+    pub craft: TaskCardSize,
+    #[serde(default = "default_standard_card_size")]
+    pub regions: TaskCardSize,
+    #[serde(default = "default_standard_card_size")]
+    pub curve_fit: TaskCardSize,
+    #[serde(default = "default_standard_card_size")]
+    pub statistics: TaskCardSize,
+}
+
+const fn default_standard_card_size() -> TaskCardSize {
+    TaskCardSize::new(340.0, 436.0)
+}
+
+const fn default_processing_card_size() -> TaskCardSize {
+    TaskCardSize::new(340.0, 430.0)
+}
+
+const fn default_craft_card_size() -> TaskCardSize {
+    TaskCardSize::new(520.0, 500.0)
+}
+
+impl Default for TaskCardSettings {
+    fn default() -> Self {
+        Self {
+            processing: default_processing_card_size(),
+            craft: default_craft_card_size(),
+            regions: default_standard_card_size(),
+            curve_fit: default_standard_card_size(),
+            statistics: default_standard_card_size(),
+        }
+    }
+}
+
+impl TaskCardSettings {
+    pub(crate) fn sanitize(&mut self) {
+        sanitize_card_size(&mut self.processing, default_processing_card_size());
+        sanitize_card_size(&mut self.craft, default_craft_card_size());
+        sanitize_card_size(&mut self.regions, default_standard_card_size());
+        sanitize_card_size(&mut self.curve_fit, default_standard_card_size());
+        sanitize_card_size(&mut self.statistics, default_standard_card_size());
+    }
+}
+
+fn sanitize_card_size(size: &mut TaskCardSize, fallback: TaskCardSize) {
+    if !size.width.is_finite() || size.width <= 0.0 {
+        size.width = fallback.width;
+    }
+    if !size.body_height.is_finite() || size.body_height <= 0.0 {
+        size.body_height = fallback.body_height;
+    }
+    size.width = size.width.min(4_096.0);
+    size.body_height = size.body_height.min(4_096.0);
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]

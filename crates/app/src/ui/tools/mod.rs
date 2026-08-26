@@ -16,6 +16,8 @@ mod statistics;
 mod statistics_config;
 mod symmetry;
 pub(crate) mod task_card;
+mod task_card_layout;
+mod task_card_resize;
 mod xps;
 
 use cursors::cursor_group;

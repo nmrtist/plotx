@@ -107,7 +107,7 @@ pub(super) fn show(app: &mut PlotxApp, index: usize, ui: &mut Ui) {
         }
     });
 
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         ui.selectable_value(
             &mut app.session.ui.craft_result_tab,
             CraftResultTab::Overview,
@@ -304,7 +304,7 @@ fn components(
         .filter(|summary| summary.component_count > 0)
         .map(|summary| summary.region)
         .collect::<Vec<_>>();
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         egui::ComboBox::from_id_salt(("craft_component_sort", run.id.0))
             .selected_text(match app.session.ui.craft_component_sort {
                 CraftComponentSort::ChemicalShift => "Sort: ppm",

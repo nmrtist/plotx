@@ -189,9 +189,14 @@ pub(crate) fn render_task(app: &mut PlotxApp, host: &mut Ui) {
     let TaskCardGeometry {
         pos,
         width,
-        min_body_height,
-        max_body_height,
-    } = task_card::geometry_with_width(host, 420.0, 820.0);
+        body_height,
+    } = task_card::geometry(
+        app,
+        host,
+        TaskDockTab::Craft,
+        420.0,
+        app.session.ui.craft_task_collapsed,
+    );
     let collapsed = app.session.ui.craft_task_collapsed;
     let dark = host.visuals().dark_mode;
     let mut close = false;
@@ -200,52 +205,42 @@ pub(crate) fn render_task(app: &mut PlotxApp, host: &mut Ui) {
     task_card::area(host, area_id, pos).show(host.ctx(), |ui| {
         ui.set_width(width);
         crate::ui::card_frame(dark, egui::Margin::ZERO).show(ui, |ui| {
+            task_card::header(ui, area_id, "CRAFT", None::<&str>, |ui| {
+                if ui
+                    .small_button(icon::X)
+                    .on_hover_text("Close CRAFT")
+                    .clicked()
+                {
+                    close = true;
+                }
+                let glyph = if collapsed {
+                    icon::CARET_DOWN
+                } else {
+                    icon::CARET_UP
+                };
+                if ui
+                    .small_button(glyph)
+                    .on_hover_text(if collapsed {
+                        "Expand CRAFT"
+                    } else {
+                        "Collapse CRAFT"
+                    })
+                    .clicked()
+                {
+                    toggle_collapse = true;
+                }
+            });
             if task_card::tab_bar(app, TaskDockTab::Craft, ui) {
                 ui.separator();
             }
-            let nmr = app.doc.datasets[index].as_nmr().unwrap();
-            let runs = nmr.craft_runs.len();
-            task_card::header(ui, area_id, |ui| {
-                ui.label(crate::typography::headline("CRAFT"));
-                ui.weak(format!("{} points · {runs} run(s)", nmr.data.points.len()));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui
-                        .small_button(icon::X)
-                        .on_hover_text("Close CRAFT")
-                        .clicked()
-                    {
-                        close = true;
-                    }
-                    let glyph = if collapsed {
-                        icon::CARET_DOWN
-                    } else {
-                        icon::CARET_UP
-                    };
-                    if ui
-                        .small_button(glyph)
-                        .on_hover_text(if collapsed {
-                            "Expand CRAFT"
-                        } else {
-                            "Collapse CRAFT"
-                        })
-                        .clicked()
-                    {
-                        toggle_collapse = true;
-                    }
-                });
-            });
             if !collapsed {
                 ui.separator();
-                task_card::resizable_body(
-                    ui,
-                    "craft_task_body_resize",
-                    650.0,
-                    min_body_height,
-                    max_body_height,
-                    |ui| body(app, index, ui),
-                );
+                task_card::sized_body(ui, body_height, |ui| body(app, index, ui));
             }
         });
+        if !collapsed {
+            task_card::resize_handles(app, ui, area_id, TaskDockTab::Craft, width, body_height);
+        }
     });
     if toggle_collapse {
         app.session.ui.craft_task_collapsed = !collapsed;

@@ -182,90 +182,101 @@ fn settings(app: &mut PlotxApp, index: usize, invocation: &CraftInvocation, ui: 
         "3. Confirm acquisition and fit settings",
     ));
     ui.collapsing("Advanced fit settings", |ui| {
-        egui::Grid::new("craft_advanced_settings")
-            .num_columns(4)
-            .show(ui, |ui| {
-                ui.label("Minimum A/N");
-                let mut value = invocation.params.min_amplitude_to_noise;
-                if ui
-                    .add(DragValue::new(&mut value).range(0.1..=100.0).speed(0.1))
+        let mut value = invocation.params.min_amplitude_to_noise;
+        if setting_row(
+            ui,
+            "Minimum A/N",
+            invocation.sources.min_amplitude_to_noise,
+            &nmr,
+            &mut overrides.min_amplitude_to_noise,
+            |ui| {
+                ui.add(DragValue::new(&mut value).range(0.1..=100.0).speed(0.1))
                     .changed()
-                {
-                    overrides.min_amplitude_to_noise = Some(value);
-                }
-                source_cell(invocation.sources.min_amplitude_to_noise, &nmr, ui);
-                reset_button(&mut overrides.min_amplitude_to_noise, ui);
-                ui.end_row();
+            },
+        ) {
+            overrides.min_amplitude_to_noise = Some(value);
+        }
 
-                ui.label("Max components / fit window");
-                let mut value = invocation.params.max_components_per_fit_window;
-                if ui.add(DragValue::new(&mut value).range(1..=64)).changed() {
-                    overrides.max_components_per_fit_window = Some(value);
-                }
-                source_cell(invocation.sources.max_components_per_fit_window, &nmr, ui);
-                reset_button(&mut overrides.max_components_per_fit_window, ui);
-                ui.end_row();
+        let mut value = invocation.params.max_components_per_fit_window;
+        if setting_row(
+            ui,
+            "Max components / fit window",
+            invocation.sources.max_components_per_fit_window,
+            &nmr,
+            &mut overrides.max_components_per_fit_window,
+            |ui| ui.add(DragValue::new(&mut value).range(1..=64)).changed(),
+        ) {
+            overrides.max_components_per_fit_window = Some(value);
+        }
 
-                ui.label("Linewidth range (Hz)");
-                let mut value = invocation.params.linewidth_hz;
-                if ui
-                    .horizontal(|ui| {
-                        let first = ui
-                            .add(DragValue::new(&mut value.0).range(0.001..=1_000.0))
-                            .changed();
-                        ui.label("to");
-                        first
-                            | ui.add(DragValue::new(&mut value.1).range(0.002..=2_000.0))
-                                .changed()
-                    })
-                    .inner
-                {
-                    overrides.linewidth_hz = Some(value);
-                }
-                source_cell(invocation.sources.linewidth_hz, &nmr, ui);
-                reset_button(&mut overrides.linewidth_hz, ui);
-                ui.end_row();
+        let mut value = invocation.params.linewidth_hz;
+        if setting_row(
+            ui,
+            "Linewidth range (Hz)",
+            invocation.sources.linewidth_hz,
+            &nmr,
+            &mut overrides.linewidth_hz,
+            |ui| {
+                let first = ui
+                    .add(DragValue::new(&mut value.0).range(0.001..=1_000.0))
+                    .changed();
+                ui.label("to");
+                first
+                    | ui.add(DragValue::new(&mut value.1).range(0.002..=2_000.0))
+                        .changed()
+            },
+        ) {
+            overrides.linewidth_hz = Some(value);
+        }
 
-                ui.label("Fit window width (Hz)");
-                let mut value = invocation.params.max_fit_window_width_hz;
-                if ui
-                    .add(DragValue::new(&mut value).range(10.0..=10_000.0))
+        let mut value = invocation.params.max_fit_window_width_hz;
+        if setting_row(
+            ui,
+            "Fit window width (Hz)",
+            invocation.sources.max_fit_window_width_hz,
+            &nmr,
+            &mut overrides.max_fit_window_width_hz,
+            |ui| {
+                ui.add(DragValue::new(&mut value).range(10.0..=10_000.0))
                     .changed()
-                {
-                    overrides.max_fit_window_width_hz = Some(value);
-                }
-                source_cell(invocation.sources.max_fit_window_width_hz, &nmr, ui);
-                reset_button(&mut overrides.max_fit_window_width_hz, ui);
-                ui.end_row();
+            },
+        ) {
+            overrides.max_fit_window_width_hz = Some(value);
+        }
 
-                ui.label("FIR taps");
-                let mut value = invocation.params.filter_taps;
-                if ui
-                    .add(DragValue::new(&mut value).range(3..=4_095))
+        let mut value = invocation.params.filter_taps;
+        if setting_row(
+            ui,
+            "FIR taps",
+            invocation.sources.filter_taps,
+            &nmr,
+            &mut overrides.filter_taps,
+            |ui| {
+                ui.add(DragValue::new(&mut value).range(3..=4_095))
                     .changed()
-                {
-                    overrides.filter_taps = Some(value | 1);
-                }
-                source_cell(invocation.sources.filter_taps, &nmr, ui);
-                reset_button(&mut overrides.filter_taps, ui);
-                ui.end_row();
+            },
+        ) {
+            overrides.filter_taps = Some(value | 1);
+        }
 
-                ui.label("Max downsampled points");
-                let mut value = invocation.params.max_downsampled_points;
-                if ui
-                    .add(DragValue::new(&mut value).range(64..=65_536))
+        let mut value = invocation.params.max_downsampled_points;
+        if setting_row(
+            ui,
+            "Max downsampled points",
+            invocation.sources.max_downsampled_points,
+            &nmr,
+            &mut overrides.max_downsampled_points,
+            |ui| {
+                ui.add(DragValue::new(&mut value).range(64..=65_536))
                     .changed()
-                {
-                    overrides.max_downsampled_points = Some(value);
-                }
-                source_cell(invocation.sources.max_downsampled_points, &nmr, ui);
-                reset_button(&mut overrides.max_downsampled_points, ui);
-                ui.end_row();
-            });
+            },
+        ) {
+            overrides.max_downsampled_points = Some(value);
+        }
 
         if invocation.params.profile == CraftProfile::Ssfp {
             let mut skip_ms = invocation.params.skip_duration_s * 1_000.0;
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label("Skip initial");
                 if ui
                     .add(
@@ -350,7 +361,7 @@ fn regions(
         let mut changed = false;
         let mut remove = None;
         for (position, region) in regions.iter_mut().enumerate() {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 changed |= ui
                     .add(DragValue::new(&mut region.start_ppm).suffix(" ppm"))
                     .changed();
@@ -431,7 +442,7 @@ fn regions(
 fn run_controls(app: &mut PlotxApp, index: usize, ui: &mut Ui) {
     let dataset = app.doc.datasets[index].resource_id();
     if let Some(elapsed) = app.session.compute.progress(dataset, ComputeKind::Craft) {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.spinner();
             ui.label(format!("Running… {:.1} s", elapsed.as_secs_f32()));
         });
@@ -466,8 +477,22 @@ fn run_controls(app: &mut PlotxApp, index: usize, ui: &mut Ui) {
     }
 }
 
-fn source_cell(source: CraftParamSource, nmr: &plotx_core::state::NmrDataset, ui: &mut Ui) {
-    ui.weak(source_text(source, nmr));
+fn setting_row<T>(
+    ui: &mut Ui,
+    label: &str,
+    source: CraftParamSource,
+    nmr: &plotx_core::state::NmrDataset,
+    reset: &mut Option<T>,
+    add_control: impl FnOnce(&mut Ui) -> bool,
+) -> bool {
+    ui.horizontal_wrapped(|ui| {
+        ui.label(label);
+        let changed = add_control(ui);
+        ui.weak(source_text(source, nmr));
+        reset_button(reset, ui);
+        changed
+    })
+    .inner
 }
 
 fn source_text(source: CraftParamSource, _nmr: &plotx_core::state::NmrDataset) -> String {

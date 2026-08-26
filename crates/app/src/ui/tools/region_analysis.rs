@@ -60,10 +60,14 @@ pub(crate) fn render_task(app: &mut PlotxApp, host: &mut Ui) {
     let TaskCardGeometry {
         pos,
         width,
-        min_body_height,
-        max_body_height,
-    } = task_card::geometry(host, 300.0);
-    let default_body_height = 460.0;
+        body_height,
+    } = task_card::geometry(
+        app,
+        host,
+        TaskDockTab::Regions,
+        300.0,
+        app.session.ui.region_task_collapsed,
+    );
     let collapsed = app.session.ui.region_task_collapsed;
     let dark = host.visuals().dark_mode;
     let mut close = false;
@@ -74,75 +78,67 @@ pub(crate) fn render_task(app: &mut PlotxApp, host: &mut Ui) {
     task_card::area(host, area_id, pos).show(host.ctx(), |ui| {
         ui.set_width(width);
         crate::ui::card_frame(dark, egui::Margin::ZERO).show(ui, |ui| {
-            if task_card::tab_bar(app, TaskDockTab::Regions, ui) {
-                ui.separator();
-            }
             let count = app.doc.datasets[di]
                 .region_analysis()
                 .map_or(0, |state| state.regions.len());
-            task_card::header(ui, area_id, |ui| {
-                ui.label(crate::typography::headline("Regions"));
-                let state = if app.session.tool == Tool::Regions {
-                    if count == 0 {
-                        "Drawing".to_owned()
-                    } else {
-                        format!("Drawing · {count}")
-                    }
-                } else if count == 1 {
-                    "1 region".to_owned()
+            let state = if app.session.tool == Tool::Regions {
+                if count == 0 {
+                    "Drawing".to_owned()
                 } else {
-                    format!("{count} regions")
+                    format!("Drawing · {count}")
+                }
+            } else if count == 1 {
+                "1 region".to_owned()
+            } else {
+                format!("{count} regions")
+            };
+            task_card::header(ui, area_id, "Regions", Some(state), |ui| {
+                if ui
+                    .small_button(icon::X)
+                    .on_hover_text("Close region tools")
+                    .clicked()
+                {
+                    close = true;
+                }
+                let glyph = if collapsed {
+                    icon::CARET_DOWN
+                } else {
+                    icon::CARET_UP
                 };
-                ui.weak(state);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui
-                        .small_button(icon::X)
-                        .on_hover_text("Close region tools")
-                        .clicked()
-                    {
-                        close = true;
-                    }
-                    let glyph = if collapsed {
-                        icon::CARET_DOWN
+                if ui
+                    .small_button(glyph)
+                    .on_hover_text(if collapsed {
+                        "Expand region tools"
                     } else {
-                        icon::CARET_UP
-                    };
-                    if ui
-                        .small_button(glyph)
-                        .on_hover_text(if collapsed {
-                            "Expand region tools"
-                        } else {
-                            "Collapse region tools"
-                        })
+                        "Collapse region tools"
+                    })
+                    .clicked()
+                {
+                    toggle_collapse = true;
+                }
+                if collapsed
+                    && count > 0
+                    && ui
+                        .small_button(icon::TABLE)
+                        .on_hover_text("View extracted curves")
                         .clicked()
-                    {
-                        toggle_collapse = true;
-                    }
-                    if collapsed
-                        && count > 0
-                        && ui
-                            .small_button(icon::TABLE)
-                            .on_hover_text("View extracted curves")
-                            .clicked()
-                    {
-                        open_table = true;
-                    }
-                });
+                {
+                    open_table = true;
+                }
             });
+            if task_card::tab_bar(app, TaskDockTab::Regions, ui) {
+                ui.separator();
+            }
             if !collapsed {
                 ui.separator();
-                task_card::resizable_body(
-                    ui,
-                    "region_task_body_resize",
-                    default_body_height,
-                    min_body_height,
-                    max_body_height,
-                    |ui| {
-                        region_task_body(app, di, ui);
-                    },
-                );
+                task_card::sized_body(ui, body_height, |ui| {
+                    region_task_body(app, di, ui);
+                });
             }
         });
+        if !collapsed {
+            task_card::resize_handles(app, ui, area_id, TaskDockTab::Regions, width, body_height);
+        }
     });
 
     if toggle_collapse {

@@ -51,10 +51,14 @@ pub(crate) fn render_task(app: &mut PlotxApp, host: &mut Ui) {
     let TaskCardGeometry {
         pos,
         width,
-        min_body_height,
-        max_body_height,
-    } = task_card::geometry(host, 280.0);
-    let default_body_height = 380.0;
+        body_height,
+    } = task_card::geometry(
+        app,
+        host,
+        TaskDockTab::CurveFit,
+        280.0,
+        app.session.ui.curve_fit_task_collapsed,
+    );
     let collapsed = app.session.ui.curve_fit_task_collapsed;
     let dark = host.visuals().dark_mode;
     let mut close = false;
@@ -64,21 +68,20 @@ pub(crate) fn render_task(app: &mut PlotxApp, host: &mut Ui) {
     task_card::area(host, area_id, pos).show(host.ctx(), |ui| {
         ui.set_width(width);
         crate::ui::card_frame(dark, egui::Margin::ZERO).show(ui, |ui| {
-            if task_card::tab_bar(app, TaskDockTab::CurveFit, ui) {
-                ui.separator();
-            }
             let table = app.doc.datasets[di].as_table().unwrap();
             let curves = table.series_bindings.len();
             let points = table.typed_state.envelope.revision.snapshot.row_count;
-            task_card::header(ui, area_id, |ui| {
-                crate::typography::headline_label(ui, "Curve Fit");
-                let curve_count = if curves == 1 {
-                    "1 curve".to_owned()
-                } else {
-                    format!("{curves} curves")
-                };
-                ui.weak(format!("{curve_count} · {points} points each"));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let curve_count = if curves == 1 {
+                "1 curve".to_owned()
+            } else {
+                format!("{curves} curves")
+            };
+            task_card::header(
+                ui,
+                area_id,
+                "Curve Fit",
+                Some(format!("{curve_count} · {points} points each")),
+                |ui| {
                     if ui
                         .small_button(icon::X)
                         .on_hover_text("Close Curve Fit")
@@ -102,20 +105,19 @@ pub(crate) fn render_task(app: &mut PlotxApp, host: &mut Ui) {
                     {
                         toggle_collapse = true;
                     }
-                });
-            });
+                },
+            );
+            if task_card::tab_bar(app, TaskDockTab::CurveFit, ui) {
+                ui.separator();
+            }
             if !collapsed {
                 ui.separator();
-                task_card::resizable_body(
-                    ui,
-                    "curve_fit_task_body_resize",
-                    default_body_height,
-                    min_body_height,
-                    max_body_height,
-                    |ui| curve_fit_task_body(app, di, ui),
-                );
+                task_card::sized_body(ui, body_height, |ui| curve_fit_task_body(app, di, ui));
             }
         });
+        if !collapsed {
+            task_card::resize_handles(app, ui, area_id, TaskDockTab::CurveFit, width, body_height);
+        }
     });
 
     if toggle_collapse {

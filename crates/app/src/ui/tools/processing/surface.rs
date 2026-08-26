@@ -97,7 +97,7 @@ pub(super) fn render(app: &mut PlotxApp, host: &mut Ui) {
         return;
     }
     if app.doc.datasets[di].as_xrd().is_some() {
-        render_xrd(app, host, di, owner);
+        render_xrd(app, host, di);
         return;
     }
     let Some(shape) = surface_shape(&app.doc.datasets[di]) else {
@@ -107,9 +107,14 @@ pub(super) fn render(app: &mut PlotxApp, host: &mut Ui) {
     let TaskCardGeometry {
         pos,
         width,
-        min_body_height,
-        max_body_height,
-    } = task_card::geometry(host, 300.0);
+        body_height,
+    } = task_card::geometry(
+        app,
+        host,
+        TaskDockTab::Processing,
+        300.0,
+        app.session.ui.processing_task_collapsed,
+    );
     let collapsed = app.session.ui.processing_task_collapsed;
     let dark = host.visuals().dark_mode;
     let mut close = false;
@@ -119,9 +124,6 @@ pub(super) fn render(app: &mut PlotxApp, host: &mut Ui) {
     task_card::area(host, area_id, pos).show(host.ctx(), |ui| {
         ui.set_width(width);
         crate::ui::card_frame(dark, egui::Margin::ZERO).show(ui, |ui| {
-            if task_card::tab_bar(app, TaskDockTab::Processing, ui) {
-                ui.separator();
-            }
             let name = app.doc.datasets[di].display_name();
             let output = shape
                 .axes
@@ -132,32 +134,32 @@ pub(super) fn render(app: &mut PlotxApp, host: &mut Ui) {
                         .unwrap_or(shape.input_domain)
                 })
                 .collect::<Vec<_>>();
-            task_card::header(ui, area_id, |ui| {
-                ui.label(crate::typography::headline("Processing"));
-                ui.weak(if output.iter().all(|d| *d == Domain::Time) {
-                    "Time-domain output"
+            let domain = if output.iter().all(|d| *d == Domain::Time) {
+                "Time-domain output"
+            } else {
+                "Frequency-domain output"
+            };
+            task_card::header(ui, area_id, "Processing", Some(domain), |ui| {
+                if ui
+                    .small_button(icon::X)
+                    .on_hover_text("Close Processing")
+                    .clicked()
+                {
+                    close = true;
+                }
+                let glyph = if collapsed {
+                    icon::CARET_DOWN
                 } else {
-                    "Frequency-domain output"
-                });
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui
-                        .small_button(icon::X)
-                        .on_hover_text("Close Processing")
-                        .clicked()
-                    {
-                        close = true;
-                    }
-                    let glyph = if collapsed {
-                        icon::CARET_DOWN
-                    } else {
-                        icon::CARET_UP
-                    };
-                    if ui.small_button(glyph).clicked() {
-                        toggle = true;
-                    }
-                    ui.menu_button(icon::DOTS_THREE_VERTICAL, |ui| panel_menu(app, di, ui));
-                });
+                    icon::CARET_UP
+                };
+                if ui.small_button(glyph).clicked() {
+                    toggle = true;
+                }
+                ui.menu_button(icon::DOTS_THREE_VERTICAL, |ui| panel_menu(app, di, ui));
             });
+            if task_card::tab_bar(app, TaskDockTab::Processing, ui) {
+                ui.separator();
+            }
             ui.add(egui::Label::new(RichText::new(name).small()).truncate());
             ui.small(format!(
                 "{} · {}",
@@ -170,30 +172,33 @@ pub(super) fn render(app: &mut PlotxApp, host: &mut Ui) {
             ));
             if !collapsed {
                 ui.separator();
-                task_card::resizable_body(
-                    ui,
-                    "processing_task_body_resize",
-                    430.0,
-                    min_body_height,
-                    max_body_height,
-                    |ui| {
-                        egui::ScrollArea::vertical()
-                            .id_salt(("processing_task", owner))
-                            .auto_shrink([false, true])
-                            .show(ui, |ui| {
-                                if shape.axes.len() == 2 {
-                                    ui.small("Axes are processed F2 direct, then F1 indirect.");
-                                }
-                                for axis in &shape.axes {
-                                    render_axis(app, di, owner, shape.input_domain, axis, ui);
-                                }
-                                action_bar(app, ui);
-                                analysis_card(app, di, ui);
-                            });
-                    },
-                );
+                task_card::sized_body(ui, body_height, |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt(("processing_task", owner))
+                        .auto_shrink([false, true])
+                        .show(ui, |ui| {
+                            if shape.axes.len() == 2 {
+                                ui.small("Axes are processed F2 direct, then F1 indirect.");
+                            }
+                            for axis in &shape.axes {
+                                render_axis(app, di, owner, shape.input_domain, axis, ui);
+                            }
+                            action_bar(app, ui);
+                            analysis_card(app, di, ui);
+                        });
+                });
             }
         });
+        if !collapsed {
+            task_card::resize_handles(
+                app,
+                ui,
+                area_id,
+                TaskDockTab::Processing,
+                width,
+                body_height,
+            );
+        }
     });
     if toggle {
         app.session.ui.processing_task_collapsed = !collapsed;
@@ -203,7 +208,7 @@ pub(super) fn render(app: &mut PlotxApp, host: &mut Ui) {
     }
 }
 
-fn render_xrd(app: &mut PlotxApp, host: &mut Ui, di: usize, owner: DatasetId) {
+fn render_xrd(app: &mut PlotxApp, host: &mut Ui, di: usize) {
     let Some(dataset) = app.doc.datasets[di].as_xrd() else {
         return;
     };
@@ -213,9 +218,14 @@ fn render_xrd(app: &mut PlotxApp, host: &mut Ui, di: usize, owner: DatasetId) {
     let TaskCardGeometry {
         pos,
         width,
-        min_body_height,
-        max_body_height,
-    } = task_card::geometry(host, 300.0);
+        body_height,
+    } = task_card::geometry(
+        app,
+        host,
+        TaskDockTab::Processing,
+        300.0,
+        app.session.ui.processing_task_collapsed,
+    );
     let collapsed = app.session.ui.processing_task_collapsed;
     let dark = host.visuals().dark_mode;
     let mut close = false;
@@ -227,139 +237,138 @@ fn render_xrd(app: &mut PlotxApp, host: &mut Ui, di: usize, owner: DatasetId) {
     task_card::area(host, area_id, pos).show(host.ctx(), |ui| {
         ui.set_width(width);
         crate::ui::card_frame(dark, egui::Margin::ZERO).show(ui, |ui| {
+            task_card::header(ui, area_id, "XRD Processing", None::<&str>, |ui| {
+                if ui
+                    .small_button(icon::X)
+                    .on_hover_text("Close Processing")
+                    .clicked()
+                {
+                    close = true;
+                }
+                let glyph = if collapsed {
+                    icon::CARET_DOWN
+                } else {
+                    icon::CARET_UP
+                };
+                if ui.small_button(glyph).clicked() {
+                    toggle = true;
+                }
+                ui.menu_button(icon::DOTS_THREE_VERTICAL, |ui| panel_menu(app, di, ui));
+                if ui
+                    .small_button(icon::ARROW_ARC_LEFT)
+                    .on_hover_text("Reset processing")
+                    .clicked()
+                {
+                    reset = true;
+                }
+            });
             if task_card::tab_bar(app, TaskDockTab::Processing, ui) {
                 ui.separator();
             }
-            task_card::header(ui, area_id, |ui| {
-                ui.label(crate::typography::headline("XRD Processing"));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui
-                        .small_button(icon::X)
-                        .on_hover_text("Close Processing")
-                        .clicked()
-                    {
-                        close = true;
-                    }
-                    let glyph = if collapsed {
-                        icon::CARET_DOWN
-                    } else {
-                        icon::CARET_UP
-                    };
-                    if ui.small_button(glyph).clicked() {
-                        toggle = true;
-                    }
-                    ui.menu_button(icon::DOTS_THREE_VERTICAL, |ui| panel_menu(app, di, ui));
-                    if ui
-                        .small_button(icon::ARROW_ARC_LEFT)
-                        .on_hover_text("Reset processing")
-                        .clicked()
-                    {
-                        reset = true;
-                    }
-                });
-            });
             ui.add(egui::Label::new(RichText::new(name).small()).truncate());
             if !collapsed {
                 ui.separator();
-                task_card::resizable_body(
-                    ui,
-                    ("xrd_processing_task_body_resize", owner),
-                    250.0,
-                    min_body_height,
-                    max_body_height,
-                    |ui| {
-                        let mut background = params.background.is_some();
-                        if ui
-                            .checkbox(&mut background, "SNIP background subtraction")
-                            .changed()
-                        {
-                            params.background =
-                                background.then_some(SnipBackground { iterations: 40 });
-                            changed = true;
-                        }
-                        if let Some(settings) = &mut params.background {
-                            ui.horizontal(|ui| {
-                                ui.label("Iterations");
-                                changed |= ui
-                                    .add(
-                                        egui::DragValue::new(&mut settings.iterations)
-                                            .range(1..=MAX_SNIP_ITERATIONS),
-                                    )
-                                    .changed();
-                            });
-                        }
-                        let mut smoothing = params.smoothing.is_some();
-                        if ui
-                            .checkbox(&mut smoothing, "Savitzky-Golay smoothing")
-                            .changed()
-                        {
-                            params.smoothing = smoothing.then_some(SavitzkyGolay {
-                                window: 11,
-                                polynomial_order: 3,
-                            });
-                            changed = true;
-                        }
-                        if let Some(settings) = &mut params.smoothing {
-                            ui.horizontal(|ui| {
-                                ui.label("Window");
-                                let mut window = settings.window;
-                                if ui
-                                    .add(
-                                        egui::DragValue::new(&mut window)
-                                            .range(3..=MAX_SAVGOL_WINDOW)
-                                            .speed(2),
-                                    )
-                                    .changed()
-                                {
-                                    settings.window = window | 1;
-                                    changed = true;
-                                }
-                                ui.label("Order");
-                                changed |= ui
-                                    .add(
-                                        egui::DragValue::new(&mut settings.polynomial_order)
-                                            .range(1..=MAX_SAVGOL_ORDER),
-                                    )
-                                    .changed();
-                            });
-                            if settings.polynomial_order >= settings.window as u8 {
-                                settings.polynomial_order = (settings.window - 1) as u8;
+                task_card::sized_body(ui, body_height, |ui| {
+                    let mut background = params.background.is_some();
+                    if ui
+                        .checkbox(&mut background, "SNIP background subtraction")
+                        .changed()
+                    {
+                        params.background = background.then_some(SnipBackground { iterations: 40 });
+                        changed = true;
+                    }
+                    if let Some(settings) = &mut params.background {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label("Iterations");
+                            changed |= ui
+                                .add(
+                                    egui::DragValue::new(&mut settings.iterations)
+                                        .range(1..=MAX_SNIP_ITERATIONS),
+                                )
+                                .changed();
+                        });
+                    }
+                    let mut smoothing = params.smoothing.is_some();
+                    if ui
+                        .checkbox(&mut smoothing, "Savitzky-Golay smoothing")
+                        .changed()
+                    {
+                        params.smoothing = smoothing.then_some(SavitzkyGolay {
+                            window: 11,
+                            polynomial_order: 3,
+                        });
+                        changed = true;
+                    }
+                    if let Some(settings) = &mut params.smoothing {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label("Window");
+                            let mut window = settings.window;
+                            if ui
+                                .add(
+                                    egui::DragValue::new(&mut window)
+                                        .range(3..=MAX_SAVGOL_WINDOW)
+                                        .speed(2),
+                                )
+                                .changed()
+                            {
+                                settings.window = window | 1;
+                                changed = true;
                             }
+                            ui.label("Order");
+                            changed |= ui
+                                .add(
+                                    egui::DragValue::new(&mut settings.polynomial_order)
+                                        .range(1..=MAX_SAVGOL_ORDER),
+                                )
+                                .changed();
+                        });
+                        if settings.polynomial_order >= settings.window as u8 {
+                            settings.polynomial_order = (settings.window - 1) as u8;
                         }
-                        egui::ComboBox::from_label("Normalize")
-                            .selected_text(match params.normalization {
-                                XrdNormalization::None => "None",
-                                XrdNormalization::Maximum => "Maximum intensity",
-                                XrdNormalization::Area => "Integrated area",
-                            })
-                            .show_ui(ui, |ui| {
-                                changed |= ui
-                                    .selectable_value(
-                                        &mut params.normalization,
-                                        XrdNormalization::None,
-                                        "None",
-                                    )
-                                    .changed();
-                                changed |= ui
-                                    .selectable_value(
-                                        &mut params.normalization,
-                                        XrdNormalization::Maximum,
-                                        "Maximum intensity",
-                                    )
-                                    .changed();
-                                changed |= ui
-                                    .selectable_value(
-                                        &mut params.normalization,
-                                        XrdNormalization::Area,
-                                        "Integrated area",
-                                    )
-                                    .changed();
-                            });
-                        action_bar(app, ui);
-                    },
-                );
+                    }
+                    egui::ComboBox::from_label("Normalize")
+                        .selected_text(match params.normalization {
+                            XrdNormalization::None => "None",
+                            XrdNormalization::Maximum => "Maximum intensity",
+                            XrdNormalization::Area => "Integrated area",
+                        })
+                        .show_ui(ui, |ui| {
+                            changed |= ui
+                                .selectable_value(
+                                    &mut params.normalization,
+                                    XrdNormalization::None,
+                                    "None",
+                                )
+                                .changed();
+                            changed |= ui
+                                .selectable_value(
+                                    &mut params.normalization,
+                                    XrdNormalization::Maximum,
+                                    "Maximum intensity",
+                                )
+                                .changed();
+                            changed |= ui
+                                .selectable_value(
+                                    &mut params.normalization,
+                                    XrdNormalization::Area,
+                                    "Integrated area",
+                                )
+                                .changed();
+                        });
+                    action_bar(app, ui);
+                });
             }
         });
+        if !collapsed {
+            task_card::resize_handles(
+                app,
+                ui,
+                area_id,
+                TaskDockTab::Processing,
+                width,
+                body_height,
+            );
+        }
     });
     if reset {
         params = XrdProcessing::default();
@@ -390,7 +399,7 @@ fn render_axis(
         .output_domain(input_domain)
         .unwrap_or(input_domain);
     ui.add_space(6.0);
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         ui.label(crate::typography::headline(axis.label()));
         ui.weak(format!(
             "· {} to {}",
@@ -471,7 +480,7 @@ fn step_row(
         component: Some(plotx_core::automation::ComponentRef::ProcessingStep(id)),
     };
     egui::Frame::group(ui.style()).show(ui, |ui| {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             crate::ui::properties::panel::processing_step_section(app, &target, ui);
             let response = ui
                 .selectable_label(

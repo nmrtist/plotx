@@ -5,25 +5,32 @@ use egui::{
     Align, Area, CursorIcon, Id, Layout, Order, Pos2, RichText, Sense, Ui, UiBuilder, Vec2,
 };
 use egui_phosphor::regular as icon;
-use plotx_core::state::{PlotxApp, TaskDockTab, Tool};
-use std::hash::Hash;
+use plotx_core::{
+    settings::TaskCardSize,
+    state::{PlotxApp, TaskDockTab, Tool},
+};
 
-/// Width shared by every task card, and the gap it keeps from the canvas edges.
-const WIDTH: f32 = 310.0;
-const MARGIN: f32 = 12.0;
-const TOP_OFFSET: f32 = 8.0;
+use super::task_card_layout::{CardLayout, HorizontalAnchor, VerticalAnchor, fit_layout};
+
+const COLLAPSED_WIDTH: f32 = 310.0;
+// Sidebar/Ribbon spacing is already applied by the central workspace panel.
+// Task cards use that same boundary and must not add a second local gap.
+const TOP_OFFSET: f32 = 0.0;
 /// Room the card header, frame and footprint need outside the resizable body.
 const CHROME: f32 = 64.0;
-/// Below this the body is useless anyway; the card is allowed to overhang.
+/// Preferred interaction minimum. A smaller viewport may temporarily force a
+/// smaller body; viewport fitting always wins over this preference.
 const FLOOR: f32 = 120.0;
-const MIN_SAFE_EDGE: f32 = 72.0;
-const MIN_CARD_WIDTH: f32 = 120.0;
+const MIN_CANVAS_WIDTH: f32 = 320.0;
+const STANDARD_MIN_WIDTH: f32 = 300.0;
+const CRAFT_MIN_WIDTH: f32 = 380.0;
+const STANDARD_MAX_WIDTH: f32 = 520.0;
+const CRAFT_MAX_WIDTH: f32 = 760.0;
 
 pub(super) struct TaskCardGeometry {
     pub pos: Pos2,
     pub width: f32,
-    pub min_body_height: f32,
-    pub max_body_height: f32,
+    pub body_height: f32,
 }
 
 /// Anchors a card to the host's top-right corner and sizes its body to the
@@ -34,37 +41,122 @@ pub(super) struct TaskCardGeometry {
 /// the fitted max and force the card past the canvas. `Area` then constrains it
 /// to the screen and slides it up over the Ribbon, hiding the very buttons that
 /// opened it. Clamping the min keeps a short window shrinking instead.
-pub(super) fn geometry(host: &Ui, preferred_min_body: f32) -> TaskCardGeometry {
-    geometry_with_width(host, preferred_min_body, WIDTH)
-}
-
-/// Variant for analysis tasks that need a wide visual workspace. The requested
-/// width is still clamped to the central board, preserving the basic controls
-/// on small windows without making compact cards wider.
-pub(super) fn geometry_with_width(
+pub(super) fn geometry(
+    app: &PlotxApp,
     host: &Ui,
+    tab: TaskDockTab,
     preferred_min_body: f32,
-    preferred_width: f32,
+    collapsed: bool,
 ) -> TaskCardGeometry {
-    let host_rect =
-        crate::ui::workspace_geometry::board_rect(host.ctx()).unwrap_or_else(|| host.max_rect());
-    let width = card_width(host_rect, preferred_width);
-    let pos = host_rect.right_top() + egui::vec2(-width - MARGIN, TOP_OFFSET);
-    let max_body_height = (host_rect.bottom() - pos.y - CHROME).max(FLOOR);
+    let host_rect = bounds(host);
+    let id = area_id(tab);
+    let preferred = preferred_size(app, tab);
+    let requested_width = if collapsed {
+        COLLAPSED_WIDTH.min(host_rect.width().max(1.0))
+    } else {
+        card_width(host_rect, tab, preferred.width)
+    };
+    let stored = host
+        .ctx()
+        .data(|data| data.get_temp::<CardLayout>(id.with("layout")));
+    let chrome = stored.map_or(CHROME, |layout| layout.chrome_height);
+    let extra_width = stored.map_or(0.0, |layout| layout.extra_width);
+    let preferred_body = preferred.body_height.max(preferred_min_body);
+    let desired_size = Vec2::new(
+        requested_width + extra_width,
+        if collapsed {
+            chrome
+        } else {
+            chrome + preferred_body
+        },
+    );
+    let initial = CardLayout {
+        rect: egui::Rect::from_min_size(
+            host_rect.right_top() + egui::vec2(-desired_size.x, TOP_OFFSET),
+            desired_size,
+        ),
+        bounds: host_rect,
+        horizontal: HorizontalAnchor::Right,
+        vertical: VerticalAnchor::Top,
+        chrome_height: chrome,
+        extra_width,
+        collapsed,
+    };
+    let layout = fit_layout(
+        stored.unwrap_or(initial),
+        host_rect,
+        desired_size,
+        collapsed,
+    );
+    host.ctx()
+        .data_mut(|data| data.insert_temp(id.with("layout"), layout));
     TaskCardGeometry {
-        pos,
-        width,
-        min_body_height: preferred_min_body.min(max_body_height),
-        max_body_height,
+        pos: layout.rect.min,
+        width: (layout.rect.width() - layout.extra_width).max(1.0),
+        body_height: if collapsed {
+            0.0
+        } else {
+            (layout.rect.height() - layout.chrome_height).max(0.0)
+        },
     }
 }
 
-fn card_width(host: egui::Rect, preferred_width: f32) -> f32 {
-    preferred_width.min(
-        (host.width() - MIN_SAFE_EDGE - MARGIN * 3.0)
-            .max(MIN_CARD_WIDTH)
-            .min((host.width() - MARGIN * 2.0).max(1.0)),
-    )
+fn card_width(host: egui::Rect, tab: TaskDockTab, preferred_width: f32) -> f32 {
+    let (minimum, absolute_maximum) = width_limits(tab);
+    let physical_maximum = host.width().max(1.0);
+    let canvas_preserving_maximum =
+        (host.width() - MIN_CANVAS_WIDTH).max(minimum.min(physical_maximum));
+    preferred_width
+        .clamp(
+            minimum.min(physical_maximum),
+            absolute_maximum.min(physical_maximum),
+        )
+        .min(canvas_preserving_maximum)
+}
+
+fn area_id(tab: TaskDockTab) -> Id {
+    match tab {
+        TaskDockTab::Processing => Id::new("processing_task_card"),
+        TaskDockTab::Regions => Id::new("region_task_card"),
+        TaskDockTab::CurveFit => Id::new("curve_fit_task_card"),
+        TaskDockTab::Statistics => Id::new("statistics_task_card"),
+        TaskDockTab::Craft => Id::new("craft_task_card"),
+    }
+}
+
+fn bounds(host: &Ui) -> egui::Rect {
+    crate::ui::workspace_geometry::task_card_bounds(host.ctx())
+        .unwrap_or_else(|| host.ctx().content_rect())
+}
+
+fn width_limits(tab: TaskDockTab) -> (f32, f32) {
+    if tab == TaskDockTab::Craft {
+        (CRAFT_MIN_WIDTH, CRAFT_MAX_WIDTH)
+    } else {
+        (STANDARD_MIN_WIDTH, STANDARD_MAX_WIDTH)
+    }
+}
+
+fn preferred_size(app: &PlotxApp, tab: TaskDockTab) -> TaskCardSize {
+    let cards = &app.settings.window.task_cards;
+    match tab {
+        TaskDockTab::Processing => cards.processing,
+        TaskDockTab::Regions => cards.regions,
+        TaskDockTab::CurveFit => cards.curve_fit,
+        TaskDockTab::Statistics => cards.statistics,
+        TaskDockTab::Craft => cards.craft,
+    }
+}
+
+fn preferred_size_mut(app: &mut PlotxApp, tab: TaskDockTab) -> &mut TaskCardSize {
+    let cards = &mut app.settings.window.task_cards;
+    match tab {
+        TaskDockTab::Processing => &mut cards.processing,
+        TaskDockTab::Regions => &mut cards.regions,
+        TaskDockTab::CurveFit => &mut cards.curve_fit,
+        TaskDockTab::Statistics => &mut cards.statistics,
+        TaskDockTab::Craft => &mut cards.craft,
+    }
 }
 
 pub(crate) fn visible_area_id(app: &PlotxApp) -> Option<Id> {
@@ -106,96 +198,448 @@ pub(crate) fn visible_area_id(app: &PlotxApp) -> Option<Id> {
     }
 }
 
-/// A task card that starts at `pos` and follows the shared title-bar drag
-/// position maintained by [`header`]. It stays inside the central board and
-/// below popup/dialog layers.
-pub(super) fn area(host: &Ui, id: Id, pos: Pos2) -> Area {
-    let stored = host
-        .ctx()
-        .data(|data| data.get_temp::<Pos2>(id.with("position")));
-    let bounds =
-        crate::ui::workspace_geometry::board_rect(host.ctx()).unwrap_or_else(|| host.max_rect());
-    let area = Area::new(id)
-        .order(Order::Middle)
-        .movable(false)
-        .constrain_to(bounds);
-    if let Some(stored) = stored {
-        area.current_pos(stored)
-    } else {
-        // `default_pos` only applies when egui first creates the Area. The
-        // central workspace can move when sidebars or workflow chrome change,
-        // so an untouched task card must be re-anchored to the current host on
-        // every frame. A user drag stores an explicit position above.
-        area.current_pos(pos)
-    }
+/// Whether the pointer is over the visible card or its resize grips. Canvas
+/// gestures are dispatched before the card is rendered in the current frame,
+/// so they must consult the previous authoritative area rectangle explicitly
+/// instead of relying only on `layer_id_at`.
+pub(crate) fn pointer_allows_canvas(app: &PlotxApp, ui: &Ui, pos: Pos2) -> bool {
+    let card_hit = visible_area_id(app)
+        .and_then(|id| ui.ctx().memory(|memory| memory.area_rect(id)))
+        .is_some_and(|rect| rect.expand(6.0).contains(pos));
+    !card_hit
+        && ui
+            .ctx()
+            .layer_id_at(pos)
+            .is_none_or(|layer| layer == ui.layer_id())
 }
 
-/// Renders a draggable title row. The drag zone is registered before its child
-/// buttons so close, collapse and menu controls retain priority.
-pub(super) fn header<R>(ui: &mut Ui, area_id: Id, add_contents: impl FnOnce(&mut Ui) -> R) -> R {
+#[derive(Clone, Copy)]
+struct DragOrigin {
+    rect: egui::Rect,
+}
+
+pub(super) fn area(_host: &Ui, id: Id, pos: Pos2) -> Area {
+    // Position and size are constrained together by the task-card gesture
+    // model. Area's own constraint pass uses its previous-frame size, which
+    // creates a visible one-frame correction whenever both change at once.
+    Area::new(id)
+        .order(Order::Middle)
+        .movable(false)
+        .fixed_pos(pos)
+}
+
+/// Renders the task-card title as one move surface with a dedicated action
+/// slot. Text responses participate in the same gesture while buttons remain
+/// ordinary controls, so the visual and interactive title bars are identical.
+pub(super) fn header<R>(
+    ui: &mut Ui,
+    area_id: Id,
+    title: &str,
+    detail: Option<impl Into<RichText>>,
+    add_actions: impl FnOnce(&mut Ui) -> R,
+) -> R {
     let (drag_rect, drag) = ui.allocate_exact_size(
         Vec2::new(ui.available_width(), ui.spacing().interact_size.y),
         Sense::drag(),
     );
     let drag = drag.on_hover_cursor(CursorIcon::Grab);
     update_drag_position(ui, area_id, &drag);
-    let mut header = ui.new_child(
+    let mut actions = ui.new_child(
         UiBuilder::new()
-            .id_salt(area_id.with("title_contents"))
+            .id_salt(area_id.with("title_actions"))
             .max_rect(drag_rect)
+            .layout(Layout::right_to_left(Align::Center)),
+    );
+    actions.set_clip_rect(drag_rect);
+    let result = add_actions(&mut actions);
+    let text_right = (actions.min_rect().left() - ui.spacing().item_spacing.x)
+        .clamp(drag_rect.left(), drag_rect.right());
+    let text_rect =
+        egui::Rect::from_min_max(drag_rect.min, egui::pos2(text_right, drag_rect.max.y));
+    let mut text = ui.new_child(
+        UiBuilder::new()
+            .id_salt(area_id.with("title_text"))
+            .max_rect(text_rect)
             .layout(Layout::left_to_right(Align::Center)),
     );
-    add_contents(&mut header)
+    text.set_clip_rect(text_rect);
+    let title_drag = text
+        .label(crate::typography::headline(title))
+        .interact(Sense::drag())
+        .on_hover_cursor(CursorIcon::Grab);
+    update_drag_position(&text, area_id, &title_drag);
+    if let Some(detail) = detail {
+        let detail_drag = text
+            .label(detail.into().weak())
+            .interact(Sense::drag())
+            .on_hover_cursor(CursorIcon::Grab);
+        update_drag_position(&text, area_id, &detail_drag);
+    }
+    result
 }
 
 fn update_drag_position(ui: &Ui, area_id: Id, drag: &egui::Response) {
     let origin_id = area_id.with("drag_origin");
-    let position_id = area_id.with("position");
+    let current_rect = ui
+        .ctx()
+        .data(|data| data.get_temp::<CardLayout>(area_id.with("layout")))
+        .map(|layout| layout.rect)
+        .or_else(|| ui.ctx().memory(|memory| memory.area_rect(area_id)));
     if drag.drag_started()
-        && let Some(origin) = ui
-            .ctx()
-            .memory(|memory| memory.area_rect(area_id).map(|rect| rect.min))
+        && let Some(rect) = current_rect
     {
         ui.ctx()
-            .data_mut(|data| data.insert_temp(origin_id, origin));
+            .data_mut(|data| data.insert_temp(origin_id, DragOrigin { rect }));
     }
     if drag.dragged()
-        && let Some(origin) = ui.ctx().data(|data| data.get_temp::<Pos2>(origin_id))
+        && let Some(origin) = ui.ctx().data(|data| data.get_temp::<DragOrigin>(origin_id))
         && let Some(delta) = drag.total_drag_delta()
     {
-        ui.ctx()
-            .data_mut(|data| data.insert_temp(position_id, origin + delta));
+        let bounds = bounds(ui);
+        let desired_min = origin.rect.min + delta;
+        let pos = egui::pos2(
+            desired_min.x.clamp(
+                bounds.left(),
+                (bounds.right() - origin.rect.width()).max(bounds.left()),
+            ),
+            desired_min.y.clamp(
+                bounds.top(),
+                (bounds.bottom() - origin.rect.height()).max(bounds.top()),
+            ),
+        );
+        let rect = egui::Rect::from_min_size(pos, origin.rect.size().min(bounds.size()));
+        ui.ctx().data_mut(|data| {
+            let mut layout = data
+                .get_temp::<CardLayout>(area_id.with("layout"))
+                .unwrap_or(CardLayout {
+                    rect: origin.rect,
+                    bounds,
+                    horizontal: HorizontalAnchor::Right,
+                    vertical: VerticalAnchor::Top,
+                    chrome_height: CHROME,
+                    extra_width: 0.0,
+                    collapsed: false,
+                });
+            layout.rect = rect;
+            layout.bounds = bounds;
+            layout.horizontal = if rect.left() - bounds.left() <= bounds.right() - rect.right() {
+                HorizontalAnchor::Left
+            } else {
+                HorizontalAnchor::Right
+            };
+            layout.vertical = if rect.top() - bounds.top() <= bounds.bottom() - rect.bottom() {
+                VerticalAnchor::Top
+            } else {
+                VerticalAnchor::Bottom
+            };
+            data.insert_temp(area_id.with("layout"), layout);
+        });
         ui.ctx().request_repaint();
     }
     if drag.drag_stopped() {
-        ui.ctx().data_mut(|data| data.remove::<Pos2>(origin_id));
+        ui.ctx()
+            .data_mut(|data| data.remove::<DragOrigin>(origin_id));
     }
 }
 
-/// Renders the vertically resizable body shared by every task card.
-///
-/// `egui::Resize` normally collapses a non-resizable axis to its content size.
-/// Keeping the content UI at the card width aligns its handle with the card.
-pub(super) fn resizable_body<R>(
+/// Gives the card body the height resolved by the shared whole-card geometry.
+pub(super) fn sized_body<R>(
     ui: &mut Ui,
-    id_salt: impl Hash,
-    default_height: f32,
-    min_height: f32,
-    max_height: f32,
+    height: f32,
     add_contents: impl FnOnce(&mut Ui) -> R,
 ) -> R {
-    let width = ui.available_width();
-    egui::Resize::default()
-        .id_salt(id_salt)
-        .default_size([width, default_height])
-        .min_size([width, min_height])
-        .max_size([width, max_height])
-        .resizable([false, true])
-        .with_stroke(false)
-        .show(ui, |ui| {
-            ui.set_min_width(width);
-            add_contents(ui)
-        })
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::hover());
+    let mut body = ui.new_child(
+        UiBuilder::new()
+            .id_salt("task_card_body")
+            .max_rect(rect)
+            .layout(*ui.layout()),
+    );
+    add_contents(&mut body)
+}
+
+#[derive(Clone, Copy)]
+struct ResizeOrigin {
+    rect: egui::Rect,
+    chrome_height: f32,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct ResizeEdges {
+    pub(super) left: bool,
+    pub(super) right: bool,
+    pub(super) top: bool,
+    pub(super) bottom: bool,
+}
+
+/// Adds resize handles on every edge and corner of the whole card. The result
+/// is constrained before it is stored, so pulling beyond an edge cannot move
+/// the opposite edge or create a growing sidebar gap.
+pub(super) fn resize_handles(
+    app: &mut PlotxApp,
+    ui: &mut Ui,
+    area_id: Id,
+    tab: TaskDockTab,
+    requested_width: f32,
+    body_height: f32,
+) {
+    // At this point the card has been laid out in the current pass. Reading
+    // Area memory here returns the previous pass's rectangle, which is exactly
+    // the wrong origin when a viewport change and a resize happen together.
+    let rect = ui.min_rect();
+    let chrome_height = (rect.height() - body_height).max(0.0);
+    let extra_width = (rect.width() - requested_width).max(0.0);
+    ui.ctx().data_mut(|data| {
+        if let Some(mut layout) = data.get_temp::<CardLayout>(area_id.with("layout")) {
+            // Measurement refines content-to-frame metrics only. Gesture and
+            // workspace fitting are the sole writers of the authoritative
+            // rectangle; copying the just-rendered rectangle here would
+            // overwrite a title drag performed earlier in the same pass.
+            layout.chrome_height = chrome_height;
+            layout.extra_width = extra_width;
+            data.insert_temp(area_id.with("layout"), layout);
+        }
+    });
+    let grip = 5.0;
+    let corner = 12.0;
+    let handles = [
+        (
+            egui::Rect::from_min_max(
+                egui::pos2(rect.left() - grip, rect.top() - grip),
+                egui::pos2(rect.left() + corner, rect.top() + corner),
+            ),
+            "resize_north_west",
+            CursorIcon::ResizeNorthWest,
+            ResizeEdges {
+                left: true,
+                right: false,
+                top: true,
+                bottom: false,
+            },
+        ),
+        (
+            egui::Rect::from_min_max(
+                egui::pos2(rect.right() - corner, rect.top() - grip),
+                egui::pos2(rect.right() + grip, rect.top() + corner),
+            ),
+            "resize_north_east",
+            CursorIcon::ResizeNorthEast,
+            ResizeEdges {
+                left: false,
+                right: true,
+                top: true,
+                bottom: false,
+            },
+        ),
+        (
+            egui::Rect::from_min_max(
+                egui::pos2(rect.left() - grip, rect.bottom() - corner),
+                egui::pos2(rect.left() + corner, rect.bottom() + grip),
+            ),
+            "resize_south_west",
+            CursorIcon::ResizeSouthWest,
+            ResizeEdges {
+                left: true,
+                right: false,
+                top: false,
+                bottom: true,
+            },
+        ),
+        (
+            egui::Rect::from_min_max(
+                egui::pos2(rect.right() - corner, rect.bottom() - corner),
+                egui::pos2(rect.right() + grip, rect.bottom() + grip),
+            ),
+            "resize_south_east",
+            CursorIcon::ResizeSouthEast,
+            ResizeEdges {
+                left: false,
+                right: true,
+                top: false,
+                bottom: true,
+            },
+        ),
+        (
+            egui::Rect::from_min_max(
+                egui::pos2(rect.left() - grip, rect.top() + corner),
+                egui::pos2(rect.left() + grip, rect.bottom() - corner),
+            ),
+            "resize_west",
+            CursorIcon::ResizeWest,
+            ResizeEdges {
+                left: true,
+                right: false,
+                top: false,
+                bottom: false,
+            },
+        ),
+        (
+            egui::Rect::from_min_max(
+                egui::pos2(rect.right() - grip, rect.top() + corner),
+                egui::pos2(rect.right() + grip, rect.bottom() - corner),
+            ),
+            "resize_east",
+            CursorIcon::ResizeEast,
+            ResizeEdges {
+                left: false,
+                right: true,
+                top: false,
+                bottom: false,
+            },
+        ),
+        (
+            egui::Rect::from_min_max(
+                egui::pos2(rect.left() + corner, rect.top() - grip),
+                egui::pos2(rect.right() - corner, rect.top() + grip),
+            ),
+            "resize_north",
+            CursorIcon::ResizeNorth,
+            ResizeEdges {
+                left: false,
+                right: false,
+                top: true,
+                bottom: false,
+            },
+        ),
+        (
+            egui::Rect::from_min_max(
+                egui::pos2(rect.left() + corner, rect.bottom() - grip),
+                egui::pos2(rect.right() - corner, rect.bottom() + grip),
+            ),
+            "resize_south",
+            CursorIcon::ResizeSouth,
+            ResizeEdges {
+                left: false,
+                right: false,
+                top: false,
+                bottom: true,
+            },
+        ),
+    ];
+    let responses = handles.map(|(rect, salt, cursor, edges)| {
+        (
+            ui.interact(rect, area_id.with(salt), Sense::drag())
+                .on_hover_cursor(cursor),
+            edges,
+            rect,
+        )
+    });
+    for (response, edges, hit_rect) in &responses {
+        super::task_card_resize::paint_feedback(ui, rect, *hit_rect, *edges, response);
+    }
+    let origin_id = area_id.with("resize_origin");
+    let active = responses.iter().find(|(response, _, _)| {
+        response.drag_started() || response.dragged() || response.drag_stopped()
+    });
+    let Some((response, edges, _)) = active else {
+        return;
+    };
+    if response.drag_started() {
+        ui.ctx().data_mut(|data| {
+            data.insert_temp(
+                origin_id,
+                ResizeOrigin {
+                    rect,
+                    chrome_height,
+                },
+            )
+        });
+    }
+    if response.dragged()
+        && let Some(origin) = ui
+            .ctx()
+            .data(|data| data.get_temp::<ResizeOrigin>(origin_id))
+        && let Some(delta) = response.total_drag_delta()
+    {
+        let (minimum, maximum) = width_limits(tab);
+        let bounds = bounds(ui);
+        // Geometry and interaction must use the same effective maximum. The
+        // canvas-preserving cap can be lower than the product-level maximum;
+        // storing the larger width made the next layout shrink without moving
+        // the left edge, which appeared as a growing right-hand gap.
+        let effective_maximum = card_width(bounds, tab, maximum);
+        let resized = resized_rect(
+            origin,
+            *edges,
+            delta,
+            bounds,
+            minimum + extra_width,
+            effective_maximum + extra_width,
+        );
+        *preferred_size_mut(app, tab) = TaskCardSize::new(
+            (resized.width() - extra_width).max(1.0),
+            (resized.height() - origin.chrome_height).max(1.0),
+        );
+        ui.ctx().data_mut(|data| {
+            if let Some(mut layout) = data.get_temp::<CardLayout>(area_id.with("layout")) {
+                layout.rect = resized;
+                layout.bounds = bounds;
+                if edges.left {
+                    layout.horizontal = HorizontalAnchor::Right;
+                } else if edges.right {
+                    layout.horizontal = HorizontalAnchor::Left;
+                }
+                if edges.top {
+                    layout.vertical = VerticalAnchor::Bottom;
+                } else if edges.bottom {
+                    layout.vertical = VerticalAnchor::Top;
+                }
+                data.insert_temp(area_id.with("layout"), layout);
+            }
+        });
+        ui.ctx().request_repaint();
+    }
+    if response.drag_stopped() {
+        ui.ctx()
+            .data_mut(|data| data.remove::<ResizeOrigin>(origin_id));
+        app.persist_settings();
+    }
+}
+
+fn resized_rect(
+    origin: ResizeOrigin,
+    edges: ResizeEdges,
+    delta: Vec2,
+    bounds: egui::Rect,
+    minimum_width: f32,
+    maximum_width: f32,
+) -> egui::Rect {
+    let minimum_width = minimum_width.min(bounds.width());
+    let maximum_width = maximum_width.min(bounds.width());
+    let minimum_height = (origin.chrome_height + FLOOR).min(bounds.height());
+    let mut resized = origin.rect;
+    if edges.left {
+        resized.min.x = (origin.rect.left() + delta.x).clamp(
+            bounds.left(),
+            (origin.rect.right() - minimum_width).max(bounds.left()),
+        );
+    }
+    if edges.right {
+        resized.max.x = (origin.rect.right() + delta.x).clamp(
+            (origin.rect.left() + minimum_width).min(bounds.right()),
+            bounds.right(),
+        );
+    }
+    if resized.width() > maximum_width {
+        if edges.left {
+            resized.min.x = resized.right() - maximum_width;
+        } else {
+            resized.max.x = resized.left() + maximum_width;
+        }
+    }
+    if edges.top {
+        resized.min.y = (origin.rect.top() + delta.y).clamp(
+            bounds.top(),
+            (origin.rect.bottom() - minimum_height).max(bounds.top()),
+        );
+    }
+    if edges.bottom {
+        resized.max.y = (origin.rect.bottom() + delta.y).clamp(
+            (origin.rect.top() + minimum_height).min(bounds.bottom()),
+            bounds.bottom(),
+        );
+    }
+    resized
 }
 
 pub(super) fn is_active(app: &PlotxApp, tab: TaskDockTab) -> bool {
@@ -254,22 +698,60 @@ pub(super) fn tab_bar(app: &mut PlotxApp, current: TaskDockTab, ui: &mut Ui) -> 
     if open.len() < 2 {
         return false;
     }
-    let mut selected = None;
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing.x = 3.0;
-        for (tab, glyph, label, dataset) in &open {
-            if ui
-                .selectable_label(
-                    *tab == current,
-                    RichText::new(format!("{glyph} {label}")).small(),
-                )
-                .clicked()
-            {
-                selected = Some((*tab, *dataset));
+    let mut action = None;
+    ui.scope(|ui| {
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            for (tab, glyph, label, dataset) in &open {
+                let selected = *tab == current;
+                let (fill, stroke) = if selected {
+                    (
+                        ui.visuals().selection.bg_fill,
+                        ui.visuals().selection.stroke,
+                    )
+                } else {
+                    (
+                        ui.visuals().widgets.inactive.weak_bg_fill,
+                        ui.visuals().widgets.inactive.bg_stroke,
+                    )
+                };
+                egui::Frame::NONE
+                    .fill(fill)
+                    .stroke(stroke)
+                    .corner_radius(ui.visuals().widgets.inactive.corner_radius)
+                    .inner_margin(egui::Margin::symmetric(6, 2))
+                    .show(ui, |ui| {
+                        ui.spacing_mut().item_spacing.x = 2.0;
+                        ui.horizontal(|ui| {
+                            if ui
+                                .add(
+                                    egui::Button::selectable(
+                                        selected,
+                                        RichText::new(format!("{glyph} {label}")).small(),
+                                    )
+                                    .frame(false),
+                                )
+                                .clicked()
+                            {
+                                action = Some((false, *tab, *dataset));
+                            }
+                            if ui
+                                .add(egui::Button::new(RichText::new(icon::X).small()).frame(false))
+                                .on_hover_text(format!("Close {label}"))
+                                .clicked()
+                            {
+                                action = Some((true, *tab, *dataset));
+                            }
+                        });
+                    });
             }
-        }
+        });
     });
-    if let Some((tab, dataset)) = selected {
+    if let Some((close, tab, dataset)) = action {
+        if close {
+            app.session.ui.close_task_tab(tab);
+            return true;
+        }
         if app.session.ui.task_dock_active == Some(TaskDockTab::Regions)
             && tab != TaskDockTab::Regions
             && app.session.tool == Tool::Regions
@@ -285,193 +767,5 @@ pub(super) fn tab_bar(app: &mut PlotxApp, current: TaskDockTab, ui: &mut Ui) -> 
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use plotx_core::state::{CanvasDocument, Dataset, NmrDataset};
-    use plotx_io::{Domain, NmrData};
-    use std::cell::Cell;
-
-    fn app_with_task(tab: TaskDockTab, collapsed: bool) -> PlotxApp {
-        let mut app = PlotxApp::new();
-        let data = NmrData {
-            points: vec![num_complex::Complex64::new(0.0, 0.0); 2],
-            domain: Domain::Time,
-            spectral_width_hz: 1.0,
-            observe_freq_mhz: 1.0,
-            carrier_ppm: 0.0,
-            nucleus: "1H".into(),
-            source: "test".into(),
-            group_delay: 0.0,
-        };
-        app.doc
-            .datasets
-            .push(Dataset::Nmr(Box::new(NmrDataset::load(data))));
-        app.doc
-            .canvases
-            .push(CanvasDocument::new("p".into(), [100.0, 80.0]));
-        app.focus_single(0);
-        app.session.ui.task_dock_active = Some(tab);
-        let id = app.doc.datasets[0].resource_id();
-        match tab {
-            TaskDockTab::Processing => {
-                app.session.ui.processing_task_dataset = Some(id);
-                app.session.ui.processing_task_collapsed = collapsed;
-            }
-            TaskDockTab::Regions => {
-                app.session.ui.region_task_dataset = Some(id);
-                app.session.ui.region_task_collapsed = collapsed;
-            }
-            _ => unreachable!(),
-        }
-        app
-    }
-
-    #[test]
-    fn visible_task_uses_the_area_id_that_is_actually_rendered() {
-        let processing = app_with_task(TaskDockTab::Processing, false);
-        let regions = app_with_task(TaskDockTab::Regions, true);
-
-        assert_eq!(
-            visible_area_id(&processing),
-            Some(Id::new("processing_task_card"))
-        );
-        assert_eq!(visible_area_id(&regions), Some(Id::new("region_task_card")));
-    }
-
-    #[test]
-    fn task_card_geometry_uses_the_central_board_boundary() {
-        let app = PlotxApp::new();
-        let ctx = egui::Context::default();
-        let screen = egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(1000.0, 700.0));
-        let board = egui::Rect::from_min_max(egui::pos2(180.0, 80.0), egui::pos2(760.0, 680.0));
-        let observed = Cell::new(None);
-
-        let _ = ctx.run_ui(
-            egui::RawInput {
-                screen_rect: Some(screen),
-                ..Default::default()
-            },
-            |ui| {
-                crate::ui::workspace_geometry::resolve(&app, board, ui.ctx());
-                observed.set(Some(geometry(ui, 200.0)));
-            },
-        );
-
-        let card = observed.take().expect("task-card geometry");
-        assert!(card.pos.x >= board.left());
-        assert!(card.pos.x + card.width + MARGIN <= board.right());
-        assert!(card.pos.y >= board.top());
-    }
-
-    #[test]
-    fn narrow_boards_keep_a_valid_card_width() {
-        let board = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(250.0, 140.0));
-
-        assert!(card_width(board, WIDTH) < WIDTH);
-        assert!(card_width(board, WIDTH) >= MIN_CARD_WIDTH);
-    }
-
-    #[test]
-    fn title_drag_moves_the_shared_task_card() {
-        let ctx = egui::Context::default();
-        let screen = egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(640.0, 480.0));
-        let area_id = Id::new("test_task_card");
-        let start = Pos2::new(100.0, 80.0);
-
-        let frame = |events| {
-            let input = egui::RawInput {
-                screen_rect: Some(screen),
-                events,
-                ..Default::default()
-            };
-            let _ = ctx.run_ui(input, |ui| {
-                egui::CentralPanel::default().show_inside(ui, |ui| {
-                    area(ui, area_id, start).show(ui.ctx(), |ui| {
-                        ui.set_width(WIDTH);
-                        header(ui, area_id, |ui| {
-                            ui.label("Processing");
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                let _ = ui.button("Close");
-                            });
-                        });
-                        ui.label("Body");
-                    });
-                });
-            });
-        };
-
-        frame(Vec::new());
-        frame(Vec::new());
-        let initial = ctx
-            .memory(|memory| memory.area_rect(area_id))
-            .expect("laid-out task card");
-        let pointer_start = initial.min + egui::vec2(80.0, 12.0);
-        let pointer_end = pointer_start + egui::vec2(120.0, 100.0);
-        frame(vec![egui::Event::PointerMoved(pointer_start)]);
-        frame(vec![
-            egui::Event::PointerMoved(pointer_start),
-            egui::Event::PointerButton {
-                pos: pointer_start,
-                button: egui::PointerButton::Primary,
-                pressed: true,
-                modifiers: egui::Modifiers::default(),
-            },
-        ]);
-        frame(vec![egui::Event::PointerMoved(pointer_end)]);
-        frame(vec![egui::Event::PointerButton {
-            pos: pointer_end,
-            button: egui::PointerButton::Primary,
-            pressed: false,
-            modifiers: egui::Modifiers::default(),
-        }]);
-
-        let moved = ctx
-            .memory(|memory| memory.area_rect(area_id))
-            .expect("task card area");
-        assert_eq!(moved.min, initial.min + (pointer_end - pointer_start));
-    }
-
-    #[test]
-    fn resize_handle_stays_at_the_task_card_right_edge() {
-        let ctx = egui::Context::default();
-        let screen = egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(640.0, 480.0));
-        let expected_right = Cell::new(0.0);
-        let actual_right = Cell::new(None);
-
-        let frame = || {
-            let _ = ctx.run_ui(
-                egui::RawInput {
-                    screen_rect: Some(screen),
-                    ..Default::default()
-                },
-                |ui| {
-                    egui::CentralPanel::default().show_inside(ui, |ui| {
-                        Area::new(Id::new("resize_test_card"))
-                            .fixed_pos(Pos2::new(100.0, 80.0))
-                            .show(ui.ctx(), |ui| {
-                                ui.set_width(WIDTH);
-                                let body_id = Id::new("resize_test_body");
-                                let corner_id = ui
-                                    .make_persistent_id(Id::new(body_id))
-                                    .with("__resize_corner");
-                                expected_right
-                                    .set(ui.next_widget_position().x + ui.available_width());
-                                resizable_body(ui, body_id, 200.0, 120.0, 300.0, |ui| {
-                                    ui.label("Short content");
-                                });
-                                actual_right.set(
-                                    ui.ctx()
-                                        .read_response(corner_id)
-                                        .map(|response| response.rect.right()),
-                                );
-                            });
-                    });
-                },
-            );
-        };
-
-        frame();
-        frame();
-        assert_eq!(actual_right.get(), Some(expected_right.get()));
-    }
-}
+#[path = "task_card_tests.rs"]
+mod tests;

@@ -98,7 +98,7 @@ fn ilt_default_catalog_edit_uses_shared_bounds_and_persists() {
     app.commit_property_with_settings_writer(commit, |settings| {
         crate::settings::save_to_path(&path, settings)
     });
-    let loaded = crate::settings::load_from_paths(&path, None);
+    let loaded = crate::settings::load_from_path(&path);
     let _ = std::fs::remove_file(&path);
     assert_eq!(loaded.processing.ilt_lambda, 0.4);
 }

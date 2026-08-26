@@ -11,6 +11,10 @@ These instructions apply to the entire repository.
   `docs/dist/`, or `docs/node_modules/`.
 - Keep public documentation and user-visible behavior in sync.
 - Never add credentials or confidential or proprietary data.
+- Until the first stable release, persisted formats remain fixed at v1. Do not
+  add migrations, legacy readers, compatibility fallbacks, old serialization
+  adapters, or development-draft format handling. Framework-native default
+  filling such as Serde `#[serde(default)]` is sufficient.
 
 ## Product name
 

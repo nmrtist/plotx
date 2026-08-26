@@ -156,11 +156,7 @@ pub fn render_central(app: &mut PlotxApp, ui: &mut Ui) {
     // Raw-pointer gestures must not start through UI layered over the canvas.
     let pointer_hits_canvas_layer = ui
         .input(|input| input.pointer.hover_pos())
-        .is_none_or(|pos| {
-            ui.ctx()
-                .layer_id_at(pos)
-                .is_none_or(|layer| layer == ui.layer_id())
-        });
+        .is_none_or(|pos| super::tools::task_card::pointer_allows_canvas(app, ui, pos));
     let pointer_owned = app.session.ui.interaction.is_active()
         || (ui.rect_contains_pointer(rect) && pointer_hits_canvas_layer);
 

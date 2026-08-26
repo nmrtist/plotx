@@ -20,26 +20,8 @@ fn missing_fields_take_defaults() {
         settings.appearance.graphics_power,
         GraphicsPowerPreference::LowPower
     );
-}
-
-#[test]
-fn v0_preferences_load_as_settings() {
-    let path = temp_settings("v0");
-    let legacy = temp_settings("legacy");
-    let _ = std::fs::remove_file(&path);
-    let _ = std::fs::remove_file(&legacy);
-    std::fs::write(
-        &legacy,
-        r#"{"include_view_snapshots":true,"snap_enabled":false}"#,
-    )
-    .unwrap();
-
-    let settings = io::load_from_paths(&path, Some(&legacy));
-    let _ = std::fs::remove_file(&legacy);
-
-    assert!(settings.export.include_view_snapshots);
-    assert!(!settings.general.snap_enabled);
-    assert_eq!(settings.schema_version, SETTINGS_SCHEMA_VERSION);
+    assert_eq!(settings.window.task_cards.craft.width, 520.0);
+    assert_eq!(settings.window.task_cards.processing.width, 340.0);
 }
 
 #[test]
@@ -52,7 +34,7 @@ fn unversioned_nested_settings_keep_their_fields() {
     )
     .unwrap();
 
-    let settings = io::load_from_paths(&path, None);
+    let settings = io::load_from_path(&path);
     let _ = std::fs::remove_file(&path);
 
     assert!(!settings.general.snap_enabled);
@@ -81,7 +63,7 @@ fn backup_generation_count_is_bounded_on_load() {
     let _ = std::fs::remove_file(&path);
     std::fs::write(&path, r#"{"general":{"project_backup_generations":255}}"#).unwrap();
 
-    let settings = io::load_from_paths(&path, None);
+    let settings = io::load_from_path(&path);
     let _ = std::fs::remove_file(&path);
 
     assert_eq!(
@@ -103,7 +85,7 @@ fn recent_files_are_bounded_on_load() {
     )
     .unwrap();
 
-    let settings = io::load_from_paths(&path, None);
+    let settings = io::load_from_path(&path);
     let _ = std::fs::remove_file(&path);
 
     // The loaded list is what the Preferences panel shows, so the documented
@@ -121,9 +103,10 @@ fn save_and_load_roundtrip() {
     settings.general.project_backup_generations = 3;
     settings.export.include_view_snapshots = true;
     settings.export.trim_to_visible_content = true;
+    settings.window.task_cards.craft = TaskCardSize::new(612.0, 688.0);
 
     io::save_to_path(&path, &settings).unwrap();
-    let loaded = io::load_from_paths(&path, None);
+    let loaded = io::load_from_path(&path);
     let _ = std::fs::remove_file(&path);
 
     assert!(!loaded.general.snap_enabled);
@@ -131,6 +114,59 @@ fn save_and_load_roundtrip() {
     assert_eq!(loaded.general.project_backup_generations, 3);
     assert!(loaded.export.include_view_snapshots);
     assert!(loaded.export.trim_to_visible_content);
+    assert_eq!(
+        loaded.window.task_cards.craft,
+        TaskCardSize::new(612.0, 688.0)
+    );
+}
+
+#[test]
+fn invalid_task_card_sizes_are_repaired_at_the_load_boundary() {
+    let path = temp_settings("task-card-bound");
+    let _ = std::fs::remove_file(&path);
+    std::fs::write(
+        &path,
+        r#"{"schema_version":1,"window":{"task_cards":{"craft":{"width":-1.0,"body_height":0.0}}}}"#,
+    )
+    .unwrap();
+
+    let settings = io::load_from_path(&path);
+    let _ = std::fs::remove_file(&path);
+
+    assert_eq!(
+        settings.window.task_cards.craft,
+        TaskCardSize::new(520.0, 500.0)
+    );
+}
+
+#[test]
+fn missing_task_card_size_fields_only_use_that_card_defaults() {
+    let path = temp_settings("task-card-missing-field");
+    let _ = std::fs::remove_file(&path);
+    std::fs::write(
+        &path,
+        r#"{
+            "general":{"snap_enabled":false},
+            "window":{"task_cards":{
+                "processing":{"width":352.0},
+                "craft":{"body_height":712.0}
+            }}
+        }"#,
+    )
+    .unwrap();
+
+    let settings = io::load_from_path(&path);
+    let _ = std::fs::remove_file(&path);
+
+    assert!(!settings.general.snap_enabled);
+    assert_eq!(
+        settings.window.task_cards.craft,
+        TaskCardSize::new(520.0, 712.0)
+    );
+    assert_eq!(
+        settings.window.task_cards.processing,
+        TaskCardSize::new(352.0, 430.0)
+    );
 }
 
 #[test]
@@ -139,7 +175,7 @@ fn corrupt_file_quarantines_and_defaults() {
     let _ = std::fs::remove_file(&path);
     std::fs::write(&path, b"{").unwrap();
 
-    let settings = io::load_from_paths(&path, None);
+    let settings = io::load_from_path(&path);
     let quarantined = (1..1000)
         .map(|i| {
             path.parent()
