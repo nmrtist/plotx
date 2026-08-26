@@ -130,7 +130,7 @@ impl CraftParams {
         Self {
             profile: CraftProfile::Conventional,
             regions: Vec::new(),
-            max_components_per_fit_window: 7,
+            max_components_per_fit_window: 15,
             min_amplitude_to_noise: 3.3,
             linewidth_hz: (0.05, 10.0),
             filter_taps: 499,
@@ -329,7 +329,7 @@ pub fn process_craft_cancellable(
         if cancelled() {
             return Err(CraftError::Cancelled);
         }
-        let result = fit_region(input, skip, sw, region, params, cancelled)?;
+        let result = fit_region(input, skip, data.group_delay, sw, region, params, cancelled)?;
         if let Some((kind, message)) = result.warning {
             warnings.push(CraftWarning {
                 kind,
@@ -455,7 +455,10 @@ pub fn process_craft_cancellable(
         .points
         .iter()
         .enumerate()
-        .map(|(index, &sample)| sample - model_at(&components, index as f64 / sw))
+        .map(|(index, &sample)| {
+            let time = (index as f64 - data.group_delay) / sw;
+            sample - model_at(&components, time)
+        })
         .collect();
     let residual_rss: f64 = residual_fid[skip..].iter().map(Complex64::norm_sqr).sum();
     let input_rss: f64 = input.iter().map(Complex64::norm_sqr).sum();
@@ -518,6 +521,7 @@ pub fn process_craft_cancellable(
 fn fit_region(
     input: &[Complex64],
     skipped_points: usize,
+    group_delay_points: f64,
     sw: f64,
     region: HzRegion,
     params: &CraftParams,
@@ -535,7 +539,11 @@ fn fit_region(
         .iter()
         .enumerate()
         .map(|(index, &value)| {
-            let time = (skipped_points + index) as f64 / sw;
+            // Bruker points after the digital-filter transient are already
+            // samples of the FID starting at `ceil(delay) - delay`. Keeping the
+            // raw point number here would reintroduce the removed delay as an
+            // amplitude extrapolation and a first-order phase ramp.
+            let time = (skipped_points as f64 + index as f64 - group_delay_points) / sw;
             value * Complex64::from_polar(1.0, -TAU * center_hz * time)
         })
         .collect();
@@ -568,7 +576,11 @@ fn fit_region(
         .copied()
         .collect();
     let times: Vec<f64> = (0..samples.len())
-        .map(|index| (skipped_points + phase_start + index * decimation) as f64 / sw)
+        .map(|index| {
+            (skipped_points as f64 + phase_start as f64 + (index * decimation) as f64
+                - group_delay_points)
+                / sw
+        })
         .collect();
     if samples.len() < 16 {
         return Ok(RegionResult {

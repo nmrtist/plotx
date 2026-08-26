@@ -46,7 +46,7 @@ CRAFT 直接拟合一维 NMR 采集中的原始复数 FID，并报告共振分�
 
 - **Minimum A/N**：3.3。较低值会保留更弱的候选分量，但也更容易拟合噪声；低于
   3.3 时会标记为需要复核。
-- **Max components / fit window**：7（允许范围 1–64）。达到上限会在诊断中给出
+- **Max components / fit window**：15（允许范围 1–64）。达到上限会在诊断中给出
   警告。
 - **Linewidth range (Hz)**：0.05–10 Hz。
 - **Fit window width (Hz)**：500 Hz。它只决定宽信号组如何分段计算，不会增加

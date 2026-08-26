@@ -60,7 +60,7 @@ profile uses these defaults:
 
 - **Minimum A/N**: 3.3. Lower values retain weaker candidates but increase the
   chance of fitting noise; values below 3.3 are flagged for review.
-- **Max components / fit window**: 7 (allowed range 1–64). Reaching the limit
+- **Max components / fit window**: 15 (allowed range 1–64). Reaching the limit
   is reported as a diagnostic warning.
 - **Linewidth range (Hz)**: 0.05–10 Hz.
 - **Fit window width (Hz)**: 500 Hz. This controls how wide groups are divided

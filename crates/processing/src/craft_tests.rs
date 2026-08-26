@@ -99,6 +99,76 @@ fn ssfp_skip_extrapolates_amplitude_to_time_zero() {
 }
 
 #[test]
+fn group_delay_uses_the_physical_fid_time_origin() {
+    let sw = 2_000.0;
+    let delay = 67.985_885_620_117_2;
+    let expected_amplitude = 5.0;
+    let expected_phase = 0.4;
+    let mut input = data(&[], 4096, sw);
+    input.group_delay = delay;
+    input.points = (0..input.points.len())
+        .map(|index| {
+            let time = (index as f64 - delay) / sw;
+            Complex64::from_polar(
+                expected_amplitude * (-PI * 2.0 * time).exp(),
+                expected_phase + TAU * 100.0 * time,
+            )
+        })
+        .collect();
+    let params = CraftParams {
+        regions: vec![CraftRegion::new(CraftRegionId(1), 0.18, 0.22)],
+        filter_taps: 127,
+        ..CraftParams::default()
+    };
+
+    let result = process_craft_cancellable(
+        &input,
+        &CraftInvocation::acquisition(&input, params),
+        &|| false,
+    )
+    .unwrap();
+
+    assert_eq!(result.components.len(), 1, "{:?}", result.components);
+    let component = &result.components[0];
+    assert!((component.amplitude_t0 - expected_amplitude).abs() < 0.02);
+    let phase_error = (component.phase_rad - expected_phase).sin().abs();
+    assert!(phase_error < 0.01, "phase error was {phase_error}");
+}
+
+#[test]
+fn default_model_limit_resolves_non_lorentzian_multiplet_quantitation() {
+    let mut components = vec![
+        (-108.0, 0.75, 0.3, 0.5),
+        (-100.0, 1.50, 0.3, 0.6),
+        (-92.0, 0.75, 0.3, 0.7),
+    ];
+    for (frequency, amplitude) in [(80.0, 0.25), (88.0, 0.75), (96.0, 0.75), (104.0, 0.25)] {
+        components.push((frequency, amplitude * 0.6, 0.3, 1.0));
+        components.push((frequency + 0.8, amplitude * 0.4, 0.3, 1.8));
+    }
+    let input = data(&components, 4096, 2_000.0);
+    let params = CraftParams {
+        regions: vec![
+            CraftRegion::new(CraftRegionId(0), -0.23, -0.17),
+            CraftRegion::new(CraftRegionId(1), 0.14, 0.23),
+        ],
+        filter_taps: 127,
+        ..CraftParams::default()
+    };
+
+    let result = process_craft_cancellable(
+        &input,
+        &CraftInvocation::acquisition(&input, params),
+        &|| false,
+    )
+    .unwrap();
+
+    assert!(result.diagnostics.fit_windows[1].selected_model_order > 7);
+    let ratio = result.region_ratio.unwrap().value;
+    assert!((ratio - 1.5).abs() < 0.03, "ratio was {ratio}");
+}
+
+#[test]
 fn rejects_frequency_domain_input() {
     let mut input = data(&[], 128, 1000.0);
     input.domain = Domain::Frequency;
