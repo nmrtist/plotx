@@ -1,10 +1,15 @@
 use super::tests::synthetic_1d;
 use super::*;
-use crate::state::{CraftRunId, FieldPayload, StoredCraftRun};
+use crate::state::{
+    CraftRunId, FieldPayload, NewAnalysisReport, ReportKindId, ReportSource, ReportStatus,
+    StoredCraftRun,
+};
 use plotx_processing::craft::{
-    CraftComponent, CraftComponentId, CraftDiagnostics, CraftFitWindowDiagnostic,
+    CraftComponent, CraftComponentId, CraftDiagnostics, CraftModelingWindowDiagnostic,
     CraftParamOverrides, CraftParams, CraftReference, CraftRegionId, CraftRegionRatio,
-    CraftRegionSummary, CraftResult, CraftRunStatus, resolve_craft_invocation,
+    CraftRegionSummary, CraftReportDefinition, CraftResult, CraftRunStatus,
+    CraftStabilityDiagnostics, CraftStabilityMetric, CraftStabilityRegion,
+    resolve_craft_invocation,
 };
 
 fn sample_run(data: &NmrData) -> StoredCraftRun {
@@ -80,31 +85,54 @@ fn sample_run(data: &NmrData) -> StoredCraftRun {
                 residual_rss: 1.0,
                 normalized_residual: 0.02,
                 maximum_condition_number: Some(4.0),
-                fit_windows: vec![
-                    CraftFitWindowDiagnostic {
-                        region: CraftRegionId(0),
-                        core_hz: (-1300.0, -1100.0),
-                        padded_hz: (-1320.0, -1080.0),
-                        actual_decimation: 4,
-                        retained_samples: 256,
+                modeling_windows: vec![
+                    CraftModelingWindowDiagnostic {
+                        retention_band_hz: (-1300.0, -1100.0),
+                        modeling_band_hz: (-1320.0, -1080.0),
+                        decimation_factor: 4,
+                        modeled_sample_count: 256,
                         evaluated_model_orders: 7,
                         selected_model_order: 1,
-                        bic: Some(-25.0),
+                        training_bic: Some(-25.0),
                         condition_number: Some(3.0),
+                        modeled_duration_s: 1.0,
+                        training_normalized_residual: 0.01,
+                        validation_normalized_residual: 0.02,
                     },
-                    CraftFitWindowDiagnostic {
-                        region: CraftRegionId(1),
-                        core_hz: (1100.0, 1300.0),
-                        padded_hz: (1080.0, 1320.0),
-                        actual_decimation: 4,
-                        retained_samples: 256,
+                    CraftModelingWindowDiagnostic {
+                        retention_band_hz: (1100.0, 1300.0),
+                        modeling_band_hz: (1080.0, 1320.0),
+                        decimation_factor: 4,
+                        modeled_sample_count: 256,
                         evaluated_model_orders: 7,
                         selected_model_order: 1,
-                        bic: Some(-20.0),
+                        training_bic: Some(-20.0),
                         condition_number: Some(4.0),
+                        modeled_duration_s: 1.0,
+                        training_normalized_residual: 0.01,
+                        validation_normalized_residual: 0.02,
                     },
                 ],
                 warnings: Vec::new(),
+                stability: CraftStabilityDiagnostics {
+                    delta_ppm: 0.016,
+                    regions: vec![CraftStabilityRegion {
+                        region: CraftRegionId(0),
+                        metric: CraftStabilityMetric {
+                            median: 1.0,
+                            minimum: 0.999,
+                            maximum: 1.001,
+                            relative_dispersion: 0.002,
+                        },
+                        component_count_min: 1,
+                        component_count_max: 1,
+                        model_order_min: 1,
+                        model_order_max: 1,
+                    }],
+                    ratio: None,
+                    passed: true,
+                    skipped: Vec::new(),
+                },
             },
             synthetic_fid: Vec::new(),
             residual_fid: Vec::new(),
@@ -181,7 +209,7 @@ fn unavailable_craft_diagnostics_survive_project_roundtrip() {
     run.components[0].linewidth_std_hz = None;
     run.components[0].phase_std_rad = None;
     run.diagnostics.maximum_condition_number = None;
-    run.diagnostics.fit_windows[0].bic = None;
+    run.diagnostics.modeling_windows[0].training_bic = None;
     let mut dataset = NmrDataset::load(data);
     dataset.craft_runs.push(run.clone());
     dataset.reconcile_craft_fields();
@@ -198,6 +226,101 @@ fn unavailable_craft_diagnostics_survive_project_roundtrip() {
         panic!("NMR dataset survives round-trip");
     };
     assert_eq!(dataset.craft_runs, vec![run]);
+}
+
+#[test]
+fn only_stable_complete_runs_create_quantitative_reports() {
+    let data = synthetic_1d();
+    let definition = CraftReportDefinition::default();
+    let stable = sample_run(&data);
+    assert!(stable.amplitude_report(definition.clone()).is_ok());
+
+    let mut needs_review = stable.clone();
+    needs_review.diagnostics.status = CraftRunStatus::Partial;
+    needs_review.diagnostics.stability.passed = false;
+    assert!(
+        needs_review
+            .amplitude_report(definition)
+            .unwrap_err()
+            .contains("NeedsReview")
+    );
+    assert!(crate::state::craft_component_table(&needs_review).is_ok());
+}
+
+#[test]
+fn report_status_tracks_stability_and_source_availability() {
+    let data = synthetic_1d();
+    let mut dataset = NmrDataset::load(data.clone());
+    let mut run = sample_run(&data);
+    run.provenance.invocation.reference = dataset.craft_reference();
+    let definition = CraftReportDefinition::default();
+    let snapshot = run.amplitude_report(definition.clone()).unwrap();
+    let source = ReportSource {
+        dataset: dataset.resource_id,
+        craft_run: run.id,
+    };
+    dataset.craft_runs.push(run);
+    dataset.reconcile_craft_fields();
+    let mut app = crate::state::PlotxApp::new();
+    app.doc.datasets.push(Dataset::Nmr(Box::new(dataset)));
+    let report = app.doc.create_report(NewAnalysisReport {
+        name: "CRAFT stability status".to_owned(),
+        kind: ReportKindId::new("craft_amplitude"),
+        source,
+        definition: serde_json::to_value(definition).unwrap(),
+        snapshot: serde_json::to_value(snapshot).unwrap(),
+        source_fingerprint: crate::state::craft_input_sha256(&data),
+        schema_version: 1,
+    });
+
+    assert_eq!(
+        app.doc.report(report).unwrap().status(&app.doc),
+        ReportStatus::Available
+    );
+    app.doc.datasets[0].as_nmr_mut().unwrap().craft_runs[0]
+        .diagnostics
+        .stability
+        .passed = false;
+    assert_eq!(
+        app.doc.report(report).unwrap().status(&app.doc),
+        ReportStatus::NeedsReview
+    );
+    app.doc.datasets[0].as_nmr_mut().unwrap().craft_runs.clear();
+    assert_eq!(
+        app.doc.report(report).unwrap().status(&app.doc),
+        ReportStatus::Unavailable
+    );
+}
+
+#[test]
+fn stability_snapshot_survives_project_roundtrip() {
+    let data = synthetic_1d();
+    let mut run = sample_run(&data);
+    run.diagnostics.stability.skipped = vec!["contract: overlapping regions".to_owned()];
+    run.diagnostics.stability.ratio = Some(CraftStabilityMetric {
+        median: 0.5,
+        minimum: 0.498,
+        maximum: 0.502,
+        relative_dispersion: 0.008,
+    });
+    let mut dataset = NmrDataset::load(data);
+    dataset.craft_runs.push(run.clone());
+    dataset.reconcile_craft_fields();
+    let mut app = crate::state::PlotxApp::new();
+    app.doc.datasets.push(Dataset::Nmr(Box::new(dataset)));
+    let path = super::tests::temp_project("craft-stability");
+    let _ = std::fs::remove_file(&path);
+
+    save_project(&app, &path, false).unwrap();
+    let loaded = load_project(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+
+    assert_eq!(
+        loaded.doc.datasets[0].as_nmr().unwrap().craft_runs[0]
+            .diagnostics
+            .stability,
+        run.diagnostics.stability
+    );
 }
 
 #[test]

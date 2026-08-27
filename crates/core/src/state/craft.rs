@@ -1,8 +1,9 @@
 use super::{FloatSeries, NmrDataset, TableDataset, materialized_float_series_table};
 use plotx_io::NmrData;
 use plotx_processing::craft::{
-    CRAFT_ALGORITHM, CRAFT_ALGORITHM_VERSION, CraftComponent, CraftDiagnostics, CraftInvocation,
-    CraftReference, CraftRegionRatio, CraftRegionSummary, CraftResult,
+    CRAFT_ALGORITHM, CRAFT_ALGORITHM_VERSION, CraftAmplitudeReport, CraftComponent,
+    CraftDiagnostics, CraftInvocation, CraftReference, CraftRegionRatio, CraftRegionSummary,
+    CraftReportDefinition, CraftResult, calculate_craft_report,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -32,6 +33,17 @@ pub struct StoredCraftRun {
 }
 
 impl StoredCraftRun {
+    pub fn amplitude_report(
+        &self,
+        definition: CraftReportDefinition,
+    ) -> Result<CraftAmplitudeReport, String> {
+        if self.diagnostics.status != plotx_processing::craft::CraftRunStatus::Complete
+            || !self.diagnostics.stability.passed
+        {
+            return Err("CRAFT run is marked NeedsReview; quantitative amplitude reports are unavailable until stability checks pass.".to_owned());
+        }
+        calculate_craft_report(&self.components, definition).map_err(|e| e.to_string())
+    }
     pub fn from_result(
         id: CraftRunId,
         data: &NmrData,
@@ -238,6 +250,84 @@ pub fn craft_component_table(run: &StoredCraftRun) -> Result<TableDataset, Strin
             ),
         ],
         "plotx.analysis.craft-component-table.v1",
+    )
+    .map_err(|error| error.to_string())
+}
+
+pub fn craft_amplitude_report_table(report: &CraftAmplitudeReport) -> Result<TableDataset, String> {
+    let rows = report.segments.len();
+    let values = |read: fn(&plotx_processing::craft::CraftReportSegment) -> f64| {
+        report
+            .segments
+            .iter()
+            .map(|segment| Some(read(segment)))
+            .collect()
+    };
+    materialized_float_series_table(
+        (
+            "segment".into(),
+            "".into(),
+            (1..=rows).map(|i| Some(i as f64)).collect(),
+        ),
+        vec![
+            FloatSeries {
+                name: "report threshold A/N".into(),
+                unit: "".into(),
+                values: vec![Some(report.definition.threshold_an); rows],
+                uncertainty: None,
+                fit: None,
+            },
+            FloatSeries {
+                name: "segment width".into(),
+                unit: "Hz".into(),
+                values: vec![Some(report.definition.segment_width_hz); rows],
+                uncertainty: None,
+                fit: None,
+            },
+            FloatSeries {
+                name: "center".into(),
+                unit: "Hz".into(),
+                values: values(|s| s.center_hz),
+                uncertainty: None,
+                fit: None,
+            },
+            FloatSeries {
+                name: "start".into(),
+                unit: "Hz".into(),
+                values: values(|s| s.start_hz),
+                uncertainty: None,
+                fit: None,
+            },
+            FloatSeries {
+                name: "end".into(),
+                unit: "Hz".into(),
+                values: values(|s| s.end_hz),
+                uncertainty: None,
+                fit: None,
+            },
+            FloatSeries {
+                name: "component count".into(),
+                unit: "".into(),
+                values: values(|s| s.component_count as f64),
+                uncertainty: None,
+                fit: None,
+            },
+            FloatSeries {
+                name: "scalar amplitude sum t0".into(),
+                unit: "".into(),
+                values: values(|s| s.scalar_amplitude_sum_t0),
+                uncertainty: None,
+                fit: None,
+            },
+            FloatSeries {
+                name: "coherent amplitude t0".into(),
+                unit: "".into(),
+                values: values(|s| s.coherent_amplitude_t0),
+                uncertainty: None,
+                fit: None,
+            },
+        ],
+        "plotx.analysis.craft-amplitude-report.v1",
     )
     .map_err(|error| error.to_string())
 }

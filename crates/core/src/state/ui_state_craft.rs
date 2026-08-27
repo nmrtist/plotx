@@ -11,6 +11,7 @@ pub enum CraftResultTab {
     Overview,
     Components,
     Diagnostics,
+    Reports,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

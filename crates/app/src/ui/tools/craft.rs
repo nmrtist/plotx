@@ -8,6 +8,7 @@ use super::task_card::{self, TaskCardGeometry};
 use crate::ui::commands::{self, CommandId};
 
 mod results;
+mod results_diagnostics;
 mod setup;
 mod spectrum;
 
@@ -304,6 +305,18 @@ fn command_button(app: &mut PlotxApp, command: CommandId, label: &str, primary: 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn preview_sample_indices(point_count: usize, sample_count: usize) -> Vec<usize> {
+        let count = point_count.min(sample_count.max(2));
+        if count == 0 {
+            return Vec::new();
+        }
+        if count == 1 {
+            return vec![0];
+        }
+        let last = point_count - 1;
+        (0..count).map(|index| index * last / (count - 1)).collect()
+    }
     use num_complex::Complex64;
     use plotx_core::state::{CraftRunId, NmrDataset, StoredCraftRun};
     use plotx_io::{Domain, NmrData};
@@ -340,8 +353,9 @@ mod tests {
                     residual_rss: 1.0,
                     normalized_residual: 1.0,
                     maximum_condition_number: Some(1.0),
-                    fit_windows: Vec::new(),
+                    modeling_windows: Vec::new(),
                     warnings: Vec::new(),
+                    stability: Default::default(),
                 },
                 synthetic_fid: Vec::new(),
                 residual_fid: Vec::new(),
@@ -354,7 +368,7 @@ mod tests {
         let first = NmrDataset::load(time_domain_data("first"));
         let mut second = NmrDataset::load(time_domain_data("second"));
         let mut provenance_params = CraftParams::ssfp();
-        provenance_params.min_amplitude_to_noise = 8.5;
+        provenance_params.minimum_amplitude_to_noise = 8.5;
         second
             .craft_runs
             .push(stored_run(&second.data, provenance_params.clone()));
@@ -364,10 +378,10 @@ mod tests {
 
         app.set_active_dataset(Some(0));
         open_for_active(&mut app);
-        app.session.ui.craft_overrides.min_amplitude_to_noise = Some(6.0);
+        app.session.ui.craft_overrides.minimum_amplitude_to_noise = Some(6.0);
         open_for_active(&mut app);
         assert_eq!(
-            app.session.ui.craft_overrides.min_amplitude_to_noise,
+            app.session.ui.craft_overrides.minimum_amplitude_to_noise,
             Some(6.0)
         );
 
@@ -382,7 +396,7 @@ mod tests {
 
     #[test]
     fn preview_indices_cover_endpoints_with_a_bounded_sample_count() {
-        let indices = results::preview_sample_indices(65_536, 310);
+        let indices = preview_sample_indices(65_536, 310);
 
         assert_eq!(indices.len(), 310);
         assert_eq!(indices.first(), Some(&0));
@@ -408,7 +422,7 @@ mod tests {
             &dataset.data,
             dataset.craft_reference(),
             &plotx_processing::craft::CraftParamOverrides {
-                filter_taps: Some(31),
+                fir_filter_taps: Some(31),
                 ..Default::default()
             },
             None,
@@ -427,7 +441,7 @@ mod tests {
     }
 
     #[test]
-    fn detected_signal_width_is_independent_of_internal_fit_window_width() {
+    fn detected_signal_width_is_independent_of_modeling_bandwidth() {
         assert!((45.0 / 600.0_f64 - 0.075).abs() < f64::EPSILON);
     }
 }

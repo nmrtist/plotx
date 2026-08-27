@@ -1,4 +1,5 @@
 use super::*;
+use std::f64::consts::{PI, TAU};
 
 fn data(components: &[(f64, f64, f64, f64)], count: usize, sw: f64) -> NmrData {
     let points = (0..count)
@@ -35,8 +36,7 @@ fn complete_reduction_recovers_table_and_residual() {
         2000.0,
     );
     let params = CraftParams {
-        max_fit_window_width_hz: 2_000.0,
-        filter_taps: 127,
+        fir_filter_taps: 127,
         ..CraftParams::default()
     };
     let invocation = CraftInvocation::acquisition(&input, params);
@@ -44,18 +44,25 @@ fn complete_reduction_recovers_table_and_residual() {
     assert_eq!(result.components.len(), 2, "{:?}", result.components);
     assert!((result.components[0].frequency_hz + 75.0).abs() < 0.05);
     assert!((result.components[1].frequency_hz - 120.0).abs() < 0.05);
-    assert!(result.diagnostics.normalized_residual < 1e-4);
+    assert!((result.components[0].amplitude_t0 - 8.0).abs() / 8.0 < 0.01);
+    assert!((result.components[1].amplitude_t0 - 4.0).abs() / 4.0 < 0.01);
+    assert!(
+        result.diagnostics.normalized_residual < 0.01,
+        "components={:?} diagnostics={:?}",
+        result.components,
+        result.diagnostics
+    );
 }
 
 #[test]
-fn full_band_fit_treats_empty_internal_windows_as_valid_no_signal_results() {
+fn full_band_modeling_treats_empty_windows_as_valid_no_signal_results() {
     let input = data(
         &[(-300.0, 4.0, 0.1, 2.0), (300.0, 2.0, -0.2, 2.0)],
         4096,
         2_000.0,
     );
     let params = CraftParams {
-        filter_taps: 63,
+        fir_filter_taps: 63,
         ..CraftParams::default()
     };
 
@@ -69,7 +76,7 @@ fn full_band_fit_treats_empty_internal_windows_as_valid_no_signal_results() {
     assert_eq!(result.region_summaries.len(), 1);
     assert_eq!(result.region_summaries[0].region, CraftRegionId(0));
     assert!(result.region_summaries[0].component_count >= 2);
-    assert_eq!(result.diagnostics.fit_windows.len(), 4);
+    assert_eq!(result.diagnostics.modeling_windows.len(), 2);
 }
 
 #[test]
@@ -80,14 +87,18 @@ fn ssfp_skip_extrapolates_amplitude_to_time_zero() {
         profile: CraftProfile::Ssfp,
         skip_duration_s: 10.0 / input.spectral_width_hz,
         reconstruction_duration_s: Some(0.1),
-        max_fit_window_width_hz: 20_000.0,
-        filter_taps: 63,
+        fir_filter_taps: 63,
         ..CraftParams::default()
     };
     let invocation = CraftInvocation::acquisition(&input, params);
     let result = process_craft_cancellable(&input, &invocation, &|| false).unwrap();
-    assert_eq!(result.components.len(), 1);
-    assert!((result.components[0].amplitude_t0 - 5.0).abs() < 0.05);
+    assert_eq!(result.components.len(), 1, "{:?}", result.components);
+    assert!(
+        (result.components[0].amplitude_t0 - 5.0).abs() < 0.05,
+        "components={:?} diagnostics={:?}",
+        result.components,
+        result.diagnostics
+    );
     assert_eq!(result.synthetic_fid.len(), 2000);
     assert!(
         result
@@ -117,7 +128,7 @@ fn group_delay_uses_the_physical_fid_time_origin() {
         .collect();
     let params = CraftParams {
         regions: vec![CraftRegion::new(CraftRegionId(1), 0.18, 0.22)],
-        filter_taps: 127,
+        fir_filter_taps: 127,
         ..CraftParams::default()
     };
 
@@ -149,10 +160,10 @@ fn default_model_limit_resolves_non_lorentzian_multiplet_quantitation() {
     let input = data(&components, 4096, 2_000.0);
     let params = CraftParams {
         regions: vec![
-            CraftRegion::new(CraftRegionId(0), -0.23, -0.17),
-            CraftRegion::new(CraftRegionId(1), 0.14, 0.23),
+            CraftRegion::new(CraftRegionId(0), -0.25, -0.15),
+            CraftRegion::new(CraftRegionId(1), 0.12, 0.25),
         ],
-        filter_taps: 127,
+        fir_filter_taps: 127,
         ..CraftParams::default()
     };
 
@@ -163,9 +174,29 @@ fn default_model_limit_resolves_non_lorentzian_multiplet_quantitation() {
     )
     .unwrap();
 
-    assert!(result.diagnostics.fit_windows[1].selected_model_order > 7);
+    assert_eq!(result.region_summaries[1].component_count, 8);
+    assert!(
+        !result
+            .diagnostics
+            .warnings
+            .iter()
+            .any(|warning| warning.kind == CraftWarningKind::InputAssessment
+                && warning.message.contains("peak density"))
+    );
     let ratio = result.region_ratio.unwrap().value;
     assert!((ratio - 1.5).abs() < 0.03, "ratio was {ratio}");
+    assert!(
+        result.diagnostics.stability.passed,
+        "{:?}",
+        result.diagnostics.stability
+    );
+    assert!(
+        result
+            .diagnostics
+            .stability
+            .ratio
+            .is_some_and(|metric| metric.relative_dispersion < 0.01)
+    );
 }
 
 #[test]
@@ -190,12 +221,11 @@ fn overlapping_requested_regions_are_rejected_as_ambiguous() {
             CraftRegion::new(CraftRegionId(10), -1.0, 1.0),
             CraftRegion::new(CraftRegionId(20), 0.5, 2.0),
         ],
-        max_fit_window_width_hz: 500.0,
         ..CraftParams::default()
     };
 
     assert!(matches!(
-        build_regions(&input, &params, CraftReference::acquisition(&input)),
+        build_modeling_windows(&input, &params, CraftReference::acquisition(&input), &[],),
         Err(CraftError::InvalidParameters)
     ));
 }
@@ -206,14 +236,24 @@ fn reference_maps_displayed_regions_and_reported_shifts_without_changing_frequen
     let reference = CraftReference::new(input.carrier_ppm, 0.15);
     let params = CraftParams {
         regions: vec![CraftRegion::new(CraftRegionId(7), 0.38, 0.40)],
-        max_fit_window_width_hz: 500.0,
-        filter_taps: 127,
+        fir_filter_taps: 127,
         ..CraftParams::default()
     };
 
-    let regions = build_regions(&input, &params, reference).unwrap();
-    assert!((regions[0].core.0 - 115.0).abs() < 1e-9);
-    assert!((regions[0].core.1 - 125.0).abs() < 1e-9);
+    let clear_signals = preflight::detect_clear_signals(&input, reference, 0);
+    let regions = build_modeling_windows(&input, &params, reference, &clear_signals).unwrap();
+    assert_eq!(regions.len(), 1);
+    assert!(
+        ((regions[0].retention_band_hz.0 + regions[0].retention_band_hz.1) * 0.5 - 120.0).abs()
+            < 0.25,
+        "signals={clear_signals:?} window={:?}",
+        regions[0]
+    );
+    assert!(
+        regions
+            .iter()
+            .all(|window| window.retention_band_hz.1 - window.retention_band_hz.0 <= 500.0)
+    );
 
     let invocation = resolve_craft_invocation(
         &input,
@@ -230,11 +270,10 @@ fn reference_maps_displayed_regions_and_reported_shifts_without_changing_frequen
 }
 
 #[test]
-fn narrow_window_fit_is_independent_of_signal_phase() {
+fn modeling_window_is_independent_of_signal_phase() {
     let params = CraftParams {
         regions: vec![CraftRegion::new(CraftRegionId(1), 0.18, 0.22)],
-        max_fit_window_width_hz: 500.0,
-        filter_taps: 127,
+        fir_filter_taps: 127,
         ..CraftParams::default()
     };
     let fitted_frequency = |phase| {
@@ -252,7 +291,7 @@ fn narrow_window_fit_is_independent_of_signal_phase() {
 }
 
 #[test]
-fn fit_windows_preserve_user_region_identity_and_one_region_ratio() {
+fn modeling_windows_are_independent_while_components_preserve_region_identity() {
     let input = data(
         &[(-300.0, 4.0, 0.1, 2.0), (300.0, 2.0, 0.1, 2.0)],
         4096,
@@ -263,24 +302,19 @@ fn fit_windows_preserve_user_region_identity_and_one_region_ratio() {
             CraftRegion::new(CraftRegionId(22), 0.1, 1.0),
             CraftRegion::new(CraftRegionId(11), -1.0, -0.1),
         ],
-        max_fit_window_width_hz: 150.0,
-        max_components_per_fit_window: 3,
-        filter_taps: 63,
+        maximum_model_order: 3,
+        fir_filter_taps: 63,
         ..CraftParams::default()
     };
     let reference = CraftReference::acquisition(&input);
 
-    let windows = build_regions(&input, &params, reference).unwrap();
-    assert_eq!(windows.len(), 6);
+    let clear_signals = preflight::detect_clear_signals(&input, reference, 0);
+    let windows = build_modeling_windows(&input, &params, reference, &clear_signals).unwrap();
+    assert_eq!(windows.len(), 2);
     assert!(
-        windows[..3]
+        windows
             .iter()
-            .all(|window| window.selection.id == CraftRegionId(11))
-    );
-    assert!(
-        windows[3..]
-            .iter()
-            .all(|window| window.selection.id == CraftRegionId(22))
+            .all(|window| window.retention_band_hz.1 - window.retention_band_hz.0 <= 500.0)
     );
 
     let invocation = resolve_craft_invocation(
@@ -300,6 +334,55 @@ fn fit_windows_preserve_user_region_identity_and_one_region_ratio() {
             .all(|component| { matches!(component.region, CraftRegionId(11) | CraftRegionId(22)) })
     );
     assert!((result.region_ratio.unwrap().value - 0.5).abs() < 0.05);
+}
+
+#[test]
+fn overlapping_modeling_bands_retain_each_component_once() {
+    let input = data(
+        &[
+            (-100.0, 10.0, 0.1, 2.0),
+            (0.0, 2.0, 0.1, 2.0),
+            (110.0, 8.0, 0.1, 2.0),
+        ],
+        4096,
+        2_000.0,
+    );
+    let params = CraftParams {
+        maximum_model_order: 4,
+        fir_filter_taps: 127,
+        ..CraftParams::default()
+    };
+
+    let result = process_craft_cancellable(
+        &input,
+        &CraftInvocation::acquisition(&input, params),
+        &|| false,
+    )
+    .unwrap();
+
+    assert_eq!(result.diagnostics.modeling_windows.len(), 2);
+    assert_eq!(
+        result
+            .diagnostics
+            .modeling_windows
+            .iter()
+            .map(|window| window.selected_model_order)
+            .sum::<usize>(),
+        4,
+        "{:?}",
+        result.diagnostics.modeling_windows
+    );
+    assert_eq!(result.components.len(), 3, "{:?}", result.components);
+    assert_eq!(
+        result
+            .components
+            .iter()
+            .filter(|component| component.frequency_hz.abs() < 1.0)
+            .count(),
+        1,
+        "{:?}",
+        result.components
+    );
 }
 
 #[test]
@@ -386,11 +469,11 @@ fn zero_overrides_resolve_complete_bandwidth_and_stable_sources() {
 fn resolver_applies_per_field_explicit_provenance_default_priority() {
     let input = data(&[(80.0, 10.0, 0.0, 2.0)], 1024, 1_000.0);
     let mut prior_params = CraftParams::ssfp();
-    prior_params.min_amplitude_to_noise = 8.0;
-    prior_params.filter_taps = 127;
+    prior_params.minimum_amplitude_to_noise = 8.0;
+    prior_params.fir_filter_taps = 127;
     let prior = CraftInvocation::acquisition(&input, prior_params);
     let overrides = CraftParamOverrides {
-        min_amplitude_to_noise: Some(5.0),
+        minimum_amplitude_to_noise: Some(5.0),
         ..CraftParamOverrides::default()
     };
 
@@ -401,14 +484,14 @@ fn resolver_applies_per_field_explicit_provenance_default_priority() {
         Some(&prior),
     );
 
-    assert_eq!(resolved.params.min_amplitude_to_noise, 5.0);
+    assert_eq!(resolved.params.minimum_amplitude_to_noise, 5.0);
     assert_eq!(
-        resolved.sources.min_amplitude_to_noise,
+        resolved.sources.minimum_amplitude_to_noise,
         CraftParamSource::ExplicitInput
     );
-    assert_eq!(resolved.params.filter_taps, 127);
+    assert_eq!(resolved.params.fir_filter_taps, 127);
     assert_eq!(
-        resolved.sources.filter_taps,
+        resolved.sources.fir_filter_taps,
         CraftParamSource::ResultProvenance
     );
     assert_eq!(resolved.params.profile, CraftProfile::Ssfp);
@@ -419,7 +502,7 @@ fn selecting_profile_clears_profile_owned_overrides_but_keeps_regions() {
     let region = CraftRegion::new(CraftRegionId(9), -0.2, 0.2);
     let mut overrides = CraftParamOverrides {
         regions: Some(vec![region]),
-        min_amplitude_to_noise: Some(9.0),
+        minimum_amplitude_to_noise: Some(9.0),
         ..CraftParamOverrides::default()
     };
 
@@ -427,23 +510,18 @@ fn selecting_profile_clears_profile_owned_overrides_but_keeps_regions() {
 
     assert_eq!(overrides.profile, Some(CraftProfile::Ssfp));
     assert_eq!(overrides.regions, Some(vec![region]));
-    assert_eq!(overrides.min_amplitude_to_noise, None);
+    assert_eq!(overrides.minimum_amplitude_to_noise, None);
 
     let input = data(&[(80.0, 10.0, 0.0, 2.0)], 1024, 1_000.0);
-    let mut conventional = CraftParams::conventional();
-    conventional.max_fit_window_width_hz = 125.0;
-    let previous = CraftInvocation::acquisition(&input, conventional);
+    let previous = CraftInvocation::acquisition(&input, CraftParams::conventional());
     let resolved = resolve_craft_invocation(
         &input,
         CraftReference::acquisition(&input),
         &overrides,
         Some(&previous),
     );
-    assert_eq!(resolved.params.max_fit_window_width_hz, 2_000.0);
-    assert_eq!(
-        resolved.sources.max_fit_window_width_hz,
-        CraftParamSource::StableDefault
-    );
+    assert_eq!(resolved.params.profile, CraftProfile::Ssfp);
+    assert_eq!(resolved.modeling_policy.modeling_bandwidth_hz, 2_000.0);
 }
 
 #[test]
@@ -483,7 +561,7 @@ fn short_and_invalid_inputs_are_classified_before_execution() {
 }
 
 #[test]
-fn derived_plan_matches_actual_fit_window_diagnostics() {
+fn derived_plan_matches_actual_modeling_window_diagnostics() {
     let input = data(&[(100.0, 10.0, 0.1, 2.0)], 2048, 1_000.0);
     let invocation = resolve_craft_invocation(
         &input,
@@ -494,18 +572,174 @@ fn derived_plan_matches_actual_fit_window_diagnostics() {
     let result = process_craft_cancellable(&input, &invocation, &|| false).unwrap();
 
     assert_eq!(
-        result.diagnostics.fit_windows.len(),
-        invocation.derived_plan.fit_windows.len()
+        result.diagnostics.modeling_windows.len(),
+        invocation.derived_plan.modeling_windows.len()
     );
     for (actual, planned) in result
         .diagnostics
-        .fit_windows
+        .modeling_windows
         .iter()
-        .zip(&invocation.derived_plan.fit_windows)
+        .zip(&invocation.derived_plan.modeling_windows)
     {
-        assert_eq!(actual.region, planned.region);
-        assert_eq!(actual.core_hz, planned.core_hz);
-        assert_eq!(actual.padded_hz, planned.padded_hz);
-        assert_eq!(actual.actual_decimation, planned.planned_decimation);
+        assert_eq!(actual.retention_band_hz, planned.retention_band_hz);
+        assert_eq!(actual.modeling_band_hz, planned.modeling_band_hz);
+        assert_eq!(actual.decimation_factor, planned.planned_decimation_factor);
     }
+}
+
+#[test]
+fn user_boundaries_do_not_change_fixed_modeling_protocol() {
+    let input = data(
+        &[(-100.0, 6.0, 0.2, 2.0), (100.0, 4.0, 0.2, 2.0)],
+        4096,
+        2_000.0,
+    );
+    let invocation = |regions| {
+        let params = CraftParams {
+            regions,
+            fir_filter_taps: 127,
+            ..CraftParams::default()
+        };
+        CraftInvocation::acquisition(&input, params)
+    };
+    let narrow = invocation(vec![CraftRegion::new(CraftRegionId(1), -0.24, -0.16)]);
+    let wide = invocation(vec![CraftRegion::new(CraftRegionId(1), -0.30, -0.10)]);
+
+    assert_eq!(narrow.modeling_policy, wide.modeling_policy);
+    assert_eq!(narrow.modeling_policy.modeling_bandwidth_hz, 250.0);
+    assert_eq!(narrow.modeling_policy.modeling_duration_s, 1.0);
+    assert_eq!(
+        narrow.derived_plan.modeling_windows.len(),
+        wide.derived_plan.modeling_windows.len()
+    );
+    for (left, right) in narrow
+        .derived_plan
+        .modeling_windows
+        .iter()
+        .zip(&wide.derived_plan.modeling_windows)
+    {
+        assert_eq!(left.retention_band_hz, right.retention_band_hz);
+        assert_eq!(left.modeling_band_hz, right.modeling_band_hz);
+        assert_eq!(
+            left.planned_decimation_factor,
+            right.planned_decimation_factor
+        );
+        assert_eq!(
+            left.planned_modeled_sample_count,
+            right.planned_modeled_sample_count
+        );
+        assert_eq!(
+            left.planned_modeled_duration_s,
+            right.planned_modeled_duration_s
+        );
+    }
+}
+
+#[test]
+fn boundary_instability_marks_run_partial_but_keeps_components() {
+    let input = data(&[(100.0, 5.0, 0.2, 2.0)], 4096, 2_000.0);
+    let params = CraftParams {
+        regions: vec![CraftRegion::new(CraftRegionId(7), 0.195, 0.30)],
+        fir_filter_taps: 127,
+        ..CraftParams::default()
+    };
+
+    let result = process_craft_cancellable(
+        &input,
+        &CraftInvocation::acquisition(&input, params),
+        &|| false,
+    )
+    .unwrap();
+
+    assert_eq!(result.components.len(), 1);
+    assert_eq!(result.diagnostics.status, CraftRunStatus::Partial);
+    assert!(!result.diagnostics.stability.passed);
+    assert!(
+        result
+            .diagnostics
+            .warnings
+            .iter()
+            .any(|warning| { warning.kind == CraftWarningKind::StabilityFailure })
+    );
+}
+
+#[test]
+fn global_zero_order_phase_does_not_change_coherent_amplitude() {
+    let input = data(
+        &[(-20.0, 3.0, 0.1, 1.5), (20.0, 2.0, 0.4, 1.8)],
+        4096,
+        2_000.0,
+    );
+    let params = CraftParams {
+        regions: vec![CraftRegion::new(CraftRegionId(3), -0.10, 0.10)],
+        fir_filter_taps: 127,
+        ..CraftParams::default()
+    };
+    let fit = |input: &NmrData| {
+        process_craft_cancellable(
+            input,
+            &CraftInvocation::acquisition(input, params.clone()),
+            &|| false,
+        )
+        .unwrap()
+        .region_summaries[0]
+            .coherent_amplitude_t0
+    };
+    let expected = fit(&input);
+    let rotation = Complex64::from_polar(1.0, 1.1);
+    let mut rotated = input.clone();
+    for point in &mut rotated.points {
+        *point *= rotation;
+    }
+
+    let actual = fit(&rotated);
+    assert!(
+        (actual - expected).abs() / expected < 1e-6,
+        "expected={expected} actual={actual}"
+    );
+}
+
+#[test]
+fn no_clear_signal_allows_exploration_but_requires_review() {
+    let input = data(&[], 4096, 2_000.0);
+    let invocation = CraftInvocation::acquisition(
+        &input,
+        CraftParams {
+            fir_filter_taps: 63,
+            ..CraftParams::default()
+        },
+    );
+
+    assert!(invocation.assessment.can_run());
+    assert!(invocation.assessment.issues.iter().any(|issue| {
+        issue.code == CraftIssueCode::NoClearSignal && issue.severity == CraftIssueSeverity::Warning
+    }));
+    let result = process_craft_cancellable(&input, &invocation, &|| false).unwrap();
+
+    assert_eq!(result.diagnostics.status, CraftRunStatus::Partial);
+    assert!(result.components.is_empty());
+    assert!(!result.diagnostics.stability.passed);
+}
+
+#[test]
+fn validation_selection_keeps_model_order_when_only_the_unused_tail_changes() {
+    let components = [(-30.0, 5.0, 0.2, 1.5), (42.0, 3.0, -0.3, 2.0)];
+    let selected_orders = [4096, 4112].map(|count| {
+        let input = data(&components, count, 2_000.0);
+        let invocation = CraftInvocation::acquisition(
+            &input,
+            CraftParams {
+                fir_filter_taps: 127,
+                ..CraftParams::default()
+            },
+        );
+        process_craft_cancellable(&input, &invocation, &|| false)
+            .unwrap()
+            .diagnostics
+            .modeling_windows[0]
+            .selected_model_order
+    });
+
+    assert_eq!(selected_orders[0], 2);
+    assert_eq!(selected_orders[1], selected_orders[0]);
 }

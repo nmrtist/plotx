@@ -3,6 +3,7 @@ use plotx_core::state::{
     CraftAnalysisIntent, CraftComponentSort, CraftResultTab, CraftTaskPage, PlotxApp,
     StoredCraftRun,
 };
+use plotx_processing::craft::{CraftAmplitudeReport, CraftReportDefinition};
 use plotx_processing::craft::{CraftComponent, CraftProfile, CraftRegionId, CraftRunStatus};
 
 use crate::ui::commands::CommandId;
@@ -123,6 +124,11 @@ pub(super) fn show(app: &mut PlotxApp, index: usize, ui: &mut Ui) {
             CraftResultTab::Diagnostics,
             "Diagnostics",
         );
+        ui.selectable_value(
+            &mut app.session.ui.craft_result_tab,
+            CraftResultTab::Reports,
+            "Reports",
+        );
     });
     ui.separator();
 
@@ -130,7 +136,221 @@ pub(super) fn show(app: &mut PlotxApp, index: usize, ui: &mut Ui) {
         CraftResultTab::Overview => overview(app, &nmr, &run, ui),
         CraftResultTab::Components => components(app, &nmr, &run, ui),
         CraftResultTab::Diagnostics => diagnostics(app, &nmr, &run, ui),
+        CraftResultTab::Reports => reports(app, index, &nmr, &run, ui),
     }
+}
+
+fn reports(
+    app: &mut PlotxApp,
+    index: usize,
+    nmr: &plotx_core::state::NmrDataset,
+    run: &StoredCraftRun,
+    ui: &mut Ui,
+) {
+    let source = plotx_core::state::ReportSource {
+        dataset: nmr.resource_id,
+        craft_run: run.id,
+    };
+    let report_ids = app
+        .doc
+        .reports_for_source(source)
+        .map(|r| r.id)
+        .collect::<Vec<_>>();
+    let quantitative_ready = run.diagnostics.status == CraftRunStatus::Complete
+        && run.diagnostics.stability.passed
+        && !run.is_stale_for(&nmr.data, nmr.craft_reference());
+    ui.horizontal_wrapped(|ui| {
+        if ui
+            .add_enabled(quantitative_ready, egui::Button::new("New report"))
+            .on_disabled_hover_text(
+                "A stable, current CRAFT run is required for a quantitative amplitude report.",
+            )
+            .clicked()
+        {
+            let definition = CraftReportDefinition {
+                threshold_an: run.provenance.invocation.params.minimum_amplitude_to_noise,
+                segment_width_hz: 1.0,
+                regions: Vec::new(),
+            };
+            if let Ok(snapshot) = run.amplitude_report(definition.clone())
+                && let (Ok(definition), Ok(snapshot)) = (
+                    serde_json::to_value(definition),
+                    serde_json::to_value(snapshot),
+                )
+            {
+                let id = app.doc.create_report(plotx_core::state::NewAnalysisReport {
+                    name: format!("CRAFT report {}", report_ids.len() + 1),
+                    kind: plotx_core::state::ReportKindId::new("craft_amplitude"),
+                    source,
+                    definition,
+                    snapshot,
+                    source_fingerprint: run.provenance.input_sha256.clone(),
+                    schema_version: 1,
+                });
+                app.session.ui.craft_selected_report = Some(id);
+            }
+        }
+        if !report_ids.is_empty() {
+            let mut selected = app
+                .session
+                .ui
+                .craft_selected_report
+                .filter(|id| report_ids.contains(id))
+                .or_else(|| report_ids.first().copied());
+            egui::ComboBox::from_id_salt(("craft_report", run.id.0))
+                .selected_text(
+                    selected
+                        .map(|id| format!("Report {}", id.0 + 1))
+                        .unwrap_or_default(),
+                )
+                .show_ui(ui, |ui| {
+                    for id in &report_ids {
+                        ui.selectable_value(
+                            &mut selected,
+                            Some(*id),
+                            format!("Report {}", id.0 + 1),
+                        );
+                    }
+                });
+            app.session.ui.craft_selected_report = selected;
+            if let Some(id) = selected {
+                if ui.button("Delete").clicked() {
+                    app.doc.delete_report(id);
+                    app.session.ui.craft_selected_report = None;
+                    return;
+                }
+                if ui.button("Copy").clicked()
+                    && let Ok(copy) = app.doc.copy_report(id, None)
+                {
+                    app.session.ui.craft_selected_report = Some(copy);
+                }
+                if ui.button("Rename").clicked() {
+                    let _ = app
+                        .doc
+                        .rename_report(id, format!("CRAFT report {}", id.0 + 1));
+                }
+            }
+        }
+    });
+    let Some(id) = app.session.ui.craft_selected_report else {
+        ui.weak("Create a report to summarize trusted CRAFT components.");
+        return;
+    };
+    let Some(record) = app.doc.report(id).cloned() else {
+        return;
+    };
+    match record.status(&app.doc) {
+        plotx_core::state::ReportStatus::Unavailable => {
+            ui.colored_label(
+                ui.visuals().error_fg_color,
+                "Source CRAFT run is unavailable.",
+            );
+            return;
+        }
+        plotx_core::state::ReportStatus::NeedsReview => {
+            ui.colored_label(
+                ui.visuals().warn_fg_color,
+                "Source CRAFT run changed. Review or recreate this report.",
+            );
+        }
+        plotx_core::state::ReportStatus::Available => {}
+    }
+    let mut definition: CraftReportDefinition =
+        serde_json::from_value(record.definition.clone()).unwrap_or_default();
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        ui.label("Report threshold A/N");
+        changed |= ui
+            .add(
+                egui::DragValue::new(&mut definition.threshold_an)
+                    .speed(0.1)
+                    .range(0.001..=1_000.0),
+            )
+            .changed();
+        ui.label("Segment width");
+        changed |= ui
+            .add(
+                egui::DragValue::new(&mut definition.segment_width_hz)
+                    .speed(0.1)
+                    .range(0.001..=1_000_000.0),
+            )
+            .changed();
+        ui.label(format!(
+            "Hz ({:.5} ppm)",
+            definition.segment_width_hz / nmr.data.observe_freq_mhz
+        ));
+    });
+    let mut snapshot: CraftAmplitudeReport = serde_json::from_value(record.snapshot.clone())
+        .unwrap_or(CraftAmplitudeReport {
+            schema_version: 1,
+            definition: definition.clone(),
+            segments: Vec::new(),
+        });
+    if changed && let Ok(generated_snapshot) = run.amplitude_report(definition.clone()) {
+        snapshot = generated_snapshot.clone();
+        let mut updated = record.clone();
+        updated.definition =
+            serde_json::to_value(&definition).unwrap_or_else(|_| record.definition.clone());
+        updated.snapshot =
+            serde_json::to_value(generated_snapshot).unwrap_or_else(|_| record.snapshot.clone());
+        let _ = app.doc.update_report(updated);
+    }
+    let component_count: usize = snapshot.segments.iter().map(|s| s.component_count).sum();
+    let scalar: f64 = snapshot
+        .segments
+        .iter()
+        .map(|s| s.scalar_amplitude_sum_t0)
+        .sum();
+    let coherent: f64 = snapshot
+        .segments
+        .iter()
+        .map(|s| s.coherent_amplitude_t0)
+        .sum();
+    ui.small(format!(
+        "{} segment(s) · {} component(s) · scalar {:.5} · coherent {:.5}",
+        snapshot.segments.len(),
+        component_count,
+        scalar,
+        coherent
+    ));
+    if ui
+        .add_enabled(quantitative_ready, egui::Button::new("Export report…"))
+        .on_disabled_hover_text(
+            "Quantitative export is unavailable until CRAFT stability checks pass.",
+        )
+        .clicked()
+    {
+        match app.materialize_craft_report_table(index, id) {
+            Ok(table) => app.open_data_export(table),
+            Err(message) => app.session.status = message,
+        }
+    }
+    egui::Grid::new(("craft_report_table", id.0))
+        .striped(true)
+        .show(ui, |ui| {
+            ui.strong("Segment");
+            ui.strong("Bounds (Hz)");
+            ui.strong("Components");
+            ui.strong("Scalar");
+            ui.strong("Coherent");
+            ui.end_row();
+            for (i, segment) in snapshot.segments.iter().enumerate() {
+                ui.label((i + 1).to_string());
+                ui.label(format!("{:.4} .. {:.4}", segment.start_hz, segment.end_hz));
+                ui.label(
+                    segment
+                        .component_ids
+                        .iter()
+                        .map(|id| id.0.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                );
+                ui.label(format!("{:.5}", segment.scalar_amplitude_sum_t0));
+                ui.label(format!("{:.5}", segment.coherent_amplitude_t0));
+                ui.end_row();
+            }
+        });
+    let _ = index;
 }
 
 fn prepare_rerun(app: &mut PlotxApp, run: &StoredCraftRun) {
@@ -200,6 +420,21 @@ fn overview(
         "{} components · normalized residual {:.3e}",
         run.components.len(),
         run.diagnostics.normalized_residual
+    ));
+    ui.small(format!(
+        "Fixed protocol: {:.0} Hz modeling bandwidth · boundary dispersion: {:.2}%",
+        run.provenance
+            .invocation
+            .params
+            .profile
+            .modeling_bandwidth_hz(),
+        run.diagnostics
+            .stability
+            .regions
+            .iter()
+            .map(|region| region.metric.relative_dispersion)
+            .fold(0.0, f64::max)
+            * 100.0,
     ));
     ui.small(format!(
         "Chemical-shift reference {:+.5} ppm · effective carrier {:.5} ppm",
@@ -514,22 +749,22 @@ fn diagnostics(
         ));
         ui.small(format!(
             "A/N {:.2} ({:?}) · model limit {} ({:?}) · linewidth {:.3}–{:.3} Hz ({:?})",
-            invocation.params.min_amplitude_to_noise,
-            invocation.sources.min_amplitude_to_noise,
-            invocation.params.max_components_per_fit_window,
-            invocation.sources.max_components_per_fit_window,
-            invocation.params.linewidth_hz.0,
-            invocation.params.linewidth_hz.1,
-            invocation.sources.linewidth_hz,
+            invocation.params.minimum_amplitude_to_noise,
+            invocation.sources.minimum_amplitude_to_noise,
+            invocation.params.maximum_model_order,
+            invocation.sources.maximum_model_order,
+            invocation.params.component_linewidth_bounds_hz.0,
+            invocation.params.component_linewidth_bounds_hz.1,
+            invocation.sources.component_linewidth_bounds_hz,
         ));
         ui.small(format!(
-            "Skip {} points ({:?}) · FIR {} taps · {} available · {} reconstructed · {} fit window(s)",
+            "Skip {} points ({:?}) · FIR {} taps · {} available · {} reconstructed · {} modeling window(s)",
             invocation.derived_plan.effective_skip_points,
             invocation.derived_plan.effective_skip_source,
-            invocation.derived_plan.actual_filter_taps,
+            invocation.derived_plan.effective_fir_filter_taps,
             invocation.derived_plan.available_points,
             invocation.derived_plan.reconstruction_points,
-            invocation.derived_plan.fit_windows.len(),
+            invocation.derived_plan.modeling_windows.len(),
         ));
         for issue in &invocation.assessment.issues {
             ui.colored_label(
@@ -541,27 +776,7 @@ fn diagnostics(
             );
         }
     });
-    if !run.diagnostics.fit_windows.is_empty() {
-        ui.collapsing("Fit-window BIC", |ui| {
-            for (window, diagnostic) in run.diagnostics.fit_windows.iter().enumerate() {
-                ui.small(format!(
-                    "Window {} · Region {} · order {}/{} · decimation {} · {} samples · BIC {} · condition {}",
-                    window + 1,
-                    region_number(run, diagnostic.region),
-                    diagnostic.selected_model_order,
-                    diagnostic.evaluated_model_orders,
-                    diagnostic.actual_decimation,
-                    diagnostic.retained_samples,
-                    diagnostic
-                        .bic
-                        .map_or_else(|| "unavailable".into(), |value| format!("{value:.4}")),
-                    diagnostic
-                        .condition_number
-                        .map_or_else(|| "unavailable".into(), |value| format!("{value:.3e}")),
-                ));
-            }
-        });
-    }
+    super::results_diagnostics::show_modeling_windows(run, ui);
 }
 
 fn region_number(run: &StoredCraftRun, id: CraftRegionId) -> usize {
@@ -569,17 +784,4 @@ fn region_number(run: &StoredCraftRun, id: CraftRegionId) -> usize {
         .iter()
         .position(|summary| summary.region == id)
         .map_or(0, |position| position + 1)
-}
-
-#[cfg(test)]
-pub(super) fn preview_sample_indices(point_count: usize, sample_count: usize) -> Vec<usize> {
-    let count = point_count.min(sample_count.max(2));
-    if count == 0 {
-        return Vec::new();
-    }
-    if count == 1 {
-        return vec![0];
-    }
-    let last = point_count - 1;
-    (0..count).map(|index| index * last / (count - 1)).collect()
 }

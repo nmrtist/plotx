@@ -362,6 +362,7 @@ pub struct UiState {
     pub craft_selected_run: Option<CraftRunId>,
     pub craft_task_page: CraftTaskPage,
     pub craft_result_tab: CraftResultTab,
+    pub craft_selected_report: Option<crate::state::ReportId>,
     pub craft_component_sort: CraftComponentSort,
     pub craft_component_region: Option<plotx_processing::craft::CraftRegionId>,
     pub craft_selected_component: Option<plotx_processing::craft::CraftComponentId>,
@@ -559,6 +560,7 @@ impl Default for UiState {
             craft_selected_run: None,
             craft_task_page: CraftTaskPage::Setup,
             craft_result_tab: CraftResultTab::Overview,
+            craft_selected_report: None,
             craft_component_sort: CraftComponentSort::ChemicalShift,
             craft_component_region: None,
             craft_selected_component: None,
@@ -619,6 +621,8 @@ pub struct Document {
     pub project_revision: Option<String>,
     pub automation_revision: u64,
     pub automation_runs: Vec<crate::automation::RunManifest>,
+    pub reports: Vec<AnalysisReportRecord>,
+    pub next_report_id: u64,
     /// Incremented for every persisted edit. Background save completion uses
     /// this token instead of clearing `dirty` unconditionally.
     pub edit_generation: u64,

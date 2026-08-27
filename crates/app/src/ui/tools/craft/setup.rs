@@ -69,10 +69,10 @@ fn readiness(intent: CraftAnalysisIntent, invocation: &CraftInvocation, ui: &mut
     };
     ui.colored_label(color, crate::typography::headline(label));
     ui.small(format!(
-        "{} points ({} usable) · {duration} · {} fit window(s) · {} clear signal(s)",
+        "{} points ({} usable) · {duration} · {} modeling window(s) · {} clear signal(s)",
         assessment.point_count,
         assessment.effective_point_count,
-        assessment.fit_window_count,
+        assessment.modeling_window_count,
         assessment.clear_signals.len(),
     ));
     for issue in &assessment.issues {
@@ -179,43 +179,43 @@ fn settings(app: &mut PlotxApp, index: usize, invocation: &CraftInvocation, ui: 
 
     ui.add_space(8.0);
     ui.label(crate::typography::headline(
-        "3. Confirm acquisition and fit settings",
+        "3. Confirm acquisition and component settings",
     ));
-    ui.collapsing("Advanced fit settings", |ui| {
-        let mut value = invocation.params.min_amplitude_to_noise;
+    ui.collapsing("Advanced component settings", |ui| {
+        let mut value = invocation.params.minimum_amplitude_to_noise;
         if setting_row(
             ui,
             "Minimum A/N",
-            invocation.sources.min_amplitude_to_noise,
+            invocation.sources.minimum_amplitude_to_noise,
             &nmr,
-            &mut overrides.min_amplitude_to_noise,
+            &mut overrides.minimum_amplitude_to_noise,
             |ui| {
                 ui.add(DragValue::new(&mut value).range(0.1..=100.0).speed(0.1))
                     .changed()
             },
         ) {
-            overrides.min_amplitude_to_noise = Some(value);
+            overrides.minimum_amplitude_to_noise = Some(value);
         }
 
-        let mut value = invocation.params.max_components_per_fit_window;
+        let mut value = invocation.params.maximum_model_order;
         if setting_row(
             ui,
-            "Max components / fit window",
-            invocation.sources.max_components_per_fit_window,
+            "Maximum model order",
+            invocation.sources.maximum_model_order,
             &nmr,
-            &mut overrides.max_components_per_fit_window,
+            &mut overrides.maximum_model_order,
             |ui| ui.add(DragValue::new(&mut value).range(1..=64)).changed(),
         ) {
-            overrides.max_components_per_fit_window = Some(value);
+            overrides.maximum_model_order = Some(value);
         }
 
-        let mut value = invocation.params.linewidth_hz;
+        let mut value = invocation.params.component_linewidth_bounds_hz;
         if setting_row(
             ui,
-            "Linewidth range (Hz)",
-            invocation.sources.linewidth_hz,
+            "Component linewidth range (Hz)",
+            invocation.sources.component_linewidth_bounds_hz,
             &nmr,
-            &mut overrides.linewidth_hz,
+            &mut overrides.component_linewidth_bounds_hz,
             |ui| {
                 let first = ui
                     .add(DragValue::new(&mut value.0).range(0.001..=1_000.0))
@@ -226,52 +226,7 @@ fn settings(app: &mut PlotxApp, index: usize, invocation: &CraftInvocation, ui: 
                         .changed()
             },
         ) {
-            overrides.linewidth_hz = Some(value);
-        }
-
-        let mut value = invocation.params.max_fit_window_width_hz;
-        if setting_row(
-            ui,
-            "Fit window width (Hz)",
-            invocation.sources.max_fit_window_width_hz,
-            &nmr,
-            &mut overrides.max_fit_window_width_hz,
-            |ui| {
-                ui.add(DragValue::new(&mut value).range(10.0..=10_000.0))
-                    .changed()
-            },
-        ) {
-            overrides.max_fit_window_width_hz = Some(value);
-        }
-
-        let mut value = invocation.params.filter_taps;
-        if setting_row(
-            ui,
-            "FIR taps",
-            invocation.sources.filter_taps,
-            &nmr,
-            &mut overrides.filter_taps,
-            |ui| {
-                ui.add(DragValue::new(&mut value).range(3..=4_095))
-                    .changed()
-            },
-        ) {
-            overrides.filter_taps = Some(value | 1);
-        }
-
-        let mut value = invocation.params.max_downsampled_points;
-        if setting_row(
-            ui,
-            "Max downsampled points",
-            invocation.sources.max_downsampled_points,
-            &nmr,
-            &mut overrides.max_downsampled_points,
-            |ui| {
-                ui.add(DragValue::new(&mut value).range(64..=65_536))
-                    .changed()
-            },
-        ) {
-            overrides.max_downsampled_points = Some(value);
+            overrides.component_linewidth_bounds_hz = Some(value);
         }
 
         if invocation.params.profile == CraftProfile::Ssfp {
@@ -311,9 +266,11 @@ fn settings(app: &mut PlotxApp, index: usize, invocation: &CraftInvocation, ui: 
             }
         }
         ui.weak(format!(
-            "Derived plan: skip {} points · {} actual taps · {} reconstructed points",
+            "Fixed protocol: {:.0} Hz modeling bandwidth · {:.2} s modeling duration · skip {} points · {} FIR taps · {} reconstructed points",
+            invocation.params.profile.modeling_bandwidth_hz(),
+            invocation.params.profile.modeling_duration_s(),
             invocation.derived_plan.effective_skip_points,
-            invocation.derived_plan.actual_filter_taps,
+            invocation.derived_plan.effective_fir_filter_taps,
             invocation.derived_plan.reconstruction_points,
         ));
     });

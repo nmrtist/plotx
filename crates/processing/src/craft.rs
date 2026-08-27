@@ -1,36 +1,42 @@
 //! Complete Reduction to Amplitude Frequency Table (CRAFT) for one-dimensional FIDs.
 
 use num_complex::Complex64;
-use plotx_analysis::craft::{
-    CraftFitBounds, CraftFitError, DampedSinusoid, evaluate_damped_sinusoids_cancellable,
-    matrix_pencil_estimates,
-};
+use plotx_analysis::craft::CraftFitError;
 use plotx_io::{Domain, NmrData};
 use serde::{Deserialize, Serialize};
-use std::f64::consts::{PI, TAU};
 
 mod diagnostics;
+mod fitting;
 mod preflight;
 mod reconstruction;
 mod regions;
+mod report;
 mod resolution;
+mod stability;
 pub use diagnostics::{
-    CraftDiagnostics, CraftFitWindowDiagnostic, CraftRegionRatio, CraftRegionSummary,
-    CraftRunStatus, CraftWarning, CraftWarningKind,
+    CraftDiagnostics, CraftModelingWindowDiagnostic, CraftRegionRatio, CraftRegionSummary,
+    CraftRunStatus, CraftStabilityDiagnostics, CraftStabilityMetric, CraftStabilityRegion,
+    CraftWarning, CraftWarningKind,
 };
+use fitting::{CraftModelingContext, fit_modeling_window};
 pub use preflight::{
     CraftAssessmentIssue, CraftInputAssessment, CraftIssueAction, CraftIssueCode,
     CraftIssueSeverity, CraftSignalSuggestion,
 };
 use reconstruction::model_at;
 pub use reconstruction::{synthesize_craft_fid, synthesize_craft_samples};
-use regions::{HzRegion, build_regions, region_ratio, selections_are_valid, summarize_regions};
-pub use resolution::{
-    CraftDerivedPlan, CraftDerivedWindow, CraftParamOverrides, CraftParamSource,
-    CraftParameterSources, resolve_craft_invocation,
+use regions::{build_modeling_windows, region_ratio, selections_are_valid, summarize_regions};
+pub use report::{
+    CraftAmplitudeReport, CraftReportDefinition, CraftReportError, CraftReportSegment,
+    calculate_craft_report,
 };
+pub use resolution::{
+    CraftDerivedModelingWindow, CraftDerivedPlan, CraftModelingPolicy, CraftParamOverrides,
+    CraftParamSource, CraftParameterSources, resolve_craft_invocation,
+};
+use stability::{components_for_regions, stability_diagnostics};
 
-pub const CRAFT_ALGORITHM: &str = "plotx-craft-matrix-pencil-bic";
+pub const CRAFT_ALGORITHM: &str = "plotx-craft-matrix-pencil-validation";
 pub const CRAFT_ALGORITHM_VERSION: u32 = 1;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -39,6 +45,22 @@ pub enum CraftProfile {
     #[default]
     Conventional,
     Ssfp,
+}
+
+impl CraftProfile {
+    pub const fn modeling_bandwidth_hz(self) -> f64 {
+        match self {
+            Self::Conventional => 250.0,
+            Self::Ssfp => 2_000.0,
+        }
+    }
+
+    pub const fn modeling_duration_s(self) -> f64 {
+        match self {
+            Self::Conventional => 1.0,
+            Self::Ssfp => 1.2,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -114,13 +136,11 @@ pub struct CraftParams {
     pub profile: CraftProfile,
     /// Empty means the complete acquired spectral width.
     pub regions: Vec<CraftRegion>,
-    pub max_components_per_fit_window: usize,
-    pub min_amplitude_to_noise: f64,
-    pub linewidth_hz: (f64, f64),
-    pub filter_taps: usize,
-    pub padding_fraction: f64,
-    pub max_fit_window_width_hz: f64,
-    pub max_downsampled_points: usize,
+    pub maximum_model_order: usize,
+    pub minimum_amplitude_to_noise: f64,
+    pub component_linewidth_bounds_hz: (f64, f64),
+    pub fir_filter_taps: usize,
+    pub maximum_modeled_sample_count: usize,
     pub skip_duration_s: f64,
     pub reconstruction_duration_s: Option<f64>,
 }
@@ -130,13 +150,11 @@ impl CraftParams {
         Self {
             profile: CraftProfile::Conventional,
             regions: Vec::new(),
-            max_components_per_fit_window: 15,
-            min_amplitude_to_noise: 3.3,
-            linewidth_hz: (0.05, 10.0),
-            filter_taps: 499,
-            padding_fraction: 0.2,
-            max_fit_window_width_hz: 500.0,
-            max_downsampled_points: 8192,
+            maximum_model_order: 15,
+            minimum_amplitude_to_noise: 3.3,
+            component_linewidth_bounds_hz: (0.05, 20.0),
+            fir_filter_taps: 499,
+            maximum_modeled_sample_count: 8192,
             skip_duration_s: 0.0,
             reconstruction_duration_s: None,
         }
@@ -147,34 +165,29 @@ impl CraftParams {
             profile: CraftProfile::Ssfp,
             skip_duration_s: 0.0005,
             reconstruction_duration_s: Some(1.2),
-            max_fit_window_width_hz: 2_000.0,
             ..Self::conventional()
         }
     }
 
     pub fn discovery() -> Self {
         Self {
-            min_amplitude_to_noise: 2.5,
+            minimum_amplitude_to_noise: 2.5,
             ..Self::conventional()
         }
     }
 
     pub fn validate(&self) -> Result<(), CraftError> {
-        if self.max_components_per_fit_window == 0
-            || self.max_components_per_fit_window > 64
-            || !self.min_amplitude_to_noise.is_finite()
-            || self.min_amplitude_to_noise <= 0.0
-            || !self.linewidth_hz.0.is_finite()
-            || !self.linewidth_hz.1.is_finite()
-            || self.linewidth_hz.0 <= 0.0
-            || self.linewidth_hz.0 >= self.linewidth_hz.1
-            || self.filter_taps < 3
-            || self.filter_taps.is_multiple_of(2)
-            || !self.padding_fraction.is_finite()
-            || !(0.0..=1.0).contains(&self.padding_fraction)
-            || !self.max_fit_window_width_hz.is_finite()
-            || self.max_fit_window_width_hz <= 0.0
-            || self.max_downsampled_points < 64
+        if self.maximum_model_order == 0
+            || self.maximum_model_order > 64
+            || !self.minimum_amplitude_to_noise.is_finite()
+            || self.minimum_amplitude_to_noise <= 0.0
+            || !self.component_linewidth_bounds_hz.0.is_finite()
+            || !self.component_linewidth_bounds_hz.1.is_finite()
+            || self.component_linewidth_bounds_hz.0 <= 0.0
+            || self.component_linewidth_bounds_hz.0 >= self.component_linewidth_bounds_hz.1
+            || self.fir_filter_taps < 3
+            || self.fir_filter_taps.is_multiple_of(2)
+            || self.maximum_modeled_sample_count < 64
             || !self.skip_duration_s.is_finite()
             || self.skip_duration_s < 0.0
             || self
@@ -206,6 +219,7 @@ pub struct CraftInvocation {
     pub reference: CraftReference,
     pub derived_plan: CraftDerivedPlan,
     pub assessment: CraftInputAssessment,
+    pub modeling_policy: CraftModelingPolicy,
 }
 
 impl CraftInvocation {
@@ -217,6 +231,9 @@ impl CraftInvocation {
     pub fn validate(&self, data: &NmrData) -> Result<(), CraftError> {
         self.params.validate()?;
         self.reference.validate(data)?;
+        if self.modeling_policy != CraftModelingPolicy::for_params(&self.params) {
+            return Err(CraftError::InvalidParameters);
+        }
         if self.assessment.can_run() {
             Ok(())
         } else {
@@ -272,19 +289,8 @@ pub enum CraftError {
     InvalidReference,
     #[error("CRAFT analysis was cancelled")]
     Cancelled,
-    #[error("CRAFT could not fit a requested region: {0}")]
+    #[error("CRAFT could not fit a modeling window: {0}")]
     Fit(#[from] CraftFitError),
-}
-
-struct RegionResult {
-    components: Vec<DampedSinusoid>,
-    center_hz: f64,
-    bic: Option<f64>,
-    condition_number: f64,
-    decimation: usize,
-    retained_samples: usize,
-    evaluated_model_orders: usize,
-    warning: Option<(CraftWarningKind, String)>,
 }
 
 pub fn process_craft_cancellable(
@@ -318,59 +324,94 @@ pub fn process_craft_cancellable(
         return Err(CraftError::InvalidInput);
     }
     let input = &data.points[skip..];
+    let modeling_context = CraftModelingContext {
+        input,
+        skipped_points: skip,
+        group_delay_points: data.group_delay,
+        spectral_width_hz: sw,
+        params,
+        policy: invocation.modeling_policy,
+    };
     let noise_sigma = estimate_complex_noise(input).max(f64::MIN_POSITIVE);
-    let regions = build_regions(data, params, reference)?;
+    let modeling_windows = build_modeling_windows(
+        data,
+        params,
+        reference,
+        &invocation.assessment.clear_signals,
+    )?;
     let mut fitted = Vec::new();
     let mut warnings = Vec::new();
-    let mut fit_windows = Vec::with_capacity(regions.len());
+    let mut window_diagnostics = Vec::with_capacity(modeling_windows.len());
     let mut max_condition = 1.0_f64;
+    let selected_frequency_bands = params
+        .regions
+        .iter()
+        .map(|region| {
+            let region = region.normalized();
+            (
+                (region.start_ppm - reference.effective_carrier_ppm()) * data.observe_freq_mhz,
+                (region.end_ppm - reference.effective_carrier_ppm()) * data.observe_freq_mhz,
+            )
+        })
+        .collect::<Vec<_>>();
 
-    for (index, region) in regions.iter().copied().enumerate() {
+    for (index, window) in modeling_windows.iter().copied().enumerate() {
         if cancelled() {
             return Err(CraftError::Cancelled);
         }
-        let result = fit_region(input, skip, data.group_delay, sw, region, params, cancelled)?;
-        if let Some((kind, message)) = result.warning {
+        let result = fit_modeling_window(&modeling_context, window, cancelled)?;
+        let contributes_to_selection = selected_frequency_bands.is_empty()
+            || selected_frequency_bands.iter().any(|&(start, end)| {
+                window.retention_band_hz.0 <= end && window.retention_band_hz.1 >= start
+            });
+        if let Some((kind, message)) = result.warning
+            && contributes_to_selection
+        {
             warnings.push(CraftWarning {
                 kind,
-                region: Some(region.selection.id),
-                fit_window: Some(index),
-                message: format!("Fit window {}: {message}", index + 1),
+                region: None,
+                modeling_window: Some(index),
+                message: format!("Modeling window {}: {message}", index + 1),
             });
         }
-        fit_windows.push(CraftFitWindowDiagnostic {
-            region: region.selection.id,
-            core_hz: region.core,
-            padded_hz: region.padded,
-            actual_decimation: result.decimation,
-            retained_samples: result.retained_samples,
+        window_diagnostics.push(CraftModelingWindowDiagnostic {
+            retention_band_hz: window.retention_band_hz,
+            modeling_band_hz: window.modeling_band_hz,
+            decimation_factor: result.decimation,
+            modeled_sample_count: result.modeled_sample_count,
             evaluated_model_orders: result.evaluated_model_orders,
             selected_model_order: result.components.len(),
-            bic: result.bic,
+            training_bic: result.training_bic,
             condition_number: result
                 .condition_number
                 .is_finite()
                 .then_some(result.condition_number),
+            modeled_duration_s: result.modeled_duration_s,
+            training_normalized_residual: result.training_normalized_residual,
+            validation_normalized_residual: result.validation_normalized_residual,
         });
         max_condition = max_condition.max(result.condition_number);
         for component in result.components {
             let frequency_hz = component.frequency_hz + result.center_hz;
-            if frequency_hz >= region.core.0
-                && frequency_hz < region.core.1
-                && component.amplitude / noise_sigma >= params.min_amplitude_to_noise
+            let is_last_window = index + 1 == modeling_windows.len();
+            if frequency_hz >= window.retention_band_hz.0
+                && (frequency_hz < window.retention_band_hz.1
+                    || (is_last_window && frequency_hz <= window.retention_band_hz.1))
             {
-                fitted.push((region.selection.id, frequency_hz, component));
+                // Padded modeling bands may overlap. Retention bands assign a
+                // model to exactly one window before the sub-tables are joined.
+                fitted.push((frequency_hz, component));
             }
         }
     }
 
-    fitted.sort_by(|left, right| left.1.total_cmp(&right.1));
-    let components: Vec<CraftComponent> = fitted
+    fitted.sort_by(|left, right| left.0.total_cmp(&right.0));
+    let all_components: Vec<CraftComponent> = fitted
         .into_iter()
         .enumerate()
-        .map(|(id, (region, frequency_hz, component))| CraftComponent {
+        .map(|(id, (frequency_hz, component))| CraftComponent {
             id: CraftComponentId(id as u64),
-            region,
+            region: CraftRegionId(0),
             frequency_hz,
             chemical_shift_ppm: reference.effective_carrier_ppm()
                 + frequency_hz / data.observe_freq_mhz,
@@ -378,18 +419,32 @@ pub fn process_craft_cancellable(
             phase_rad: component.phase_rad,
             decay_rate_s_inv: component.decay_rate_s_inv,
             linewidth_hz: component.linewidth_hz,
-            amplitude_to_noise: component.amplitude / noise_sigma,
+            amplitude_to_noise: component
+                .amplitude_std
+                .filter(|value| *value > 0.0)
+                .map_or(0.0, |value| component.amplitude / value),
             amplitude_std: component.amplitude_std,
             frequency_std_hz: component.frequency_std_hz,
             linewidth_std_hz: component.linewidth_std_hz,
             phase_std_rad: component.phase_std_rad,
         })
         .collect();
-    if params.min_amplitude_to_noise < 3.3 {
+    let selections = if params.regions.is_empty() {
+        let half_width_ppm = sw / (2.0 * data.observe_freq_mhz);
+        vec![CraftRegion::new(
+            CraftRegionId(0),
+            reference.effective_carrier_ppm() - half_width_ppm,
+            reference.effective_carrier_ppm() + half_width_ppm,
+        )]
+    } else {
+        params.regions.clone()
+    };
+    let components = components_for_regions(&all_components, &selections);
+    if params.minimum_amplitude_to_noise < 3.3 {
         warnings.push(CraftWarning {
             kind: CraftWarningKind::LowAmplitudeThreshold,
             region: None,
-            fit_window: None,
+            modeling_window: None,
             message: "Discovery threshold is below the strict 3.3 amplitude/noise threshold; confirm weak components independently."
                 .to_owned(),
         });
@@ -398,7 +453,7 @@ pub fn process_craft_cancellable(
         warnings.push(CraftWarning {
             kind: CraftWarningKind::SsfpQuantitation,
             region: None,
-            fit_window: None,
+            modeling_window: None,
             message: "SSFP response is relaxation-dependent; use this result for screening or relative comparison, not absolute qNMR."
                 .to_owned(),
         });
@@ -412,7 +467,7 @@ pub fn process_craft_cancellable(
             .map(|issue| CraftWarning {
                 kind: CraftWarningKind::InputAssessment,
                 region: issue.region,
-                fit_window: None,
+                modeling_window: None,
                 message: issue.message.clone(),
             }),
     );
@@ -420,18 +475,18 @@ pub fn process_craft_cancellable(
         warnings.push(CraftWarning {
             kind: CraftWarningKind::IllConditionedFit,
             region: None,
-            fit_window: None,
+            modeling_window: None,
             message: "One or more fits are ill-conditioned; inspect overlapping components and uncertainties.".to_owned(),
         });
     }
     if components.iter().any(|component| {
-        (component.linewidth_hz - params.linewidth_hz.0).abs() < 1e-6
-            || (component.linewidth_hz - params.linewidth_hz.1).abs() < 1e-6
+        (component.linewidth_hz - params.component_linewidth_bounds_hz.0).abs() < 1e-6
+            || (component.linewidth_hz - params.component_linewidth_bounds_hz.1).abs() < 1e-6
     }) {
         warnings.push(CraftWarning {
             kind: CraftWarningKind::LinewidthAtBound,
             region: None,
-            fit_window: None,
+            modeling_window: None,
             message: "One or more linewidths reached a configured fit bound.".to_owned(),
         });
     }
@@ -444,7 +499,7 @@ pub fn process_craft_cancellable(
         warnings.push(CraftWarning {
             kind: CraftWarningKind::UnboundedUncertainty,
             region: None,
-            fit_window: None,
+            modeling_window: None,
             message: "One or more components have unbounded uncertainties.".to_owned(),
         });
     }
@@ -463,34 +518,35 @@ pub fn process_craft_cancellable(
     let residual_rss: f64 = residual_fid[skip..].iter().map(Complex64::norm_sqr).sum();
     let input_rss: f64 = input.iter().map(Complex64::norm_sqr).sum();
     let normalized_residual = (residual_rss / input_rss.max(f64::MIN_POSITIVE)).sqrt();
-    let selections = if params.regions.is_empty() {
-        vec![regions[0].selection]
-    } else {
-        params
-            .regions
-            .iter()
-            .map(|requested| {
-                regions
-                    .iter()
-                    .find(|window| window.selection.id == requested.id)
-                    .map(|window| window.selection)
-                    .expect("validated CRAFT region has at least one fit window")
-            })
-            .collect()
-    };
     let region_summaries = summarize_regions(&components, &selections);
     for (position, summary) in region_summaries.iter().enumerate() {
         if summary.component_count == 0 {
             warnings.push(CraftWarning {
                 kind: CraftWarningKind::EmptyRegion,
                 region: Some(summary.region),
-                fit_window: None,
+                modeling_window: None,
                 message: format!(
                     "Region {} contains no retained signal components.",
                     position + 1
                 ),
             });
         }
+    }
+    let stability = stability_diagnostics(
+        &all_components,
+        &selections,
+        &window_diagnostics,
+        invocation.modeling_policy,
+        reference,
+        data,
+    );
+    if !stability.passed {
+        warnings.push(CraftWarning {
+            kind: CraftWarningKind::StabilityFailure,
+            region: None,
+            modeling_window: None,
+            message: "Boundary perturbation exceeded the 1% stability tolerance; retain the full fit for review, but do not use it for quantitative reporting.".to_owned(),
+        });
     }
     let status = if invocation.assessment.has_warnings()
         || warnings.iter().any(CraftWarning::blocks_quantitation)
@@ -510,242 +566,13 @@ pub fn process_craft_cancellable(
             residual_rss,
             normalized_residual,
             maximum_condition_number: max_condition.is_finite().then_some(max_condition),
-            fit_windows,
+            modeling_windows: window_diagnostics,
             warnings,
+            stability,
         },
         synthetic_fid,
         residual_fid,
     })
-}
-
-fn fit_region(
-    input: &[Complex64],
-    skipped_points: usize,
-    group_delay_points: f64,
-    sw: f64,
-    region: HzRegion,
-    params: &CraftParams,
-    cancelled: &impl Fn() -> bool,
-) -> Result<RegionResult, CraftError> {
-    let center_hz = (region.padded.0 + region.padded.1) * 0.5;
-    let padded_width = region.padded.1 - region.padded.0;
-    // Only the early signal-bearing record is modeled. Include one filter
-    // length of guard samples so the centered FIR has a fully observed window
-    // for every retained point.
-    let filter_input_len = input
-        .len()
-        .min(6_000_usize.saturating_add(params.filter_taps));
-    let mixed: Vec<Complex64> = input[..filter_input_len]
-        .iter()
-        .enumerate()
-        .map(|(index, &value)| {
-            // Bruker points after the digital-filter transient are already
-            // samples of the FID starting at `ceil(delay) - delay`. Keeping the
-            // raw point number here would reintroduce the removed delay as an
-            // amplitude extrapolation and a first-order phase ramp.
-            let time = (skipped_points as f64 + index as f64 - group_delay_points) / sw;
-            value * Complex64::from_polar(1.0, -TAU * center_hz * time)
-        })
-        .collect();
-    let filtered = low_pass_fir(
-        &mixed,
-        sw,
-        padded_width * 0.5,
-        params.filter_taps,
-        cancelled,
-    )?;
-    // Retain two samples per padded-bandwidth interval so the FIR transition
-    // band remains below the downsampled Nyquist limit.
-    let mut decimation = (sw / (2.0 * padded_width).max(f64::MIN_POSITIVE))
-        .floor()
-        .max(1.0) as usize;
-    decimation = decimation.max(filtered.len().div_ceil(params.max_downsampled_points));
-    let filter_half = effective_filter_taps(params.filter_taps, mixed.len()) / 2;
-    let valid_end = filtered.len().saturating_sub(filter_half);
-    let phase_search_end = valid_end.min(filter_half.saturating_add(params.filter_taps));
-    let phase_start = filtered[filter_half..phase_search_end]
-        .iter()
-        .enumerate()
-        .max_by(|left, right| left.1.norm_sqr().total_cmp(&right.1.norm_sqr()))
-        .map(|(index, _)| filter_half + index)
-        .unwrap_or(filter_half);
-    let useful_end = phase_start.saturating_add(6_000).min(valid_end);
-    let samples: Vec<Complex64> = filtered[phase_start..useful_end]
-        .iter()
-        .step_by(decimation)
-        .copied()
-        .collect();
-    let times: Vec<f64> = (0..samples.len())
-        .map(|index| {
-            (skipped_points as f64 + phase_start as f64 + (index * decimation) as f64
-                - group_delay_points)
-                / sw
-        })
-        .collect();
-    if samples.len() < 16 {
-        return Ok(RegionResult {
-            components: Vec::new(),
-            center_hz,
-            bic: None,
-            condition_number: 1.0,
-            decimation,
-            retained_samples: samples.len(),
-            evaluated_model_orders: 0,
-            warning: Some((
-                CraftWarningKind::FitWindowFailure,
-                "too few samples remained after filtering".to_owned(),
-            )),
-        });
-    }
-    let relative_bounds = (region.padded.0 - center_hz, region.padded.1 - center_hz);
-    let n_observations = (samples.len() * 2) as f64;
-    let initial_rss = samples.iter().map(Complex64::norm_sqr).sum();
-    let mut best_bic = bic(initial_rss, n_observations, 1.0);
-    let mut best_components = Vec::new();
-    let mut best_condition = 1.0;
-    let mut warning = None;
-
-    let fit_bounds = CraftFitBounds {
-        frequency_hz: relative_bounds,
-        linewidth_hz: params.linewidth_hz,
-    };
-    let dwell_s = decimation as f64 / sw;
-    let merge_hz = sw / input.len() as f64;
-    let max_order = params
-        .max_components_per_fit_window
-        .min(samples.len() / 2 - 1);
-    let mut evaluated_model_orders = 0;
-    // Matrix-pencil cost grows cubically with its Hankel dimension. The early
-    // 256 uniformly sampled points contain the same frequency/decay poles and
-    // keep full-width, long acquisitions bounded; the final LM still uses all
-    // retained samples.
-    let pencil_samples = &samples[..samples.len().min(256)];
-    for order in 1..=max_order {
-        evaluated_model_orders += 1;
-        let Ok(candidate) = matrix_pencil_estimates(pencil_samples, dwell_s, order, fit_bounds)
-        else {
-            continue;
-        };
-        if candidate.components.len() != order {
-            continue;
-        }
-        let fit = match evaluate_damped_sinusoids_cancellable(
-            &samples,
-            &times,
-            &candidate.components,
-            fit_bounds,
-            cancelled,
-        ) {
-            Ok(fit) => Some(fit),
-            Err(CraftFitError::Cancelled) => return Err(CraftError::Cancelled),
-            Err(error) => {
-                warning = Some((CraftWarningKind::FitWindowFailure, error.to_string()));
-                None
-            }
-        };
-        if let Some(fit) = fit {
-            let candidate_bic = bic(
-                fit.rss,
-                n_observations,
-                (fit.components.len() * 4 + 1) as f64,
-            );
-            let separated = fit
-                .components
-                .windows(2)
-                .all(|pair| (pair[1].frequency_hz - pair[0].frequency_hz).abs() >= merge_hz);
-            if candidate_bic < best_bic && separated && fit.condition_number <= 1e8 {
-                best_bic = candidate_bic;
-                best_condition = fit.condition_number;
-                best_components = fit.components;
-            }
-        }
-    }
-    if !best_components.is_empty()
-        && warning
-            .as_ref()
-            .is_some_and(|(kind, _)| *kind == CraftWarningKind::FitWindowFailure)
-    {
-        warning = None;
-    }
-    if best_components.len() == max_order {
-        warning = Some((
-            CraftWarningKind::ModelOrderLimit,
-            "model order reached the fit-window limit; inspect the residual before quantitation"
-                .to_owned(),
-        ));
-    }
-    Ok(RegionResult {
-        components: best_components,
-        center_hz,
-        bic: Some(best_bic),
-        condition_number: best_condition,
-        decimation,
-        retained_samples: samples.len(),
-        evaluated_model_orders,
-        warning,
-    })
-}
-
-fn low_pass_fir(
-    input: &[Complex64],
-    sample_rate_hz: f64,
-    cutoff_hz: f64,
-    requested_taps: usize,
-    cancelled: &impl Fn() -> bool,
-) -> Result<Vec<Complex64>, CraftError> {
-    if cutoff_hz * 2.0 >= sample_rate_hz * 0.999 {
-        return Ok(input.to_vec());
-    }
-    let taps = effective_filter_taps(requested_taps, input.len());
-    if taps < 3 {
-        return Ok(input.to_vec());
-    }
-    let half = taps / 2;
-    let normalized = cutoff_hz / sample_rate_hz;
-    let mut kernel = Vec::with_capacity(taps);
-    for index in 0..taps {
-        let x = index as isize - half as isize;
-        let sinc = if x == 0 {
-            2.0 * normalized
-        } else {
-            (TAU * normalized * x as f64).sin() / (PI * x as f64)
-        };
-        let window = 0.42 - 0.5 * (TAU * index as f64 / (taps - 1) as f64).cos()
-            + 0.08 * (2.0 * TAU * index as f64 / (taps - 1) as f64).cos();
-        kernel.push(sinc * window);
-    }
-    let sum: f64 = kernel.iter().sum();
-    for coefficient in &mut kernel {
-        *coefficient /= sum;
-    }
-    let mut output = vec![Complex64::new(0.0, 0.0); input.len()];
-    for (center, filtered) in output
-        .iter_mut()
-        .enumerate()
-        .take(input.len().saturating_sub(half))
-        .skip(half)
-    {
-        if center % 64 == 0 && cancelled() {
-            return Err(CraftError::Cancelled);
-        }
-        let start = center - half;
-        *filtered = input[start..start + taps]
-            .iter()
-            .zip(&kernel)
-            .fold(Complex64::new(0.0, 0.0), |sum, (&sample, &coefficient)| {
-                sum + sample * coefficient
-            });
-    }
-    Ok(output)
-}
-
-fn effective_filter_taps(requested_taps: usize, input_len: usize) -> usize {
-    let taps = requested_taps.min(input_len.saturating_sub(1));
-    if taps.is_multiple_of(2) {
-        taps.saturating_sub(1)
-    } else {
-        taps
-    }
 }
 
 fn estimate_complex_noise(values: &[Complex64]) -> f64 {
@@ -775,10 +602,6 @@ fn median(values: &mut [f64]) -> f64 {
     } else {
         values[middle]
     }
-}
-
-fn bic(rss: f64, observations: f64, parameters: f64) -> f64 {
-    observations * (rss.max(f64::MIN_POSITIVE) / observations).ln() + parameters * observations.ln()
 }
 
 #[cfg(test)]

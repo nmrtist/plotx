@@ -403,6 +403,16 @@ fn save_project_impl(
         });
     }
 
+    for report in &doc.reports {
+        let path = format!("reports/{}.json", report.id.0);
+        write_json(&mut zip, options, &path, report)?;
+        manifest.runs.push(Entry {
+            id: report.id.0.to_string(),
+            role: "report".to_owned(),
+            path,
+        });
+    }
+
     let workspace = Workspace {
         dataset_order: bindings,
         view_order,
@@ -469,6 +479,7 @@ pub fn load_project(path: &Path) -> Result<PlotxApp> {
     app.doc.datasets.clear();
     app.doc.canvases.clear();
     app.doc.assets.clear();
+    app.doc.reports.clear();
     app.session.project_load_warnings = asset_codec::load_assets(&mut zip, &manifest, &mut app)?;
     app.doc.project_path = Some(path.to_owned());
     // Restore before the canvases below are built: figures stamp the document
@@ -532,8 +543,16 @@ pub fn load_project(path: &Path) -> Result<PlotxApp> {
     app.doc.automation_runs = manifest
         .runs
         .iter()
+        .filter(|entry| entry.role == "run")
         .map(|entry| read_json(&mut zip, &entry.path))
         .collect::<Result<Vec<crate::automation::RunManifest>>>()?;
+    app.doc.reports = manifest
+        .runs
+        .iter()
+        .filter(|entry| entry.role == "report")
+        .map(|entry| read_json(&mut zip, &entry.path))
+        .collect::<Result<Vec<crate::state::AnalysisReportRecord>>>()?;
+    app.doc.repair_report_allocator();
     app.doc.automation_revision = workspace.automation_revision;
     asset_codec::append_undeclared_image_warnings(
         &app.doc,

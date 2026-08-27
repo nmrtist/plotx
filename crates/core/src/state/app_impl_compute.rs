@@ -279,6 +279,49 @@ impl PlotxApp {
         Ok(table_index)
     }
 
+    pub fn materialize_craft_report_table(
+        &mut self,
+        dataset: usize,
+        report_id: crate::state::ReportId,
+    ) -> Result<usize, String> {
+        let record = self
+            .doc
+            .report(report_id)
+            .cloned()
+            .ok_or_else(|| "The CRAFT report is no longer available.".to_owned())?;
+        match record.status(&self.doc) {
+            crate::state::ReportStatus::Available => {}
+            crate::state::ReportStatus::NeedsReview => {
+                return Err("The CRAFT report needs review and cannot be exported as reliable quantitative data.".to_owned());
+            }
+            crate::state::ReportStatus::Unavailable => {
+                return Err("The CRAFT report source is unavailable.".to_owned());
+            }
+        }
+        let report: plotx_processing::craft::CraftAmplitudeReport =
+            serde_json::from_value(record.snapshot)
+                .map_err(|error| format!("Could not decode CRAFT report snapshot: {error}"))?;
+        let mut table = craft_amplitude_report_table(&report)?;
+        let source_id = self
+            .doc
+            .datasets
+            .get(dataset)
+            .map(Dataset::resource_id)
+            .ok_or_else(|| "The CRAFT source dataset is no longer available.".to_owned())?;
+        table.lineage = Some(DatasetLineage::new(
+            DerivationKind::CraftComponentTable,
+            [source_id],
+        ));
+        table.name = Some(format!("CRAFT report {}", report_id.0 + 1));
+        let sheet = table.board_rect_pt();
+        table.board_pos = crate::state::next_board_frame_pos(self, [sheet.width, sheet.height]);
+        table.board_sheet_visible = false;
+        let table_index = self.doc.datasets.len();
+        self.doc.datasets.push(Dataset::Table(Box::new(table)));
+        self.mark_document_dirty();
+        Ok(table_index)
+    }
+
     pub fn show_craft_component_table_on_board(&mut self, table: usize) -> Result<(), String> {
         let table = self
             .doc

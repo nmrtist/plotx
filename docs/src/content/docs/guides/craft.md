@@ -50,26 +50,37 @@ fields under **Signal groups** are available when you need exact bounds.
 
 A signal group can contain several fitted components. A component is a fitted
 resonance contribution, not a compound identification or a guaranteed visible
-multiplet. A wide group may be split into several calculation windows, but its
-components are still reported under the group you selected.
+multiplet. Fixed modeling windows determine how the FID is solved; the signal
+group boundary only determines which completed components belong to the group.
 
-## Advanced fit settings
+## Advanced component settings
 
-Leave **Advanced fit settings** closed for routine work. The conventional
+Leave **Advanced component settings** closed for routine work. The conventional
 profile uses these defaults:
 
 - **Minimum A/N**: 3.3. Lower values retain weaker candidates but increase the
   chance of fitting noise; values below 3.3 are flagged for review.
-- **Max components / fit window**: 15 (allowed range 1–64). Reaching the limit
-  is reported as a diagnostic warning.
-- **Linewidth range (Hz)**: 0.05–10 Hz.
-- **Fit window width (Hz)**: 500 Hz. This controls how wide groups are divided
-  for calculation; it does not create extra signal groups.
+- **Maximum model order**: 15 (allowed range 1–64) for each modeling window.
+  Reaching the limit is reported as a diagnostic warning.
+- **Component linewidth range (Hz)**: 0.05–20 Hz. The bound applies to each
+  component, not the frequency range modeled at once. The 20 Hz default is a
+  typical starting point rather than a universal constant. Change it only when
+  the acquisition and expected line shape justify a different bound.
+
+The fixed modeling bandwidth is 250 Hz for Conventional and 2000 Hz for SSFP.
+This is the actual frequency width of a modeling window, not a linewidth and
+not a quantitative tuning control. A modeling window can contain many component
+lines, each still constrained by the separate component-linewidth range.
 
 Use **Reset** beside an edited value to restore the value inherited from the
 selected run or the profile default. Changing profiles keeps the selected
 groups and loads the new profile's settings. Conventional FID is always the
 default; PlotX does not infer SSFP from the waveform.
+
+CRAFT keeps Bruker acquisition `GRPDLY` separate from its own FIR filtering.
+The importer/FFT path uses `GRPDLY` to define the acquisition time origin; the
+499-tap CRAFT FIR has an independent edge transient handled by phase-conjugate
+precharge. Neither delay is silently folded into the other.
 
 The **SSFP / interrupted FID** profile starts with **Skip initial** at 0.5 ms
 and **Extend reconstructed FID** enabled for 1.2 s. Skipping early points can
@@ -106,10 +117,28 @@ or enabled **Reference** step changes; rerun it before interpreting the result.
 Runs with warnings or a partial fit are marked **Needs review** even when the
 calculation completes.
 
+CRAFT performs deterministic boundary-perturbation checks around each selected
+group. Small shifts, expansions, contractions, and one-sided moves must keep
+amplitudes and ratios within 1%. A run that fails this stability gate keeps its
+complete component table and residual for inspection, but cannot create or
+export a quantitative amplitude report.
+
 Choose **Export components…** to open the standard CSV, TSV, XLSX, or clipboard
 export dialog. Under **Signals**, **Create data table** creates a sortable PlotX
 table without leaving CRAFT. Choose **View data table** to inspect, chart, or
 export it, and **Add to board** only when you want the table on a board sheet.
+
+## CRAFT amplitude reports
+
+The model's **Minimum A/N** is a trust criterion for retaining fitted components.
+The **Reports** tab is a separate reporting layer: its **Report threshold**
+selects which retained components are included, without refitting or changing
+the complete component table. **Segment width** is the total fixed frequency
+window (Hz) around each selected peak; overlapping windows are merged. Reports
+show both the scalar sum of component amplitudes and the phase-aware coherent
+amplitude. These segment amplitudes are summaries of fitted components, not
+integrals of frequency-domain bins. A report whose source run changes is marked
+for review rather than silently recalculated.
 
 ## Interpretation
 

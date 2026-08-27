@@ -2,7 +2,7 @@ use super::tests::app_with_nmr;
 use super::*;
 
 fn use_short_fixture_filter(app: &mut PlotxApp) {
-    app.session.ui.craft_overrides.filter_taps = Some(31);
+    app.session.ui.craft_overrides.fir_filter_taps = Some(31);
 }
 
 #[test]

@@ -45,6 +45,8 @@ impl PlotxApp {
                 project_revision: None,
                 automation_revision: 0,
                 automation_runs: Vec::new(),
+                reports: Vec::new(),
+                next_report_id: 0,
                 edit_generation: 0,
                 dirty: false,
                 save_include_view_snapshots: settings.export.include_view_snapshots,

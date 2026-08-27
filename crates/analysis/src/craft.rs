@@ -94,6 +94,90 @@ pub enum CraftFitError {
     Singular,
 }
 
+/// Replace the leading samples of a complex record by backward linear
+/// prediction from the immediately following observed samples.
+///
+/// CRAFT uses this after digital filtering because a finite FIR must invent a
+/// prehistory at the acquisition boundary. The prediction is fitted in reverse
+/// time, so the supplied autoregressive order has the same meaning as a
+/// conventional forward linear predictor.
+pub fn backward_linear_predict(
+    samples: &mut [Complex64],
+    predicted_count: usize,
+    training_count: usize,
+    order: usize,
+) -> Result<(), CraftFitError> {
+    if predicted_count == 0 {
+        return Ok(());
+    }
+    if order == 0
+        || training_count <= order
+        || predicted_count
+            .checked_add(training_count)
+            .is_none_or(|required| required > samples.len())
+        || samples
+            .iter()
+            .take(predicted_count + training_count)
+            .any(|value| !value.re.is_finite() || !value.im.is_finite())
+    {
+        return Err(CraftFitError::InvalidInput);
+    }
+
+    let training = &samples[predicted_count..predicted_count + training_count];
+    let reversed = training.iter().rev().copied().collect::<Vec<_>>();
+    let scale = reversed
+        .iter()
+        .map(|value| value.norm())
+        .fold(0.0_f64, f64::max);
+    if scale <= f64::MIN_POSITIVE {
+        return Err(CraftFitError::Singular);
+    }
+    let equation_count = reversed.len() - order;
+    let mut design = DMatrix::<f64>::zeros(equation_count * 2, order * 2);
+    let mut observed = DVector::<f64>::zeros(equation_count * 2);
+    for row in 0..equation_count {
+        let target = reversed[row + order];
+        observed[row * 2] = target.re / scale;
+        observed[row * 2 + 1] = target.im / scale;
+        for lag in 0..order {
+            let basis = reversed[row + order - lag - 1] / scale;
+            design[(row * 2, lag * 2)] = basis.re;
+            design[(row * 2, lag * 2 + 1)] = -basis.im;
+            design[(row * 2 + 1, lag * 2)] = basis.im;
+            design[(row * 2 + 1, lag * 2 + 1)] = basis.re;
+        }
+    }
+    // Scale the singular-value cutoff by the design energy so rank detection
+    // remains stable across differently normalized input records.
+    let rank_tolerance = (5e-14 * design.norm_squared()).sqrt().max(1e-12);
+    let solution = design
+        .svd(true, true)
+        .solve(&observed, rank_tolerance)
+        .map_err(|_| CraftFitError::Singular)?;
+    let coefficients = solution
+        .as_slice()
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|pair| Complex64::new(pair[0], pair[1]))
+        .collect::<Vec<_>>();
+    let mut history = reversed;
+    for index in 0..predicted_count {
+        let predicted = coefficients
+            .iter()
+            .enumerate()
+            .fold(Complex64::new(0.0, 0.0), |sum, (lag, coefficient)| {
+                sum + coefficient * history[history.len() - lag - 1]
+            });
+        if !predicted.re.is_finite() || !predicted.im.is_finite() {
+            return Err(CraftFitError::Singular);
+        }
+        samples[predicted_count - index - 1] = predicted;
+        history.push(predicted);
+    }
+    Ok(())
+}
+
 /// Fit a fixed set of initial component frequencies. Model-order selection and
 /// residual candidate discovery live in `plotx-processing`, beside its FFT.
 pub fn fit_damped_sinusoids_cancellable(

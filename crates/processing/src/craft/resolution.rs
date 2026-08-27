@@ -1,6 +1,8 @@
 use plotx_io::NmrData;
 use serde::{Deserialize, Serialize};
 
+use super::preflight::detect_clear_signals;
+use super::regions::build_modeling_windows;
 use super::{
     CraftInputAssessment, CraftInvocation, CraftParams, CraftProfile, CraftReference, CraftRegion,
     CraftRegionId,
@@ -19,13 +21,11 @@ pub enum CraftParamSource {
 pub struct CraftParamOverrides {
     pub profile: Option<CraftProfile>,
     pub regions: Option<Vec<CraftRegion>>,
-    pub max_components_per_fit_window: Option<usize>,
-    pub min_amplitude_to_noise: Option<f64>,
-    pub linewidth_hz: Option<(f64, f64)>,
-    pub filter_taps: Option<usize>,
-    pub padding_fraction: Option<f64>,
-    pub max_fit_window_width_hz: Option<f64>,
-    pub max_downsampled_points: Option<usize>,
+    pub maximum_model_order: Option<usize>,
+    pub minimum_amplitude_to_noise: Option<f64>,
+    pub component_linewidth_bounds_hz: Option<(f64, f64)>,
+    pub fir_filter_taps: Option<usize>,
+    pub maximum_modeled_sample_count: Option<usize>,
     pub skip_duration_s: Option<f64>,
     pub reconstruction_duration_s: Option<Option<f64>>,
 }
@@ -36,13 +36,11 @@ impl CraftParamOverrides {
         Self {
             profile: Some(params.profile),
             regions: Some(params.regions),
-            max_components_per_fit_window: Some(params.max_components_per_fit_window),
-            min_amplitude_to_noise: Some(params.min_amplitude_to_noise),
-            linewidth_hz: Some(params.linewidth_hz),
-            filter_taps: Some(params.filter_taps),
-            padding_fraction: Some(params.padding_fraction),
-            max_fit_window_width_hz: Some(params.max_fit_window_width_hz),
-            max_downsampled_points: Some(params.max_downsampled_points),
+            maximum_model_order: Some(params.maximum_model_order),
+            minimum_amplitude_to_noise: Some(params.minimum_amplitude_to_noise),
+            component_linewidth_bounds_hz: Some(params.component_linewidth_bounds_hz),
+            fir_filter_taps: Some(params.fir_filter_taps),
+            maximum_modeled_sample_count: Some(params.maximum_modeled_sample_count),
             skip_duration_s: Some(params.skip_duration_s),
             reconstruction_duration_s: Some(params.reconstruction_duration_s),
         }
@@ -64,13 +62,11 @@ impl CraftParamOverrides {
 pub struct CraftParameterSources {
     pub profile: CraftParamSource,
     pub regions: CraftParamSource,
-    pub max_components_per_fit_window: CraftParamSource,
-    pub min_amplitude_to_noise: CraftParamSource,
-    pub linewidth_hz: CraftParamSource,
-    pub filter_taps: CraftParamSource,
-    pub padding_fraction: CraftParamSource,
-    pub max_fit_window_width_hz: CraftParamSource,
-    pub max_downsampled_points: CraftParamSource,
+    pub maximum_model_order: CraftParamSource,
+    pub minimum_amplitude_to_noise: CraftParamSource,
+    pub component_linewidth_bounds_hz: CraftParamSource,
+    pub fir_filter_taps: CraftParamSource,
+    pub maximum_modeled_sample_count: CraftParamSource,
     pub skip_duration_s: CraftParamSource,
     pub reconstruction_duration_s: CraftParamSource,
 }
@@ -80,13 +76,11 @@ impl CraftParameterSources {
         [
             self.profile,
             self.regions,
-            self.max_components_per_fit_window,
-            self.min_amplitude_to_noise,
-            self.linewidth_hz,
-            self.filter_taps,
-            self.padding_fraction,
-            self.max_fit_window_width_hz,
-            self.max_downsampled_points,
+            self.maximum_model_order,
+            self.minimum_amplitude_to_noise,
+            self.component_linewidth_bounds_hz,
+            self.fir_filter_taps,
+            self.maximum_modeled_sample_count,
             self.skip_duration_s,
             self.reconstruction_duration_s,
         ]
@@ -95,12 +89,44 @@ impl CraftParameterSources {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct CraftDerivedWindow {
-    pub region: CraftRegionId,
-    pub core_hz: (f64, f64),
-    pub padded_hz: (f64, f64),
-    pub planned_decimation: usize,
-    pub planned_retained_samples: usize,
+pub struct CraftDerivedModelingWindow {
+    pub retention_band_hz: (f64, f64),
+    pub modeling_band_hz: (f64, f64),
+    pub planned_decimation_factor: usize,
+    pub planned_modeled_sample_count: usize,
+    pub planned_modeled_duration_s: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CraftModelingPolicy {
+    pub modeling_bandwidth_hz: f64,
+    pub modeling_duration_s: f64,
+    pub validation_tail_fraction: f64,
+    pub boundary_stability_relative_tolerance: f64,
+    pub component_linewidth_bounds_hz: (f64, f64),
+}
+
+impl Default for CraftModelingPolicy {
+    fn default() -> Self {
+        Self {
+            modeling_bandwidth_hz: 250.0,
+            modeling_duration_s: 1.0,
+            validation_tail_fraction: 0.2,
+            boundary_stability_relative_tolerance: 0.01,
+            component_linewidth_bounds_hz: (0.05, 20.0),
+        }
+    }
+}
+
+impl CraftModelingPolicy {
+    pub(super) fn for_params(params: &CraftParams) -> Self {
+        Self {
+            modeling_bandwidth_hz: params.profile.modeling_bandwidth_hz(),
+            modeling_duration_s: params.profile.modeling_duration_s(),
+            component_linewidth_bounds_hz: params.component_linewidth_bounds_hz,
+            ..Self::default()
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -108,10 +134,10 @@ pub struct CraftDerivedPlan {
     pub effective_skip_points: usize,
     pub effective_skip_source: CraftParamSource,
     pub available_points: usize,
-    pub actual_filter_taps: usize,
+    pub effective_fir_filter_taps: usize,
     pub reconstruction_points: usize,
     pub resolved_regions: Vec<CraftRegion>,
-    pub fit_windows: Vec<CraftDerivedWindow>,
+    pub modeling_windows: Vec<CraftDerivedModelingWindow>,
 }
 
 pub fn resolve_craft_invocation(
@@ -160,43 +186,40 @@ pub fn resolve_craft_invocation(
         regions = full_bandwidth_region(data, reference).into_iter().collect();
         regions_source = CraftParamSource::InputDerived;
     }
-    let (max_components_per_fit_window, max_components_source) =
-        resolved!(max_components_per_fit_window);
-    let (min_amplitude_to_noise, min_amplitude_source) = resolved!(min_amplitude_to_noise);
-    let (linewidth_hz, linewidth_source) = resolved!(linewidth_hz);
-    let (filter_taps, filter_taps_source) = resolved!(filter_taps);
-    let (padding_fraction, padding_source) = resolved!(padding_fraction);
-    let (max_fit_window_width_hz, fit_window_source) = resolved!(max_fit_window_width_hz);
-    let (max_downsampled_points, downsample_source) = resolved!(max_downsampled_points);
+    let (maximum_model_order, maximum_model_order_source) = resolved!(maximum_model_order);
+    let (minimum_amplitude_to_noise, minimum_amplitude_source) =
+        resolved!(minimum_amplitude_to_noise);
+    let (component_linewidth_bounds_hz, component_linewidth_bounds_source) =
+        resolved!(component_linewidth_bounds_hz);
+    let (fir_filter_taps, fir_filter_taps_source) = resolved!(fir_filter_taps);
+    let (maximum_modeled_sample_count, maximum_modeled_sample_count_source) =
+        resolved!(maximum_modeled_sample_count);
     let (skip_duration_s, skip_source) = resolved!(skip_duration_s);
     let (reconstruction_duration_s, reconstruction_source) = resolved!(reconstruction_duration_s);
     let params = CraftParams {
         profile,
         regions,
-        max_components_per_fit_window,
-        min_amplitude_to_noise,
-        linewidth_hz,
-        filter_taps,
-        padding_fraction,
-        max_fit_window_width_hz,
-        max_downsampled_points,
+        maximum_model_order,
+        minimum_amplitude_to_noise,
+        component_linewidth_bounds_hz,
+        fir_filter_taps,
+        maximum_modeled_sample_count,
         skip_duration_s,
         reconstruction_duration_s,
     };
     let sources = CraftParameterSources {
         profile: profile_source,
         regions: regions_source,
-        max_components_per_fit_window: max_components_source,
-        min_amplitude_to_noise: min_amplitude_source,
-        linewidth_hz: linewidth_source,
-        filter_taps: filter_taps_source,
-        padding_fraction: padding_source,
-        max_fit_window_width_hz: fit_window_source,
-        max_downsampled_points: downsample_source,
+        maximum_model_order: maximum_model_order_source,
+        minimum_amplitude_to_noise: minimum_amplitude_source,
+        component_linewidth_bounds_hz: component_linewidth_bounds_source,
+        fir_filter_taps: fir_filter_taps_source,
+        maximum_modeled_sample_count: maximum_modeled_sample_count_source,
         skip_duration_s: skip_source,
         reconstruction_duration_s: reconstruction_source,
     };
-    let derived_plan = derive_plan(data, reference, &params, &sources);
+    let modeling_policy = CraftModelingPolicy::for_params(&params);
+    let derived_plan = derive_plan(data, reference, &params, &sources, modeling_policy);
     let assessment = CraftInputAssessment::assess(data, reference, &params, &derived_plan);
     CraftInvocation {
         params,
@@ -204,6 +227,7 @@ pub fn resolve_craft_invocation(
         reference,
         derived_plan,
         assessment,
+        modeling_policy,
     }
 }
 
@@ -224,6 +248,7 @@ fn derive_plan(
     reference: CraftReference,
     params: &CraftParams,
     sources: &CraftParameterSources,
+    modeling_policy: CraftModelingPolicy,
 ) -> CraftDerivedPlan {
     let requested_skip = if data.spectral_width_hz.is_finite() && params.skip_duration_s.is_finite()
     {
@@ -245,9 +270,16 @@ fn derive_plan(
         sources.skip_duration_s
     };
     let available_points = data.points.len().saturating_sub(effective_skip_points);
-    let actual_filter_taps = effective_taps(
-        params.filter_taps,
-        available_points.min(6_000_usize.saturating_add(params.filter_taps)),
+    let fit_points = if data.spectral_width_hz.is_finite() && data.spectral_width_hz > 0.0 {
+        (modeling_policy.modeling_duration_s * data.spectral_width_hz)
+            .ceil()
+            .max(1.0) as usize
+    } else {
+        0
+    };
+    let effective_fir_filter_taps = effective_taps(
+        params.fir_filter_taps,
+        available_points.min(fit_points.saturating_add(params.fir_filter_taps)),
     );
     let acquired_duration = if data.spectral_width_hz.is_finite() && data.spectral_width_hz > 0.0 {
         data.points.len() as f64 / data.spectral_width_hz
@@ -269,73 +301,50 @@ fn derive_plan(
         0
     };
     let resolved_regions = params.regions.clone();
-    let mut fit_windows = Vec::new();
+    let mut modeling_windows = Vec::new();
     if data.spectral_width_hz.is_finite()
         && data.spectral_width_hz > 0.0
         && data.observe_freq_mhz.is_finite()
         && data.observe_freq_mhz > 0.0
         && reference.effective_carrier_ppm().is_finite()
-        && params.max_fit_window_width_hz.is_finite()
-        && params.max_fit_window_width_hz > 0.0
+        && params.profile.modeling_bandwidth_hz().is_finite()
     {
-        let half_sw = data.spectral_width_hz * 0.5;
-        let carrier = reference.effective_carrier_ppm();
-        for selection in &resolved_regions {
-            let normalized = selection.normalized();
-            let start =
-                ((normalized.start_ppm - carrier) * data.observe_freq_mhz).clamp(-half_sw, half_sw);
-            let end =
-                ((normalized.end_ppm - carrier) * data.observe_freq_mhz).clamp(-half_sw, half_sw);
-            if !start.is_finite() || !end.is_finite() || end <= start {
-                continue;
+        let filter_input = available_points.min(fit_points.saturating_add(params.fir_filter_taps));
+        let clear_signals = detect_clear_signals(data, reference, effective_skip_points);
+        for window in
+            build_modeling_windows(data, params, reference, &clear_signals).unwrap_or_default()
+        {
+            let modeled_bandwidth_hz = window.modeling_band_hz.1 - window.modeling_band_hz.0;
+            let mut decimation = (data.spectral_width_hz
+                / (2.0 * modeled_bandwidth_hz).max(f64::MIN_POSITIVE))
+            .floor()
+            .max(1.0) as usize;
+            if params.maximum_modeled_sample_count > 0 {
+                decimation =
+                    decimation.max(filter_input.div_ceil(params.maximum_modeled_sample_count));
             }
-            let pieces = ((end - start) / params.max_fit_window_width_hz)
-                .ceil()
-                .max(1.0) as usize;
-            let width = (end - start) / pieces as f64;
-            for index in 0..pieces {
-                let core = (
-                    start + index as f64 * width,
-                    start + (index + 1) as f64 * width,
-                );
-                let padding = width * params.padding_fraction.max(0.0) * 0.5;
-                let padded = (
-                    (core.0 - padding).max(-half_sw),
-                    (core.1 + padding).min(half_sw),
-                );
-                let padded_width = padded.1 - padded.0;
-                let filter_input =
-                    available_points.min(6_000_usize.saturating_add(params.filter_taps));
-                let mut decimation = (data.spectral_width_hz
-                    / (2.0 * padded_width).max(f64::MIN_POSITIVE))
-                .floor()
-                .max(1.0) as usize;
-                if params.max_downsampled_points > 0 {
-                    decimation =
-                        decimation.max(filter_input.div_ceil(params.max_downsampled_points));
-                }
-                let retained = filter_input
-                    .saturating_sub(actual_filter_taps)
-                    .min(6_000)
-                    .div_ceil(decimation);
-                fit_windows.push(CraftDerivedWindow {
-                    region: selection.id,
-                    core_hz: core,
-                    padded_hz: padded,
-                    planned_decimation: decimation,
-                    planned_retained_samples: retained,
-                });
-            }
+            let retained = filter_input
+                .saturating_sub(effective_fir_filter_taps)
+                .min(fit_points)
+                .div_ceil(decimation);
+            modeling_windows.push(CraftDerivedModelingWindow {
+                retention_band_hz: window.retention_band_hz,
+                modeling_band_hz: window.modeling_band_hz,
+                planned_decimation_factor: decimation,
+                planned_modeled_sample_count: retained,
+                planned_modeled_duration_s: retained as f64 * decimation as f64
+                    / data.spectral_width_hz,
+            });
         }
     }
     CraftDerivedPlan {
         effective_skip_points,
         effective_skip_source,
         available_points,
-        actual_filter_taps,
+        effective_fir_filter_taps,
         reconstruction_points,
         resolved_regions,
-        fit_windows,
+        modeling_windows,
     }
 }
 

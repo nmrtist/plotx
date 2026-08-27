@@ -74,10 +74,9 @@ fn craft_result_is_installed_with_provenance_by_dataset_identity() {
     let target = app.doc.datasets[0].resource_id();
     app.session.ui.craft_task_dataset = Some(target);
     let mut params = plotx_processing::craft::CraftParams::conventional();
-    params.filter_taps = 31;
-    params.max_fit_window_width_hz = 2_000.0;
-    params.max_downsampled_points = 512;
-    params.max_components_per_fit_window = 2;
+    params.fir_filter_taps = 31;
+    params.maximum_modeled_sample_count = 512;
+    params.maximum_model_order = 2;
 
     assert!(app.request_craft_analysis(
         0,
@@ -173,10 +172,9 @@ fn craft_rerun_keeps_requested_parent_without_hijacking_another_task() {
     let target = app.doc.datasets[0].resource_id();
     app.session.ui.craft_task_dataset = Some(target);
     let mut params = plotx_processing::craft::CraftParams::conventional();
-    params.filter_taps = 31;
-    params.max_fit_window_width_hz = 2_000.0;
-    params.max_downsampled_points = 512;
-    params.max_components_per_fit_window = 2;
+    params.fir_filter_taps = 31;
+    params.maximum_modeled_sample_count = 512;
+    params.maximum_model_order = 2;
     assert!(app.request_craft_analysis(
         0,
         plotx_processing::craft::CraftParamOverrides::from_params(params),

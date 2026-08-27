@@ -12,8 +12,7 @@ pub(super) fn setup(app: &mut PlotxApp, ctx: &egui::Context) -> Result<(), Strin
         .data
         .clone();
     let mut params = CraftParams::conventional();
-    params.max_fit_window_width_hz = data.spectral_width_hz;
-    params.max_components_per_fit_window = 8;
+    params.maximum_model_order = 8;
     let invocation = CraftInvocation::acquisition(&data, params);
     let result = process_craft_cancellable(&data, &invocation, &|| false)
         .map_err(|error| format!("CRAFT screenshot analysis failed: {error}"))?;

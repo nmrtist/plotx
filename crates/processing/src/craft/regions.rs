@@ -2,14 +2,13 @@ use plotx_io::NmrData;
 
 use super::{
     CraftComponent, CraftError, CraftParams, CraftReference, CraftRegion, CraftRegionId,
-    CraftRegionRatio, CraftRegionSummary,
+    CraftRegionRatio, CraftRegionSummary, CraftSignalSuggestion,
 };
 
-#[derive(Clone, Copy)]
-pub(super) struct HzRegion {
-    pub(super) selection: CraftRegion,
-    pub(super) core: (f64, f64),
-    pub(super) padded: (f64, f64),
+#[derive(Clone, Copy, Debug)]
+pub(super) struct ModelingWindow {
+    pub(super) retention_band_hz: (f64, f64),
+    pub(super) modeling_band_hz: (f64, f64),
 }
 
 pub(super) fn selections_are_valid(regions: &[CraftRegion]) -> bool {
@@ -37,11 +36,12 @@ pub(super) fn selections_are_valid(regions: &[CraftRegion]) -> bool {
         .all(|pair| pair[0].end_ppm <= pair[1].start_ppm)
 }
 
-pub(super) fn build_regions(
+pub(super) fn build_modeling_windows(
     data: &NmrData,
     params: &CraftParams,
     reference: CraftReference,
-) -> Result<Vec<HzRegion>, CraftError> {
+    clear_signals: &[CraftSignalSuggestion],
+) -> Result<Vec<ModelingWindow>, CraftError> {
     let half_sw = data.spectral_width_hz * 0.5;
     let effective_carrier_ppm = reference.effective_carrier_ppm();
     let requested: Vec<(CraftRegion, f64, f64)> = if params.regions.is_empty() {
@@ -88,29 +88,99 @@ pub(super) fn build_regions(
         return Err(CraftError::InvalidParameters);
     }
 
-    let mut regions = Vec::new();
-    for (selection, start, end) in requested_cores {
-        let pieces = ((end - start) / params.max_fit_window_width_hz)
-            .ceil()
-            .max(1.0) as usize;
-        let width = (end - start) / pieces as f64;
-        for index in 0..pieces {
-            let core = (
-                start + index as f64 * width,
-                start + (index + 1) as f64 * width,
-            );
-            let padding = (core.1 - core.0) * params.padding_fraction * 0.5;
-            regions.push(HzRegion {
-                selection,
-                core,
-                padded: (
-                    (core.0 - padding).max(-half_sw),
-                    (core.1 + padding).min(half_sw),
-                ),
+    // Modeling windows are a profile-owned protocol. They tile the acquired
+    // bandwidth with a fixed physical width and therefore do not change when a
+    // user nudges a reporting region boundary.
+    let width = params
+        .profile
+        .modeling_bandwidth_hz()
+        .min(data.spectral_width_hz);
+    let signal_hz = clear_signals
+        .iter()
+        .filter_map(|signal| {
+            let frequency =
+                (signal.chemical_shift_ppm - effective_carrier_ppm) * data.observe_freq_mhz;
+            let weight = signal.prominence_sigma.max(f64::MIN_POSITIVE);
+            (frequency.is_finite()
+                && weight.is_finite()
+                && frequency >= -half_sw
+                && frequency <= half_sw)
+                .then_some((frequency, weight))
+        })
+        .collect::<Vec<_>>();
+    let mut centers = signal_cluster_centers(&signal_hz, width);
+    if centers.is_empty() {
+        let pieces = (data.spectral_width_hz / width).ceil().max(1.0) as usize;
+        centers.extend((0..pieces).map(|index| {
+            let start = -half_sw + index as f64 * width;
+            (start + (start + width).min(half_sw)) * 0.5
+        }));
+    }
+    let mut regions = Vec::with_capacity(centers.len());
+    for (index, center) in centers.iter().copied().enumerate() {
+        let nominal_start = (center - width * 0.5).max(-half_sw);
+        let nominal_end = (center + width * 0.5).min(half_sw);
+        let retention_start = centers
+            .get(index.wrapping_sub(1))
+            .map_or(nominal_start, |previous| {
+                nominal_start.max((previous + center) * 0.5)
             });
-        }
+        let retention_end = centers
+            .get(index + 1)
+            .map_or(nominal_end, |next| nominal_end.min((center + next) * 0.5));
+        regions.push(ModelingWindow {
+            retention_band_hz: (retention_start, retention_end),
+            modeling_band_hz: (nominal_start, nominal_end),
+        });
     }
     Ok(regions)
+}
+
+fn signal_cluster_centers(signals: &[(f64, f64)], window_width_hz: f64) -> Vec<f64> {
+    let mut ranked = signals.to_vec();
+    ranked.sort_by(|left, right| {
+        right
+            .1
+            .total_cmp(&left.1)
+            .then_with(|| left.0.total_cmp(&right.0))
+    });
+    let minimum_center_spacing = window_width_hz * 0.5;
+    let mut seeds = Vec::new();
+    for &(frequency, _) in &ranked {
+        if seeds
+            .iter()
+            .all(|seed: &f64| (frequency - *seed).abs() > minimum_center_spacing)
+        {
+            seeds.push(frequency);
+        }
+    }
+
+    let mut clusters = vec![Vec::new(); seeds.len()];
+    for signal in ranked {
+        if let Some((index, _)) = seeds.iter().enumerate().min_by(|(_, left), (_, right)| {
+            (signal.0 - **left)
+                .abs()
+                .total_cmp(&(signal.0 - **right).abs())
+        }) {
+            clusters[index].push(signal);
+        }
+    }
+    let mut centers = clusters
+        .into_iter()
+        .filter_map(weighted_median_frequency)
+        .collect::<Vec<_>>();
+    centers.sort_by(f64::total_cmp);
+    centers
+}
+
+fn weighted_median_frequency(mut signals: Vec<(f64, f64)>) -> Option<f64> {
+    signals.sort_by(|left, right| left.0.total_cmp(&right.0));
+    let half_weight = signals.iter().map(|signal| signal.1).sum::<f64>() * 0.5;
+    let mut accumulated = 0.0;
+    signals.into_iter().find_map(|(frequency, weight)| {
+        accumulated += weight;
+        (accumulated >= half_weight).then_some(frequency)
+    })
 }
 
 pub(super) fn summarize_regions(

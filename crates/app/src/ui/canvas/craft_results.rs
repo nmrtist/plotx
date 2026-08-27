@@ -45,6 +45,17 @@ pub(crate) fn handle_and_paint_craft_result(
     else {
         return;
     };
+    paint_craft_ranges(CraftRangePaintContext {
+        app,
+        dataset,
+        run,
+        stored,
+        nmr,
+        plot,
+        figure,
+        painter,
+        ui,
+    });
     if let Some(selected) = app.session.ui.craft_selected_component
         && let Some(component) = stored
             .components
@@ -100,5 +111,136 @@ pub(crate) fn handle_and_paint_craft_result(
         app.session
             .ui
             .open_task_tab(plotx_core::state::TaskDockTab::Craft);
+    }
+}
+
+struct CraftRangePaintContext<'a> {
+    app: &'a PlotxApp,
+    dataset: plotx_core::state::DatasetId,
+    run: plotx_core::state::CraftRunId,
+    stored: &'a plotx_core::state::StoredCraftRun,
+    nmr: &'a plotx_core::state::NmrDataset,
+    plot: PlotRect,
+    figure: &'a plotx_figure::Figure,
+    painter: &'a egui::Painter,
+    ui: &'a Ui,
+}
+
+fn paint_craft_ranges(context: CraftRangePaintContext<'_>) {
+    let CraftRangePaintContext {
+        app,
+        dataset,
+        run,
+        stored,
+        nmr,
+        plot,
+        figure,
+        painter,
+        ui,
+    } = context;
+    let carrier = stored
+        .provenance
+        .invocation
+        .reference
+        .effective_carrier_ppm();
+    let observe = nmr.data.observe_freq_mhz;
+    let modeling = stored
+        .diagnostics
+        .modeling_windows
+        .iter()
+        .map(|window| {
+            (
+                carrier + window.modeling_band_hz.0 / observe,
+                carrier + window.modeling_band_hz.1 / observe,
+            )
+        })
+        .collect::<Vec<_>>();
+    let regions = stored
+        .region_summaries
+        .iter()
+        .map(|region| (region.start_ppm, region.end_ppm))
+        .collect::<Vec<_>>();
+    let report_segments = app
+        .session
+        .ui
+        .craft_selected_report
+        .and_then(|id| app.doc.report(id))
+        .filter(|record| {
+            record.source
+                == plotx_core::state::ReportSource {
+                    dataset,
+                    craft_run: run,
+                }
+        })
+        .and_then(|record| {
+            serde_json::from_value::<plotx_processing::craft::CraftAmplitudeReport>(
+                record.snapshot.clone(),
+            )
+            .ok()
+        })
+        .map(|report| {
+            report
+                .segments
+                .into_iter()
+                .map(|segment| {
+                    (
+                        carrier + segment.start_hz / observe,
+                        carrier + segment.end_hz / observe,
+                    )
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    paint_range_track(
+        &modeling,
+        plot.top + 2.0,
+        plot,
+        figure,
+        painter,
+        ui.visuals().weak_text_color().linear_multiply(0.45),
+    );
+    paint_range_track(
+        &regions,
+        plot.top + 7.0,
+        plot,
+        figure,
+        painter,
+        ui.visuals().selection.stroke.color.linear_multiply(0.75),
+    );
+    paint_range_track(
+        &report_segments,
+        plot.top + 12.0,
+        plot,
+        figure,
+        painter,
+        ui.visuals().warn_fg_color.linear_multiply(0.75),
+    );
+}
+
+fn paint_range_track(
+    ranges: &[(f64, f64)],
+    y: f32,
+    plot: PlotRect,
+    figure: &plotx_figure::Figure,
+    painter: &egui::Painter,
+    color: egui::Color32,
+) {
+    for &(left, right) in ranges {
+        let first = x_to_screen(left, plot, figure.x.min, figure.x.span(), figure.x.reversed);
+        let second = x_to_screen(
+            right,
+            plot,
+            figure.x.min,
+            figure.x.span(),
+            figure.x.reversed,
+        );
+        let rect = egui::Rect::from_min_max(
+            Pos2::new(first.min(second).max(plot.left), y),
+            Pos2::new(first.max(second).min(plot.right()), y + 3.0),
+        );
+        if rect.is_positive() {
+            painter.rect_filled(rect, 0.0, color);
+        }
     }
 }

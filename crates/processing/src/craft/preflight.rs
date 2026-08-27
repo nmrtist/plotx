@@ -2,6 +2,7 @@ use plotx_analysis::peaks::{DetectParams, detect_peaks, estimate_noise};
 use plotx_io::{Domain, NmrData};
 use rustfft::FftPlanner;
 use serde::{Deserialize, Serialize};
+use std::f64::consts::PI;
 
 use super::{CraftDerivedPlan, CraftParams, CraftReference, CraftRegionId};
 
@@ -36,7 +37,7 @@ pub enum CraftIssueAction {
     CheckImport,
     CheckAcquisitionMetadata,
     CorrectReference,
-    ResetFitSettings,
+    ResetModelingSettings,
     AdjustRegions,
     ReduceSkippedPoints,
     ReviewAcquisition,
@@ -65,7 +66,7 @@ pub struct CraftInputAssessment {
     pub point_count: usize,
     pub effective_point_count: usize,
     pub acquisition_duration_s: Option<f64>,
-    pub fit_window_count: usize,
+    pub modeling_window_count: usize,
     pub clear_signals: Vec<CraftSignalSuggestion>,
     pub issues: Vec<CraftAssessmentIssue>,
 }
@@ -136,8 +137,8 @@ impl CraftInputAssessment {
             if params.validate().is_err() {
                 error(
                     CraftIssueCode::InvalidParameters,
-                    "One or more explicit fit settings are invalid.",
-                    CraftIssueAction::ResetFitSettings,
+                    "One or more explicit component or acquisition settings are invalid.",
+                    CraftIssueAction::ResetModelingSettings,
                 );
             }
             if regions_outside_bandwidth_or_overlap(data, reference, params) {
@@ -155,14 +156,14 @@ impl CraftInputAssessment {
                 );
             }
             if plan
-                .fit_windows
+                .modeling_windows
                 .iter()
-                .any(|window| window.planned_retained_samples < 16)
+                .any(|window| window.planned_modeled_sample_count < 16)
             {
                 error(
                     CraftIssueCode::TooFewEffectivePoints,
-                    "Fewer than 16 samples remain in one or more fit windows after FIR filtering.",
-                    CraftIssueAction::ResetFitSettings,
+                    "Fewer than 16 samples remain in one or more modeling windows after FIR filtering.",
+                    CraftIssueAction::ResetModelingSettings,
                 );
             }
         }
@@ -193,9 +194,10 @@ impl CraftInputAssessment {
             if count == 0 && !clear_signals.is_empty() {
                 issues.push(warning(CraftIssueCode::RegionWithoutClearSignal, Some(region.id), "A selected region contains no clear signal; adjust the region or confirm it with independent evidence.", CraftIssueAction::AdjustRegions));
             }
-            if count >= params.max_components_per_fit_window {
-                issues.push(warning(CraftIssueCode::DenseSignalWindow, Some(region.id), "Detected peak density reaches the model-order limit; consider narrowing the region or increasing the limit.", CraftIssueAction::IncreaseModelLimit));
-            }
+            // Peak-picking is only a preflight hint.  The FFT can contain many
+            // transition-band extrema for one physical multiplet, so raw peak
+            // count must not be used as a model-capacity warning.  Capacity is
+            // assessed after the bounded time-domain fit has selected a model.
         }
         Self {
             point_count: data.points.len(),
@@ -203,7 +205,7 @@ impl CraftInputAssessment {
             acquisition_duration_s: (data.spectral_width_hz.is_finite()
                 && data.spectral_width_hz > 0.0)
                 .then(|| data.points.len() as f64 / data.spectral_width_hz),
-            fit_window_count: plan.fit_windows.len(),
+            modeling_window_count: plan.modeling_windows.len(),
             clear_signals,
             issues,
         }
@@ -278,7 +280,7 @@ fn regions_outside_bandwidth_or_overlap(
         .any(|pair| pair[0].end_ppm > pair[1].start_ppm)
 }
 
-fn detect_clear_signals(
+pub(super) fn detect_clear_signals(
     data: &NmrData,
     reference: CraftReference,
     skip: usize,
@@ -289,7 +291,12 @@ fn detect_clear_signals(
     }
     let fft_len = input.len().next_power_of_two();
     let mut spectrum = vec![num_complex::Complex64::new(0.0, 0.0); fft_len];
-    spectrum[..input.len()].copy_from_slice(input);
+    let duration_s = input.len() as f64 / data.spectral_width_hz;
+    let matched_line_broadening_hz = 1.0 / duration_s.max(f64::MIN_POSITIVE);
+    for (index, (&sample, output)) in input.iter().zip(&mut spectrum).enumerate() {
+        let time_s = index as f64 / data.spectral_width_hz;
+        *output = sample * (-PI * matched_line_broadening_hz * time_s).exp();
+    }
     FftPlanner::<f64>::new()
         .plan_fft_forward(fft_len)
         .process(&mut spectrum);
@@ -308,7 +315,14 @@ fn detect_clear_signals(
         &DetectParams {
             min_height: Some(6.0 * sigma),
             min_prominence: 5.0 * sigma,
-            min_spacing: None,
+            // Merge FFT extrema closer than one acquired spectral
+            // resolution element (1/acquisition time).  Matched exponential
+            // apodization broadens a line and otherwise creates several
+            // equally significant extrema for a single resonance.
+            // `xs` is expressed in zero-padded FFT-bin indices.  One acquired
+            // spectral-resolution element spans `fft_len / input.len()` of
+            // those bins when the FFT is zero-padded.
+            min_spacing: Some(fft_len as f64 / input.len() as f64),
             max_count: Some(64),
         },
     );

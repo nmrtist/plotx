@@ -24,6 +24,56 @@ fn synthetic(
 }
 
 #[test]
+fn backward_prediction_restores_filtered_record_leading_points() {
+    let components = [
+        (13.0, 4.0, 0.3, 0.8),
+        (-21.0, 2.5, -0.4, 1.7),
+        (37.0, 1.2, 1.1, 2.4),
+    ];
+    let (_, expected) = synthetic(&components, 300, 500.0);
+    let mut samples = expected.clone();
+    samples[..5].fill(Complex64::new(100.0, -50.0));
+
+    backward_linear_predict(&mut samples, 5, 256, 32).unwrap();
+
+    for index in 0..5 {
+        assert!(
+            (samples[index] - expected[index]).norm() < 1e-7,
+            "index={index} predicted={:?} expected={:?}",
+            samples[index],
+            expected[index]
+        );
+    }
+}
+
+#[test]
+fn backward_prediction_restores_a_short_single_exponential() {
+    let (_, expected) = synthetic(&[(0.0, 3.0, 0.4, 5.0)], 192, 4_000.0);
+    let mut samples = expected.clone();
+    samples[..5].fill(Complex64::new(100.0, -50.0));
+
+    backward_linear_predict(&mut samples, 5, 187, 16).unwrap();
+
+    for index in 0..5 {
+        assert!(
+            (samples[index] - expected[index]).norm() < 1e-7,
+            "index={index} predicted={:?} expected={:?}",
+            samples[index],
+            expected[index]
+        );
+    }
+}
+
+#[test]
+fn backward_prediction_rejects_an_underspecified_fit() {
+    let mut samples = vec![Complex64::new(1.0, 0.0); 12];
+    assert_eq!(
+        backward_linear_predict(&mut samples, 5, 7, 7),
+        Err(CraftFitError::InvalidInput)
+    );
+}
+
+#[test]
 fn recovers_single_damped_sinusoid() {
     let (times, samples) = synthetic(&[(123.4, 7.5, 0.37, 2.2)], 2048, 2000.0);
     let fit = fit_damped_sinusoids_cancellable(
