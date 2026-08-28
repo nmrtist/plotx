@@ -171,10 +171,10 @@ text does not change an Agreement already accepted.
 
 You accept this Agreement by posting the signature statement requested by the
 CLA assistant in a pull request in the official PlotX repository. Acceptance is
-recorded in `signatures/version1/cla.json` together with your GitHub account,
-the pull request, and the date. You accept once; the acceptance then covers
-Your Contributions under this version, including any Contribution Submitted
-before the date of acceptance.
+recorded in the `cla-signatures` branch at `signatures/version1/cla.json`,
+together with your GitHub account, the pull request, and the date. You accept
+once; the acceptance then covers Your Contributions under this version,
+including any Contribution Submitted before the date of acceptance.
 
 ## Attribution
 
