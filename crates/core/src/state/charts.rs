@@ -432,7 +432,14 @@ fn build_mass_chromatogram(dataset: &Dataset, _ctx: &ChartContext) -> Option<Fig
     let dataset = dataset.as_mass_spec()?;
     let id = dataset
         .field_catalog
-        .id_for_key(&stream_tic_key(dataset.active_stream))?;
+        .id_for_key(&stream_tic_key(dataset.active_stream))
+        .or_else(|| {
+            dataset.run.chromatograms.iter().find_map(|channel| {
+                dataset
+                    .field_catalog
+                    .id_for_key(&crate::state::channel_key(&channel.id.0))
+            })
+        })?;
     dataset.field_figure(id)
 }
 

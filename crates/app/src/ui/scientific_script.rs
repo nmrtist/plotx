@@ -101,6 +101,10 @@ pub(crate) fn prepare_run(
             serde_json::json!({
                 "id": channel.id.0,
                 "kind": match channel.kind {
+                    ChromatogramKind::TotalIonCurrent => "total_ion_current",
+                    ChromatogramKind::BasePeak => "base_peak",
+                    ChromatogramKind::SelectedIonMonitoring => "selected_ion_monitoring",
+                    ChromatogramKind::SelectedReactionMonitoring => "selected_reaction_monitoring",
                     ChromatogramKind::Optical => "optical",
                     ChromatogramKind::Temperature => "temperature",
                     ChromatogramKind::Pressure => "pressure",
@@ -108,6 +112,17 @@ pub(crate) fn prepare_run(
                     ChromatogramKind::Unknown => "unknown",
                 },
                 "description": channel.description,
+                "polarity": match channel.polarity {
+                    plotx_io::Polarity::Positive => "positive",
+                    plotx_io::Polarity::Negative => "negative",
+                    plotx_io::Polarity::Unknown => "unknown",
+                },
+                "transition": channel.transition.as_ref().map(|transition| serde_json::json!({
+                    "precursor_mz": transition.precursor_mz,
+                    "product_mz": transition.product_mz,
+                    "collision_energy": transition.collision_energy,
+                    "activation_method": transition.activation_method,
+                })),
                 "coordinate": channel.coordinate,
                 "unit": channel.unit,
                 "time_min": channel.time_min,

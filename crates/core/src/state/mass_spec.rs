@@ -122,8 +122,7 @@ impl MassSpecDataset {
     pub fn load(run: MassSpecRun) -> Self {
         let acquisition_identity =
             plotx_io::AcquisitionIdentity::from_path(std::path::Path::new(&run.source));
-        let active_stream =
-            first_ms_stream(&run).expect("a validated LC–MS run has a readable primary stream");
+        let active_stream = first_ms_stream(&run).unwrap_or(AcquisitionStreamId::new(0));
         let mut field_catalog = mass_spec_field_catalog(&run);
         field_catalog.attach_provenance(&run.source, None);
         Self {
@@ -148,8 +147,8 @@ impl MassSpecDataset {
             .stream(self.active_stream)
             .is_some_and(readable_ms_stream);
         if !active_valid {
-            self.active_stream = first_ms_stream(&self.run)
-                .ok_or_else(|| "LC–MS run has no readable non-reference MS stream".to_owned())?;
+            self.active_stream = first_ms_stream(&self.run).unwrap_or(AcquisitionStreamId::new(0));
+            self.selected_spectrum = None;
         }
         if self.selected_spectrum.is_some_and(|selected| {
             self.run
@@ -219,42 +218,13 @@ impl MassSpecDataset {
     }
 
     pub(crate) fn field_representation(&self, id: FieldId) -> Option<super::FieldRepresentation> {
-        for stream in self
-            .run
-            .streams
-            .iter()
-            .filter(|stream| readable_ms_stream(stream))
-        {
-            if self.field_catalog.id_for_key(&stream_tic_key(stream.id)) == Some(id)
-                || self.field_catalog.id_for_key(&stream_bpi_key(stream.id)) == Some(id)
-            {
-                return Some(super::FieldRepresentation::Curve1D);
-            }
-            if self
-                .field_catalog
-                .id_for_key(&stream_spectrum_key(stream.id))
-                == Some(id)
-            {
-                return (stream.id == self.active_stream && self.selected_spectrum().is_some())
-                    .then_some(super::FieldRepresentation::Curve1D);
-            }
+        let key = self.field_catalog.key_for_id(id)?;
+        if key.starts_with("mass_spec.stream.") && key.ends_with(".spectrum") {
+            return (key == stream_spectrum_key(self.active_stream)
+                && self.selected_spectrum().is_some())
+            .then_some(super::FieldRepresentation::Curve1D);
         }
-        if self.extracted_spectra.iter().any(|extraction| {
-            self.field_catalog
-                .id_for_key(&extracted_stream_spectrum_key(extraction.id))
-                == Some(id)
-        }) || self
-            .extracted_ion_chromatograms
-            .iter()
-            .any(|xic| self.field_catalog.id_for_key(&xic_key(xic.id)) == Some(id))
-            || self.run.chromatograms.iter().any(|channel| {
-                self.field_catalog.id_for_key(&channel_key(&channel.id.0)) == Some(id)
-            })
-        {
-            Some(super::FieldRepresentation::Curve1D)
-        } else {
-            None
-        }
+        Some(super::FieldRepresentation::Curve1D)
     }
 
     pub fn add_extraction(
@@ -342,6 +312,12 @@ impl MassSpecDataset {
     }
 
     pub fn tic_panel_note(&self) -> String {
+        if self.run.stream(self.active_stream).is_none() {
+            return self.run.chromatograms.first().map_or_else(
+                || "Mass chromatogram".to_owned(),
+                |channel| channel.description.clone(),
+            );
+        }
         let polarity = self
             .run
             .stream(self.active_stream)
@@ -587,7 +563,7 @@ pub(crate) fn mass_spec_field_keys(run: &MassSpecRun) -> Vec<String> {
         .chain(
             run.chromatograms
                 .iter()
-                .filter(|channel| channel.kind == ChromatogramKind::Optical)
+                .filter(|channel| channel.source_stream.is_none() && channel.kind.is_signal())
                 .map(|channel| channel_key(&channel.id.0)),
         )
         .collect()
@@ -699,98 +675,10 @@ fn extracted_points(
 }
 
 #[cfg(test)]
-pub(crate) fn sample_mass_spec_run() -> MassSpecRun {
-    use plotx_io::{
-        AcquisitionStream, ChromatogramChannel, ChromatogramChannelId, Polarity,
-        SpectrumRepresentation,
-    };
-    let scan = |id, time, tic, polarity, mz: &[f64], intensity: &[f64]| MassSpectrum {
-        id: SpectrumId::new(id),
-        source_native_id: Some(id.to_string()),
-        retention_time_min: time,
-        ms_level: 1,
-        polarity,
-        representation: SpectrumRepresentation::Profile,
-        mz: mz.to_vec(),
-        intensity: intensity.to_vec(),
-        tic,
-        base_peak_mz: mz.first().copied(),
-        base_peak_intensity: intensity.first().copied(),
-        precursor: None,
-    };
-    MassSpecRun {
-        source: "synthetic.raw".to_owned(),
-        metadata: [("Sample".to_owned(), "test".to_owned())]
-            .into_iter()
-            .collect(),
-        instrument: Some("SQD2".to_owned()),
-        streams: vec![
-            AcquisitionStream {
-                id: AcquisitionStreamId::new(3),
-                source_native_id: Some("3".to_owned()),
-                source_label: Some("Function 3".to_owned()),
-                role: StreamRole::Primary,
-                acquisition_range: Some([10.0, 500.0]),
-                spectra: vec![
-                    scan(11, 0.5, 2.0, Polarity::Positive, &[10.0], &[2.0]),
-                    scan(12, 1.0, 9.0, Polarity::Positive, &[20.0, 30.0], &[9.0, 1.0]),
-                ],
-            },
-            AcquisitionStream {
-                id: AcquisitionStreamId::new(5),
-                source_native_id: Some("5".to_owned()),
-                source_label: Some("Function 5".to_owned()),
-                role: StreamRole::Reference,
-                acquisition_range: None,
-                spectra: vec![],
-            },
-            AcquisitionStream {
-                id: AcquisitionStreamId::new(7),
-                source_native_id: Some("7".to_owned()),
-                source_label: Some("Function 7".to_owned()),
-                role: StreamRole::Primary,
-                acquisition_range: Some([20.0, 800.0]),
-                spectra: vec![
-                    scan(101, 0.4, 4.0, Polarity::Negative, &[40.0], &[4.0]),
-                    scan(105, 1.4, 3.0, Polarity::Negative, &[50.0], &[3.0]),
-                ],
-            },
-        ],
-        chromatograms: vec![
-            ChromatogramChannel {
-                id: ChromatogramChannelId("stream:9:coordinate:217.5".to_owned()),
-                kind: ChromatogramKind::Optical,
-                source_stream: None,
-                coordinate: Some(217.5),
-                description: "PDA 217.5 nm".to_owned(),
-                unit: "AU".to_owned(),
-                time_min: vec![0.5, 1.0],
-                values: vec![-1.0, 2.0],
-            },
-            ChromatogramChannel {
-                id: ChromatogramChannelId("stream:9:coordinate:280".to_owned()),
-                kind: ChromatogramKind::Optical,
-                source_stream: None,
-                coordinate: Some(280.0),
-                description: "PDA 280 nm".to_owned(),
-                unit: "AU".to_owned(),
-                time_min: vec![0.5, 1.0],
-                values: vec![3.0, 4.0],
-            },
-            ChromatogramChannel {
-                id: ChromatogramChannelId("auxiliary:1".to_owned()),
-                kind: ChromatogramKind::Temperature,
-                source_stream: None,
-                coordinate: None,
-                description: "Sample temperature".to_owned(),
-                unit: "°C".to_owned(),
-                time_min: vec![0.5],
-                values: vec![25.0],
-            },
-        ],
-        import_warnings: vec!["optional reference was unavailable".to_owned()],
-    }
-}
+#[path = "mass_spec_fixture.rs"]
+mod fixture;
+#[cfg(test)]
+pub(crate) use fixture::sample_mass_spec_run;
 
 #[cfg(test)]
 #[path = "mass_spec_interaction_tests.rs"]

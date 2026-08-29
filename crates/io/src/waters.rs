@@ -619,6 +619,8 @@ fn optical_channels(functions: &[DecodedFunction]) -> Result<Vec<ChromatogramCha
                 normalized_bits(channel.coordinate)
             )),
             kind: ChromatogramKind::Optical,
+            polarity: Polarity::Unknown,
+            transition: None,
             source_stream: None,
             coordinate: Some(channel.coordinate),
             description: format!("Optical {} nm", format_coordinate(channel.coordinate)),

@@ -49,7 +49,9 @@ pub(super) fn channels(
             };
             Ok(ChromatogramChannel {
                 id: ChromatogramChannelId(format!("{prefix}{local}")),
-                kind: ChromatogramKind::Unknown,
+                kind: ChromatogramKind::TotalIonCurrent,
+                polarity: source.map_or(crate::Polarity::Unknown, AcquisitionStream::polarity),
+                transition: None,
                 source_stream: source.map(|s| s.id),
                 coordinate: Some((experiment + 1) as f64),
                 description: format!("{sample} experiment {} total ion current", experiment + 1),

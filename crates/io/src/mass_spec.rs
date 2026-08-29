@@ -122,6 +122,10 @@ impl AcquisitionStream {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ChromatogramKind {
+    TotalIonCurrent,
+    BasePeak,
+    SelectedIonMonitoring,
+    SelectedReactionMonitoring,
     Optical,
     Temperature,
     Pressure,
@@ -129,10 +133,29 @@ pub enum ChromatogramKind {
     Unknown,
 }
 
+impl ChromatogramKind {
+    pub fn is_signal(self) -> bool {
+        !matches!(
+            self,
+            Self::Temperature | Self::Pressure | Self::Housekeeping
+        )
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MassTransition {
+    pub precursor_mz: Option<f64>,
+    pub product_mz: Option<f64>,
+    pub collision_energy: Option<f64>,
+    pub activation_method: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChromatogramChannel {
     pub id: ChromatogramChannelId,
     pub kind: ChromatogramKind,
+    pub polarity: Polarity,
+    pub transition: Option<MassTransition>,
     pub source_stream: Option<AcquisitionStreamId>,
     pub coordinate: Option<f64>,
     pub description: String,
@@ -262,9 +285,13 @@ impl MassSpecRun {
             }
         }
         if !self
-            .streams
+            .chromatograms
             .iter()
-            .any(|stream| stream.role == StreamRole::Primary && !stream.spectra.is_empty())
+            .any(|channel| channel.kind.is_signal())
+            && !self
+                .streams
+                .iter()
+                .any(|stream| stream.role == StreamRole::Primary && !stream.spectra.is_empty())
         {
             return Err("run has no readable non-reference MS stream".to_owned());
         }
@@ -293,6 +320,19 @@ impl MassSpecRun {
             }
             if channel.coordinate.is_some_and(|value| !value.is_finite()) {
                 return Err(format!("channel {} has an invalid coordinate", channel.id));
+            }
+            if let Some(transition) = &channel.transition
+                && (transition
+                    .precursor_mz
+                    .is_some_and(|value| !value.is_finite() || value <= 0.0)
+                    || transition
+                        .product_mz
+                        .is_some_and(|value| !value.is_finite() || value <= 0.0)
+                    || transition
+                        .collision_energy
+                        .is_some_and(|value| !value.is_finite() || value < 0.0))
+            {
+                return Err(format!("channel {} has an invalid transition", channel.id));
             }
         }
         Ok(())
@@ -438,6 +478,8 @@ mod tests {
         let channel = ChromatogramChannel {
             id: ChromatogramChannelId("tic".to_owned()),
             kind: ChromatogramKind::Unknown,
+            polarity: Polarity::Unknown,
+            transition: None,
             source_stream: None,
             coordinate: None,
             description: "TIC".to_owned(),

@@ -22,6 +22,9 @@ use std::{
     path::Path,
 };
 
+#[path = "mzml_chromatogram.rs"]
+mod chromatogram;
+
 const MAX_SPECTRA: usize = 1_000_000;
 const MAX_POINTS_PER_SPECTRUM: usize = 5_000_000;
 const MAX_DECODED_BYTES_PER_ARRAY: usize = 40_000_000;
@@ -37,7 +40,7 @@ const RETAINED_XML_BUFFER_BYTES: usize = 64 * 1024;
 /// found. This wrapper stops exposing source bytes after one event's budget;
 /// the parser therefore receives an I/O error before it can append beyond the
 /// configured limit, including for unterminated tokens.
-struct EventBounded<R> {
+pub(super) struct EventBounded<R> {
     inner: R,
     remaining: usize,
 }
@@ -88,22 +91,24 @@ impl<R: BufRead> BufRead for EventBounded<R> {
 struct StreamKey(u8, u8);
 
 #[derive(Default)]
-struct BinaryArray {
-    kind: Option<ArrayKind>,
-    precision: Option<Precision>,
-    zlib: bool,
-    unsupported: Option<String>,
-    text: Vec<u8>,
+pub(super) struct BinaryArray {
+    pub(super) kind: Option<ArrayKind>,
+    pub(super) precision: Option<Precision>,
+    pub(super) zlib: bool,
+    pub(super) unsupported: Option<String>,
+    pub(super) optional_auxiliary: bool,
+    pub(super) text: Vec<u8>,
 }
 
 #[derive(Clone, Copy)]
-enum ArrayKind {
+pub(super) enum ArrayKind {
     Mz,
     Intensity,
+    Time,
 }
 
 #[derive(Clone, Copy)]
-enum Precision {
+pub(super) enum Precision {
     F32,
     F64,
 }
@@ -151,6 +156,7 @@ pub fn parse(input: impl BufRead, source: String) -> Result<MassSpecRun, IoError
     reader.config_mut().trim_text(true);
     let mut buffer = Vec::new();
     let mut spectra = Vec::new();
+    let mut chromatograms = Vec::new();
     let mut warnings = Vec::new();
     let mut run_id = None;
     let mut total_decoded = 0usize;
@@ -184,6 +190,21 @@ pub fn parse(input: impl BufRead, source: String) -> Result<MassSpecRun, IoError
                     buffer = Vec::with_capacity(RETAINED_XML_BUFFER_BYTES);
                 }
             }
+            Event::Start(tag) if tag.local_name().as_ref() == b"chromatogram" => {
+                let tag = tag.into_owned();
+                let channel = chromatogram::parse(
+                    &mut reader,
+                    &mut buffer,
+                    &tag,
+                    chromatograms.len(),
+                    &mut warnings,
+                    &mut total_decoded,
+                )?;
+                chromatograms.push(channel);
+                if buffer.capacity() > RETAINED_XML_BUFFER_BYTES {
+                    buffer = Vec::with_capacity(RETAINED_XML_BUFFER_BYTES);
+                }
+            }
             Event::Eof => break,
             _ => {}
         }
@@ -192,8 +213,8 @@ pub fn parse(input: impl BufRead, source: String) -> Result<MassSpecRun, IoError
     if !saw_run {
         return Err(invalid("mzML contains no run"));
     }
-    if spectra.is_empty() {
-        return Err(invalid("mzML run contains no spectra"));
+    if spectra.is_empty() && chromatograms.is_empty() {
+        return Err(invalid("mzML run contains no spectra or chromatograms"));
     }
 
     let mut grouped: BTreeMap<StreamKey, Vec<MassSpectrum>> = BTreeMap::new();
@@ -231,7 +252,7 @@ pub fn parse(input: impl BufRead, source: String) -> Result<MassSpecRun, IoError
         metadata,
         instrument: None,
         streams,
-        chromatograms: Vec::new(),
+        chromatograms,
         import_warnings: warnings,
     };
     run.validate().map_err(invalid)?;
@@ -311,6 +332,11 @@ fn parse_spectrum<R: BufRead>(
                 let target = match kind {
                     ArrayKind::Mz => &mut draft.mz,
                     ArrayKind::Intensity => &mut draft.intensity,
+                    ArrayKind::Time => {
+                        return Err(invalid(format!(
+                            "spectrum {label} contains an unexpected time array"
+                        )));
+                    }
                 };
                 if target.replace(values).is_some() {
                     return Err(invalid(format!(
@@ -432,7 +458,7 @@ fn apply_cv(
     Ok(())
 }
 
-fn read_binary_text<R: BufRead>(
+pub(super) fn read_binary_text<R: BufRead>(
     reader: &mut Reader<EventBounded<R>>,
     buffer: &mut Vec<u8>,
     output: &mut Vec<u8>,
@@ -469,7 +495,7 @@ fn read_binary_text<R: BufRead>(
     }
 }
 
-fn decode_array(
+pub(super) fn decode_array(
     array: BinaryArray,
     declared: Option<usize>,
     label: &str,
@@ -558,7 +584,7 @@ fn decode_array(
     Ok((kind, values))
 }
 
-fn attribute(tag: &BytesStart<'_>, name: &[u8]) -> Result<Option<String>, IoError> {
+pub(super) fn attribute(tag: &BytesStart<'_>, name: &[u8]) -> Result<Option<String>, IoError> {
     for attribute in tag.attributes() {
         let attribute =
             attribute.map_err(|error| invalid(format!("invalid XML attribute: {error}")))?;
@@ -577,7 +603,7 @@ fn attribute(tag: &BytesStart<'_>, name: &[u8]) -> Result<Option<String>, IoErro
     Ok(None)
 }
 
-fn read_event<'buffer, R: BufRead>(
+pub(super) fn read_event<'buffer, R: BufRead>(
     reader: &mut Reader<EventBounded<R>>,
     buffer: &'buffer mut Vec<u8>,
     limit: usize,
@@ -663,7 +689,7 @@ fn polarity_label(p: Polarity) -> &'static str {
         Polarity::Unknown => "unknown polarity",
     }
 }
-fn push_warning(warnings: &mut Vec<String>, message: String) {
+pub(super) fn push_warning(warnings: &mut Vec<String>, message: String) {
     if warnings.len() + 1 < MAX_IMPORT_WARNINGS {
         warnings.push(message);
     } else if warnings.len() + 1 == MAX_IMPORT_WARNINGS {
@@ -673,7 +699,7 @@ fn push_warning(warnings: &mut Vec<String>, message: String) {
 fn xml_error(error: quick_xml::Error) -> IoError {
     invalid(format!("XML parsing failed: {error}"))
 }
-fn invalid(message: impl Into<String>) -> IoError {
+pub(super) fn invalid(message: impl Into<String>) -> IoError {
     IoError::InvalidMzMl(message.into())
 }
 

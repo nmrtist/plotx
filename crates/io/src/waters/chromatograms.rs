@@ -161,6 +161,8 @@ fn parse_data(
     let channel = ChromatogramChannel {
         id: ChromatogramChannelId(format!("auxiliary:{number}")),
         kind,
+        polarity: crate::Polarity::Unknown,
+        transition: None,
         source_stream: None,
         coordinate: coordinate_from_description(&descriptor.name),
         description: descriptor.name.clone(),

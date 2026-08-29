@@ -15,7 +15,7 @@ PlotX 直接读取厂商 LC–MS、NMR、XPS、AFM 与电生理格式，无需�
 | Waters MassLynx RAW | `.raw` 目录 | 已验证的低分辨率数据，包括 SQD2 数据 |
 | SCIEX legacy WIFF | `.wiff` + `.wiff.scan` | 支持单样本与多样本 legacy 数据；两个文件必须放在一起 |
 | Rigaku 粉末 XRD | `.rasx`、FI `.raw`、RAS_RAW `.txt` | 衍射图样、采集元数据，以及文件提供的衰减系数 |
-| mzML | `.mzML` | 使用 32 位或 64 位、未压缩或 zlib 压缩数组的质心或轮廓 LC–MS 谱图 |
+| mzML | `.mzML` | 使用 32 位或 64 位数组的质心/轮廓谱图及 TIC、BPC、SIM 或 SRM 色谱图 |
 | Bruker NanoScope AFM | `.spm` / `.pfc` | 图像、力曲线、Force Volume 与 PeakForce Capture 数据立方体 |
 | JCAMP-DX | `.dx` / `.jdx` / `.jcamp` | 1D 频域 NMR 谱 |
 | Axon Binary Format 2 | `.abf` | int16/float32、多通道、多 sweep，以及文件内 DAC/epoch 刺激 |
@@ -53,10 +53,12 @@ CasaXPS `.txt` 按结构头内容识别，而不是只看扩展名；其他 `.tx
 
 打开或拖入 `.mzML` 文件。PlotX 会将谱图导入与 Waters 数据相同的 LC–MS
 数据集和图表工作流。谱图按 MS 级别和极性分组；以秒或分钟记录的扫描时间都会
-换算为分钟显示。文件自带的色谱图暂不导入。
+换算为分钟显示。PlotX 也会导入文件自带的 TIC、BPC、SIM 与 SRM 色谱图，
+包括只有色谱图而没有 scan 谱图的采集。文件提供时，会保留 transition 的
+precursor/product m/z、极性、碰撞能量和活化方法。
 
-导入器支持小端 32 位和 64 位浮点 m/z 与强度数组，可不压缩或使用 zlib 压缩。
-Numpress、大端数组以及缺少任一必需数组的谱图会使导入停止并显示错误。
+导入器支持小端 32 位和 64 位浮点 m/z、时间与强度数组，可不压缩或使用 zlib
+压缩。Numpress、大端数组以及缺少必需数组的谱图或色谱图会使导入停止并显示错误。
 
 ## SCIEX legacy WIFF
 

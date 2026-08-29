@@ -72,6 +72,29 @@ fn default_lcms_canvas_without_optical_data_contains_only_tic() {
 }
 
 #[test]
+fn chromatogram_only_run_uses_existing_fields_and_default_canvas() {
+    let mut run = sample_mass_spec_run();
+    run.streams.clear();
+    run.chromatograms.truncate(1);
+    run.chromatograms[0].kind = ChromatogramKind::SelectedReactionMonitoring;
+    run.chromatograms[0].description = "SRM 455.2 -> 520.2".to_owned();
+    assert!(run.validate().is_ok());
+
+    let dataset = Dataset::MassSpec(Box::new(MassSpecDataset::load(run)));
+    let mass_spec = dataset.as_mass_spec().unwrap();
+    assert_eq!(mass_spec.active_stream, AcquisitionStreamId::new(0));
+    assert!(mass_spec.supported_ms_streams().next().is_none());
+    assert_eq!(mass_spec_field_keys(&mass_spec.run).len(), 1);
+
+    let canvas = crate::workflow::build_default_canvas(&dataset, "mrm.mzML");
+    assert_eq!(canvas.objects.len(), 1);
+    assert_eq!(canvas.objects[0].name, "SRM 455.2 -> 520.2");
+    let plot = canvas.objects[0].plot().unwrap();
+    assert_eq!(plot.chart.type_id, "mass_chromatogram");
+    assert_eq!(plot.figure().series[0].points, [[0.5, -1.0], [1.0, 2.0]]);
+}
+
+#[test]
 fn mean_extraction_averages_missing_profile_coordinates_as_zero() {
     let mut dataset = MassSpecDataset::load(sample_mass_spec_run());
     let (_, field) = dataset
@@ -92,7 +115,9 @@ fn stream_tic_prefers_bound_chromatogram_points() {
     let mut run = sample_mass_spec_run();
     run.chromatograms.push(ChromatogramChannel {
         id: ChromatogramChannelId("tic:bound".to_owned()),
-        kind: ChromatogramKind::Unknown,
+        kind: ChromatogramKind::TotalIonCurrent,
+        polarity: plotx_io::Polarity::Unknown,
+        transition: None,
         source_stream: Some(AcquisitionStreamId::new(3)),
         coordinate: None,
         description: "Total ion current".to_owned(),
@@ -115,7 +140,9 @@ fn displayed_mass_spec_trace_uses_bound_tic_channel() {
     let mut run = sample_mass_spec_run();
     run.chromatograms.push(ChromatogramChannel {
         id: ChromatogramChannelId("tic:rendered".to_owned()),
-        kind: ChromatogramKind::Unknown,
+        kind: ChromatogramKind::TotalIonCurrent,
+        polarity: plotx_io::Polarity::Unknown,
+        transition: None,
         source_stream: Some(AcquisitionStreamId::new(3)),
         coordinate: None,
         description: "Total ion current".to_owned(),

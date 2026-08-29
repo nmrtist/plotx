@@ -16,7 +16,7 @@ no conversion step is needed.
 | Waters MassLynx RAW | `.raw` directory | Validated low-resolution runs, including SQD2 data |
 | SCIEX legacy WIFF | `.wiff` + `.wiff.scan` | Single- and multi-sample legacy runs; both files must remain together |
 | Rigaku powder XRD | `.rasx`, FI `.raw`, RAS_RAW `.txt` | Diffraction pattern, acquisition metadata, and attenuation when available |
-| mzML | `.mzML` | Centroided or profile LC–MS spectra with 32-bit or 64-bit arrays, uncompressed or zlib-compressed |
+| mzML | `.mzML` | Centroided/profile spectra and TIC, BPC, SIM, or SRM chromatograms with 32-bit or 64-bit arrays |
 | Bruker NanoScope AFM | `.spm` / `.pfc` | Images, force curves, force-volume and PeakForce Capture cubes |
 | JCAMP-DX | `.dx` / `.jdx` / `.jcamp` | 1D frequency-domain NMR spectra |
 | Axon Binary Format 2 | `.abf` | int16/float32, multiple channels and sweeps, embedded DAC/epoch stimuli |
@@ -62,11 +62,14 @@ non-uniform sampling, and other arrayed experiments are not supported. See
 Open or drop a `.mzML` file. PlotX imports the spectra into the same LC–MS
 dataset and chart workflow used for Waters runs. Spectra are grouped by MS
 level and polarity; scan times recorded in seconds or minutes are displayed in
-minutes. File-supplied chromatograms are not imported.
+minutes. PlotX also imports file-supplied TIC, BPC, SIM, and SRM chromatograms,
+including chromatogram-only acquisitions. Transition precursor/product m/z,
+polarity, collision energy, and activation method are retained when present.
 
-The importer accepts little-endian 32-bit and 64-bit floating-point m/z and
-intensity arrays with no compression or zlib compression. Numpress, big-endian
-arrays, and spectra without both required arrays stop the import with an error.
+The importer accepts little-endian 32-bit and 64-bit floating-point m/z, time,
+and intensity arrays with no compression or zlib compression. Numpress,
+big-endian arrays, and spectra or chromatograms without their required arrays
+stop the import with an error.
 
 ## SCIEX legacy WIFF
 

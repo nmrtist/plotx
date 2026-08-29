@@ -20,6 +20,8 @@ use std::collections::{BTreeMap, BTreeSet};
 #[path = "field_contour.rs"]
 mod field_contour;
 pub use field_contour::*;
+#[path = "field_mass_spec.rs"]
+mod field_mass_spec;
 
 impl super::Dataset {
     /// Describes stable child fields and their encoding capabilities.
@@ -358,11 +360,10 @@ impl super::Dataset {
                         }
                     }
                 }
-                for channel in dataset
-                    .run
-                    .chromatograms
-                    .iter()
-                    .filter(|channel| channel.kind == plotx_io::ChromatogramKind::Optical)
+                for channel in
+                    dataset.run.chromatograms.iter().filter(|channel| {
+                        channel.source_stream.is_none() && channel.kind.is_signal()
+                    })
                 {
                     let key = channel_key(&channel.id.0);
                     if let Some(id) = dataset.field_catalog.id_for_key(&key) {
@@ -452,6 +453,9 @@ impl super::Dataset {
     }
 
     pub fn default_field_id(&self) -> Option<FieldId> {
+        if let Self::MassSpec(dataset) = self {
+            return field_mass_spec::default_field_id(dataset);
+        }
         if let Self::Nmr2D(dataset) = self
             && !dataset.is_true_2d()
         {
@@ -469,10 +473,16 @@ impl super::Dataset {
     }
 
     pub fn has_field(&self, id: FieldId) -> bool {
+        if let Self::MassSpec(dataset) = self {
+            return dataset.field_catalog.key_for_id(id).is_some();
+        }
         self.field_descriptors().iter().any(|field| field.id == id)
     }
 
     pub fn field_descriptor(&self, id: FieldId) -> Option<FieldDescriptor> {
+        if let Self::MassSpec(dataset) = self {
+            return field_mass_spec::descriptor(dataset, id);
+        }
         self.field_descriptors()
             .into_iter()
             .find(|field| field.id == id)

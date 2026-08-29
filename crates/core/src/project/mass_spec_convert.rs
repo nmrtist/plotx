@@ -159,19 +159,46 @@ fn write_channel(output: &mut impl Write, channel: &ChromatogramChannel) -> Resu
     write_u8(
         output,
         match channel.kind {
-            ChromatogramKind::Optical => 0,
-            ChromatogramKind::Temperature => 1,
-            ChromatogramKind::Pressure => 2,
-            ChromatogramKind::Housekeeping => 3,
-            ChromatogramKind::Unknown => 4,
+            ChromatogramKind::TotalIonCurrent => 0,
+            ChromatogramKind::BasePeak => 1,
+            ChromatogramKind::SelectedIonMonitoring => 2,
+            ChromatogramKind::SelectedReactionMonitoring => 3,
+            ChromatogramKind::Optical => 4,
+            ChromatogramKind::Temperature => 5,
+            ChromatogramKind::Pressure => 6,
+            ChromatogramKind::Housekeeping => 7,
+            ChromatogramKind::Unknown => 8,
         },
     )?;
+    write_u8(
+        output,
+        match channel.polarity {
+            Polarity::Positive => 0,
+            Polarity::Negative => 1,
+            Polarity::Unknown => 2,
+        },
+    )?;
+    write_optional_transition(output, channel.transition.as_ref())?;
     write_optional_u64(output, channel.source_stream.map(AcquisitionStreamId::get))?;
     write_optional_f64(output, channel.coordinate)?;
     write_string(output, &channel.description)?;
     write_string(output, &channel.unit)?;
     write_f64s(output, &channel.time_min)?;
     write_f64s(output, &channel.values)
+}
+
+fn write_optional_transition(
+    output: &mut impl Write,
+    transition: Option<&plotx_io::MassTransition>,
+) -> Result<()> {
+    let Some(transition) = transition else {
+        return write_u8(output, 0);
+    };
+    write_u8(output, 1)?;
+    write_optional_f64(output, transition.precursor_mz)?;
+    write_optional_f64(output, transition.product_mz)?;
+    write_optional_f64(output, transition.collision_energy)?;
+    write_optional_string(output, transition.activation_method.as_deref())
 }
 
 pub(super) fn decode<R: Read>(input: &mut EntryReader<'_, R>) -> Result<MassSpecDataset> {
@@ -577,12 +604,32 @@ impl<'a, 'p, R: Read> Reader<'a, 'p, R> {
     fn read_channel(&mut self) -> Result<ChromatogramChannel> {
         let id = ChromatogramChannelId(self.read_string()?);
         let kind = match self.read_u8()? {
-            0 => ChromatogramKind::Optical,
-            1 => ChromatogramKind::Temperature,
-            2 => ChromatogramKind::Pressure,
-            3 => ChromatogramKind::Housekeeping,
-            4 => ChromatogramKind::Unknown,
+            0 => ChromatogramKind::TotalIonCurrent,
+            1 => ChromatogramKind::BasePeak,
+            2 => ChromatogramKind::SelectedIonMonitoring,
+            3 => ChromatogramKind::SelectedReactionMonitoring,
+            4 => ChromatogramKind::Optical,
+            5 => ChromatogramKind::Temperature,
+            6 => ChromatogramKind::Pressure,
+            7 => ChromatogramKind::Housekeeping,
+            8 => ChromatogramKind::Unknown,
             tag => return Err(invalid_tag("chromatogram kind", tag)),
+        };
+        let polarity = match self.read_u8()? {
+            0 => Polarity::Positive,
+            1 => Polarity::Negative,
+            2 => Polarity::Unknown,
+            tag => return Err(invalid_tag("chromatogram polarity", tag)),
+        };
+        let transition = match self.read_u8()? {
+            0 => None,
+            1 => Some(plotx_io::MassTransition {
+                precursor_mz: self.read_optional_f64()?,
+                product_mz: self.read_optional_f64()?,
+                collision_energy: self.read_optional_f64()?,
+                activation_method: self.read_optional_string()?,
+            }),
+            tag => return Err(invalid_tag("chromatogram transition presence", tag)),
         };
         let source_stream = self.read_optional_u64()?.map(AcquisitionStreamId::new);
         let coordinate = self.read_optional_f64()?;
@@ -593,6 +640,8 @@ impl<'a, 'p, R: Read> Reader<'a, 'p, R> {
         Ok(ChromatogramChannel {
             id,
             kind,
+            polarity,
+            transition,
             source_stream,
             coordinate,
             description,
@@ -664,137 +713,5 @@ fn decode_bytes(bytes: &[u8]) -> Result<MassSpecRun> {
 mod project_tests;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn minimal_run_prefix() -> Vec<u8> {
-        let mut bytes = MAGIC.to_vec();
-        bytes.extend_from_slice(&VERSION.to_le_bytes());
-        bytes.extend_from_slice(&0_u64.to_le_bytes()); // source
-        bytes.push(0); // instrument
-        bytes.extend_from_slice(&0_u64.to_le_bytes()); // metadata
-        bytes
-    }
-
-    fn assert_count_rejected_without_payload(bytes: &[u8], label: &str) {
-        let message = decode_bytes(bytes).unwrap_err().to_string();
-        assert!(
-            message.contains(label)
-                && (message.contains("remaining") || message.contains("truncated")),
-            "{message}"
-        );
-    }
-
-    #[test]
-    fn rejects_unknown_future_version_precisely() {
-        let mut bytes = MAGIC.to_vec();
-        bytes.extend_from_slice(&2_u16.to_le_bytes());
-        let error = decode_bytes(&bytes).unwrap_err();
-        assert!(error.to_string().contains("LC–MS payload version 2"));
-    }
-
-    #[test]
-    fn rejects_truncated_header_invalid_tag_and_huge_length_before_allocation() {
-        assert!(
-            decode_bytes(MAGIC)
-                .unwrap_err()
-                .to_string()
-                .contains("truncated")
-        );
-
-        let mut invalid_tag = MAGIC.to_vec();
-        invalid_tag.extend_from_slice(&VERSION.to_le_bytes());
-        invalid_tag.extend_from_slice(&0_u64.to_le_bytes());
-        invalid_tag.push(2);
-        assert!(
-            decode_bytes(&invalid_tag)
-                .unwrap_err()
-                .to_string()
-                .contains("invalid option tag 2")
-        );
-
-        let mut huge = MAGIC.to_vec();
-        huge.extend_from_slice(&VERSION.to_le_bytes());
-        huge.extend_from_slice(&u64::MAX.to_le_bytes());
-        let message = decode_bytes(&huge).unwrap_err().to_string();
-        assert!(
-            message.contains("string exceeds") || message.contains("length exceeds"),
-            "{message}"
-        );
-    }
-
-    #[test]
-    fn rejects_large_structural_counts_without_reserving_the_claimed_collection() {
-        const LARGE_COUNT: u64 = 10_000_000;
-
-        let mut warnings = minimal_run_prefix();
-        warnings.extend_from_slice(&LARGE_COUNT.to_le_bytes());
-        assert_count_rejected_without_payload(&warnings, "warning count");
-
-        let mut streams = minimal_run_prefix();
-        streams.extend_from_slice(&0_u64.to_le_bytes()); // warnings
-        streams.extend_from_slice(&LARGE_COUNT.to_le_bytes());
-        assert_count_rejected_without_payload(&streams, "stream count");
-
-        let mut spectra = minimal_run_prefix();
-        spectra.extend_from_slice(&0_u64.to_le_bytes()); // warnings
-        spectra.extend_from_slice(&1_u64.to_le_bytes()); // streams
-        spectra.extend_from_slice(&7_u64.to_le_bytes()); // stream id
-        spectra.push(0); // source native id
-        spectra.push(0); // source label
-        spectra.push(0); // primary role
-        spectra.push(0); // acquisition range
-        spectra.extend_from_slice(&LARGE_COUNT.to_le_bytes());
-        assert_count_rejected_without_payload(&spectra, "spectrum count");
-    }
-
-    #[test]
-    fn payload_round_trips_streams_spectra_channels_and_precursors() {
-        let mut run = crate::state::sample_mass_spec_run();
-        run.instrument = Some("QTOF".to_owned());
-        run.streams[0].spectra[1].precursor = Some(Precursor {
-            selected_mz: 445.2,
-            charge: Some(2),
-            isolation_window_lower_offset: Some(0.5),
-            isolation_window_upper_offset: Some(0.75),
-            collision_energy: Some(20.0),
-            activation_method: Some("CID".to_owned()),
-        });
-        let decoded = decode_bytes(&encode(&run).unwrap()).unwrap();
-        assert_eq!(decoded.source, run.source);
-        assert_eq!(decoded.instrument, run.instrument);
-        assert_eq!(decoded.metadata, run.metadata);
-        assert_eq!(decoded.import_warnings, run.import_warnings);
-        assert_eq!(decoded.streams.len(), 3);
-        assert_eq!(decoded.streams[0].role, StreamRole::Primary);
-        assert_eq!(decoded.streams[0].source_label, run.streams[0].source_label);
-        assert_eq!(decoded.streams[0].spectra[1].id, SpectrumId::new(12));
-        assert_eq!(decoded.streams[0].spectra[1].mz, [20.0, 30.0]);
-        let precursor = decoded.streams[0].spectra[1].precursor.as_ref().unwrap();
-        assert_eq!(precursor.selected_mz, 445.2);
-        assert_eq!(precursor.charge, Some(2));
-        assert_eq!(precursor.activation_method.as_deref(), Some("CID"));
-        assert_eq!(decoded.chromatograms.len(), 3);
-        assert_eq!(decoded.chromatograms[0].kind, run.chromatograms[0].kind);
-        assert_eq!(decoded.chromatograms[0].values, run.chromatograms[0].values);
-    }
-
-    #[test]
-    fn rejects_truncated_and_trailing_payloads() {
-        let bytes = encode(&crate::state::sample_mass_spec_run()).unwrap();
-        assert!(
-            decode_bytes(&bytes[..bytes.len() - 1])
-                .unwrap_err()
-                .to_string()
-                .contains("truncated")
-        );
-        let mut trailing = bytes;
-        trailing.push(0);
-        assert!(
-            decode_bytes(&trailing)
-                .unwrap_err()
-                .to_string()
-                .contains("trailing data")
-        );
-    }
-}
+#[path = "mass_spec_convert_tests.rs"]
+mod tests;

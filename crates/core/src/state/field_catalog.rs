@@ -44,6 +44,12 @@ impl FieldCatalog {
         self.key_to_id.get(key).copied()
     }
 
+    pub(crate) fn key_for_id(&self, id: FieldId) -> Option<&str> {
+        self.key_to_id
+            .iter()
+            .find_map(|(key, candidate)| (*candidate == id).then_some(key.as_str()))
+    }
+
     pub fn trace_collection(&self, field: FieldId) -> Option<&TraceCollectionCatalog> {
         self.trace_collections.get(&field)
     }

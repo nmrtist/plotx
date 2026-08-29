@@ -44,6 +44,12 @@ pub(super) fn mass_spectrometry_group(app: &mut PlotxApp, di: usize, ui: &mut Ui
     let selected_spectrum = dataset.selected_spectrum().cloned();
     let extraction_count = dataset.extracted_spectra.len();
     let xic_count = dataset.extracted_ion_chromatograms.len();
+    let transition_count = dataset
+        .run
+        .chromatograms
+        .iter()
+        .filter(|channel| channel.transition.is_some())
+        .count();
 
     ui.label(crate::typography::headline("Acquisition"));
     let active_label = streams
@@ -68,6 +74,14 @@ pub(super) fn mass_spectrometry_group(app: &mut PlotxApp, di: usize, ui: &mut Ui
     }
     if !optical.is_empty() {
         ui.weak(format!("Detector channels: {}", optical.join(", ")));
+    }
+    if streams.is_empty() {
+        ui.label("Chromatogram-only acquisition");
+        ui.weak(format!(
+            "{} channels · {transition_count} transitions",
+            dataset.run.chromatograms.len()
+        ));
+        return false;
     }
 
     ui.separator();

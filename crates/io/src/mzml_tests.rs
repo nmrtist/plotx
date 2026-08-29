@@ -99,6 +99,20 @@ fn parsed(xml: String) -> MassSpecRun {
     parse(Cursor::new(xml), "fixture.mzML".to_owned()).unwrap()
 }
 
+fn chromatogram(id: &str, kind: &str, details: &str) -> String {
+    format!(
+        "<chromatogram id=\"{id}\" defaultArrayLength=\"2\"><cvParam accession=\"{kind}\"/>{details}<binaryDataArrayList count=\"2\">{}{}</binaryDataArrayList></chromatogram>",
+        array("MS:1000595", &[30.0, 90.0], TestPrecision::F64, false).replace(
+            "<cvParam accession=\"MS:1000595\"/>",
+            "<cvParam accession=\"MS:1000595\" unitAccession=\"UO:0000010\"/>"
+        ),
+        array("MS:1000515", &[10.0, 20.0], TestPrecision::F64, false).replace(
+            "<cvParam accession=\"MS:1000515\"/>",
+            "<cvParam accession=\"MS:1000515\" unitName=\"count per second\"/>"
+        )
+    )
+}
+
 #[test]
 fn imports_uncompressed_f64_and_normalizes_seconds_and_minutes() {
     let run = parsed(document(
@@ -125,6 +139,56 @@ fn imports_zlib_f32_into_f64() {
     )));
     assert_eq!(run.streams[0].spectra[0].mz, [100.25, 200.5]);
     assert_eq!(run.streams[0].spectra[0].polarity, Polarity::Negative);
+}
+
+#[test]
+fn imports_chromatogram_only_tic_and_structured_srm_transition() {
+    let tic = chromatogram("TIC", "MS:1000235", "");
+    let transition = chromatogram(
+        "Q1=455.2 Q3=520.2 peptide-heavy",
+        "MS:1001473",
+        "<cvParam accession=\"MS:1000130\"/><precursor><isolationWindow><cvParam accession=\"MS:1000827\" value=\"455.2\"/></isolationWindow><activation><cvParam accession=\"MS:1000133\" name=\"collision-induced dissociation\"/><cvParam accession=\"MS:1000045\" value=\"27.5\"/></activation></precursor><product><isolationWindow><cvParam accession=\"MS:1000827\" value=\"520.2\"/></isolationWindow></product>",
+    );
+    let run = parsed(format!(
+        "<mzML><run id=\"mrm\"><chromatogramList count=\"2\">{tic}{transition}</chromatogramList></run></mzML>"
+    ));
+
+    assert!(run.streams.is_empty());
+    assert_eq!(run.chromatograms.len(), 2);
+    assert_eq!(
+        run.chromatograms[0].kind,
+        crate::ChromatogramKind::TotalIonCurrent
+    );
+    assert_eq!(run.chromatograms[0].time_min, [0.5, 1.5]);
+    assert_eq!(run.chromatograms[0].unit, "count per second");
+    let srm = &run.chromatograms[1];
+    assert_eq!(
+        srm.kind,
+        crate::ChromatogramKind::SelectedReactionMonitoring
+    );
+    assert_eq!(srm.polarity, Polarity::Positive);
+    let transition = srm.transition.as_ref().unwrap();
+    assert_eq!(transition.precursor_mz, Some(455.2));
+    assert_eq!(transition.product_mz, Some(520.2));
+    assert_eq!(transition.collision_energy, Some(27.5));
+    assert_eq!(
+        transition.activation_method.as_deref(),
+        Some("collision-induced dissociation")
+    );
+}
+
+#[test]
+fn ignores_declared_non_standard_chromatogram_arrays_without_warning() {
+    let auxiliary = "<binaryDataArray><cvParam accession=\"MS:1000519\"/><cvParam accession=\"MS:1000576\"/><cvParam accession=\"MS:1000786\"/><binary>AQAAAAIAAAA=</binary></binaryDataArray>";
+    let channel = chromatogram("TIC", "MS:1000235", "").replace(
+        "<binaryDataArrayList count=\"2\">",
+        &format!("<binaryDataArrayList count=\"3\">{auxiliary}"),
+    );
+    let run = parsed(format!(
+        "<mzML><run><chromatogramList count=\"1\">{channel}</chromatogramList></run></mzML>"
+    ));
+    assert!(run.import_warnings.is_empty());
+    assert_eq!(run.chromatograms[0].values, [10.0, 20.0]);
 }
 
 #[test]
