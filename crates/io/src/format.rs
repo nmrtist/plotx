@@ -35,6 +35,7 @@ pub enum AfmFormat {
 pub enum MassSpectrometryFormat {
     WatersMassLynxRaw,
     MzMl,
+    SciexWiff,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,6 +88,7 @@ impl DataFormat {
                 "waters-masslynx-raw"
             }
             Self::MassSpectrometry(MassSpectrometryFormat::MzMl) => "mzml",
+            Self::MassSpectrometry(MassSpectrometryFormat::SciexWiff) => "sciex-wiff",
             Self::Xrd(XrdFormat::RigakuRasx) => "rigaku-rasx",
             Self::Xrd(XrdFormat::RigakuRaw) => "rigaku-raw-fi",
             Self::Xrd(XrdFormat::RigakuProfile) => "rigaku-profile",

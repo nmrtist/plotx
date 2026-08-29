@@ -26,7 +26,7 @@ pub(super) fn collect_data_files(folder: &Path, output: &mut Vec<PathBuf>) {
                 .extension()
                 .and_then(|value| value.to_str())
                 .unwrap_or("");
-            let supported_extension = ["abf", "spm", "pfc", "rasx", "vms"]
+            let supported_extension = ["abf", "spm", "pfc", "rasx", "vms", "wiff"]
                 .iter()
                 .any(|supported| extension.eq_ignore_ascii_case(supported));
             let recognized_raw =
@@ -90,6 +90,24 @@ mod tests {
         collect_data_files(&root, &mut found);
 
         assert_eq!(found, vec![dataset]);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn folder_scan_discovers_only_the_primary_wiff_file() {
+        let root =
+            std::env::temp_dir().join(format!("plotx-wiff-discovery-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let wiff = root.join("sample.WIFF");
+        std::fs::write(&wiff, b"container").unwrap();
+        std::fs::write(root.join("sample.WIFF.scan"), b"scans").unwrap();
+        std::fs::write(root.join("sample.wiff2"), b"wiff2").unwrap();
+        std::fs::write(root.join("sample.timeseries.data"), b"data").unwrap();
+
+        let mut found = Vec::new();
+        collect_data_files(&root, &mut found);
+
+        assert_eq!(found, vec![wiff]);
         std::fs::remove_dir_all(root).unwrap();
     }
 }

@@ -605,6 +605,17 @@ fn text_report(report: &InspectionReport) -> String {
             ephys.protocol.as_deref().unwrap_or("unknown")
         ));
     }
+    if let Some(mass_spec) = &report.mass_spectrometry {
+        if let Some(instrument) = &mass_spec.instrument {
+            lines.push(format!("mass_spec.instrument: {instrument}"));
+        }
+        lines.push(format!("mass_spec.streams: {}", mass_spec.stream_count));
+        lines.push(format!("mass_spec.scans: {}", mass_spec.ms_scan_count));
+        lines.push(format!(
+            "mass_spec.chromatograms: {}",
+            mass_spec.chromatograms.join(", ")
+        ));
+    }
     if let Some(xrd) = &report.xrd {
         lines.push(format!("xrd.points: {}", xrd.point_count));
         lines.push(format!(
@@ -726,6 +737,43 @@ mod tests {
             }))
         );
         assert!(parse(&["plotx-cli", "batch", "workflow.json"]).is_err());
+    }
+
+    #[test]
+    fn text_inspection_includes_mass_spectrometry_statistics() {
+        let report = InspectionReport {
+            schema: plotx_core::workflow::INSPECTION_SCHEMA,
+            format: "sciex-wiff".to_owned(),
+            provenance: plotx_core::workflow::ProvenanceReport {
+                selected_path: "sample.wiff".into(),
+                data_path: "sample.wiff".into(),
+                parameter_paths: Vec::new(),
+                companion_paths: vec!["sample.wiff.scan".into()],
+            },
+            dimension: plotx_core::workflow::DimensionReport {
+                count: 3,
+                shape: vec![2, 42, 1],
+            },
+            domain: "mass_spectrometry".to_owned(),
+            warnings: Vec::new(),
+            electrophysiology: None,
+            afm: None,
+            mass_spectrometry: Some(plotx_core::workflow::MassSpecReport {
+                instrument: Some("SCIEX TripleTOF 6600".to_owned()),
+                stream_count: 2,
+                ms_scan_count: 42,
+                chromatograms: vec!["total ion current chromatogram".to_owned()],
+            }),
+            xrd: None,
+            xps: None,
+        };
+
+        let output = text_report(&report);
+
+        assert!(output.contains("format: sciex-wiff"));
+        assert!(output.contains("mass_spec.streams: 2"));
+        assert!(output.contains("mass_spec.scans: 42"));
+        assert!(output.contains("mass_spec.chromatograms: total ion current chromatogram"));
     }
 
     #[test]

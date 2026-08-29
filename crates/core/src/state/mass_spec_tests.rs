@@ -3,6 +3,7 @@ use crate::actions::Action;
 use crate::state::{
     AxisRange, Dataset, ObjectFrame, PlotxApp, SeriesBinding, SeriesSource, ToolGroup,
 };
+use plotx_io::{ChromatogramChannel, ChromatogramChannelId};
 
 #[test]
 fn dynamic_catalog_and_stable_selection_follow_stream_identity() {
@@ -84,6 +85,48 @@ fn mean_extraction_averages_missing_profile_coordinates_as_zero() {
     let (_, _, _, points, stick) = dataset.field_values(field).unwrap();
     assert!(stick);
     assert_eq!(points, [[10.0, 1.0], [20.0, 4.5], [30.0, 0.5]]);
+}
+
+#[test]
+fn stream_tic_prefers_bound_chromatogram_points() {
+    let mut run = sample_mass_spec_run();
+    run.chromatograms.push(ChromatogramChannel {
+        id: ChromatogramChannelId("tic:bound".to_owned()),
+        kind: ChromatogramKind::Unknown,
+        source_stream: Some(AcquisitionStreamId::new(3)),
+        coordinate: None,
+        description: "Total ion current".to_owned(),
+        unit: "cps".to_owned(),
+        time_min: vec![0.0, 2.0],
+        values: vec![11.0, 22.0],
+    });
+    let dataset = MassSpecDataset::load(run);
+    let field = dataset
+        .field_catalog
+        .id_for_key(&stream_tic_key(AcquisitionStreamId::new(3)))
+        .expect("stream TIC field");
+    let (_, _, _, points, stick) = dataset.field_values(field).expect("TIC values");
+    assert!(!stick);
+    assert_eq!(points, [[0.0, 11.0], [2.0, 22.0]]);
+}
+
+#[test]
+fn displayed_mass_spec_trace_uses_bound_tic_channel() {
+    let mut run = sample_mass_spec_run();
+    run.chromatograms.push(ChromatogramChannel {
+        id: ChromatogramChannelId("tic:rendered".to_owned()),
+        kind: ChromatogramKind::Unknown,
+        source_stream: Some(AcquisitionStreamId::new(3)),
+        coordinate: None,
+        description: "Total ion current".to_owned(),
+        unit: "cps".to_owned(),
+        time_min: vec![0.0, 1.0],
+        values: vec![100.0, 200.0],
+    });
+    let dataset = Dataset::MassSpec(Box::new(MassSpecDataset::load(run)));
+    let trace = dataset.displayed_trace(None).expect("mass-spec trace");
+    assert_eq!(trace.xs, [0.0, 1.0]);
+    assert_eq!(trace.ys, [100.0, 200.0]);
 }
 
 #[test]

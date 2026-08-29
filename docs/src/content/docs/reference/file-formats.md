@@ -73,6 +73,23 @@ non-uniform sampling, and arrayed parameters other than phase are not
 supported. The import also stops if the recorded dimensions do not match the
 data.
 
+## SCIEX legacy WIFF
+
+PlotX reads a legacy `.wiff` OLE metadata container together with the
+`.wiff.scan` payload whose name is formed by appending `.scan` to the complete
+`.wiff` filename. The importer is pure Rust and does not require SCIEX Analyst,
+SCIEX OS, or a ProteoWizard SDK installation.
+
+Only the validated legacy layout is supported. The native importer reads the
+sample subtree/index streams, preserves duplicate sample names as independent
+samples, and exposes each of the 11 verified experiment slots as its own
+acquisition stream and TIC channel. Records remain in cycle order, including
+zero-TIC and empty DDA slots; no cross-experiment time merging or interpolation
+is performed. Unknown or structurally different WIFF variants are rejected
+before a dataset is created. Encrypted or newer `.wiff2` and
+`.timeseries.data` input is outside this boundary and must first be converted
+to mzML.
+
 ## Workflow and run-record files
 
 An [automation](/guides/automation/) workflow file is a JSON description of a

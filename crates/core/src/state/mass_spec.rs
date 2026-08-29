@@ -1,3 +1,4 @@
+use super::mass_spec_tic::points_for_stream_tic;
 use super::{
     DatasetId, DatasetLineage, FieldCatalog, FieldId,
     mass_spec_xic::{ExtractedIonChromatogram, IonChromatogramId, xic_key, xic_title},
@@ -460,15 +461,18 @@ impl MassSpecDataset {
             let stream_id = stream.id;
             let stream_label = stream_display_label(stream);
             if self.field_catalog.id_for_key(&stream_tic_key(stream_id)) == Some(id) {
+                let chromatogram_points = points_for_stream_tic(&self.run, stream_id);
                 return Some((
                     format!("{stream_label} TIC"),
                     "Retention time (min)",
                     "Total ion current".to_owned(),
-                    stream
-                        .spectra
-                        .iter()
-                        .map(|scan| [scan.retention_time_min, scan.tic])
-                        .collect(),
+                    chromatogram_points.unwrap_or_else(|| {
+                        stream
+                            .spectra
+                            .iter()
+                            .map(|scan| [scan.retention_time_min, scan.tic])
+                            .collect()
+                    }),
                     false,
                 ));
             }

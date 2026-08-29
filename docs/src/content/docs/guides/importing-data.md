@@ -14,6 +14,7 @@ no conversion step is needed.
 | Bruker TopSpin | `fid` / `ser` directories | 1D and 2D |
 | Varian/Agilent VnmrJ | `.fid` directory | Raw time-domain 1D and conventional 2D |
 | Waters MassLynx RAW | `.raw` directory | Validated low-resolution runs, including SQD2 data |
+| SCIEX legacy WIFF | `.wiff` + `.wiff.scan` | Single- and multi-sample legacy runs; both files must remain together |
 | Rigaku powder XRD | `.rasx`, FI `.raw`, RAS_RAW `.txt` | Diffraction pattern, acquisition metadata, and attenuation when available |
 | mzML | `.mzML` | Centroided or profile LC–MS spectra with 32-bit or 64-bit arrays, uncompressed or zlib-compressed |
 | Bruker NanoScope AFM | `.spm` / `.pfc` | Images, force curves, force-volume and PeakForce Capture cubes |
@@ -35,7 +36,9 @@ TopSpin, Varian/Agilent VnmrJ, and Waters MassLynx RAW), *Open Project…*, or
 Each imported dataset appears in the Primary Side Bar and is placed on the
 board automatically.
 The file picker accepts several ABF files at once. Opening a folder recursively
-imports every `.abf`, `.spm`, `.pfc`, `.vms`, structured CasaXPS `.txt`, and recognized `.raw` bundle below it.
+imports every `.abf`, `.spm`, `.pfc`, `.vms`, `.wiff`, structured CasaXPS
+`.txt`, and recognized `.raw` bundle below it. A `.wiff.scan` companion is
+never imported as a separate dataset.
 A `.raw` directory is imported once as a complete run; its internal files are
 not treated as separate datasets. For ABF files, each immediate parent folder
 becomes the initial, editable cell ID.
@@ -64,6 +67,22 @@ minutes. File-supplied chromatograms are not imported.
 The importer accepts little-endian 32-bit and 64-bit floating-point m/z and
 intensity arrays with no compression or zlib compression. Numpress, big-endian
 arrays, and spectra without both required arrays stop the import with an error.
+
+## SCIEX legacy WIFF
+
+Open or drop the `.wiff` file. Keep the paired file with `.scan` appended to
+the full filename beside it, for example `sample.wiff` and
+`sample.wiff.scan`. PlotX imports native scan IDs, retention times, m/z and
+intensity arrays, precursor details when available, polarity, instrument and
+acquisition-start metadata, and a separate TIC for each verified experiment.
+Spectra are grouped into independent sample/experiment acquisition streams and
+retain cycle order, including zero-TIC and empty DDA slots. Duplicate sample
+names remain separate and are displayed with stable suffixes such as
+`yjs_10ppm #1` and `yjs_10ppm #2`.
+
+PlotX rejects a missing companion, an empty container, or an unrecognized WIFF
+layout rather than creating a partial dataset. SCIEX `.wiff2` and `.timeseries.data` are not supported;
+convert those acquisitions to mzML before opening them in PlotX.
 
 ## Rigaku powder XRD
 

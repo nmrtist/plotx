@@ -379,7 +379,7 @@ pub(crate) fn open_file(app: &mut PlotxApp) {
             &["png", "jpg", "jpeg", "tif", "tiff", "webp", "bmp"],
         )
         .add_filter(
-            "All supported data (*.mzML, *.rasx, *.raw, *.vms, *.txt, *.spm, *.pfc, *.abf, *.jdf, fid, ser, *.zip, *.opj)",
+            "All supported data (*.mzML, *.wiff, *.rasx, *.raw, *.vms, *.txt, *.spm, *.pfc, *.abf, *.jdf, fid, ser, *.zip, *.opj)",
             origin::OPEN_FILE_FILTER_EXTENSIONS,
         )
         .add_filter("Rigaku XRD (*.rasx, *.raw, *.txt)", &["rasx", "raw", "txt"])
@@ -391,6 +391,7 @@ pub(crate) fn open_file(app: &mut PlotxApp) {
         .add_filter("Axon Binary Format 2 (*.abf)", &["abf"])
         .add_filter("JEOL Delta (*.jdf)", &["jdf"])
         .add_filter("mzML mass spectrometry (*.mzML)", &["mzML"])
+        .add_filter("SCIEX legacy WIFF (*.wiff)", &["wiff"])
         .add_filter("XPS (*.vms, CasaXPS *.txt)", &["vms", "txt"])
         .add_filter("Bruker TopSpin (fid, ser)", &["fid", "ser"])
         .add_filter("Varian/Agilent VnmrJ (fid)", &["fid"])
@@ -427,7 +428,7 @@ pub(crate) fn choose_project_save_path() -> Option<std::path::PathBuf> {
 
 pub(crate) fn open_folder(app: &mut PlotxApp) {
     if let Some(path) = rfd::FileDialog::new()
-        .set_title("Open a data folder (Waters MassLynx RAW, Bruker, Varian/Agilent VnmrJ, or recursive AFM/ABF2 import)")
+        .set_title("Open a data folder (vendor acquisitions or recursive scientific-data import)")
         .pick_folder()
     {
         open_folder_path(app, &path);

@@ -13,6 +13,7 @@ PlotX 直接读取厂商 LC–MS、NMR、XPS、AFM 与电生理格式，无需�
 | Bruker TopSpin | `fid` / `ser` 目录 | 1D 与 2D |
 | Varian/Agilent VnmrJ | `.fid` 目录 | 原始时域 1D 与常规 2D |
 | Waters MassLynx RAW | `.raw` 目录 | 已验证的低分辨率数据，包括 SQD2 数据 |
+| SCIEX legacy WIFF | `.wiff` + `.wiff.scan` | 支持单样本与多样本 legacy 数据；两个文件必须放在一起 |
 | Rigaku 粉末 XRD | `.rasx`、FI `.raw`、RAS_RAW `.txt` | 衍射图样、采集元数据，以及文件提供的衰减系数 |
 | mzML | `.mzML` | 使用 32 位或 64 位、未压缩或 zlib 压缩数组的质心或轮廓 LC–MS 谱图 |
 | Bruker NanoScope AFM | `.spm` / `.pfc` | 图像、力曲线、Force Volume 与 PeakForce Capture 数据立方体 |
@@ -32,7 +33,8 @@ PlotX 直接读取厂商 LC–MS、NMR、XPS、AFM 与电生理格式，无需�
 *Open Project…* 或 *Import Table…*。每个导入的数据集会出现在主侧栏中，
 并自动放置到画板上。
 文件选择器可以一次选择多个 ABF。打开文件夹时会递归导入其中所有 `.abf`、
-`.spm`、`.pfc`、`.vms`、结构化 CasaXPS `.txt` 和已识别的 `.raw` 数据包。每个 `.raw` 目录会作为一次完整采集
+`.spm`、`.pfc`、`.vms`、`.wiff`、结构化 CasaXPS `.txt` 和已识别的 `.raw`
+数据包；配套的 `.wiff.scan` 不会作为独立数据集导入。每个 `.raw` 目录会作为一次完整采集
 导入一次，其中的内部文件不会被当作独立数据集。对 ABF 文件，每个文件的直接
 父目录名会成为可编辑的初始 cell ID。
 CasaXPS `.txt` 按结构头内容识别，而不是只看扩展名；其他 `.txt` 仍进入表格导入。
@@ -55,6 +57,19 @@ CasaXPS `.txt` 按结构头内容识别，而不是只看扩展名；其他 `.tx
 
 导入器支持小端 32 位和 64 位浮点 m/z 与强度数组，可不压缩或使用 zlib 压缩。
 Numpress、大端数组以及缺少任一必需数组的谱图会使导入停止并显示错误。
+
+## SCIEX legacy WIFF
+
+请打开或拖入 `.wiff` 文件，并将文件名末尾追加 `.scan` 的配套文件放在同一
+目录，例如 `sample.wiff` 与 `sample.wiff.scan`。PlotX 会导入原始 scan ID、
+保留时间、m/z 与强度数组、可用的 precursor 信息、极性、仪器与采集开始时间
+元数据，以及每个已验证 experiment 的独立 TIC。谱图按样本与 experiment 分成独立
+的 acquisition stream，并保留 cycle 顺序，包括零 TIC 和空 DDA 槽位。重复样本名
+不会合并，会稳定显示为 `yjs_10ppm #1`、`yjs_10ppm #2` 等后缀。
+
+缺少配套文件、容器无样本或 WIFF 布局未识别时，PlotX 会明确拒绝，不会创建不完整的数据集。
+暂不支持 SCIEX `.wiff2` 与 `.timeseries.data`；请先将这些采集转换为 mzML，
+再在 PlotX 中打开。
 
 ## Rigaku 粉末 XRD
 

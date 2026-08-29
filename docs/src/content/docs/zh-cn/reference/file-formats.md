@@ -59,6 +59,19 @@ States 2D 数据。暂不支持处理后的谱图、3D 或 4D 实验、成像、
 非均匀采样，以及除 phase 以外的参数数组。如果文件记录的维度与数据不一致，
 导入也会停止。
 
+## SCIEX legacy WIFF
+
+PlotX 会同时读取 legacy `.wiff` OLE 元数据容器，以及在完整 `.wiff` 文件名
+末尾追加 `.scan` 所得到的 `.wiff.scan` payload。导入器使用纯 Rust，不要求
+安装 SCIEX Analyst、SCIEX OS 或 ProteoWizard SDK。
+
+目前仅支持已验证的 legacy 布局。原生导入器会读取 sample subtree/index 流，保留
+重复样本为独立样本，并将已验证的 11 个 experiment 槽位分别提供为独立的
+acquisition stream 与 TIC channel。记录按 cycle 顺序保留，包括零 TIC 和空 DDA
+槽位；不会跨 experiment 合并时间或插值。未知或结构不同的 WIFF 变体会在创建
+数据集之前被拒绝。加密或较新的 `.wiff2` 与
+`.timeseries.data` 不在此边界内，必须先转换为 mzML。
+
 ## 工作流与运行记录文件
 
 [自动化](/zh-cn/guides/automation/)工作流文件是一次批处理运行的 JSON

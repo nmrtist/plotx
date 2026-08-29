@@ -12,6 +12,7 @@ pub mod mzml;
 pub mod nanoscope;
 mod nmr_origin;
 pub mod origin;
+pub mod sciex_wiff;
 pub mod varian;
 pub mod waters;
 pub mod xlsx;
@@ -659,6 +660,12 @@ pub enum IoError {
     #[error("invalid or unsupported mzML: {0}")]
     InvalidMzMl(String),
 
+    #[error("invalid or unsupported SCIEX WIFF: {0}")]
+    InvalidSciexWiff(String),
+
+    #[error("unsupported SCIEX WIFF: {0}")]
+    UnsupportedSciexWiff(String),
+
     #[error("invalid XPS data: {0}")]
     InvalidXps(String),
 
@@ -702,6 +709,11 @@ pub fn detect_format(path: impl AsRef<Path>) -> Result<DataFormat, IoError> {
         .and_then(|e| e.to_str())
         .unwrap_or("")
         .to_ascii_lowercase();
+    let lower_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
     match ext.as_str() {
         "rasx" => Ok(DataFormat::Xrd(XrdFormat::RigakuRasx)),
         "raw" if xrd::is_rigaku_raw(path) => Ok(DataFormat::Xrd(XrdFormat::RigakuRaw)),
@@ -722,6 +734,15 @@ pub fn detect_format(path: impl AsRef<Path>) -> Result<DataFormat, IoError> {
         "jdf" => Ok(DataFormat::Nmr(NmrFormat::JeolDelta)),
         "dx" | "jdx" | "jcamp" => Ok(DataFormat::Nmr(NmrFormat::JcampDx1D)),
         "mzml" => Ok(DataFormat::MassSpectrometry(MassSpectrometryFormat::MzMl)),
+        "wiff" => Ok(DataFormat::MassSpectrometry(
+            MassSpectrometryFormat::SciexWiff,
+        )),
+        "wiff2" | "data" if ext == "wiff2" || lower_name.ends_with(".timeseries.data") => {
+            Err(IoError::UnsupportedSciexWiff(
+                "SCIEX WIFF2 and timeseries.data are not currently supported; convert the acquisition to mzML before opening it in PlotX"
+                    .to_owned(),
+            ))
+        }
         // Fall back to a content sniff so extensionless or mislabelled files
         // are still recognised by their magic bytes.
         _ if abf2::is_abf2(path) => {
@@ -729,7 +750,7 @@ pub fn detect_format(path: impl AsRef<Path>) -> Result<DataFormat, IoError> {
         }
         _ if jeol::is_jdf(path) => Ok(DataFormat::Nmr(NmrFormat::JeolDelta)),
         _ => Err(IoError::Unsupported(format!(
-            "unrecognised path {}: expected mzML, Rigaku FI .raw/.rasx/profile .txt, a Waters .raw directory, NanoScope .spm/.pfc, ABF2 .abf, JEOL .jdf, JCAMP-DX .dx/.jdx/.jcamp, Bruker fid/ser or pdata, or a Varian/Agilent VnmrJ .fid directory",
+            "unrecognised path {}: expected mzML, legacy SCIEX .wiff, Rigaku FI .raw/.rasx/profile .txt, a Waters .raw directory, NanoScope .spm/.pfc, ABF2 .abf, JEOL .jdf, JCAMP-DX .dx/.jdx/.jcamp, Bruker fid/ser or pdata, or a Varian/Agilent VnmrJ .fid directory",
             path.display()
         ))),
     }
@@ -753,6 +774,7 @@ pub fn load_path(path: impl AsRef<Path>) -> Result<LoadResult, IoError> {
             waters::load(path)
         }
         DataFormat::MassSpectrometry(MassSpectrometryFormat::MzMl) => mzml::load(path),
+        DataFormat::MassSpectrometry(MassSpectrometryFormat::SciexWiff) => sciex_wiff::load(path),
         DataFormat::Xrd(XrdFormat::RigakuRasx) => xrd::load_rasx(path),
         DataFormat::Xrd(XrdFormat::RigakuRaw) => xrd::load_raw(path),
         DataFormat::Xrd(XrdFormat::RigakuProfile) => xrd::load_profile(path),

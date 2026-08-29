@@ -21,7 +21,8 @@ pub(super) const ORIGIN_PROJECT_FILTER_LABEL: &str =
     "Origin projects (experimental: OPJ import; OPJU recognition only)";
 pub(super) const ORIGIN_PROJECT_FILTER_EXTENSIONS: &[&str] = &["opj", "opju"];
 pub(super) const OPEN_FILE_FILTER_EXTENSIONS: &[&str] = &[
-    "mzML", "rasx", "raw", "vms", "txt", "spm", "pfc", "abf", "jdf", "fid", "ser", "zip", "opj",
+    "mzML", "wiff", "rasx", "raw", "vms", "txt", "spm", "pfc", "abf", "jdf", "fid", "ser", "zip",
+    "opj",
 ];
 
 const ORIGIN_MEDIA_TYPE: &str = "application/x-origin-project";
