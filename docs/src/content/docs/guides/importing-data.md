@@ -80,6 +80,16 @@ import warning identifies spectra with additional values and states that only
 the first was retained. Scientific Script scan snapshots expose the summary
 provenance, instrument configuration, source event or preset, and filter string.
 
+TIC and BPC provenance is kept separate. A file-supplied TIC or BPC channel is
+marked as a source chromatogram and is used for its bound acquisition stream
+before any fallback. When that channel is absent, PlotX uses the per-spectrum
+source summary when available; otherwise it deterministically derives TIC from
+the intensity array or BPC from the largest non-negative peak. A mixed run can
+therefore report both source summaries and array-derived points. An unbound
+source chromatogram in a multi-stream run is kept as its own channel rather
+than guessed as a replacement for a stream's TIC or BPC. Field metadata,
+Scientific Summary, and Scientific Script expose the selected provenance.
+
 For runs with many chromatogram channels, open **Dataset tools → Mass
 spectrometry** from **Extract Mass Spectrum** or the command palette. The
 **Chromatogram channels** browser lists a stable count and ordering, with TIC

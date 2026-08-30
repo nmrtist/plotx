@@ -1,5 +1,6 @@
 use crate::{
-    AcquisitionStream, ChromatogramChannel, ChromatogramChannelId, ChromatogramKind, IoError,
+    AcquisitionStream, ChromatogramChannel, ChromatogramChannelId, ChromatogramKind,
+    ChromatogramProvenance, IoError,
 };
 
 pub(super) fn channels(
@@ -50,6 +51,7 @@ pub(super) fn channels(
             Ok(ChromatogramChannel {
                 id: ChromatogramChannelId(format!("{prefix}{local}")),
                 kind: ChromatogramKind::TotalIonCurrent,
+                provenance: ChromatogramProvenance::Source,
                 polarity: source.map_or(crate::Polarity::Unknown, AcquisitionStream::polarity),
                 transition: None,
                 source_stream: source.map(|s| s.id),

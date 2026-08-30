@@ -77,6 +77,59 @@ fn rejects_large_structural_counts_without_reserving_the_claimed_collection() {
 }
 
 #[test]
+fn v1_channel_wire_layout_remains_fixed_and_defaults_provenance_to_source() {
+    let channel = ChromatogramChannel {
+        id: ChromatogramChannelId("legacy-tic".to_owned()),
+        kind: ChromatogramKind::TotalIonCurrent,
+        provenance: ChromatogramProvenance::PeakArrays,
+        polarity: Polarity::Unknown,
+        transition: None,
+        source_stream: None,
+        coordinate: None,
+        description: "Legacy TIC".to_owned(),
+        unit: "count".to_owned(),
+        time_min: vec![0.5],
+        values: vec![10.0],
+    };
+    let run = MassSpecRun {
+        source: String::new(),
+        metadata: BTreeMap::new(),
+        instrument: None,
+        streams: Vec::new(),
+        chromatograms: vec![channel],
+        import_warnings: Vec::new(),
+    };
+
+    let mut v1 = minimal_run_prefix();
+    v1.extend_from_slice(&0_u64.to_le_bytes()); // import warnings
+    v1.extend_from_slice(&0_u64.to_le_bytes()); // streams
+    v1.extend_from_slice(&1_u64.to_le_bytes()); // chromatograms
+    write_string(&mut v1, "legacy-tic").unwrap();
+    v1.push(0); // TIC
+    v1.push(2); // unknown polarity
+    v1.push(0); // no transition
+    v1.push(0); // no source stream
+    v1.push(0); // no coordinate
+    write_string(&mut v1, "Legacy TIC").unwrap();
+    write_string(&mut v1, "count").unwrap();
+    write_f64s(&mut v1, &[0.5]).unwrap();
+    write_f64s(&mut v1, &[10.0]).unwrap();
+    v1.extend_from_slice(&0_u64.to_le_bytes()); // no active stream
+    v1.extend_from_slice(&0_u64.to_le_bytes()); // extracted spectra
+    v1.extend_from_slice(&1_u64.to_le_bytes()); // next extraction ID
+    v1.extend_from_slice(&0_u64.to_le_bytes()); // extracted-ion chromatograms
+    v1.extend_from_slice(&1_u64.to_le_bytes()); // next chromatogram ID
+
+    assert_eq!(encode(&run).unwrap(), v1);
+    let decoded = decode_bytes(&v1).unwrap();
+    assert_eq!(decoded.chromatograms[0].polarity, Polarity::Unknown);
+    assert_eq!(
+        decoded.chromatograms[0].provenance,
+        ChromatogramProvenance::Source
+    );
+}
+
+#[test]
 fn payload_round_trips_spectra_channels_precursors_and_transitions() {
     let mut run = crate::state::sample_mass_spec_run();
     run.instrument = Some("QTOF".to_owned());
@@ -99,6 +152,7 @@ fn payload_round_trips_spectra_channels_precursors_and_transitions() {
         activation_method: Some("CID".to_owned()),
     });
     run.chromatograms[0].kind = ChromatogramKind::SelectedReactionMonitoring;
+    run.chromatograms[0].provenance = ChromatogramProvenance::SpectrumSummary;
     run.chromatograms[0].polarity = Polarity::Positive;
     run.chromatograms[0].transition = Some(plotx_io::MassTransition {
         precursor_mz: Some(445.2),
@@ -146,6 +200,7 @@ fn payload_round_trips_spectra_channels_precursors_and_transitions() {
     assert_eq!(precursor.activation_method.as_deref(), Some("CID"));
     let channel = &decoded.chromatograms[0];
     assert_eq!(channel.kind, ChromatogramKind::SelectedReactionMonitoring);
+    assert_eq!(channel.provenance, ChromatogramProvenance::Source);
     assert_eq!(channel.polarity, Polarity::Positive);
     let transition = channel.transition.as_ref().unwrap();
     assert_eq!(transition.precursor_mz, Some(445.2));
@@ -180,4 +235,8 @@ fn chromatogram_only_payload_round_trips_with_no_active_stream() {
     let decoded = decode_bytes(&encode(&run).unwrap()).unwrap();
     assert!(decoded.streams.is_empty());
     assert_eq!(decoded.chromatograms.len(), 1);
+    assert_eq!(
+        decoded.chromatograms[0].provenance,
+        ChromatogramProvenance::Source
+    );
 }

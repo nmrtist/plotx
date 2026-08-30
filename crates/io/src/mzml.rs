@@ -228,8 +228,8 @@ pub fn parse(input: impl BufRead, source: String) -> Result<MassSpecRun, IoError
     if spectra.is_empty() && chromatograms.is_empty() {
         return Err(invalid("mzML run contains no spectra or chromatograms"));
     }
-
     let streams = stream::build(spectra);
+    stream::bind_source_chromatograms(&streams, &mut chromatograms);
     let mut metadata = BTreeMap::new();
     metadata.insert("source format".to_owned(), "mzML".to_owned());
     if let Some(id) = run_id {

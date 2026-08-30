@@ -5,8 +5,8 @@ use crate::state::{
 };
 use plotx_io::{
     AcquisitionStream, AcquisitionStreamId, ChromatogramChannel, ChromatogramChannelId,
-    ChromatogramKind, MassSpecRun, MassSpectrum, Polarity, Precursor, SpectrumAcquisition,
-    SpectrumId, SpectrumRepresentation, SpectrumSummaryProvenance, StreamRole,
+    ChromatogramKind, ChromatogramProvenance, MassSpecRun, MassSpectrum, Polarity, Precursor,
+    SpectrumAcquisition, SpectrumId, SpectrumRepresentation, SpectrumSummaryProvenance, StreamRole,
 };
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
@@ -694,6 +694,7 @@ impl<'a, 'p, R: Read> Reader<'a, 'p, R> {
         Ok(ChromatogramChannel {
             id,
             kind,
+            provenance: ChromatogramProvenance::Source,
             polarity,
             transition,
             source_stream,

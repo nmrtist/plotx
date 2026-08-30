@@ -1,4 +1,4 @@
-use super::mass_spec_tic::points_for_stream_tic;
+use super::mass_spec_tic::resolve_stream_chromatogram;
 use super::{
     DatasetId, DatasetLineage, FieldCatalog, FieldId,
     mass_spec_xic::{ExtractedIonChromatogram, IonChromatogramId, xic_key, xic_title},
@@ -6,8 +6,8 @@ use super::{
 };
 use plotx_figure::{Axis, Figure, Series, SeriesKind};
 use plotx_io::{
-    AcquisitionStreamId, ChromatogramChannel, ChromatogramChannelId, ChromatogramKind, MassSpecRun,
-    MassSpectrum, SpectrumId, StreamRole,
+    AcquisitionStreamId, ChromatogramChannel, ChromatogramChannelId, ChromatogramKind,
+    ChromatogramProvenance, MassSpecRun, MassSpectrum, SpectrumId, StreamRole,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -35,6 +35,8 @@ impl fmt::Display for ExtractionId {
 }
 
 pub(crate) type MassSpecFieldValues = (String, &'static str, String, Vec<[f64; 2]>, bool);
+pub const MASS_SPEC_CHROMATOGRAM_PROVENANCE_METADATA_KEY: &str =
+    "mass_spec.chromatogram_provenance";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -93,6 +95,26 @@ impl MassSpecDataset {
             .chromatograms
             .iter()
             .find(|channel| self.channel_field_id(&channel.id) == Some(field))
+    }
+
+    pub fn chromatogram_provenance_for_field(
+        &self,
+        field: FieldId,
+    ) -> Option<ChromatogramProvenance> {
+        if let Some(channel) = self.channel_for_field(field) {
+            return Some(channel.provenance);
+        }
+        self.supported_ms_streams().find_map(|stream| {
+            let kind = if self.field_catalog.id_for_key(&stream_tic_key(stream)) == Some(field) {
+                ChromatogramKind::TotalIonCurrent
+            } else if self.field_catalog.id_for_key(&stream_bpi_key(stream)) == Some(field) {
+                ChromatogramKind::BasePeak
+            } else {
+                return None;
+            };
+            resolve_stream_chromatogram(&self.run, stream, kind)
+                .map(|chromatogram| chromatogram.provenance)
+        })
     }
 
     /// Resolve a chromatogram field to the stream whose scan cursor it drives.
@@ -449,36 +471,27 @@ impl MassSpecDataset {
             let stream_id = stream.id;
             let stream_label = stream_display_label(stream);
             if self.field_catalog.id_for_key(&stream_tic_key(stream_id)) == Some(id) {
-                let chromatogram_points = points_for_stream_tic(&self.run, stream_id);
+                let chromatogram = resolve_stream_chromatogram(
+                    &self.run,
+                    stream_id,
+                    ChromatogramKind::TotalIonCurrent,
+                )?;
                 return Some((
                     format!("{stream_label} TIC"),
                     "Retention time (min)",
                     "Total ion current".to_owned(),
-                    chromatogram_points.unwrap_or_else(|| {
-                        stream
-                            .spectra
-                            .iter()
-                            .map(|scan| [scan.retention_time_min, scan.tic])
-                            .collect()
-                    }),
+                    chromatogram.points,
                     false,
                 ));
             }
             if self.field_catalog.id_for_key(&stream_bpi_key(stream_id)) == Some(id) {
+                let chromatogram =
+                    resolve_stream_chromatogram(&self.run, stream_id, ChromatogramKind::BasePeak)?;
                 return Some((
                     format!("{stream_label} BPI"),
                     "Retention time (min)",
                     "Base-peak intensity".to_owned(),
-                    stream
-                        .spectra
-                        .iter()
-                        .map(|scan| {
-                            [
-                                scan.retention_time_min,
-                                scan.base_peak_intensity.unwrap_or(0.0),
-                            ]
-                        })
-                        .collect(),
+                    chromatogram.points,
                     false,
                 ));
             }

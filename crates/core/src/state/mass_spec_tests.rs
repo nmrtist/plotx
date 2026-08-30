@@ -3,8 +3,7 @@ use crate::actions::Action;
 use crate::state::{
     AxisRange, Dataset, ObjectFrame, PlotxApp, SeriesBinding, SeriesSource, ToolGroup,
 };
-use plotx_io::{ChromatogramChannel, ChromatogramChannelId};
-use std::path::Path;
+use plotx_io::{ChromatogramChannel, ChromatogramChannelId, ChromatogramProvenance};
 
 #[test]
 fn dynamic_catalog_and_stable_selection_follow_stream_identity() {
@@ -117,6 +116,7 @@ fn stream_tic_prefers_bound_chromatogram_points() {
     run.chromatograms.push(ChromatogramChannel {
         id: ChromatogramChannelId("tic:bound".to_owned()),
         kind: ChromatogramKind::TotalIonCurrent,
+        provenance: ChromatogramProvenance::Source,
         polarity: plotx_io::Polarity::Unknown,
         transition: None,
         source_stream: Some(AcquisitionStreamId::new(3)),
@@ -134,10 +134,14 @@ fn stream_tic_prefers_bound_chromatogram_points() {
     let (_, _, _, points, stick) = dataset.field_values(field).expect("TIC values");
     assert!(!stick);
     assert_eq!(points, [[0.0, 11.0], [2.0, 22.0]]);
+    assert_eq!(
+        dataset.chromatogram_provenance_for_field(field),
+        Some(ChromatogramProvenance::Source)
+    );
 }
 
 #[test]
-fn stream_tic_without_a_bound_channel_uses_spectrum_summaries() {
+fn stream_tic_without_a_bound_channel_uses_peak_arrays() {
     let dataset = MassSpecDataset::load(sample_mass_spec_run());
     let field = dataset
         .field_catalog
@@ -148,6 +152,22 @@ fn stream_tic_without_a_bound_channel_uses_spectrum_summaries() {
     assert!(!stick);
     assert_eq!(points, [[0.5, 2.0], [1.0, 9.0]]);
     assert_eq!(
+        dataset.chromatogram_provenance_for_field(field),
+        Some(ChromatogramProvenance::PeakArrays)
+    );
+    let bpc = dataset
+        .field_catalog
+        .id_for_key(&stream_bpi_key(AcquisitionStreamId::new(3)))
+        .expect("stream BPC field");
+    assert_eq!(
+        dataset.field_values(bpc).unwrap().3,
+        [[0.5, 2.0], [1.0, 9.0]]
+    );
+    assert_eq!(
+        dataset.chromatogram_provenance_for_field(bpc),
+        Some(ChromatogramProvenance::PeakArrays)
+    );
+    assert_eq!(
         dataset.run.streams[0].spectra[1]
             .intensity
             .iter()
@@ -157,34 +177,82 @@ fn stream_tic_without_a_bound_channel_uses_spectrum_summaries() {
 }
 
 #[test]
-fn local_small_mzml_figure_matches_the_14_point_ms1_tic_when_present() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .join(".tmp/MS-data/hupo-psi-mzpeak-small/small.mzML");
-    if !path.is_file() {
-        return;
+fn stream_tic_and_bpc_choose_independent_sources_and_fallbacks() {
+    let mut run = sample_mass_spec_run();
+    for spectrum in &mut run.streams[0].spectra {
+        spectrum.tic_provenance = plotx_io::SpectrumSummaryProvenance::Source;
     }
-    let loaded = plotx_io::mzml::load(&path).unwrap();
-    let plotx_io::Acquisition::MassSpec(run) = loaded.acquisition else {
-        panic!("small.mzML did not import as mass spectrometry data");
-    };
-    let dataset = MassSpecDataset::load(*run);
-    let field = dataset
+    run.chromatograms.push(ChromatogramChannel {
+        id: ChromatogramChannelId("bpc:bound".to_owned()),
+        kind: ChromatogramKind::BasePeak,
+        provenance: ChromatogramProvenance::Source,
+        polarity: plotx_io::Polarity::Positive,
+        transition: None,
+        source_stream: Some(AcquisitionStreamId::new(3)),
+        coordinate: None,
+        description: "Base-peak chromatogram".to_owned(),
+        unit: "cps".to_owned(),
+        time_min: vec![0.25, 1.25],
+        values: vec![101.0, 202.0],
+    });
+    run.chromatograms.push(ChromatogramChannel {
+        id: ChromatogramChannelId("unknown:bound".to_owned()),
+        kind: ChromatogramKind::Unknown,
+        provenance: ChromatogramProvenance::Source,
+        polarity: plotx_io::Polarity::Unknown,
+        transition: None,
+        source_stream: Some(AcquisitionStreamId::new(3)),
+        coordinate: None,
+        description: "Unclassified signal".to_owned(),
+        unit: "cps".to_owned(),
+        time_min: vec![9.0],
+        values: vec![999.0],
+    });
+    let dataset = MassSpecDataset::load(run);
+    let tic = dataset
         .field_catalog
-        .id_for_key(&stream_tic_key(dataset.active_stream))
+        .id_for_key(&stream_tic_key(AcquisitionStreamId::new(3)))
         .unwrap();
-    let figure = dataset.field_figure(field).unwrap();
+    let bpc = dataset
+        .field_catalog
+        .id_for_key(&stream_bpi_key(AcquisitionStreamId::new(3)))
+        .unwrap();
 
-    assert_eq!(figure.series[0].points.len(), 14);
     assert_eq!(
-        figure.series[0]
-            .points
-            .iter()
-            .copied()
-            .max_by(|left, right| left[1].total_cmp(&right[1])),
-        Some([0.285483333333, 22_136_832.0])
+        dataset.field_values(tic).unwrap().3,
+        [[0.5, 2.0], [1.0, 9.0]]
     );
-    assert_eq!(figure.series[0].points[1], [0.007896666667, 12_901_166.0]);
+    assert_eq!(
+        dataset.chromatogram_provenance_for_field(tic),
+        Some(ChromatogramProvenance::SpectrumSummary)
+    );
+    assert_eq!(
+        dataset.field_values(bpc).unwrap().3,
+        [[0.25, 101.0], [1.25, 202.0]]
+    );
+    assert_eq!(
+        dataset.chromatogram_provenance_for_field(bpc),
+        Some(ChromatogramProvenance::Source)
+    );
+}
+
+#[test]
+fn scientific_summary_exposes_resolved_chromatogram_provenance() {
+    let mass_spec = MassSpecDataset::load(sample_mass_spec_run());
+    let dataset = Dataset::MassSpec(Box::new(mass_spec));
+    let mut app = PlotxApp::new();
+    app.doc.canvases.push(crate::workflow::build_default_canvas(
+        &dataset,
+        "synthetic.raw",
+    ));
+    app.doc.datasets.push(dataset);
+
+    assert!(
+        app.canvas_scientific_summary(0)
+            .formatted_lines()
+            .iter()
+            .any(|line| line.contains("peak arrays"))
+    );
 }
 
 #[test]
@@ -193,6 +261,7 @@ fn displayed_mass_spec_trace_uses_bound_tic_channel() {
     run.chromatograms.push(ChromatogramChannel {
         id: ChromatogramChannelId("tic:rendered".to_owned()),
         kind: ChromatogramKind::TotalIonCurrent,
+        provenance: ChromatogramProvenance::Source,
         polarity: plotx_io::Polarity::Unknown,
         transition: None,
         source_stream: Some(AcquisitionStreamId::new(3)),

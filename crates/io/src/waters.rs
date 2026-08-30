@@ -2,9 +2,10 @@
 
 use crate::{
     Acquisition, AcquisitionStream, AcquisitionStreamId, ChromatogramChannel,
-    ChromatogramChannelId, ChromatogramKind, DataFormat, IoError, LoadResult, LoadWarning,
-    LoadWarningCode, MassSpecRun, MassSpectrometryFormat, MassSpectrum, Polarity, Provenance,
-    SpectrumAcquisition, SpectrumId, SpectrumRepresentation, SpectrumSummaryProvenance, StreamRole,
+    ChromatogramChannelId, ChromatogramKind, ChromatogramProvenance, DataFormat, IoError,
+    LoadResult, LoadWarning, LoadWarningCode, MassSpecRun, MassSpectrometryFormat, MassSpectrum,
+    Polarity, Provenance, SpectrumAcquisition, SpectrumId, SpectrumRepresentation,
+    SpectrumSummaryProvenance, StreamRole,
 };
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -224,7 +225,6 @@ pub fn load(path: &Path) -> Result<LoadResult, IoError> {
     }) {
         return Err(invalid("the bundle contains no readable MS function"));
     }
-
     let mut chromatograms = optical_channels(&functions)?;
     let streams = functions
         .into_iter()
@@ -622,6 +622,7 @@ fn optical_channels(functions: &[DecodedFunction]) -> Result<Vec<ChromatogramCha
                 normalized_bits(channel.coordinate)
             )),
             kind: ChromatogramKind::Optical,
+            provenance: ChromatogramProvenance::Source,
             polarity: Polarity::Unknown,
             transition: None,
             source_stream: None,

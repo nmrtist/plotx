@@ -1,6 +1,5 @@
 use super::*;
-use plotx_io::{MassTransition, Polarity};
-use std::path::Path;
+use plotx_io::{ChromatogramProvenance, MassTransition, Polarity};
 
 fn channel(
     id: &str,
@@ -12,6 +11,7 @@ fn channel(
     ChromatogramChannel {
         id: ChromatogramChannelId(id.to_owned()),
         kind,
+        provenance: ChromatogramProvenance::Source,
         polarity,
         transition: transition.map(
             |(precursor_mz, product_mz, collision_energy, activation_method)| MassTransition {
@@ -171,58 +171,4 @@ fn large_channel_cache_scans_only_when_filters_change() {
     assert_eq!(state.filter_scans, 2);
     assert_eq!(state.matches.len(), 1);
     assert_eq!(state.matches[0].id.0, "transition=719");
-}
-
-#[test]
-fn local_pxd066465_builds_720_transition_fields_when_present() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .join(".tmp/MS-data/pride-PXD066465/Drug_substance_3_scheduled_MRM.mzML");
-    if !path.is_file() {
-        return;
-    }
-    let loaded = plotx_io::mzml::load(&path).expect("PXD066465 mzML import");
-    let plotx_io::Acquisition::MassSpec(run) = loaded.acquisition else {
-        panic!("PXD066465 did not import as mass spectrometry data");
-    };
-    let dataset = MassSpecDataset::load(*run);
-    let index = ChannelIndex::build(&dataset);
-
-    assert_eq!(dataset.run.streams.len(), 0);
-    assert_eq!(dataset.run.chromatograms.len(), 722);
-    assert_eq!(index.entries.len(), 722);
-    assert_eq!(index.transition_count, 720);
-    assert!(
-        index
-            .entries
-            .iter()
-            .all(|entry| dataset.channel_field_id(&entry.id).is_some())
-    );
-
-    let first_transition = index
-        .entries
-        .iter()
-        .find(|entry| entry.precursor_mz.is_some() && entry.product_mz.is_some())
-        .expect("structured transition");
-    let precursor_mz = first_transition.precursor_mz.unwrap();
-    let product_mz = first_transition.product_mz.unwrap();
-    let mut state = BrowserState::new(index);
-    state.filters.precursor_mz = format_number(precursor_mz);
-    state.filters.product_mz = format_number(product_mz);
-    assert!(state.refresh());
-    assert!(!state.matches.is_empty());
-
-    let ctx = crate::typography::test_context();
-    let mut rendered_counts = None;
-    let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
-        ui.set_width(360.0);
-        let selected = dataset.channel_field_id(&dataset.run.chromatograms[0].id);
-        assert!(channel_browser(&dataset, selected, ui).is_none());
-        let state_id = ui.make_persistent_id(("mass_spec_channel_browser", dataset.resource_id));
-        let rendered = ui
-            .data(|data| data.get_temp::<BrowserState>(state_id))
-            .expect("browser UI cache");
-        rendered_counts = Some((rendered.index.entries.len(), rendered.matches.len()));
-    });
-    assert_eq!(rendered_counts, Some((722, 722)));
 }

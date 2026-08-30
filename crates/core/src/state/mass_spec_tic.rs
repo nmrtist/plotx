@@ -1,26 +1,46 @@
-use plotx_io::{AcquisitionStreamId, MassSpecRun};
+use plotx_io::{AcquisitionStreamId, ChromatogramKind, ChromatogramProvenance, MassSpecRun};
 
-pub(crate) fn points_for_stream_tic(
+pub(crate) struct ResolvedChromatogram {
+    pub points: Vec<[f64; 2]>,
+    pub provenance: ChromatogramProvenance,
+}
+
+pub(crate) fn resolve_stream_chromatogram(
     run: &MassSpecRun,
     stream_id: AcquisitionStreamId,
-) -> Option<Vec<[f64; 2]>> {
-    let channel = run.chromatograms.iter().find(|channel| {
-        channel.source_stream == Some(stream_id)
-            && matches!(
-                channel.kind,
-                plotx_io::ChromatogramKind::TotalIonCurrent | plotx_io::ChromatogramKind::Unknown
-            )
-    })?;
-    if channel.time_min.len() != channel.values.len() {
-        return None;
+    kind: ChromatogramKind,
+) -> Option<ResolvedChromatogram> {
+    let provenance = run.stream_chromatogram_provenance(stream_id, kind)?;
+    if let Some(channel) = run.bound_chromatogram(stream_id, kind) {
+        return Some(ResolvedChromatogram {
+            points: channel
+                .time_min
+                .iter()
+                .copied()
+                .zip(channel.values.iter().copied())
+                .map(|(time, value)| [time, value])
+                .collect(),
+            provenance,
+        });
     }
-    Some(
-        channel
-            .time_min
+    let stream = run.stream(stream_id)?;
+    let points = match kind {
+        ChromatogramKind::TotalIonCurrent => stream
+            .spectra
             .iter()
-            .copied()
-            .zip(channel.values.iter().copied())
-            .map(|(time, value)| [time, value])
+            .map(|spectrum| [spectrum.retention_time_min, spectrum.tic])
             .collect(),
-    )
+        ChromatogramKind::BasePeak => stream
+            .spectra
+            .iter()
+            .map(|spectrum| {
+                [
+                    spectrum.retention_time_min,
+                    spectrum.base_peak_intensity.unwrap_or(0.0),
+                ]
+            })
+            .collect(),
+        _ => return None,
+    };
+    Some(ResolvedChromatogram { points, provenance })
 }

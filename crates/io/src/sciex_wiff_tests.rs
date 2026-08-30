@@ -180,6 +180,17 @@ fn loads_a_synthetic_single_sample_wiff_pair_end_to_end() {
     assert_eq!(run.chromatograms.len(), 1);
     assert_eq!(run.chromatograms[0].time_min, vec![1.25]);
     assert_eq!(run.chromatograms[0].values, vec![14.0]);
+    assert_eq!(
+        run.chromatograms[0].provenance,
+        crate::ChromatogramProvenance::Source
+    );
+    assert_eq!(
+        run.stream_chromatogram_provenance(
+            run.streams[0].id,
+            crate::ChromatogramKind::TotalIonCurrent
+        ),
+        Some(crate::ChromatogramProvenance::Source)
+    );
 }
 
 #[test]
@@ -326,66 +337,4 @@ fn skips_an_empty_scan_when_the_sample_has_readable_spectra() {
     assert_eq!(streams[0].spectra[0].id, SpectrumId::new(5));
     assert_eq!(warnings.len(), 1);
     assert!(warnings[0].contains("file=fixture scan=4"));
-}
-
-#[test]
-fn local_wiff_fixture_imports_validated_multi_sample_layout_when_present() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .join(".tmp/WIFF/20250305.wiff");
-    if !path.is_file() {
-        return;
-    }
-
-    let loaded = load(&path).expect("local legacy WIFF fixture should import every sample");
-    assert!(
-        loaded.warnings.is_empty(),
-        "valid empty scan headers are not import warnings"
-    );
-    assert_eq!(
-        loaded.format,
-        DataFormat::MassSpectrometry(MassSpectrometryFormat::SciexWiff)
-    );
-    let Acquisition::MassSpec(run) = loaded.acquisition else {
-        panic!("WIFF should produce a mass-spectrometry run");
-    };
-    assert_eq!(run.metadata["sample count"].parse::<usize>().unwrap(), 2);
-    assert_eq!(run.metadata["samples"], "yjs_10ppm #1, yjs_10ppm #2");
-    assert_eq!(run.streams.len(), 22);
-    assert_eq!(run.chromatograms.len(), 22);
-    let sample0: usize = run.streams[..11]
-        .iter()
-        .flat_map(|stream| &stream.spectra)
-        .filter(|spectrum| spectrum.tic > 0.0)
-        .count();
-    let sample1: usize = run.streams[11..]
-        .iter()
-        .flat_map(|stream| &stream.spectra)
-        .filter(|spectrum| spectrum.tic > 0.0)
-        .count();
-    assert_eq!((sample0, sample1), (3141, 3072));
-    assert!(
-        run.streams
-            .iter()
-            .flat_map(|stream| &stream.spectra)
-            .all(|spectrum| {
-                spectrum.mz.len() == spectrum.intensity.len()
-                    && spectrum.retention_time_min.is_finite()
-                    && spectrum.mz.iter().all(|value| value.is_finite())
-            })
-    );
-    let tic = &run.chromatograms[0];
-    assert_eq!(tic.time_min.len(), 3905);
-    assert!(tic.time_min.windows(2).all(|pair| pair[1] > pair[0]));
-    assert!((tic.time_min[0] - 0.002533333333333333).abs() < 1e-9);
-    assert!((tic.time_min[3904] - 13.49435).abs() < 1e-9);
-    let ms1 = &run.streams[0];
-    let peak = ms1
-        .spectra
-        .iter()
-        .max_by(|left, right| left.tic.total_cmp(&right.tic))
-        .unwrap();
-    assert!((peak.retention_time_min - 0.9720333333333334).abs() < 1e-9);
-    assert_eq!(peak.tic, 5374726.0);
-    assert_eq!(loaded.provenance.companion_paths.len(), 1);
 }

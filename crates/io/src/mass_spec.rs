@@ -71,6 +71,35 @@ pub enum SpectrumSummaryProvenance {
     Derived,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChromatogramProvenance {
+    Source,
+    SpectrumSummary,
+    PeakArrays,
+    SpectrumSummaryAndPeakArrays,
+}
+
+impl ChromatogramProvenance {
+    pub const fn machine_label(self) -> &'static str {
+        match self {
+            Self::Source => "source_chromatogram",
+            Self::SpectrumSummary => "spectrum_summary",
+            Self::PeakArrays => "peak_arrays",
+            Self::SpectrumSummaryAndPeakArrays => "spectrum_summary_and_peak_arrays",
+        }
+    }
+
+    pub const fn display_label(self) -> &'static str {
+        match self {
+            Self::Source => "source chromatogram",
+            Self::SpectrumSummary => "spectrum summaries",
+            Self::PeakArrays => "peak arrays",
+            Self::SpectrumSummaryAndPeakArrays => "spectrum summaries and peak arrays",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SpectrumAcquisition {
     pub instrument_configuration_id: Option<String>,
@@ -174,6 +203,7 @@ pub struct MassTransition {
 pub struct ChromatogramChannel {
     pub id: ChromatogramChannelId,
     pub kind: ChromatogramKind,
+    pub provenance: ChromatogramProvenance,
     pub polarity: Polarity,
     pub transition: Option<MassTransition>,
     pub source_stream: Option<AcquisitionStreamId>,
@@ -277,6 +307,51 @@ pub struct MassSpecRun {
 impl MassSpecRun {
     pub fn stream(&self, id: AcquisitionStreamId) -> Option<&AcquisitionStream> {
         self.streams.iter().find(|stream| stream.id == id)
+    }
+
+    pub fn bound_chromatogram(
+        &self,
+        stream: AcquisitionStreamId,
+        kind: ChromatogramKind,
+    ) -> Option<&ChromatogramChannel> {
+        self.chromatograms
+            .iter()
+            .filter(|channel| channel.source_stream == Some(stream) && channel.kind == kind)
+            .min_by_key(|channel| match channel.provenance {
+                ChromatogramProvenance::Source => 0,
+                ChromatogramProvenance::SpectrumSummary => 1,
+                ChromatogramProvenance::PeakArrays => 2,
+                ChromatogramProvenance::SpectrumSummaryAndPeakArrays => 3,
+            })
+    }
+
+    pub fn stream_chromatogram_provenance(
+        &self,
+        stream: AcquisitionStreamId,
+        kind: ChromatogramKind,
+    ) -> Option<ChromatogramProvenance> {
+        if let Some(channel) = self.bound_chromatogram(stream, kind) {
+            return Some(channel.provenance);
+        }
+        let spectra = &self.stream(stream)?.spectra;
+        let mut source = false;
+        let mut derived = false;
+        for provenance in spectra.iter().map(|spectrum| match kind {
+            ChromatogramKind::TotalIonCurrent => Some(spectrum.tic_provenance),
+            ChromatogramKind::BasePeak => Some(spectrum.base_peak_provenance),
+            _ => None,
+        }) {
+            match provenance? {
+                SpectrumSummaryProvenance::Source => source = true,
+                SpectrumSummaryProvenance::Derived => derived = true,
+            }
+        }
+        match (source, derived) {
+            (true, false) => Some(ChromatogramProvenance::SpectrumSummary),
+            (false, true) => Some(ChromatogramProvenance::PeakArrays),
+            (true, true) => Some(ChromatogramProvenance::SpectrumSummaryAndPeakArrays),
+            (false, false) => None,
+        }
     }
 
     pub fn validate(&self) -> Result<(), String> {
@@ -522,6 +597,7 @@ mod tests {
         let channel = ChromatogramChannel {
             id: ChromatogramChannelId("tic".to_owned()),
             kind: ChromatogramKind::Unknown,
+            provenance: ChromatogramProvenance::Source,
             polarity: Polarity::Unknown,
             transition: None,
             source_stream: None,

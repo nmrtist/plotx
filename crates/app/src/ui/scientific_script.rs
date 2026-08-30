@@ -10,7 +10,7 @@ use std::path::Path;
 use plotx_analysis::peaks::{DetectParams, detect_peaks, estimate_noise};
 #[cfg(test)]
 use plotx_io::Acquisition;
-use plotx_io::{ChromatogramKind, LiquidChromatographyMethod, MassSpecRun};
+use plotx_io::{AcquisitionStreamId, ChromatogramKind, LiquidChromatographyMethod, MassSpecRun};
 use rhai::module_resolvers::DummyModuleResolver;
 use rhai::{Array, Dynamic, Engine, EvalAltResult, Map, Position};
 
@@ -111,6 +111,8 @@ pub(crate) fn prepare_run(
                     ChromatogramKind::Housekeeping => "housekeeping",
                     ChromatogramKind::Unknown => "unknown",
                 },
+                "provenance": channel.provenance.machine_label(),
+                "source_stream_id": channel.source_stream.map(AcquisitionStreamId::get),
                 "description": channel.description,
                 "polarity": match channel.polarity {
                     plotx_io::Polarity::Positive => "positive",
@@ -128,6 +130,18 @@ pub(crate) fn prepare_run(
                 "time_min": channel.time_min,
                 "values": channel.values,
             })
+        })
+        .collect::<Vec<_>>();
+    let stream_chromatograms = run
+        .streams
+        .iter()
+        .flat_map(|stream| {
+            [
+                ChromatogramKind::TotalIonCurrent,
+                ChromatogramKind::BasePeak,
+            ]
+            .into_iter()
+            .filter_map(move |kind| prepared_stream_chromatogram(run, stream.id, kind))
         })
         .collect::<Vec<_>>();
     let scans = run
@@ -170,9 +184,50 @@ pub(crate) fn prepare_run(
         "source": run.source,
         "instrument": run.instrument,
         "chromatograms": channels,
+        "stream_chromatograms": stream_chromatograms,
         "scans": scans,
         "lc_method": method,
     })
+}
+
+fn prepared_stream_chromatogram(
+    run: &MassSpecRun,
+    stream: AcquisitionStreamId,
+    kind: ChromatogramKind,
+) -> Option<serde_json::Value> {
+    let provenance = run.stream_chromatogram_provenance(stream, kind)?;
+    let source = run.bound_chromatogram(stream, kind);
+    let spectra = &run.stream(stream)?.spectra;
+    let (time_min, values) = if let Some(channel) = source {
+        (channel.time_min.clone(), channel.values.clone())
+    } else {
+        (
+            spectra
+                .iter()
+                .map(|spectrum| spectrum.retention_time_min)
+                .collect(),
+            spectra
+                .iter()
+                .map(|spectrum| match kind {
+                    ChromatogramKind::TotalIonCurrent => spectrum.tic,
+                    ChromatogramKind::BasePeak => spectrum.base_peak_intensity.unwrap_or(0.0),
+                    _ => unreachable!("caller restricts resolved stream chromatograms"),
+                })
+                .collect(),
+        )
+    };
+    Some(serde_json::json!({
+        "stream_id": stream.get(),
+        "kind": match kind {
+            ChromatogramKind::TotalIonCurrent => "total_ion_current",
+            ChromatogramKind::BasePeak => "base_peak",
+            _ => unreachable!("caller restricts resolved stream chromatograms"),
+        },
+        "provenance": provenance.machine_label(),
+        "source_channel_id": source.map(|channel| channel.id.0.as_str()),
+        "time_min": time_min,
+        "values": values,
+    }))
 }
 
 fn summary_provenance_label(provenance: plotx_io::SpectrumSummaryProvenance) -> &'static str {
@@ -325,7 +380,19 @@ mod tests {
                     }),
                 }],
             }],
-            chromatograms: Vec::new(),
+            chromatograms: vec![plotx_io::ChromatogramChannel {
+                id: plotx_io::ChromatogramChannelId("bpc".to_owned()),
+                kind: ChromatogramKind::BasePeak,
+                provenance: plotx_io::ChromatogramProvenance::Source,
+                polarity: plotx_io::Polarity::Positive,
+                transition: None,
+                source_stream: Some(plotx_io::AcquisitionStreamId::new(1)),
+                coordinate: None,
+                description: "Base-peak chromatogram".to_owned(),
+                unit: "count".to_owned(),
+                time_min: vec![1.5],
+                values: vec![50.0],
+            }],
             import_warnings: Vec::new(),
         };
 
@@ -341,6 +408,20 @@ mod tests {
         assert_eq!(scan["precursor"]["selected_mz"], 445.2);
         assert_eq!(scan["precursor"]["isolation_window_target_mz"], 445.0);
         assert_eq!(scan["precursor"]["activation_method"], "CID");
+        assert_eq!(
+            prepared["chromatograms"][0]["provenance"],
+            "source_chromatogram"
+        );
+        assert_eq!(prepared["chromatograms"][0]["source_stream_id"], 1);
+        assert_eq!(
+            prepared["stream_chromatograms"][0]["provenance"],
+            "spectrum_summary"
+        );
+        assert_eq!(
+            prepared["stream_chromatograms"][1]["provenance"],
+            "source_chromatogram"
+        );
+        assert_eq!(prepared["stream_chromatograms"][1]["values"][0], 50.0);
     }
 
     #[test]

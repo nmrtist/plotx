@@ -430,10 +430,26 @@ fn mass_spec_context(
     data: &crate::state::MassSpecDataset,
     field: crate::state::FieldId,
 ) -> Option<SummaryPart> {
-    let stream_id = data
+    let provenance = data
+        .chromatogram_provenance_for_field(field)
+        .map(|provenance| {
+            SummaryPart::new(
+                format!(
+                    "mass:chromatogram-provenance:{}",
+                    provenance.machine_label()
+                ),
+                provenance.display_label(),
+            )
+        });
+    let Some(stream_id) = data
         .chromatogram_stream_for_field(field)
-        .or_else(|| data.spectrum_stream_for_field(field))?;
-    let stream = data.run.stream(stream_id)?;
+        .or_else(|| data.spectrum_stream_for_field(field))
+    else {
+        return provenance;
+    };
+    let Some(stream) = data.run.stream(stream_id) else {
+        return provenance;
+    };
     let polarity = match stream.polarity() {
         plotx_io::Polarity::Positive => "positive",
         plotx_io::Polarity::Negative => "negative",
@@ -444,12 +460,12 @@ fn mass_spec_context(
         (false, Some(level)) => format!("{polarity} MS{level}"),
         (false, None) => polarity.to_owned(),
         (true, Some(level)) => format!("MS{level}"),
-        (true, None) => return None,
+        (true, None) => return provenance,
     };
-    Some(SummaryPart::new(
-        format!("mass:{}:{:?}", polarity, level),
-        text,
-    ))
+    let acquisition = SummaryPart::new(format!("mass:{}:{:?}", polarity, level), text);
+    provenance
+        .map(|provenance| merge_context(Some(acquisition.clone()), provenance).unwrap())
+        .or(Some(acquisition))
 }
 
 fn xps_summary(

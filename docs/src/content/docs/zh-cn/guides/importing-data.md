@@ -67,6 +67,14 @@ DIA 没有 selected ion，其隔离窗目标也不会被误写成 selected-ion m
 指出对应谱图，并说明只保留了第一个值。Scientific Script 的 scan 快照会暴露摘要
 provenance、instrument configuration、源 event 或 preset，以及 filter string。
 
+TIC 与 BPC 的 provenance 分开保存。文件直接提供的 TIC 或 BPC channel 会标记为
+source chromatogram，并在其绑定的 acquisition stream 中优先使用。缺少绑定 channel
+时，PlotX 会先使用每张谱图的 source summary；只有没有 source summary 时，才确定性地
+从强度数组派生 TIC，或从最大的非负峰派生 BPC。因此同一次采集中可能同时存在 source
+summary 与数组派生点。多 stream 运行中未绑定的 source chromatogram 会作为独立 channel
+保留，不会被猜测成某个 stream 的 TIC 或 BPC，也不会让 TIC channel 代替 BPC。field
+metadata、Scientific Summary 和 Scientific Script 都会暴露最终选用的 provenance。
+
 对于包含大量色谱 channel 的数据，请通过 **Extract Mass Spectrum** 或命令面板打开
 **Dataset tools → Mass spectrometry**。**Chromatogram channels** 浏览器会显示稳定的
 数量和顺序，其中 TIC、BPC 排在 SIM/SRM transition 之前。自由文本可匹配 channel

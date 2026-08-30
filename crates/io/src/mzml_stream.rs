@@ -1,4 +1,7 @@
-use crate::{AcquisitionStream, AcquisitionStreamId, MassSpectrum, Polarity, StreamRole};
+use crate::{
+    AcquisitionStream, AcquisitionStreamId, ChromatogramChannel, ChromatogramKind, MassSpectrum,
+    Polarity, StreamRole,
+};
 use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -25,6 +28,31 @@ pub(super) fn build(spectra: Vec<MassSpectrum>) -> Vec<AcquisitionStream> {
             }
         })
         .collect()
+}
+
+pub(super) fn bind_source_chromatograms(
+    streams: &[AcquisitionStream],
+    chromatograms: &mut [ChromatogramChannel],
+) {
+    let [stream] = streams else { return };
+    let mut bound_tic = false;
+    let mut bound_bpc = false;
+    for channel in chromatograms {
+        let bind = match channel.kind {
+            ChromatogramKind::TotalIonCurrent if !bound_tic => {
+                bound_tic = true;
+                true
+            }
+            ChromatogramKind::BasePeak if !bound_bpc => {
+                bound_bpc = true;
+                true
+            }
+            _ => false,
+        };
+        if bind {
+            channel.source_stream = Some(stream.id);
+        }
+    }
 }
 
 fn range(spectra: &[MassSpectrum]) -> Option<[f64; 2]> {

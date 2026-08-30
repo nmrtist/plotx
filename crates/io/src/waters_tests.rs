@@ -179,6 +179,10 @@ fn decodes_functions_by_metadata_and_builds_dynamic_optical_channels() {
     assert_eq!(run.chromatograms.len(), 2);
     assert_eq!(run.chromatograms[0].coordinate, Some(214.0));
     assert_eq!(run.chromatograms[0].values, [-2.0, 5.0]);
+    assert_eq!(
+        run.chromatograms[0].provenance,
+        ChromatogramProvenance::Source
+    );
     assert_eq!(run.chromatograms[1].coordinate, Some(254.0));
     assert_eq!(run.chromatograms[1].values, [3.0, -7.0]);
     assert_eq!(result.warnings.len(), 1);
@@ -317,42 +321,4 @@ fn rejects_invalid_idx_stride_missing_calibration_and_mismatched_function_table(
             .to_string()
             .contains("2 records but 1 numbered functions")
     );
-}
-
-#[test]
-fn validates_local_acceptance_bundles_when_present() {
-    let expected = [
-        ("A2_10 mM_20260731.raw", 1_643_630_usize),
-        ("PmST1_BIAO_20260728_240 MIN-3.raw", 968_073),
-        ("PmST1_gaogong_20260728_240 MIN-3.raw", 935_742),
-    ];
-    let root = Path::new(r"C:\tmp\plotx-ms-demodata");
-    for (name, expected_pairs) in expected {
-        let path = root.join(name);
-        if !path.is_dir() {
-            continue;
-        }
-        let result = load(&path).expect("load local acceptance bundle");
-        let run = loaded_run(&result);
-        let ms = run
-            .streams
-            .iter()
-            .find(|stream| stream.role == StreamRole::Primary)
-            .expect("MS stream");
-        assert_eq!(ms.spectra.len(), 596);
-        assert_eq!(
-            ms.spectra
-                .iter()
-                .map(|spectrum| spectrum.mz.len())
-                .sum::<usize>(),
-            expected_pairs
-        );
-        let coordinates = run
-            .chromatograms
-            .iter()
-            .filter(|channel| channel.kind == ChromatogramKind::Optical)
-            .filter_map(|channel| channel.coordinate)
-            .collect::<Vec<_>>();
-        assert_eq!(coordinates, [214.0, 254.0]);
-    }
 }

@@ -3,7 +3,8 @@ use super::{
     push_warning, read_binary_text, read_event,
 };
 use crate::{
-    ChromatogramChannel, ChromatogramChannelId, ChromatogramKind, IoError, MassTransition, Polarity,
+    ChromatogramChannel, ChromatogramChannelId, ChromatogramKind, ChromatogramProvenance, IoError,
+    MassTransition, Polarity,
 };
 use quick_xml::{
     Reader,
@@ -304,6 +305,7 @@ fn finish(mut draft: Draft) -> Result<ChromatogramChannel, IoError> {
     Ok(ChromatogramChannel {
         id: ChromatogramChannelId(draft.native_id),
         kind: draft.kind,
+        provenance: ChromatogramProvenance::Source,
         polarity: draft.polarity,
         transition,
         source_stream: None,

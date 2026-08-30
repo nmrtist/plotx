@@ -1,6 +1,9 @@
 use super::*;
 use crate::automation::{CAP_FIELD_MASS_CHROMATOGRAM, CAP_FIELD_MASS_SPECTRUM, CapabilityId};
-use crate::state::{FieldMetadata, MassSpecDataset, readable_ms_stream};
+use crate::state::{
+    FieldMetadata, MASS_SPEC_CHROMATOGRAM_PROVENANCE_METADATA_KEY, MassSpecDataset,
+    readable_ms_stream,
+};
 
 pub(super) fn default_field_id(dataset: &MassSpecDataset) -> Option<FieldId> {
     dataset
@@ -31,12 +34,11 @@ pub(super) fn descriptor(dataset: &MassSpecDataset, id: FieldId) -> Option<Field
             .chromatograms
             .iter()
             .find(|channel| channel.id.0 == channel_id)?;
-        return Some(build(
+        return Some(build_chromatogram(
             dataset,
             id,
             key,
             &channel.description,
-            CAP_FIELD_MASS_CHROMATOGRAM,
             channel.values.len(),
             vec!["min".to_owned(), channel.unit.clone()],
         ));
@@ -49,24 +51,30 @@ pub(super) fn descriptor(dataset: &MassSpecDataset, id: FieldId) -> Option<Field
     {
         let stream_label = stream_display_label(stream);
         if key == stream_tic_key(stream.id) {
-            return Some(build(
+            let length = dataset
+                .run
+                .bound_chromatogram(stream.id, plotx_io::ChromatogramKind::TotalIonCurrent)
+                .map_or(stream.spectra.len(), |channel| channel.values.len());
+            return Some(build_chromatogram(
                 dataset,
                 id,
                 key,
                 &format!("{stream_label} TIC"),
-                CAP_FIELD_MASS_CHROMATOGRAM,
-                stream.spectra.len(),
+                length,
                 vec!["min".to_owned()],
             ));
         }
         if key == stream_bpi_key(stream.id) {
-            return Some(build(
+            let length = dataset
+                .run
+                .bound_chromatogram(stream.id, plotx_io::ChromatogramKind::BasePeak)
+                .map_or(stream.spectra.len(), |channel| channel.values.len());
+            return Some(build_chromatogram(
                 dataset,
                 id,
                 key,
                 &format!("{stream_label} BPI"),
-                CAP_FIELD_MASS_CHROMATOGRAM,
-                stream.spectra.len(),
+                length,
                 vec!["min".to_owned()],
             ));
         }
@@ -116,6 +124,32 @@ pub(super) fn descriptor(dataset: &MassSpecDataset, id: FieldId) -> Option<Field
         xic.intensity.len(),
         vec!["min".to_owned()],
     ))
+}
+
+fn build_chromatogram(
+    dataset: &MassSpecDataset,
+    id: FieldId,
+    key: &str,
+    name: &str,
+    length: usize,
+    units: Vec<String>,
+) -> FieldDescriptor {
+    let mut descriptor = build(
+        dataset,
+        id,
+        key,
+        name,
+        CAP_FIELD_MASS_CHROMATOGRAM,
+        length,
+        units,
+    );
+    if let Some(provenance) = dataset.chromatogram_provenance_for_field(id) {
+        descriptor.metadata.0.insert(
+            MASS_SPEC_CHROMATOGRAM_PROVENANCE_METADATA_KEY.to_owned(),
+            provenance.machine_label().to_owned(),
+        );
+    }
+    descriptor
 }
 
 fn build(

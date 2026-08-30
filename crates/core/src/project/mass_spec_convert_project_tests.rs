@@ -43,6 +43,13 @@ fn schema_v1_project_round_trip_preserves_stream_bindings_and_extractions() {
     assert_eq!(loaded.extracted_ion_chromatograms[0].mz_min, 10.0);
     assert_eq!(loaded.extracted_ion_chromatograms[0].intensity, [0.0, 0.0]);
     assert_eq!(loaded.field_catalog, expected_catalog);
+    assert!(
+        loaded
+            .run
+            .chromatograms
+            .iter()
+            .all(|channel| channel.provenance == ChromatogramProvenance::Source)
+    );
 }
 
 #[test]

@@ -1,7 +1,7 @@
 use super::*;
 use plotx_io::{
-    AcquisitionStream, ChromatogramChannel, ChromatogramChannelId, Polarity, SpectrumAcquisition,
-    SpectrumRepresentation, SpectrumSummaryProvenance,
+    AcquisitionStream, ChromatogramChannel, ChromatogramChannelId, ChromatogramProvenance,
+    Polarity, SpectrumAcquisition, SpectrumRepresentation, SpectrumSummaryProvenance,
 };
 
 pub(crate) fn sample_mass_spec_run() -> MassSpecRun {
@@ -105,6 +105,7 @@ fn channel(
     ChromatogramChannel {
         id: ChromatogramChannelId(id.to_owned()),
         kind,
+        provenance: ChromatogramProvenance::Source,
         polarity: Polarity::Unknown,
         transition: None,
         source_stream: None,

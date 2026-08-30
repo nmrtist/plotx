@@ -195,27 +195,19 @@ impl Dataset {
             }
             Self::Afm(_) => None,
             Self::MassSpec(data) => {
-                let stream = data.run.stream(data.active_stream)?;
-                let chromatogram =
-                    super::mass_spec_tic::points_for_stream_tic(&data.run, data.active_stream);
-                if let Some(points) = chromatogram {
-                    let (xs, ys): (Vec<_>, Vec<_>) = points
-                        .into_iter()
-                        .map(|[time, value]| (time, value))
-                        .unzip();
-                    return Some(Trace1d {
-                        xs,
-                        ys,
-                        x_reversed: false,
-                    });
-                }
+                let chromatogram = super::mass_spec_tic::resolve_stream_chromatogram(
+                    &data.run,
+                    data.active_stream,
+                    plotx_io::ChromatogramKind::TotalIonCurrent,
+                )?;
+                let (xs, ys) = chromatogram
+                    .points
+                    .into_iter()
+                    .map(|[time, value]| (time, value))
+                    .unzip();
                 Some(Trace1d {
-                    xs: stream
-                        .spectra
-                        .iter()
-                        .map(|scan| scan.retention_time_min)
-                        .collect(),
-                    ys: stream.spectra.iter().map(|scan| scan.tic).collect(),
+                    xs,
+                    ys,
                     x_reversed: false,
                 })
             }

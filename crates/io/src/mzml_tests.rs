@@ -1,8 +1,7 @@
 use super::*;
-use crate::AcquisitionStreamId;
+use crate::{AcquisitionStreamId, ChromatogramKind, ChromatogramProvenance};
 use flate2::{Compression, write::ZlibEncoder};
 use std::io::{self, BufReader, Cursor, Read, Write};
-use std::path::Path;
 
 struct ChunkedRead<R> {
     inner: R,
@@ -241,78 +240,6 @@ fn retains_acquisition_metadata_without_fragmenting_ms_level_streams() {
 }
 
 #[test]
-fn local_small_fixture_matches_source_tic_and_acquisition_functions_when_present() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .join(".tmp/MS-data/hupo-psi-mzpeak-small/small.mzML");
-    if !path.is_file() {
-        return;
-    }
-    let loaded = load(&path).unwrap();
-    let Acquisition::MassSpec(run) = loaded.acquisition else {
-        panic!("small.mzML did not import as mass spectrometry data");
-    };
-
-    assert!(run.import_warnings.is_empty());
-    assert_eq!(run.streams.len(), 2);
-    assert_eq!(
-        run.streams
-            .iter()
-            .map(|stream| stream.spectra.len())
-            .collect::<Vec<_>>(),
-        [14, 34]
-    );
-    assert_eq!(
-        run.streams[0]
-            .spectra
-            .iter()
-            .map(|spectrum| [spectrum.retention_time_min, spectrum.tic])
-            .collect::<Vec<_>>(),
-        [
-            [0.004935, 15_245_068.0],
-            [0.007896666667, 12_901_166.0],
-            [0.075015, 15_148_302.0],
-            [0.077788333333, 10_349_958.0],
-            [0.143451666667, 18_257_344.0],
-            [0.146408333333, 11_037_852.0],
-            [0.213673333333, 17_613_074.0],
-            [0.216746666667, 1_597_410.5],
-            [0.285483333333, 22_136_832.0],
-            [0.288898333333, 12_434_530.0],
-            [0.358558333333, 16_495_375.0],
-            [0.361428333333, 6_548_706.5],
-            [0.428483333333, 12_015_003.0],
-            [0.433221666667, 13_332_331.0],
-        ]
-    );
-    assert_eq!(
-        run.streams
-            .iter()
-            .flat_map(|stream| &stream.spectra)
-            .filter(|spectrum| spectrum.precursor.is_some())
-            .count(),
-        34
-    );
-    let scan = run
-        .streams
-        .iter()
-        .flat_map(|stream| &stream.spectra)
-        .find(|spectrum| {
-            spectrum.source_native_id.as_deref()
-                == Some("controllerType=0 controllerNumber=1 scan=29")
-        })
-        .unwrap();
-    assert_eq!(scan.retention_time_min, 0.285483333333);
-    assert_eq!(scan.tic, 22_136_832.0);
-    assert_eq!(scan.tic_provenance, SpectrumSummaryProvenance::Source);
-    assert_eq!(
-        scan.acquisition.instrument_configuration_id.as_deref(),
-        Some("IC1")
-    );
-    assert_eq!(scan.acquisition.source_event_id, Some(1));
-}
-
-#[test]
 fn imports_ms2_selected_ion_isolation_window_and_activation() {
     let details = concat!(
         "<precursorList count=\"1\"><precursor spectrumRef=\"scan=1\">",
@@ -414,6 +341,11 @@ fn imports_chromatogram_only_tic_and_structured_srm_transition() {
         run.chromatograms[0].kind,
         crate::ChromatogramKind::TotalIonCurrent
     );
+    assert_eq!(
+        run.chromatograms[0].provenance,
+        crate::ChromatogramProvenance::Source
+    );
+    assert_eq!(run.chromatograms[0].source_stream, None);
     assert_eq!(run.chromatograms[0].time_min, [0.5, 1.5]);
     assert_eq!(run.chromatograms[0].unit, "count per second");
     let srm = &run.chromatograms[1];
@@ -429,6 +361,46 @@ fn imports_chromatogram_only_tic_and_structured_srm_transition() {
     assert_eq!(
         transition.activation_method.as_deref(),
         Some("collision-induced dissociation")
+    );
+}
+
+#[test]
+fn binds_at_most_one_source_tic_and_bpc_when_the_run_has_one_stream() {
+    let spectrum = spectrum("scan=1", 1, "MS:1000129", false, TestPrecision::F64, false);
+    let tic = chromatogram("TIC", "MS:1000235", "");
+    let extra_tic = chromatogram("TIC duplicate", "MS:1000235", "");
+    let bpc = chromatogram("BPC", "MS:1000628", "");
+    let extra_bpc = chromatogram("BPC duplicate", "MS:1000628", "");
+    let run = parsed(format!(
+        "<mzML><run id=\"single\"><spectrumList count=\"1\">{spectrum}</spectrumList><chromatogramList count=\"4\">{tic}{extra_tic}{bpc}{extra_bpc}</chromatogramList></run></mzML>"
+    ));
+    let stream = run.streams[0].id;
+
+    assert_eq!(run.chromatograms[0].source_stream, Some(stream));
+    assert_eq!(run.chromatograms[1].source_stream, None);
+    assert_eq!(run.chromatograms[2].source_stream, Some(stream));
+    assert_eq!(run.chromatograms[3].source_stream, None);
+    assert_eq!(
+        run.bound_chromatogram(stream, ChromatogramKind::TotalIonCurrent)
+            .unwrap()
+            .id
+            .0,
+        "TIC"
+    );
+    assert_eq!(
+        run.bound_chromatogram(stream, ChromatogramKind::BasePeak)
+            .unwrap()
+            .id
+            .0,
+        "BPC"
+    );
+    assert_eq!(
+        run.stream_chromatogram_provenance(stream, ChromatogramKind::TotalIonCurrent),
+        Some(ChromatogramProvenance::Source)
+    );
+    assert_eq!(
+        run.stream_chromatogram_provenance(stream, ChromatogramKind::BasePeak),
+        Some(ChromatogramProvenance::Source)
     );
 }
 
