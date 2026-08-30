@@ -5,8 +5,8 @@ use crate::state::{
 };
 use plotx_io::{
     AcquisitionStream, AcquisitionStreamId, ChromatogramChannel, ChromatogramChannelId,
-    ChromatogramKind, MassSpecRun, MassSpectrum, Polarity, Precursor, SpectrumId,
-    SpectrumRepresentation, StreamRole,
+    ChromatogramKind, MassSpecRun, MassSpectrum, Polarity, Precursor, SpectrumAcquisition,
+    SpectrumId, SpectrumRepresentation, SpectrumSummaryProvenance, StreamRole,
 };
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
@@ -133,12 +133,33 @@ fn write_spectrum(output: &mut impl Write, spectrum: &MassSpectrum) -> Result<()
             SpectrumRepresentation::Unknown => 2,
         },
     )?;
+    write_optional_string(
+        output,
+        spectrum.acquisition.instrument_configuration_id.as_deref(),
+    )?;
+    write_optional_u64(output, spectrum.acquisition.source_event_id.map(u64::from))?;
+    write_optional_string(output, spectrum.acquisition.filter_string.as_deref())?;
     write_f64(output, spectrum.tic)?;
+    write_summary_provenance(output, spectrum.tic_provenance)?;
     write_optional_f64(output, spectrum.base_peak_mz)?;
     write_optional_f64(output, spectrum.base_peak_intensity)?;
+    write_summary_provenance(output, spectrum.base_peak_provenance)?;
     write_optional_precursor(output, spectrum.precursor.as_ref())?;
     write_f64s(output, &spectrum.mz)?;
     write_f64s(output, &spectrum.intensity)
+}
+
+fn write_summary_provenance(
+    output: &mut impl Write,
+    provenance: SpectrumSummaryProvenance,
+) -> Result<()> {
+    write_u8(
+        output,
+        match provenance {
+            SpectrumSummaryProvenance::Source => 0,
+            SpectrumSummaryProvenance::Derived => 1,
+        },
+    )
 }
 
 fn write_optional_precursor(output: &mut impl Write, precursor: Option<&Precursor>) -> Result<()> {
@@ -146,8 +167,11 @@ fn write_optional_precursor(output: &mut impl Write, precursor: Option<&Precurso
         return write_u8(output, 0);
     };
     write_u8(output, 1)?;
-    write_f64(output, precursor.selected_mz)?;
+    write_optional_string(output, precursor.source_spectrum_native_id.as_deref())?;
+    write_optional_f64(output, precursor.selected_mz)?;
+    write_optional_f64(output, precursor.selected_intensity)?;
     write_optional_i32(output, precursor.charge)?;
+    write_optional_f64(output, precursor.isolation_window_target_mz)?;
     write_optional_f64(output, precursor.isolation_window_lower_offset)?;
     write_optional_f64(output, precursor.isolation_window_upper_offset)?;
     write_optional_f64(output, precursor.collision_energy)?;
@@ -533,9 +557,25 @@ impl<'a, 'p, R: Read> Reader<'a, 'p, R> {
             2 => SpectrumRepresentation::Unknown,
             tag => return Err(invalid_tag("spectrum representation", tag)),
         };
+        let acquisition = SpectrumAcquisition {
+            instrument_configuration_id: self.read_optional_string()?,
+            source_event_id: self
+                .read_optional_u64()?
+                .map(|value| {
+                    u32::try_from(value).map_err(|_| {
+                        ProjectError::Invalid(
+                            "LC–MS payload source event ID exceeds u32".to_owned(),
+                        )
+                    })
+                })
+                .transpose()?,
+            filter_string: self.read_optional_string()?,
+        };
         let tic = self.read_f64()?;
+        let tic_provenance = self.read_summary_provenance()?;
         let base_peak_mz = self.read_optional_f64()?;
         let base_peak_intensity = self.read_optional_f64()?;
+        let base_peak_provenance = self.read_summary_provenance()?;
         let precursor = self.read_precursor()?;
         let mz = self.read_f64s()?;
         let intensity = self.read_f64s()?;
@@ -546,13 +586,24 @@ impl<'a, 'p, R: Read> Reader<'a, 'p, R> {
             ms_level,
             polarity,
             representation,
+            acquisition,
             mz,
             intensity,
             tic,
+            tic_provenance,
             base_peak_mz,
             base_peak_intensity,
+            base_peak_provenance,
             precursor,
         })
+    }
+
+    fn read_summary_provenance(&mut self) -> Result<SpectrumSummaryProvenance> {
+        match self.read_u8()? {
+            0 => Ok(SpectrumSummaryProvenance::Source),
+            1 => Ok(SpectrumSummaryProvenance::Derived),
+            tag => Err(invalid_tag("spectrum summary provenance", tag)),
+        }
     }
 
     fn read_precursor(&mut self) -> Result<Option<Precursor>> {
@@ -560,8 +611,11 @@ impl<'a, 'p, R: Read> Reader<'a, 'p, R> {
             return Ok(None);
         }
         Ok(Some(Precursor {
-            selected_mz: self.read_f64()?,
+            source_spectrum_native_id: self.read_optional_string()?,
+            selected_mz: self.read_optional_f64()?,
+            selected_intensity: self.read_optional_f64()?,
             charge: self.read_optional_i32()?,
+            isolation_window_target_mz: self.read_optional_f64()?,
             isolation_window_lower_offset: self.read_optional_f64()?,
             isolation_window_upper_offset: self.read_optional_f64()?,
             collision_energy: self.read_optional_f64()?,

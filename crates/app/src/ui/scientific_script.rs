@@ -137,8 +137,31 @@ pub(crate) fn prepare_run(
             stream.spectra.iter().map(move |scan| {
                 serde_json::json!({
                     "stream_id": stream.id.get(),
+                    "spectrum_id": scan.id.get(),
+                    "source_native_id": scan.source_native_id,
                     "time_min": scan.retention_time_min,
+                    "ms_level": scan.ms_level,
                     "tic": scan.tic,
+                    "tic_provenance": summary_provenance_label(scan.tic_provenance),
+                    "base_peak_mz": scan.base_peak_mz,
+                    "base_peak_intensity": scan.base_peak_intensity,
+                    "base_peak_provenance": summary_provenance_label(scan.base_peak_provenance),
+                    "acquisition": {
+                        "instrument_configuration_id": scan.acquisition.instrument_configuration_id,
+                        "source_event_id": scan.acquisition.source_event_id,
+                        "filter_string": scan.acquisition.filter_string,
+                    },
+                    "precursor": scan.precursor.as_ref().map(|precursor| serde_json::json!({
+                        "source_spectrum_native_id": precursor.source_spectrum_native_id,
+                        "selected_mz": precursor.selected_mz,
+                        "selected_intensity": precursor.selected_intensity,
+                        "charge": precursor.charge,
+                        "isolation_window_target_mz": precursor.isolation_window_target_mz,
+                        "isolation_window_lower_offset": precursor.isolation_window_lower_offset,
+                        "isolation_window_upper_offset": precursor.isolation_window_upper_offset,
+                        "collision_energy": precursor.collision_energy,
+                        "activation_method": precursor.activation_method,
+                    })),
                 })
             })
         })
@@ -150,6 +173,13 @@ pub(crate) fn prepare_run(
         "scans": scans,
         "lc_method": method,
     })
+}
+
+fn summary_provenance_label(provenance: plotx_io::SpectrumSummaryProvenance) -> &'static str {
+    match provenance {
+        plotx_io::SpectrumSummaryProvenance::Source => "source",
+        plotx_io::SpectrumSummaryProvenance::Derived => "derived",
+    }
 }
 
 fn floats(values: Array, name: &str) -> Result<Vec<f64>, Box<EvalAltResult>> {
@@ -250,6 +280,68 @@ fn rolling_percentile(values: &[f64], width: usize, quantile: f64) -> Vec<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prepared_mass_spec_scans_expose_precursor_metadata() {
+        let run = MassSpecRun {
+            source: "fixture.mzML".to_owned(),
+            metadata: std::collections::BTreeMap::new(),
+            instrument: None,
+            streams: vec![plotx_io::AcquisitionStream {
+                id: plotx_io::AcquisitionStreamId::new(1),
+                source_native_id: None,
+                source_label: None,
+                role: plotx_io::StreamRole::Primary,
+                acquisition_range: None,
+                spectra: vec![plotx_io::MassSpectrum {
+                    id: plotx_io::SpectrumId::new(2),
+                    source_native_id: Some("scan=2".to_owned()),
+                    retention_time_min: 1.5,
+                    ms_level: 2,
+                    polarity: plotx_io::Polarity::Positive,
+                    representation: plotx_io::SpectrumRepresentation::Centroid,
+                    acquisition: plotx_io::SpectrumAcquisition {
+                        instrument_configuration_id: Some("IC2".to_owned()),
+                        source_event_id: Some(3),
+                        filter_string: Some("ITMS MS2".to_owned()),
+                    },
+                    mz: vec![100.0],
+                    intensity: vec![5.0],
+                    tic: 5.0,
+                    tic_provenance: plotx_io::SpectrumSummaryProvenance::Source,
+                    base_peak_mz: Some(100.0),
+                    base_peak_intensity: Some(5.0),
+                    base_peak_provenance: plotx_io::SpectrumSummaryProvenance::Source,
+                    precursor: Some(plotx_io::Precursor {
+                        source_spectrum_native_id: Some("scan=1".to_owned()),
+                        selected_mz: Some(445.2),
+                        selected_intensity: Some(1_200.0),
+                        charge: Some(2),
+                        isolation_window_target_mz: Some(445.0),
+                        isolation_window_lower_offset: Some(0.5),
+                        isolation_window_upper_offset: Some(0.5),
+                        collision_energy: Some(25.0),
+                        activation_method: Some("CID".to_owned()),
+                    }),
+                }],
+            }],
+            chromatograms: Vec::new(),
+            import_warnings: Vec::new(),
+        };
+
+        let prepared = prepare_run(&run, None);
+        let scan = &prepared["scans"][0];
+        assert_eq!(scan["spectrum_id"], 2);
+        assert_eq!(scan["tic_provenance"], "source");
+        assert_eq!(scan["base_peak_provenance"], "source");
+        assert_eq!(scan["acquisition"]["instrument_configuration_id"], "IC2");
+        assert_eq!(scan["acquisition"]["source_event_id"], 3);
+        assert_eq!(scan["acquisition"]["filter_string"], "ITMS MS2");
+        assert_eq!(scan["precursor"]["source_spectrum_native_id"], "scan=1");
+        assert_eq!(scan["precursor"]["selected_mz"], 445.2);
+        assert_eq!(scan["precursor"]["isolation_window_target_mz"], 445.0);
+        assert_eq!(scan["precursor"]["activation_method"], "CID");
+    }
 
     #[test]
     fn script_cannot_read_an_unselected_path() {

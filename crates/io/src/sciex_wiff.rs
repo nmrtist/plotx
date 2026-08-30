@@ -2,7 +2,7 @@
 use crate::{
     Acquisition, AcquisitionStream, AcquisitionStreamId, DataFormat, IoError, LoadResult,
     LoadWarning, LoadWarningCode, MassSpecRun, MassSpectrometryFormat, MassSpectrum, Polarity,
-    Precursor, Provenance, SpectrumId, SpectrumRepresentation, StreamRole,
+    Precursor, Provenance, SpectrumAcquisition, SpectrumId, SpectrumRepresentation, StreamRole,
 };
 use byteorder::{ByteOrder, LittleEndian};
 use std::collections::{BTreeMap, BTreeSet, btree_map::Entry};
@@ -13,6 +13,8 @@ use std::path::Path;
 #[path = "sciex_wiff_scan.rs"]
 mod scan;
 use scan::{companion_path, decode_scan_block};
+#[path = "sciex_wiff_summaries.rs"]
+mod summaries;
 #[path = "sciex_wiff_tic.rs"]
 mod tic;
 struct StreamBuilder {
@@ -716,29 +718,26 @@ fn convert_spectrum(
         .iter()
         .map(|&value| f64::from(value))
         .collect();
-    let tic = record
-        .total_ion_current
-        .filter(|value| value.is_finite() && *value >= 0.0)
-        .unwrap_or_else(|| intensity.iter().copied().sum::<f64>());
-    let base_peak = intensity
-        .iter()
-        .enumerate()
-        .filter(|(_, value)| value.is_finite() && **value >= 0.0)
-        .max_by(|(_, left), (_, right)| left.total_cmp(right));
-    let (base_peak_mz, base_peak_intensity) = base_peak.map_or((None, None), |(index, value)| {
-        (record.mz.get(index).copied(), Some(*value))
-    });
-    let precursor = record.precursor.and_then(|source| {
-        let selected_mz = source.selected_mz.or(source.target_mz)?;
+    let summaries::Summaries {
+        tic,
+        tic_provenance,
+        base_peak_mz,
+        base_peak_intensity,
+        base_peak_provenance,
+    } = summaries::resolve(&record, &intensity);
+    let precursor = record.precursor.map(|source| {
         let half_width = source.isolation_width.map(|width| width / 2.0);
-        Some(Precursor {
-            selected_mz,
+        Precursor {
+            source_spectrum_native_id: None,
+            selected_mz: source.selected_mz,
+            selected_intensity: None,
             charge: source.charge,
+            isolation_window_target_mz: source.target_mz,
             isolation_window_lower_offset: half_width,
             isolation_window_upper_offset: half_width,
             collision_energy: source.collision_energy,
             activation_method: source.activation.map(activation_label),
-        })
+        }
     });
 
     Ok(MassSpectrum {
@@ -752,11 +751,18 @@ fn convert_spectrum(
             Some(ScanMode::Profile) => SpectrumRepresentation::Profile,
             None => SpectrumRepresentation::Unknown,
         },
+        acquisition: SpectrumAcquisition {
+            instrument_configuration_id: None,
+            source_event_id: record.acquisition_event_id,
+            filter_string: record.filter.filter(|value| !value.is_empty()),
+        },
         mz: record.mz,
         intensity,
         tic,
+        tic_provenance,
         base_peak_mz,
         base_peak_intensity,
+        base_peak_provenance,
         precursor,
     })
 }

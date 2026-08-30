@@ -115,7 +115,10 @@ pub fn extract_spectrum(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plotx_io::{MassSpectrum, Polarity, SpectrumId, SpectrumRepresentation};
+    use plotx_io::{
+        MassSpectrum, Polarity, SpectrumAcquisition, SpectrumId, SpectrumRepresentation,
+        SpectrumSummaryProvenance,
+    };
 
     fn scan(id: u64, time: f64, mz: &[f64], intensity: &[f64]) -> MassSpectrum {
         MassSpectrum {
@@ -125,11 +128,14 @@ mod tests {
             ms_level: 1,
             polarity: Polarity::Positive,
             representation: SpectrumRepresentation::Profile,
+            acquisition: SpectrumAcquisition::default(),
             mz: mz.to_vec(),
             intensity: intensity.to_vec(),
             tic: 0.0,
+            tic_provenance: SpectrumSummaryProvenance::Derived,
             base_peak_mz: None,
             base_peak_intensity: None,
+            base_peak_provenance: SpectrumSummaryProvenance::Derived,
             precursor: None,
         }
     }

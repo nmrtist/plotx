@@ -80,9 +80,19 @@ fn rejects_large_structural_counts_without_reserving_the_claimed_collection() {
 fn payload_round_trips_spectra_channels_precursors_and_transitions() {
     let mut run = crate::state::sample_mass_spec_run();
     run.instrument = Some("QTOF".to_owned());
+    run.streams[0].spectra[1].acquisition = SpectrumAcquisition {
+        instrument_configuration_id: Some("IC2".to_owned()),
+        source_event_id: Some(7),
+        filter_string: Some("ITMS MS2".to_owned()),
+    };
+    run.streams[0].spectra[1].tic_provenance = SpectrumSummaryProvenance::Source;
+    run.streams[0].spectra[1].base_peak_provenance = SpectrumSummaryProvenance::Source;
     run.streams[0].spectra[1].precursor = Some(Precursor {
-        selected_mz: 445.2,
+        source_spectrum_native_id: Some("scan=10".to_owned()),
+        selected_mz: Some(445.2),
+        selected_intensity: Some(1_200.0),
         charge: Some(2),
+        isolation_window_target_mz: Some(445.0),
         isolation_window_lower_offset: Some(0.5),
         isolation_window_upper_offset: Some(0.75),
         collision_energy: Some(20.0),
@@ -105,9 +115,34 @@ fn payload_round_trips_spectra_channels_precursors_and_transitions() {
     assert_eq!(decoded.streams[0].role, StreamRole::Primary);
     assert_eq!(decoded.streams[0].spectra[1].id, SpectrumId::new(12));
     assert_eq!(decoded.streams[0].spectra[1].mz, [20.0, 30.0]);
+    assert_eq!(
+        decoded.streams[0].spectra[1]
+            .acquisition
+            .instrument_configuration_id
+            .as_deref(),
+        Some("IC2")
+    );
+    assert_eq!(
+        decoded.streams[0].spectra[1].acquisition.source_event_id,
+        Some(7)
+    );
+    assert_eq!(
+        decoded.streams[0].spectra[1].tic_provenance,
+        SpectrumSummaryProvenance::Source
+    );
+    assert_eq!(
+        decoded.streams[0].spectra[1].base_peak_provenance,
+        SpectrumSummaryProvenance::Source
+    );
     let precursor = decoded.streams[0].spectra[1].precursor.as_ref().unwrap();
-    assert_eq!(precursor.selected_mz, 445.2);
+    assert_eq!(
+        precursor.source_spectrum_native_id.as_deref(),
+        Some("scan=10")
+    );
+    assert_eq!(precursor.selected_mz, Some(445.2));
+    assert_eq!(precursor.selected_intensity, Some(1_200.0));
     assert_eq!(precursor.charge, Some(2));
+    assert_eq!(precursor.isolation_window_target_mz, Some(445.0));
     assert_eq!(precursor.activation_method.as_deref(), Some("CID"));
     let channel = &decoded.chromatograms[0];
     assert_eq!(channel.kind, ChromatogramKind::SelectedReactionMonitoring);

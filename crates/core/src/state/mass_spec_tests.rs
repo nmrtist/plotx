@@ -4,6 +4,7 @@ use crate::state::{
     AxisRange, Dataset, ObjectFrame, PlotxApp, SeriesBinding, SeriesSource, ToolGroup,
 };
 use plotx_io::{ChromatogramChannel, ChromatogramChannelId};
+use std::path::Path;
 
 #[test]
 fn dynamic_catalog_and_stable_selection_follow_stream_identity() {
@@ -133,6 +134,57 @@ fn stream_tic_prefers_bound_chromatogram_points() {
     let (_, _, _, points, stick) = dataset.field_values(field).expect("TIC values");
     assert!(!stick);
     assert_eq!(points, [[0.0, 11.0], [2.0, 22.0]]);
+}
+
+#[test]
+fn stream_tic_without_a_bound_channel_uses_spectrum_summaries() {
+    let dataset = MassSpecDataset::load(sample_mass_spec_run());
+    let field = dataset
+        .field_catalog
+        .id_for_key(&stream_tic_key(AcquisitionStreamId::new(3)))
+        .expect("stream TIC field");
+    let (_, _, _, points, stick) = dataset.field_values(field).expect("TIC values");
+
+    assert!(!stick);
+    assert_eq!(points, [[0.5, 2.0], [1.0, 9.0]]);
+    assert_eq!(
+        dataset.run.streams[0].spectra[1]
+            .intensity
+            .iter()
+            .sum::<f64>(),
+        10.0
+    );
+}
+
+#[test]
+fn local_small_mzml_figure_matches_the_14_point_ms1_tic_when_present() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join(".tmp/MS-data/hupo-psi-mzpeak-small/small.mzML");
+    if !path.is_file() {
+        return;
+    }
+    let loaded = plotx_io::mzml::load(&path).unwrap();
+    let plotx_io::Acquisition::MassSpec(run) = loaded.acquisition else {
+        panic!("small.mzML did not import as mass spectrometry data");
+    };
+    let dataset = MassSpecDataset::load(*run);
+    let field = dataset
+        .field_catalog
+        .id_for_key(&stream_tic_key(dataset.active_stream))
+        .unwrap();
+    let figure = dataset.field_figure(field).unwrap();
+
+    assert_eq!(figure.series[0].points.len(), 14);
+    assert_eq!(
+        figure.series[0]
+            .points
+            .iter()
+            .copied()
+            .max_by(|left, right| left[1].total_cmp(&right[1])),
+        Some([0.285483333333, 22_136_832.0])
+    );
+    assert_eq!(figure.series[0].points[1], [0.007896666667, 12_901_166.0]);
 }
 
 #[test]

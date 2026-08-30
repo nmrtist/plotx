@@ -1,6 +1,8 @@
 use super::*;
+use crate::AcquisitionStreamId;
 use flate2::{Compression, write::ZlibEncoder};
 use std::io::{self, BufReader, Cursor, Read, Write};
+use std::path::Path;
 
 struct ChunkedRead<R> {
     inner: R,
@@ -139,6 +141,259 @@ fn imports_zlib_f32_into_f64() {
     )));
     assert_eq!(run.streams[0].spectra[0].mz, [100.25, 200.5]);
     assert_eq!(run.streams[0].spectra[0].polarity, Polarity::Negative);
+}
+
+#[test]
+fn prefers_source_tic_and_base_peak_over_profile_array_summaries() {
+    let source_summaries = concat!(
+        "<cvParam accession=\"MS:1000285\" value=\"12.5\"/>",
+        "<cvParam accession=\"MS:1000504\" value=\"150.25\"/>",
+        "<cvParam accession=\"MS:1000505\" value=\"8.5\"/>"
+    );
+    let spectrum = spectrum("scan=1", 1, "MS:1000130", false, TestPrecision::F64, false).replace(
+        "<cvParam accession=\"MS:1000127\"/>",
+        &format!("<cvParam accession=\"MS:1000128\"/>{source_summaries}"),
+    );
+    let run = parsed(document(&spectrum));
+    let scan = &run.streams[0].spectra[0];
+
+    assert_eq!(scan.intensity.iter().sum::<f64>(), 40.0);
+    assert_eq!(scan.tic, 12.5);
+    assert_eq!(scan.tic_provenance, SpectrumSummaryProvenance::Source);
+    assert_eq!(scan.base_peak_mz, Some(150.25));
+    assert_eq!(scan.base_peak_intensity, Some(8.5));
+    assert_eq!(scan.base_peak_provenance, SpectrumSummaryProvenance::Source);
+}
+
+#[test]
+fn retains_acquisition_metadata_without_fragmenting_ms_level_streams() {
+    let ftms = spectrum(
+        "scan=1",
+        1,
+        "MS:1000130",
+        false,
+        TestPrecision::F64,
+        false,
+    )
+    .replace(
+        "<scan>",
+        "<scan><cvParam accession=\"MS:1000616\" value=\"1\"/><cvParam accession=\"MS:1000512\" value=\"FTMS full scan\"/>",
+    );
+    let itms = spectrum(
+        "scan=2",
+        1,
+        "MS:1000130",
+        false,
+        TestPrecision::F64,
+        false,
+    )
+    .replace(
+        "<scan>",
+        "<scan instrumentConfigurationRef=\"IC2\"><cvParam accession=\"MS:1000616\" value=\"2\"/><cvParam accession=\"MS:1000512\" value=\"ITMS full scan\"/>",
+    );
+    let ms2 = |id: &str, filter: &str| {
+        spectrum(
+            id,
+            2,
+            "MS:1000130",
+            false,
+            TestPrecision::F64,
+            false,
+        )
+        .replace(
+            "<scan>",
+            &format!(
+                "<scan instrumentConfigurationRef=\"IC2\"><cvParam accession=\"MS:1000616\" value=\"3\"/><cvParam accession=\"MS:1000512\" value=\"{filter}\"/>"
+            ),
+        )
+    };
+    let spectra =
+        ftms + &itms + &ms2("scan=3", "MS2 precursor 445") + &ms2("scan=4", "MS2 precursor 500");
+    let xml = document(&spectra).replace(
+        "<run id=\"run-1\">",
+        "<run id=\"run-1\" defaultInstrumentConfigurationRef=\"IC1\">",
+    );
+    let run = parsed(xml);
+
+    assert_eq!(run.streams.len(), 2);
+    assert_eq!(run.streams[0].source_label.as_deref(), Some("MS1 positive"));
+    assert_eq!(run.streams[1].source_label.as_deref(), Some("MS2 positive"));
+    assert_eq!(run.streams[0].spectra.len(), 2);
+    assert_eq!(run.streams[1].spectra.len(), 2);
+    assert_eq!(
+        run.streams[0].spectra[0]
+            .acquisition
+            .instrument_configuration_id
+            .as_deref(),
+        Some("IC1")
+    );
+    assert_eq!(
+        run.streams[0].spectra[1].acquisition.source_event_id,
+        Some(2)
+    );
+    assert_eq!(
+        run.streams[1].spectra[1]
+            .acquisition
+            .filter_string
+            .as_deref(),
+        Some("MS2 precursor 500")
+    );
+}
+
+#[test]
+fn local_small_fixture_matches_source_tic_and_acquisition_functions_when_present() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join(".tmp/MS-data/hupo-psi-mzpeak-small/small.mzML");
+    if !path.is_file() {
+        return;
+    }
+    let loaded = load(&path).unwrap();
+    let Acquisition::MassSpec(run) = loaded.acquisition else {
+        panic!("small.mzML did not import as mass spectrometry data");
+    };
+
+    assert!(run.import_warnings.is_empty());
+    assert_eq!(run.streams.len(), 2);
+    assert_eq!(
+        run.streams
+            .iter()
+            .map(|stream| stream.spectra.len())
+            .collect::<Vec<_>>(),
+        [14, 34]
+    );
+    assert_eq!(
+        run.streams[0]
+            .spectra
+            .iter()
+            .map(|spectrum| [spectrum.retention_time_min, spectrum.tic])
+            .collect::<Vec<_>>(),
+        [
+            [0.004935, 15_245_068.0],
+            [0.007896666667, 12_901_166.0],
+            [0.075015, 15_148_302.0],
+            [0.077788333333, 10_349_958.0],
+            [0.143451666667, 18_257_344.0],
+            [0.146408333333, 11_037_852.0],
+            [0.213673333333, 17_613_074.0],
+            [0.216746666667, 1_597_410.5],
+            [0.285483333333, 22_136_832.0],
+            [0.288898333333, 12_434_530.0],
+            [0.358558333333, 16_495_375.0],
+            [0.361428333333, 6_548_706.5],
+            [0.428483333333, 12_015_003.0],
+            [0.433221666667, 13_332_331.0],
+        ]
+    );
+    assert_eq!(
+        run.streams
+            .iter()
+            .flat_map(|stream| &stream.spectra)
+            .filter(|spectrum| spectrum.precursor.is_some())
+            .count(),
+        34
+    );
+    let scan = run
+        .streams
+        .iter()
+        .flat_map(|stream| &stream.spectra)
+        .find(|spectrum| {
+            spectrum.source_native_id.as_deref()
+                == Some("controllerType=0 controllerNumber=1 scan=29")
+        })
+        .unwrap();
+    assert_eq!(scan.retention_time_min, 0.285483333333);
+    assert_eq!(scan.tic, 22_136_832.0);
+    assert_eq!(scan.tic_provenance, SpectrumSummaryProvenance::Source);
+    assert_eq!(
+        scan.acquisition.instrument_configuration_id.as_deref(),
+        Some("IC1")
+    );
+    assert_eq!(scan.acquisition.source_event_id, Some(1));
+}
+
+#[test]
+fn imports_ms2_selected_ion_isolation_window_and_activation() {
+    let details = concat!(
+        "<precursorList count=\"1\"><precursor spectrumRef=\"scan=1\">",
+        "<isolationWindow>",
+        "<cvParam accession=\"MS:1000827\" value=\"445.35\"/>",
+        "<cvParam accession=\"MS:1000828\" value=\"0.6\"/>",
+        "<cvParam accession=\"MS:1000829\" value=\"0.8\"/>",
+        "</isolationWindow><selectedIonList count=\"1\"><selectedIon>",
+        "<cvParam accession=\"MS:1000744\" value=\"445.34\"/>",
+        "<cvParam accession=\"MS:1000042\" value=\"1994039.0\"/>",
+        "<cvParam accession=\"MS:1000041\" value=\"2\"/>",
+        "</selectedIon></selectedIonList><activation>",
+        "<cvParam accession=\"MS:1000422\" name=\"beam-type collision-induced dissociation\"/>",
+        "<cvParam accession=\"MS:1000045\" name=\"collision energy\" value=\"27.5\"/>",
+        "</activation></precursor></precursorList>"
+    );
+    let spectrum = spectrum("scan=2", 2, "MS:1000130", false, TestPrecision::F64, false)
+        .replace("<scanList>", &format!("{details}<scanList>"));
+    let run = parsed(document(&spectrum));
+
+    assert!(run.import_warnings.is_empty());
+    let precursor = run.streams[0].spectra[0].precursor.as_ref().unwrap();
+    assert_eq!(
+        precursor.source_spectrum_native_id.as_deref(),
+        Some("scan=1")
+    );
+    assert_eq!(precursor.selected_mz, Some(445.34));
+    assert_eq!(precursor.selected_intensity, Some(1_994_039.0));
+    assert_eq!(precursor.charge, Some(2));
+    assert_eq!(precursor.isolation_window_target_mz, Some(445.35));
+    assert_eq!(precursor.isolation_window_lower_offset, Some(0.6));
+    assert_eq!(precursor.isolation_window_upper_offset, Some(0.8));
+    assert_eq!(precursor.collision_energy, Some(27.5));
+    assert_eq!(
+        precursor.activation_method.as_deref(),
+        Some("beam-type collision-induced dissociation")
+    );
+}
+
+#[test]
+fn imports_self_closing_precursor_reference() {
+    let spectrum = spectrum("scan=2", 2, "MS:1000130", false, TestPrecision::F64, false).replace(
+        "<scanList>",
+        "<precursor spectrumRef=\"scan=1\"/><scanList>",
+    );
+    let run = parsed(document(&spectrum));
+
+    assert!(run.import_warnings.is_empty());
+    let precursor = run.streams[0].spectra[0].precursor.as_ref().unwrap();
+    assert_eq!(
+        precursor.source_spectrum_native_id.as_deref(),
+        Some("scan=1")
+    );
+    assert_eq!(precursor.selected_mz, None);
+    assert_eq!(precursor.isolation_window_target_mz, None);
+}
+
+#[test]
+fn keeps_dia_isolation_target_separate_and_warns_about_extra_precursors() {
+    let details = concat!(
+        "<precursorList count=\"2\"><precursor>",
+        "<isolationWindow><cvParam accession=\"MS:1000827\" value=\"500.0\"/>",
+        "<cvParam accession=\"MS:1000828\" value=\"12.5\"/>",
+        "<cvParam accession=\"MS:1000829\" value=\"12.5\"/></isolationWindow>",
+        "<selectedIonList count=\"2\"><selectedIon></selectedIon><selectedIon>",
+        "<cvParam accession=\"MS:1000744\" value=\"501.0\"/>",
+        "</selectedIon></selectedIonList></precursor>",
+        "<precursor><isolationWindow><cvParam accession=\"MS:1000827\" value=\"525.0\"/>",
+        "</isolationWindow></precursor></precursorList>"
+    );
+    let spectrum = spectrum("dia=1", 2, "MS:1000129", false, TestPrecision::F64, false)
+        .replace("<scanList>", &format!("{details}<scanList>"));
+    let run = parsed(document(&spectrum));
+
+    let precursor = run.streams[0].spectra[0].precursor.as_ref().unwrap();
+    assert_eq!(precursor.selected_mz, None);
+    assert_eq!(precursor.isolation_window_target_mz, Some(500.0));
+    assert_eq!(precursor.isolation_window_lower_offset, Some(12.5));
+    assert_eq!(run.import_warnings.len(), 2);
+    assert!(run.import_warnings[0].contains("2 precursors"));
+    assert!(run.import_warnings[1].contains("2 selected ions"));
 }
 
 #[test]

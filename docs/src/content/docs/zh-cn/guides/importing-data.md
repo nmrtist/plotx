@@ -52,10 +52,20 @@ CasaXPS `.txt` 按结构头内容识别，而不是只看扩展名；其他 `.tx
 ## mzML
 
 打开或拖入 `.mzML` 文件。PlotX 会将谱图导入与 Waters 数据相同的 LC–MS
-数据集和图表工作流。谱图按 MS 级别和极性分组；以秒或分钟记录的扫描时间都会
-换算为分钟显示。PlotX 也会导入文件自带的 TIC、BPC、SIM 与 SRM 色谱图，
-包括只有色谱图而没有 scan 谱图的采集。文件提供时，会保留 transition 的
+数据集和图表工作流。谱图按 MS 级别和极性分组；每张 scan 仍会保留文件中可用的
+采集功能元数据，例如 mzML instrument configuration、preset scan configuration 和
+filter string。以秒或分钟记录的
+扫描时间都会换算为分钟显示。对于每张谱图，PlotX 优先使用文件提供的 TIC 和
+base-peak 摘要，而不是对 profile 采样点简单求和；同时保留摘要来自源文件还是由数组派生。
+PlotX 也会导入文件自带的 TIC、BPC、SIM 与 SRM 色谱图，包括只有色谱图而没有
+scan 谱图的采集。文件提供时，会保留 transition 的
 precursor/product m/z、极性、碰撞能量和活化方法。
+对于 MS2 及更高级谱图，PlotX 会分别保留 precursor 谱图引用、selected-ion m/z、
+selected-ion 强度与电荷、隔离窗目标与上下偏移、碰撞能量和活化方法。因此，即使
+DIA 没有 selected ion，其隔离窗目标也不会被误写成 selected-ion m/z。当前数据模型
+为每张谱图保存一个 precursor 和一个 selected ion；若文件包含更多值，导入警告会
+指出对应谱图，并说明只保留了第一个值。Scientific Script 的 scan 快照会暴露摘要
+provenance、instrument configuration、源 event 或 preset，以及 filter string。
 
 导入器支持小端 32 位和 64 位浮点 m/z、时间与强度数组，可不压缩或使用 zlib
 压缩。Numpress、大端数组以及缺少必需数组的谱图或色谱图会使导入停止并显示错误。

@@ -1,6 +1,7 @@
 use super::*;
 use plotx_io::{
-    AcquisitionStream, ChromatogramChannel, ChromatogramChannelId, Polarity, SpectrumRepresentation,
+    AcquisitionStream, ChromatogramChannel, ChromatogramChannelId, Polarity, SpectrumAcquisition,
+    SpectrumRepresentation, SpectrumSummaryProvenance,
 };
 
 pub(crate) fn sample_mass_spec_run() -> MassSpecRun {
@@ -11,11 +12,14 @@ pub(crate) fn sample_mass_spec_run() -> MassSpecRun {
         ms_level: 1,
         polarity,
         representation: SpectrumRepresentation::Profile,
+        acquisition: SpectrumAcquisition::default(),
         mz: mz.to_vec(),
         intensity: intensity.to_vec(),
         tic,
+        tic_provenance: SpectrumSummaryProvenance::Derived,
         base_peak_mz: mz.first().copied(),
         base_peak_intensity: intensity.first().copied(),
+        base_peak_provenance: SpectrumSummaryProvenance::Derived,
         precursor: None,
     };
     MassSpecRun {

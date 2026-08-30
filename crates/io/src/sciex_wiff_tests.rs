@@ -1,4 +1,5 @@
 use super::*;
+use crate::SpectrumSummaryProvenance;
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::PathBuf;
@@ -235,8 +236,13 @@ fn loads_all_samples_as_distinct_streams_and_chromatograms() {
 
 #[test]
 fn maps_spectrum_identity_time_polarity_precursor_and_summaries() {
-    let streams =
-        build_streams(vec![source_spectrum()], "Sample1", &mut 1, &mut Vec::new()).unwrap();
+    let mut source = source_spectrum();
+    source.total_ion_current = Some(19.0);
+    source.base_peak_mz = Some(100.0);
+    source.base_peak_intensity = Some(4.0);
+    source.acquisition_event_id = Some(2);
+    source.filter = Some("TOF MS2".to_owned());
+    let streams = build_streams(vec![source], "Sample1", &mut 1, &mut Vec::new()).unwrap();
     let stream = &streams[0];
     let spectrum = &stream.spectra[0];
 
@@ -255,12 +261,25 @@ fn maps_spectrum_identity_time_polarity_precursor_and_summaries() {
     assert_eq!(spectrum.polarity, Polarity::Positive);
     assert_eq!(spectrum.representation, SpectrumRepresentation::Centroid);
     assert_eq!(spectrum.mz.len(), spectrum.intensity.len());
-    assert_eq!(spectrum.tic, 21.0);
-    assert_eq!(spectrum.base_peak_mz, Some(250.0));
-    assert_eq!(spectrum.base_peak_intensity, Some(11.0));
+    assert_eq!(spectrum.acquisition.source_event_id, Some(2));
+    assert_eq!(
+        spectrum.acquisition.filter_string.as_deref(),
+        Some("TOF MS2")
+    );
+    assert_eq!(spectrum.tic, 19.0);
+    assert_eq!(spectrum.tic_provenance, SpectrumSummaryProvenance::Source);
+    assert_eq!(spectrum.base_peak_mz, Some(100.0));
+    assert_eq!(spectrum.base_peak_intensity, Some(4.0));
+    assert_eq!(
+        spectrum.base_peak_provenance,
+        SpectrumSummaryProvenance::Source
+    );
     let precursor = spectrum.precursor.as_ref().unwrap();
-    assert_eq!(precursor.selected_mz, 445.34);
+    assert_eq!(precursor.source_spectrum_native_id, None);
+    assert_eq!(precursor.selected_mz, Some(445.34));
+    assert_eq!(precursor.selected_intensity, None);
     assert_eq!(precursor.charge, Some(2));
+    assert_eq!(precursor.isolation_window_target_mz, Some(445.35));
     assert_eq!(precursor.isolation_window_lower_offset, Some(1.0));
     assert_eq!(precursor.isolation_window_upper_offset, Some(1.0));
     assert_eq!(precursor.collision_energy, Some(30.0));

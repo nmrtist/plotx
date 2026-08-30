@@ -5,9 +5,9 @@
 //! and converted arrays for the spectrum currently being parsed.
 
 use crate::{
-    Acquisition, AcquisitionStream, AcquisitionStreamId, DataFormat, IoError, LoadResult,
-    MassSpecRun, MassSpectrometryFormat, MassSpectrum, Polarity, Provenance, SpectrumId,
-    SpectrumRepresentation, StreamRole,
+    Acquisition, DataFormat, IoError, LoadResult, MassSpecRun, MassSpectrometryFormat,
+    MassSpectrum, Polarity, Provenance, SpectrumAcquisition, SpectrumId, SpectrumRepresentation,
+    SpectrumSummaryProvenance,
 };
 use base64::Engine as _;
 use flate2::{Decompress, FlushDecompress, Status};
@@ -24,6 +24,10 @@ use std::{
 
 #[path = "mzml_chromatogram.rs"]
 mod chromatogram;
+#[path = "mzml_precursor.rs"]
+mod precursor;
+#[path = "mzml_stream.rs"]
+mod stream;
 
 const MAX_SPECTRA: usize = 1_000_000;
 const MAX_POINTS_PER_SPECTRUM: usize = 5_000_000;
@@ -87,9 +91,6 @@ impl<R: BufRead> BufRead for EventBounded<R> {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-struct StreamKey(u8, u8);
-
 #[derive(Default)]
 pub(super) struct BinaryArray {
     pub(super) kind: Option<ArrayKind>,
@@ -120,6 +121,14 @@ struct SpectrumDraft {
     time_min: Option<f64>,
     polarity: Polarity,
     representation: SpectrumRepresentation,
+    instrument_configuration_id: Option<String>,
+    source_event_id: Option<u32>,
+    filter_string: Option<String>,
+    scan_count: usize,
+    tic: Option<f64>,
+    base_peak_mz: Option<f64>,
+    base_peak_intensity: Option<f64>,
+    precursor: precursor::Draft,
     mz: Option<Vec<f64>>,
     intensity: Option<Vec<f64>>,
 }
@@ -159,6 +168,7 @@ pub fn parse(input: impl BufRead, source: String) -> Result<MassSpecRun, IoError
     let mut chromatograms = Vec::new();
     let mut warnings = Vec::new();
     let mut run_id = None;
+    let mut default_instrument_configuration_id = None;
     let mut total_decoded = 0usize;
     let mut saw_run = false;
     loop {
@@ -169,6 +179,8 @@ pub fn parse(input: impl BufRead, source: String) -> Result<MassSpecRun, IoError
                 }
                 saw_run = true;
                 run_id = attribute(&tag, b"id")?;
+                default_instrument_configuration_id =
+                    attribute(&tag, b"defaultInstrumentConfigurationRef")?;
             }
             Event::Start(tag) if tag.local_name().as_ref() == b"spectrum" => {
                 if spectra.len() >= MAX_SPECTRA {
@@ -176,7 +188,7 @@ pub fn parse(input: impl BufRead, source: String) -> Result<MassSpecRun, IoError
                         "spectrum count exceeds limit {MAX_SPECTRA}"
                     )));
                 }
-                let draft = spectrum_draft(&tag)?;
+                let draft = spectrum_draft(&tag, default_instrument_configuration_id.clone())?;
                 let spectrum = parse_spectrum(
                     &mut reader,
                     &mut buffer,
@@ -217,31 +229,7 @@ pub fn parse(input: impl BufRead, source: String) -> Result<MassSpecRun, IoError
         return Err(invalid("mzML run contains no spectra or chromatograms"));
     }
 
-    let mut grouped: BTreeMap<StreamKey, Vec<MassSpectrum>> = BTreeMap::new();
-    for spectrum in spectra {
-        grouped
-            .entry(StreamKey(
-                spectrum.ms_level,
-                polarity_order(spectrum.polarity),
-            ))
-            .or_default()
-            .push(spectrum);
-    }
-    let streams = grouped
-        .into_iter()
-        .enumerate()
-        .map(|(index, (key, spectra))| {
-            let polarity = spectra[0].polarity;
-            AcquisitionStream {
-                id: AcquisitionStreamId::new(index as u64 + 1),
-                source_native_id: None,
-                source_label: Some(format!("MS{} {}", key.0, polarity_label(polarity))),
-                role: StreamRole::Primary,
-                acquisition_range: range(&spectra),
-                spectra,
-            }
-        })
-        .collect();
+    let streams = stream::build(spectra);
     let mut metadata = BTreeMap::new();
     metadata.insert("source format".to_owned(), "mzML".to_owned());
     if let Some(id) = run_id {
@@ -259,7 +247,10 @@ pub fn parse(input: impl BufRead, source: String) -> Result<MassSpecRun, IoError
     Ok(run)
 }
 
-fn spectrum_draft(tag: &BytesStart<'_>) -> Result<SpectrumDraft, IoError> {
+fn spectrum_draft(
+    tag: &BytesStart<'_>,
+    default_instrument_configuration_id: Option<String>,
+) -> Result<SpectrumDraft, IoError> {
     let native_id = attribute(tag, b"id")?;
     let declared_len = attribute(tag, b"defaultArrayLength")?
         .map(|value| {
@@ -284,6 +275,14 @@ fn spectrum_draft(tag: &BytesStart<'_>) -> Result<SpectrumDraft, IoError> {
         time_min: None,
         polarity: Polarity::Unknown,
         representation: SpectrumRepresentation::Unknown,
+        instrument_configuration_id: default_instrument_configuration_id,
+        source_event_id: None,
+        filter_string: None,
+        scan_count: 0,
+        tic: None,
+        base_peak_mz: None,
+        base_peak_intensity: None,
+        precursor: precursor::Draft::default(),
         mz: None,
         intensity: None,
     })
@@ -304,22 +303,33 @@ fn parse_spectrum<R: BufRead>(
     let mut binary: Option<BinaryArray> = None;
     loop {
         match read_event(reader, buffer, MAX_XML_EVENT_BYTES)? {
-            Event::Start(tag) if tag.local_name().as_ref() == b"binaryDataArray" => {
-                binary = Some(BinaryArray::default())
+            Event::Start(tag) => {
+                draft.precursor.start(&tag)?;
+                if tag.local_name().as_ref() == b"scan" {
+                    start_scan(&tag, &mut draft, &label, warnings)?;
+                } else if tag.local_name().as_ref() == b"cvParam" {
+                    apply_cv(&tag, &mut draft, binary.as_mut())?;
+                    draft.precursor.apply_cv(&tag)?;
+                } else if tag.local_name().as_ref() == b"binaryDataArray" {
+                    binary = Some(BinaryArray::default());
+                } else if tag.local_name().as_ref() == b"binary" {
+                    let array = binary.as_mut().ok_or_else(|| {
+                        invalid(format!(
+                            "spectrum {label} has binary outside binaryDataArray"
+                        ))
+                    })?;
+                    read_binary_text(reader, buffer, &mut array.text, &label)?;
+                }
             }
-            Event::Empty(tag) if tag.local_name().as_ref() == b"cvParam" => {
-                apply_cv(&tag, &mut draft, binary.as_mut())?;
-            }
-            Event::Start(tag) if tag.local_name().as_ref() == b"cvParam" => {
-                apply_cv(&tag, &mut draft, binary.as_mut())?;
-            }
-            Event::Start(tag) if tag.local_name().as_ref() == b"binary" => {
-                let array = binary.as_mut().ok_or_else(|| {
-                    invalid(format!(
-                        "spectrum {label} has binary outside binaryDataArray"
-                    ))
-                })?;
-                read_binary_text(reader, buffer, &mut array.text, &label)?;
+            Event::Empty(tag) => {
+                draft.precursor.start(&tag)?;
+                if tag.local_name().as_ref() == b"scan" {
+                    start_scan(&tag, &mut draft, &label, warnings)?;
+                } else if tag.local_name().as_ref() == b"cvParam" {
+                    apply_cv(&tag, &mut draft, binary.as_mut())?;
+                    draft.precursor.apply_cv(&tag)?;
+                }
+                draft.precursor.end(tag.local_name().as_ref());
             }
             Event::End(tag) if tag.local_name().as_ref() == b"binaryDataArray" => {
                 let array = binary.take().ok_or_else(|| {
@@ -345,6 +355,7 @@ fn parse_spectrum<R: BufRead>(
                 }
             }
             Event::End(tag) if tag.local_name().as_ref() == b"spectrum" => break,
+            Event::End(tag) => draft.precursor.end(tag.local_name().as_ref()),
             Event::Eof => return Err(invalid(format!("input truncated inside spectrum {label}"))),
             _ => {}
         }
@@ -385,7 +396,45 @@ fn parse_spectrum<R: BufRead>(
         );
         0.0
     });
-    let (tic, base_peak_mz, base_peak_intensity) = summaries(&mz, &intensity);
+    let (derived_tic, derived_base_peak_mz, derived_base_peak_intensity) =
+        summaries(&mz, &intensity);
+    let (tic, tic_provenance) = draft
+        .tic
+        .map_or((derived_tic, SpectrumSummaryProvenance::Derived), |value| {
+            (value, SpectrumSummaryProvenance::Source)
+        });
+    let (base_peak_mz, base_peak_intensity, base_peak_provenance) = match (
+        draft.base_peak_mz,
+        draft.base_peak_intensity,
+    ) {
+        (Some(mz), Some(intensity)) => {
+            (Some(mz), Some(intensity), SpectrumSummaryProvenance::Source)
+        }
+        (None, None) => (
+            derived_base_peak_mz,
+            derived_base_peak_intensity,
+            SpectrumSummaryProvenance::Derived,
+        ),
+        _ => {
+            push_warning(
+                warnings,
+                format!(
+                    "Spectrum {label} has incomplete source base-peak metadata; it was derived from the intensity array."
+                ),
+            );
+            (
+                derived_base_peak_mz,
+                derived_base_peak_intensity,
+                SpectrumSummaryProvenance::Derived,
+            )
+        }
+    };
+    let acquisition = SpectrumAcquisition {
+        instrument_configuration_id: draft.instrument_configuration_id,
+        source_event_id: draft.source_event_id,
+        filter_string: draft.filter_string,
+    };
+    let precursor = draft.precursor.finish(&label, warnings);
     Ok(MassSpectrum {
         id: SpectrumId::new(ordinal as u64 + 1),
         source_native_id: draft.native_id,
@@ -393,13 +442,43 @@ fn parse_spectrum<R: BufRead>(
         ms_level,
         polarity: draft.polarity,
         representation: draft.representation,
+        acquisition,
         mz,
         intensity,
         tic,
+        tic_provenance,
         base_peak_mz,
         base_peak_intensity,
-        precursor: None,
+        base_peak_provenance,
+        precursor,
     })
+}
+
+fn start_scan(
+    tag: &BytesStart<'_>,
+    draft: &mut SpectrumDraft,
+    label: &str,
+    warnings: &mut Vec<String>,
+) -> Result<(), IoError> {
+    draft.scan_count += 1;
+    if draft.scan_count == 1 {
+        if let Some(reference) = attribute(tag, b"instrumentConfigurationRef")? {
+            if reference.is_empty() {
+                return Err(invalid(format!(
+                    "spectrum {label} has an empty instrumentConfigurationRef"
+                )));
+            }
+            draft.instrument_configuration_id = Some(reference);
+        }
+    } else if draft.scan_count == 2 {
+        push_warning(
+            warnings,
+            format!(
+                "Spectrum {label} describes multiple scans; only the first scan's acquisition metadata was imported."
+            ),
+        );
+    }
+    Ok(())
 }
 
 fn apply_cv(
@@ -438,7 +517,24 @@ fn apply_cv(
         "MS:1000129" => draft.polarity = Polarity::Negative,
         "MS:1000127" => draft.representation = SpectrumRepresentation::Centroid,
         "MS:1000128" => draft.representation = SpectrumRepresentation::Profile,
-        "MS:1000016" => {
+        "MS:1000285" => draft.tic = Some(nonnegative_value(tag, "total ion current")?),
+        "MS:1000504" => draft.base_peak_mz = Some(nonnegative_value(tag, "base peak m/z")?),
+        "MS:1000505" => {
+            draft.base_peak_intensity = Some(nonnegative_value(tag, "base peak intensity")?)
+        }
+        "MS:1000512" if draft.scan_count == 1 => {
+            draft.filter_string = attribute(tag, b"value")?.filter(|value| !value.is_empty())
+        }
+        "MS:1000616" if draft.scan_count == 1 => {
+            let value = attribute(tag, b"value")?
+                .ok_or_else(|| invalid("preset scan configuration has no value"))?;
+            draft.source_event_id = Some(
+                value
+                    .parse::<u32>()
+                    .map_err(|_| invalid("invalid preset scan configuration"))?,
+            );
+        }
+        "MS:1000016" if draft.scan_count == 1 => {
             let value = attribute(tag, b"value")?
                 .ok_or_else(|| invalid("scan start time has no value"))?
                 .parse::<f64>()
@@ -456,6 +552,17 @@ fn apply_cv(
         _ => {}
     }
     Ok(())
+}
+
+fn nonnegative_value(tag: &BytesStart<'_>, field: &str) -> Result<f64, IoError> {
+    let value = attribute(tag, b"value")?
+        .ok_or_else(|| invalid(format!("{field} has no value")))?
+        .parse::<f64>()
+        .map_err(|_| invalid(format!("invalid {field}")))?;
+    if !value.is_finite() || value < 0.0 {
+        return Err(invalid(format!("invalid {field}")));
+    }
+    Ok(value)
 }
 
 pub(super) fn read_binary_text<R: BufRead>(
@@ -663,32 +770,15 @@ fn decompress_zlib_exact(compressed: &[u8], label: &str) -> Result<Vec<u8>, IoEr
 }
 
 fn summaries(mz: &[f64], intensity: &[f64]) -> (f64, Option<f64>, Option<f64>) {
-    let tic = intensity.iter().sum();
+    let tic = intensity.iter().sum::<f64>().max(0.0);
     let base = intensity
         .iter()
         .enumerate()
+        .filter(|(_, value)| **value >= 0.0)
         .max_by(|a, b| a.1.total_cmp(b.1));
     (tic, base.map(|(i, _)| mz[i]), base.map(|(_, v)| *v))
 }
-fn range(spectra: &[MassSpectrum]) -> Option<[f64; 2]> {
-    let mut values = spectra.iter().flat_map(|s| s.mz.iter().copied());
-    let first = values.next()?;
-    Some(values.fold([first, first], |[lo, hi], v| [lo.min(v), hi.max(v)]))
-}
-fn polarity_order(p: Polarity) -> u8 {
-    match p {
-        Polarity::Positive => 0,
-        Polarity::Negative => 1,
-        Polarity::Unknown => 2,
-    }
-}
-fn polarity_label(p: Polarity) -> &'static str {
-    match p {
-        Polarity::Positive => "positive",
-        Polarity::Negative => "negative",
-        Polarity::Unknown => "unknown polarity",
-    }
-}
+
 pub(super) fn push_warning(warnings: &mut Vec<String>, message: String) {
     if warnings.len() + 1 < MAX_IMPORT_WARNINGS {
         warnings.push(message);

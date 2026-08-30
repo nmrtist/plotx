@@ -61,10 +61,24 @@ non-uniform sampling, and other arrayed experiments are not supported. See
 
 Open or drop a `.mzML` file. PlotX imports the spectra into the same LC–MS
 dataset and chart workflow used for Waters runs. Spectra are grouped by MS
-level and polarity; scan times recorded in seconds or minutes are displayed in
-minutes. PlotX also imports file-supplied TIC, BPC, SIM, and SRM chromatograms,
-including chromatogram-only acquisitions. Transition precursor/product m/z,
-polarity, collision energy, and activation method are retained when present.
+level and polarity, while each scan retains acquisition-function metadata such
+as its mzML instrument configuration, preset scan configuration, and filter
+string when present. Scan times recorded in seconds or minutes are displayed
+in minutes. PlotX prefers
+each spectrum's file-supplied TIC and base-peak summaries over values derived
+from profile samples, and retains whether each summary came from the source or
+was derived. PlotX also imports file-supplied TIC, BPC, SIM, and SRM
+chromatograms, including chromatogram-only acquisitions. Transition
+precursor/product m/z, polarity, collision energy, and activation method are
+retained when present.
+For MS2 and higher spectra, PlotX separately retains the precursor spectrum
+reference, selected-ion m/z, selected-ion intensity and charge, isolation-window
+target and offsets, collision energy, and activation method. This distinction
+preserves DIA isolation targets even when a selected ion is not present. The
+current data model stores one precursor and one selected ion per spectrum; an
+import warning identifies spectra with additional values and states that only
+the first was retained. Scientific Script scan snapshots expose the summary
+provenance, instrument configuration, source event or preset, and filter string.
 
 The importer accepts little-endian 32-bit and 64-bit floating-point m/z, time,
 and intensity arrays with no compression or zlib compression. Numpress,

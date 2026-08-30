@@ -64,10 +64,27 @@ pub enum SpectrumRepresentation {
     Unknown,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SpectrumSummaryProvenance {
+    Source,
+    Derived,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SpectrumAcquisition {
+    pub instrument_configuration_id: Option<String>,
+    pub source_event_id: Option<u32>,
+    pub filter_string: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Precursor {
-    pub selected_mz: f64,
+    pub source_spectrum_native_id: Option<String>,
+    pub selected_mz: Option<f64>,
+    pub selected_intensity: Option<f64>,
     pub charge: Option<i32>,
+    pub isolation_window_target_mz: Option<f64>,
     pub isolation_window_lower_offset: Option<f64>,
     pub isolation_window_upper_offset: Option<f64>,
     pub collision_energy: Option<f64>,
@@ -82,11 +99,14 @@ pub struct MassSpectrum {
     pub ms_level: u8,
     pub polarity: Polarity,
     pub representation: SpectrumRepresentation,
+    pub acquisition: SpectrumAcquisition,
     pub mz: Vec<f64>,
     pub intensity: Vec<f64>,
     pub tic: f64,
+    pub tic_provenance: SpectrumSummaryProvenance,
     pub base_peak_mz: Option<f64>,
     pub base_peak_intensity: Option<f64>,
+    pub base_peak_provenance: SpectrumSummaryProvenance,
     pub precursor: Option<Precursor>,
 }
 
@@ -342,6 +362,16 @@ impl MassSpecRun {
 fn validate_spectrum(stream: AcquisitionStreamId, spectrum: &MassSpectrum) -> Result<(), String> {
     if spectrum.ms_level == 0
         || !spectrum.retention_time_min.is_finite()
+        || spectrum
+            .acquisition
+            .instrument_configuration_id
+            .as_deref()
+            .is_some_and(str::is_empty)
+        || spectrum
+            .acquisition
+            .filter_string
+            .as_deref()
+            .is_some_and(str::is_empty)
         || spectrum.mz.len() != spectrum.intensity.len()
         || spectrum
             .mz
@@ -364,9 +394,17 @@ fn validate_spectrum(stream: AcquisitionStreamId, spectrum: &MassSpectrum) -> Re
         ));
     }
     if let Some(precursor) = &spectrum.precursor
-        && (!precursor.selected_mz.is_finite()
-            || precursor.selected_mz <= 0.0
+        && (precursor.source_spectrum_native_id.as_deref() == Some("")
+            || precursor
+                .selected_mz
+                .is_some_and(|v| !v.is_finite() || v <= 0.0)
+            || precursor
+                .selected_intensity
+                .is_some_and(|v| !v.is_finite() || v < 0.0)
             || precursor.charge == Some(0)
+            || precursor
+                .isolation_window_target_mz
+                .is_some_and(|v| !v.is_finite() || v <= 0.0)
             || precursor
                 .isolation_window_lower_offset
                 .is_some_and(|v| !v.is_finite() || v < 0.0)
@@ -397,14 +435,20 @@ mod tests {
             ms_level: 2,
             polarity: Polarity::Positive,
             representation: SpectrumRepresentation::Centroid,
+            acquisition: SpectrumAcquisition::default(),
             mz: vec![100.0],
             intensity: vec![5.0],
             tic: 5.0,
+            tic_provenance: SpectrumSummaryProvenance::Derived,
             base_peak_mz: Some(100.0),
             base_peak_intensity: Some(5.0),
+            base_peak_provenance: SpectrumSummaryProvenance::Derived,
             precursor: Some(Precursor {
-                selected_mz: 445.2,
+                source_spectrum_native_id: Some("scan=4".to_owned()),
+                selected_mz: Some(445.2),
+                selected_intensity: Some(50.0),
                 charge: Some(2),
+                isolation_window_target_mz: Some(445.0),
                 isolation_window_lower_offset: Some(0.5),
                 isolation_window_upper_offset: Some(0.5),
                 collision_energy: Some(20.0),

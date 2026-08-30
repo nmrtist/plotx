@@ -4,7 +4,7 @@ use crate::{
     Acquisition, AcquisitionStream, AcquisitionStreamId, ChromatogramChannel,
     ChromatogramChannelId, ChromatogramKind, DataFormat, IoError, LoadResult, LoadWarning,
     LoadWarningCode, MassSpecRun, MassSpectrometryFormat, MassSpectrum, Polarity, Provenance,
-    SpectrumId, SpectrumRepresentation, StreamRole,
+    SpectrumAcquisition, SpectrumId, SpectrumRepresentation, SpectrumSummaryProvenance, StreamRole,
 };
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -551,11 +551,14 @@ fn decode_low_resolution6(
             ms_level: 1,
             polarity,
             representation: SpectrumRepresentation::Unknown,
+            acquisition: SpectrumAcquisition::default(),
             mz: coordinates,
             intensity: values,
             tic,
+            tic_provenance: SpectrumSummaryProvenance::Derived,
             base_peak_mz,
             base_peak_intensity,
+            base_peak_provenance: SpectrumSummaryProvenance::Derived,
             precursor: None,
         });
     }
