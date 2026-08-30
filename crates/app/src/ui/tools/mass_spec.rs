@@ -11,6 +11,7 @@ pub(super) fn mass_spectrometry_group(app: &mut PlotxApp, di: usize, ui: &mut Ui
         return false;
     };
     let dataset_id = dataset.resource_id;
+    let selected_channel = app.selected_mass_spec_field(dataset_id);
     let active_stream = dataset.active_stream;
     let streams = dataset
         .supported_ms_streams()
@@ -81,6 +82,31 @@ pub(super) fn mass_spectrometry_group(app: &mut PlotxApp, di: usize, ui: &mut Ui
             "{} channels · {transition_count} transitions",
             dataset.run.chromatograms.len()
         ));
+    }
+
+    let channel_change = super::mass_spec_browser::channel_browser(dataset, selected_channel, ui);
+    let channel_change = channel_change.map(|id| {
+        let label = dataset
+            .run
+            .chromatograms
+            .iter()
+            .find(|channel| channel.id == id)
+            .map(|channel| channel.description.clone())
+            .unwrap_or_else(|| id.0.clone());
+        (id, label)
+    });
+    if let Some((channel, label)) = channel_change {
+        match app.select_mass_spec_channel(dataset_id, &channel) {
+            Ok(true) => {
+                app.focus_single(di);
+                app.session.status = format!("Selected chromatogram channel {label}.");
+            }
+            Ok(false) => {}
+            Err(error) => app.session.status = error,
+        }
+    }
+
+    if streams.is_empty() {
         return false;
     }
 

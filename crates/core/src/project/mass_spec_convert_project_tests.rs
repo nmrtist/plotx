@@ -69,3 +69,36 @@ fn imported_mzml_run_survives_project_round_trip() {
     assert_eq!(spectrum.mz, [1.0]);
     assert_eq!(spectrum.intensity, [2.0]);
 }
+
+#[test]
+fn selected_chromatogram_channel_binding_survives_project_round_trip() {
+    let mut run = crate::state::sample_mass_spec_run();
+    run.streams.clear();
+    run.chromatograms
+        .retain(|channel| channel.kind == ChromatogramKind::Optical);
+    let selected = run.chromatograms[1].id.clone();
+    let dataset =
+        crate::state::Dataset::MassSpec(Box::new(crate::state::MassSpecDataset::load(run)));
+    let dataset_id = dataset.resource_id();
+    let mut app = crate::state::PlotxApp::new();
+    app.doc.canvases.push(crate::workflow::build_default_canvas(
+        &dataset,
+        "channels.mzML",
+    ));
+    app.doc.datasets.push(dataset);
+    app.session.active_canvas = Some(0);
+    assert!(app.select_mass_spec_channel(dataset_id, &selected).unwrap());
+
+    let path = std::env::temp_dir().join(format!(
+        "plotx-channel-binding-round-trip-{}.plotx",
+        std::process::id()
+    ));
+    crate::project::save_project(&app, &path, false).unwrap();
+    let loaded = crate::project::load_project(&path).unwrap();
+    std::fs::remove_file(path).unwrap();
+
+    assert_eq!(
+        loaded.selected_mass_spec_channel(dataset_id),
+        Some(selected)
+    );
+}

@@ -67,6 +67,19 @@ DIA 没有 selected ion，其隔离窗目标也不会被误写成 selected-ion m
 指出对应谱图，并说明只保留了第一个值。Scientific Script 的 scan 快照会暴露摘要
 provenance、instrument configuration、源 event 或 preset，以及 filter string。
 
+对于包含大量色谱 channel 的数据，请通过 **Extract Mass Spectrum** 或命令面板打开
+**Dataset tools → Mass spectrometry**。**Chromatogram channels** 浏览器会显示稳定的
+数量和顺序，其中 TIC、BPC 排在 SIM/SRM transition 之前。自由文本可匹配 channel
+名称和 native ID；对于结构化 transition，还可按 precursor m/z、product m/z、极性、
+碰撞能量和活化方法筛选。数值输入支持精确值、`>=400` 之类的比较式，以及
+`400..500` 之类的区间。
+
+选择一行会通过 PlotX 原有的 field 与 binding 流程，把当前 LC–MS 色谱图中的 series
+替换为该单一 channel；质谱图绝不会被重新绑定。该操作可使用标准命令撤销，并随页面
+保存到 `.plotx` 项目。只有色谱图的采集也使用同一浏览器。没有可绘制 channel、没有
+结构化 transition metadata 或当前筛选无结果时，面板都会给出明确提示。列表采用
+虚拟化渲染，大型 scheduled-MRM 数据只创建当前可见行。
+
 导入器支持小端 32 位和 64 位浮点 m/z、时间与强度数组，可不压缩或使用 zlib
 压缩。Numpress、大端数组以及缺少必需数组的谱图或色谱图会使导入停止并显示错误。
 

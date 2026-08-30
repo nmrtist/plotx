@@ -7,6 +7,7 @@ mod curve_fit;
 mod electrophysiology;
 mod line_fit;
 mod mass_spec;
+mod mass_spec_browser;
 mod processing;
 mod pseudo;
 mod region_analysis;

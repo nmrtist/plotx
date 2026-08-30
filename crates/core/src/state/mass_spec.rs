@@ -6,7 +6,8 @@ use super::{
 };
 use plotx_figure::{Axis, Figure, Series, SeriesKind};
 use plotx_io::{
-    AcquisitionStreamId, ChromatogramKind, MassSpecRun, MassSpectrum, SpectrumId, StreamRole,
+    AcquisitionStreamId, ChromatogramChannel, ChromatogramChannelId, ChromatogramKind, MassSpecRun,
+    MassSpectrum, SpectrumId, StreamRole,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -83,6 +84,17 @@ pub struct MassSpecDataset {
 }
 
 impl MassSpecDataset {
+    pub fn channel_field_id(&self, channel: &ChromatogramChannelId) -> Option<FieldId> {
+        self.field_catalog.id_for_key(&channel_key(&channel.0))
+    }
+
+    pub fn channel_for_field(&self, field: FieldId) -> Option<&ChromatogramChannel> {
+        self.run
+            .chromatograms
+            .iter()
+            .find(|channel| self.channel_field_id(&channel.id) == Some(field))
+    }
+
     /// Resolve a chromatogram field to the stream whose scan cursor it drives.
     /// Optical channels intentionally use the active MS stream.
     pub fn chromatogram_stream_for_field(&self, field: FieldId) -> Option<AcquisitionStreamId> {

@@ -80,6 +80,22 @@ import warning identifies spectra with additional values and states that only
 the first was retained. Scientific Script scan snapshots expose the summary
 provenance, instrument configuration, source event or preset, and filter string.
 
+For runs with many chromatogram channels, open **Dataset tools → Mass
+spectrometry** from **Extract Mass Spectrum** or the command palette. The
+**Chromatogram channels** browser lists a stable count and ordering, with TIC
+and BPC ahead of SIM/SRM transitions. Search matches channel names and native
+IDs. Structured transitions can also be filtered by precursor m/z, product
+m/z, polarity, collision energy, and activation method. Numeric fields accept
+an exact value, comparisons such as `>=400`, or a range such as `400..500`.
+
+Selecting a row replaces the series on the current LC–MS chromatogram plot with
+that single channel through the normal PlotX field and binding workflow. Mass-
+spectrum plots are never retargeted. The choice is undoable and is saved with
+the page in a `.plotx` project. Chromatogram-only runs use the same browser.
+The panel reports when a run has no plottable channels, no structured transition
+metadata, or no channels matching the current filters. The list is virtualized,
+so only visible rows are created for large scheduled-MRM runs.
+
 The importer accepts little-endian 32-bit and 64-bit floating-point m/z, time,
 and intensity arrays with no compression or zlib compression. Numpress,
 big-endian arrays, and spectra or chromatograms without their required arrays

@@ -81,6 +81,7 @@ mod lineage;
 mod linefit;
 mod mass_spec;
 mod mass_spec_app;
+mod mass_spec_channels;
 mod mass_spec_ranges;
 mod mass_spec_tic;
 mod mass_spec_xic;
