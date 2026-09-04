@@ -87,6 +87,8 @@ pub struct AppearanceSettings {
     #[serde(default)]
     pub theme: ThemeMode,
     #[serde(default)]
+    pub show_status_bar: bool,
+    #[serde(default)]
     pub ui_scale: UiScaleSettings,
     #[serde(default)]
     pub graphics_power: GraphicsPowerPreference,

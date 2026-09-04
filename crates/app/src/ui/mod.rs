@@ -244,6 +244,9 @@ fn copy_table_export(ctx: &egui::Context, payload: plotx_core::data_export::Clip
 }
 
 fn render_status(app: &PlotxApp, ui: &mut Ui, dark: bool) {
+    if !app.settings.appearance.show_status_bar {
+        return;
+    }
     egui::Panel::bottom("status")
         .frame(
             card_frame(
@@ -619,6 +622,37 @@ fn flush_frame(dark: bool, inner_margin: egui::Margin) -> egui::Frame {
 #[cfg(test)]
 #[path = "sidebar_tests.rs"]
 mod sidebar_tests;
+
+#[cfg(test)]
+mod status_bar_tests {
+    use super::*;
+    use egui::{Pos2, RawInput, Rect, vec2};
+
+    fn remaining_height(app: &PlotxApp) -> f32 {
+        let ctx = crate::typography::test_context();
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0))),
+            ..Default::default()
+        };
+        let mut height = 0.0;
+        let _ = ctx.run_ui(input, |ui| {
+            render_status(app, ui, false);
+            height = ui.available_height();
+        });
+        height
+    }
+
+    #[test]
+    fn status_bar_only_reserves_workspace_when_enabled() {
+        let mut app = PlotxApp::new_with_settings(plotx_core::settings::Settings::default());
+        let hidden_height = remaining_height(&app);
+
+        app.settings.appearance.show_status_bar = true;
+        let shown_height = remaining_height(&app);
+
+        assert!(shown_height < hidden_height);
+    }
+}
 
 #[cfg(test)]
 mod feedback_tests {

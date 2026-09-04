@@ -645,6 +645,12 @@ pub const PRESENTATIONS: &[PropertyPresentation] = &[
         APPEARANCE_PREFERENCES_HOME,
     ),
     preference_entry(
+        app_preferences::SHOW_STATUS_BAR,
+        "Show status bar",
+        &[LocalizedText("bottom status")],
+        APPEARANCE_PREFERENCES_HOME,
+    ),
+    preference_entry(
         app_preferences::GRAPHICS_POWER,
         "Graphics processor",
         &[LocalizedText("GPU preference")],

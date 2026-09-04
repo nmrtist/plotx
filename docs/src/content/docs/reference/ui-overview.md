@@ -36,7 +36,8 @@ introduces the same regions in walkthrough form.
   shortcut surface: everything on it is also in the menus or command palette.
   See [the Ribbon](/reference/ribbon/) for every tab's groups.
 - **Status bar** — the bottom strip, showing hints, progress, and selection
-  details.
+  details. It is hidden by default to leave more room for the workspace; enable
+  **Show status bar** under **Preferences → Appearance** when you want it.
 
 Both Side Bars can be shown or hidden at any time: click the pair of layout
 buttons at the right end of the Ribbon's task row, press

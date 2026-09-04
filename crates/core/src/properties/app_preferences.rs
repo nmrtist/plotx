@@ -21,6 +21,7 @@ pub const KEEP_EMPTY_SOURCE_CANVAS: PropertyId =
 pub const PROJECT_BACKUP_GENERATIONS: PropertyId =
     PropertyId("settings.general.project_backup_generations");
 pub const THEME: PropertyId = PropertyId("settings.appearance.theme");
+pub const SHOW_STATUS_BAR: PropertyId = PropertyId("settings.appearance.show_status_bar");
 pub const GRAPHICS_POWER: PropertyId = PropertyId("settings.appearance.graphics_power");
 pub const ACCENT_COLOR: PropertyId = PropertyId("settings.appearance.accent.color");
 pub const INCLUDE_VIEW_SNAPSHOTS: PropertyId = PropertyId("settings.export.include_view_snapshots");
@@ -144,6 +145,13 @@ pub(crate) const DEFINITIONS: &[PropertyDefinition] = &[
         DefaultPolicy::Fixed(PropertyValue::Enum(THEME_SYSTEM)),
         "Chrome theme",
         &["appearance theme", "light mode", "dark mode"],
+    ),
+    app_definition(
+        SHOW_STATUS_BAR,
+        ValueSchema::Bool,
+        DefaultPolicy::Fixed(PropertyValue::Bool(false)),
+        "Show status bar",
+        &["status bar", "bottom status"],
     ),
     app_definition(
         GRAPHICS_POWER,
@@ -316,6 +324,7 @@ fn value_of(app: &PlotxApp, id: PropertyId) -> Result<PropertyValue, PropertyErr
             PropertyValue::Int(i64::from(settings.general.project_backup_generations))
         }
         THEME => PropertyValue::Enum(theme_key(settings.appearance.theme)),
+        SHOW_STATUS_BAR => PropertyValue::Bool(settings.appearance.show_status_bar),
         GRAPHICS_POWER => PropertyValue::Enum(graphics_key(settings.appearance.graphics_power)),
         ACCENT_COLOR => {
             let [r, g, b] = settings.appearance.canvas_accent.unwrap_or([
@@ -389,6 +398,9 @@ fn write_value(
         }
         (THEME, PropertyValue::Enum(value)) => {
             settings.appearance.theme = theme(value).expect("validated theme")
+        }
+        (SHOW_STATUS_BAR, PropertyValue::Bool(value)) => {
+            settings.appearance.show_status_bar = value
         }
         (GRAPHICS_POWER, PropertyValue::Enum(value)) => {
             settings.appearance.graphics_power = graphics(value).expect("validated graphics power")
