@@ -121,6 +121,10 @@ fn request_board_fit_viewport_targets_exact_camera() {
     let ctx = egui::Context::default();
     request_board_fit_viewport(&mut app, &ctx, 2.5, [30.0, -40.0]);
     assert_eq!(
+        workspace_render_detail(&ctx, 0.0),
+        plotx_render::screen::ScreenRenderDetail::Interactive
+    );
+    assert_eq!(
         app.session.viewport_mode,
         ViewportMode::Fit(BoardFitTarget::Viewport {
             zoom: 2.5,

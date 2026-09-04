@@ -5,6 +5,12 @@
 pub mod contour;
 pub mod integral;
 #[cfg(feature = "screen")]
+mod screen_contour_cache;
+#[cfg(feature = "screen")]
+mod screen_contours;
+#[cfg(feature = "screen")]
+mod screen_lod;
+#[cfg(feature = "screen")]
 mod screen_stats;
 pub mod svg;
 mod ticks;
@@ -100,6 +106,8 @@ pub struct DocumentObject<'a> {
     pub id: String,
     pub frame: Rect,
     pub figure: &'a Figure,
+    /// Runtime identity for editor-only geometry caches. Exporters ignore it.
+    pub geometry_generation: Option<u64>,
     pub visible: bool,
     pub title: Option<DocumentText>,
 }

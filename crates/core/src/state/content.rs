@@ -172,6 +172,7 @@ pub fn document_item(
             id: format!("object_{}", object.id),
             frame: frame.rect(),
             figure: plot.figure(),
+            geometry_generation: Some(plot.figure_geometry_generation()),
             visible,
             title: None,
         }),

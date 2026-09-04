@@ -1,22 +1,27 @@
 pub use crate::screen_stats::RenderStats;
-use crate::screen_stats::visible_source_len;
 use crate::{
     AXIS_LINE_WIDTH, Document, DocumentItem, DocumentObject, DocumentOverlay, DocumentViewport,
     OUTER_PAD, OverlayAlign, OverlayKind, OverlayShape, OverlayShapeKind, OverlayText, Projector,
     Rect, TICK_LABEL_PAD, TICK_LENGTH, arrow_head, axis_layout, error_bar_segments, heatmap_cells,
     integral, polygon_outline, projection_points,
+    screen_contours::paint_contours,
+    screen_lod::{line_columns, screen_line_points},
 };
 use egui::{Align2, Color32, FontId, Pos2, Sense, Shape, Stroke, StrokeKind, Ui, Vec2};
 use plotx_figure::{AxisFrame, AxisTrace, Color, Figure, SeriesKind};
-use std::borrow::Cow;
 
 mod color_scale;
 mod legend;
 mod sticks;
 
-/// Bounds on a pooled line's column grid.
-const MIN_LINE_COLUMNS: usize = 2_048;
-const MAX_LINE_COLUMNS: usize = 16_384;
+/// Screen geometry fidelity. Interactive mode bounds costly geometry by pixels.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ScreenRenderDetail {
+    #[default]
+    Full,
+    /// Temporarily omit sub-pixel detail during workspace camera movement.
+    Interactive,
+}
 
 fn col(c: Color) -> Color32 {
     Color32::from_rgb(c.r, c.g, c.b)
@@ -42,6 +47,30 @@ pub fn paint_with_stats(
     outer: Rect,
     fig: &Figure,
     scale: f32,
+    stats: Option<&mut RenderStats>,
+) {
+    paint_with_detail_and_stats(painter, outer, fig, scale, ScreenRenderDetail::Full, stats);
+}
+
+/// Paint one figure with an explicit screen detail level and optional counters.
+pub fn paint_with_detail_and_stats(
+    painter: &egui::Painter,
+    outer: Rect,
+    fig: &Figure,
+    scale: f32,
+    detail: ScreenRenderDetail,
+    stats: Option<&mut RenderStats>,
+) {
+    paint_with_detail_and_stats_impl(painter, outer, fig, scale, detail, None, stats);
+}
+
+fn paint_with_detail_and_stats_impl(
+    painter: &egui::Painter,
+    outer: Rect,
+    fig: &Figure,
+    scale: f32,
+    detail: ScreenRenderDetail,
+    geometry_generation: Option<u64>,
     mut stats: Option<&mut RenderStats>,
 ) {
     let ty = fig.typography;
@@ -276,14 +305,17 @@ pub fn paint_with_stats(
 
     crate::screen_annotations::paint(&clipped, fig, &proj, plot, scale);
 
-    for contour in &fig.contours {
-        let stroke = Stroke::new(contour.width * scale, col(contour.color));
-        for seg in &contour.segments {
-            let (ax, ay) = proj.project(seg[0]);
-            let (bx, by) = proj.project(seg[1]);
-            clipped.line_segment([to_pos(ax, ay), to_pos(bx, by)], stroke);
-        }
-    }
+    paint_contours(
+        painter,
+        &clipped,
+        fig,
+        &proj,
+        plot,
+        scale,
+        detail,
+        geometry_generation,
+        &mut stats,
+    );
 
     paint_error_bars(&clipped, &proj, fig, scale, false);
 
@@ -296,7 +328,7 @@ pub fn paint_with_stats(
                 if let Some(stats) = stats.as_deref_mut() {
                     stats.line_series_visited += 1;
                 }
-                let columns = line_columns(plot.width, painter.ctx().pixels_per_point());
+                let columns = line_columns(detail, plot.width, painter.ctx().pixels_per_point());
                 let visible = screen_line_points(
                     &series.points,
                     fig.x.min.min(fig.x.max),
@@ -304,16 +336,14 @@ pub fn paint_with_stats(
                     columns,
                 );
                 if let Some(stats) = stats.as_deref_mut() {
-                    if matches!(visible, Cow::Owned(_)) {
-                        stats.line_source_points_scanned += visible_source_len(
-                            &series.points,
-                            fig.x.min.min(fig.x.max),
-                            fig.x.min.max(fig.x.max),
-                        );
-                    }
-                    stats.line_points_emitted += visible.len();
+                    stats.record_line(
+                        visible.source_points_visited,
+                        visible.points.len(),
+                        visible.pooled,
+                    );
                 }
                 let pts: Vec<Pos2> = visible
+                    .points
                     .iter()
                     .map(|p| {
                         let (px, py) = proj.project(*p);
@@ -407,89 +437,6 @@ fn paint_error_bars(
     }
 }
 
-/// Two columns per physical pixel, so a pooled bucket stays sub-pixel.
-/// `plot_width` is in egui points; without the conversion a HiDPI screen would
-/// silently render at half its resolution.
-fn line_columns(plot_width: f32, pixels_per_point: f32) -> usize {
-    let physical = (plot_width * pixels_per_point.max(1.0)).max(1.0) as usize;
-    physical
-        .saturating_mul(2)
-        .clamp(MIN_LINE_COLUMNS, MAX_LINE_COLUMNS)
-}
-
-/// Clip to the viewport, then pool dense lines into min/max envelope buckets.
-fn screen_line_points(
-    points: &[[f64; 2]],
-    x_min: f64,
-    x_max: f64,
-    columns: usize,
-) -> Cow<'_, [[f64; 2]]> {
-    // Keep one neighbour on each side for continuity. Handles ascending traces
-    // (time) and descending ones (NMR ppm); a flat or non-monotonic series keeps
-    // its whole extent, which is safe but less selective.
-    let first_x = points.first().map(|p| p[0]);
-    let last_x = points.last().map(|p| p[0]);
-    let (start, end) = match (first_x, last_x) {
-        (Some(first), Some(last)) if first < last => {
-            let start = points
-                .partition_point(|point| point[0] < x_min)
-                .saturating_sub(1);
-            let end = points
-                .partition_point(|point| point[0] <= x_max)
-                .saturating_add(1)
-                .min(points.len());
-            (start.min(end), end)
-        }
-        (Some(first), Some(last)) if first > last => {
-            let start = points
-                .partition_point(|point| point[0] > x_max)
-                .saturating_sub(1);
-            let end = points
-                .partition_point(|point| point[0] >= x_min)
-                .saturating_add(1)
-                .min(points.len());
-            (start.min(end), end)
-        }
-        _ => (0, points.len()),
-    };
-    let visible = &points[start..end];
-    if visible.len() <= columns.saturating_mul(2) {
-        return Cow::Borrowed(visible);
-    }
-
-    let bucket_count = columns.max(1);
-    let bucket_size = visible.len().div_ceil(bucket_count);
-    let mut pooled = Vec::with_capacity(bucket_count * 2 + 2);
-    pooled.push(visible[0]);
-    for bucket in visible.chunks(bucket_size) {
-        let mut min_index = 0;
-        let mut max_index = 0;
-        for index in 1..bucket.len() {
-            if bucket[index][1] < bucket[min_index][1] {
-                min_index = index;
-            }
-            if bucket[index][1] > bucket[max_index][1] {
-                max_index = index;
-            }
-        }
-        if min_index <= max_index {
-            pooled.push(bucket[min_index]);
-            if max_index != min_index {
-                pooled.push(bucket[max_index]);
-            }
-        } else {
-            pooled.push(bucket[max_index]);
-            pooled.push(bucket[min_index]);
-        }
-    }
-    if let Some(last) = visible.last()
-        && pooled.last() != Some(last)
-    {
-        pooled.push(*last);
-    }
-    Cow::Owned(pooled)
-}
-
 fn paint_projection(
     painter: &egui::Painter,
     fig: &Figure,
@@ -542,7 +489,15 @@ pub fn paint_document(
     document: &Document<'_>,
     viewport: DocumentViewport,
 ) {
-    paint_document_impl(painter, screen, document, viewport, true, None);
+    paint_document_impl(
+        painter,
+        screen,
+        document,
+        viewport,
+        true,
+        ScreenRenderDetail::Full,
+        None,
+    );
 }
 
 /// Paint the editable board representation. The page background stays bounded,
@@ -554,7 +509,38 @@ pub fn paint_document_for_editor(
     document: &Document<'_>,
     viewport: DocumentViewport,
 ) {
-    paint_document_impl(painter, screen, document, viewport, false, None);
+    paint_document_for_editor_with_detail(
+        painter,
+        screen,
+        document,
+        viewport,
+        ScreenRenderDetail::Full,
+    );
+}
+
+/// Paint an editable document using the requested screen detail level.
+pub fn paint_document_for_editor_with_detail(
+    painter: &egui::Painter,
+    screen: Rect,
+    document: &Document<'_>,
+    viewport: DocumentViewport,
+    detail: ScreenRenderDetail,
+) {
+    paint_document_for_editor_with_detail_and_stats(
+        painter, screen, document, viewport, detail, None,
+    );
+}
+
+/// Paint an editable document with explicit detail and optional counters.
+pub fn paint_document_for_editor_with_detail_and_stats(
+    painter: &egui::Painter,
+    screen: Rect,
+    document: &Document<'_>,
+    viewport: DocumentViewport,
+    detail: ScreenRenderDetail,
+    stats: Option<&mut RenderStats>,
+) {
+    paint_document_impl(painter, screen, document, viewport, false, detail, stats);
 }
 
 pub fn paint_document_with_stats(
@@ -564,7 +550,15 @@ pub fn paint_document_with_stats(
     viewport: DocumentViewport,
     stats: Option<&mut RenderStats>,
 ) {
-    paint_document_impl(painter, screen, document, viewport, true, stats);
+    paint_document_impl(
+        painter,
+        screen,
+        document,
+        viewport,
+        true,
+        ScreenRenderDetail::Full,
+        stats,
+    );
 }
 
 fn paint_document_impl(
@@ -573,10 +567,11 @@ fn paint_document_impl(
     document: &Document<'_>,
     viewport: DocumentViewport,
     clip_items_to_page: bool,
+    detail: ScreenRenderDetail,
     mut stats: Option<&mut RenderStats>,
 ) {
     if let Some(stats) = stats.as_deref_mut() {
-        stats.documents_painted += 1;
+        stats.record_document(detail);
     }
     let page = Rect::new(
         screen.left + viewport.pan[0],
@@ -598,9 +593,14 @@ fn paint_document_impl(
 
     for item in &document.items {
         match item {
-            DocumentItem::Plot(object) => {
-                paint_document_object(&item_painter, page, object, viewport, stats.as_deref_mut())
-            }
+            DocumentItem::Plot(object) => paint_document_object(
+                &item_painter,
+                page,
+                object,
+                viewport,
+                detail,
+                stats.as_deref_mut(),
+            ),
             DocumentItem::Overlay(overlay) => {
                 paint_document_overlay(&item_painter, page, overlay, viewport)
             }
@@ -644,6 +644,7 @@ fn paint_document_object(
     page: Rect,
     object: &DocumentObject,
     viewport: DocumentViewport,
+    detail: ScreenRenderDetail,
     stats: Option<&mut RenderStats>,
 ) {
     if !object.visible {
@@ -655,7 +656,15 @@ fn paint_document_object(
         object.frame.width * viewport.zoom,
         object.frame.height * viewport.zoom,
     );
-    paint_with_stats(painter, frame, object.figure, viewport.zoom, stats);
+    paint_with_detail_and_stats_impl(
+        painter,
+        frame,
+        object.figure,
+        viewport.zoom,
+        detail,
+        object.geometry_generation,
+        stats,
+    );
     if let Some(title) = &object.title {
         let pos = Pos2::new(
             frame.left + title.position[0] * viewport.zoom,

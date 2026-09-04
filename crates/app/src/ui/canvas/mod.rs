@@ -59,6 +59,7 @@ mod phase;
 mod readout;
 mod reference_pick;
 mod regions;
+mod render_detail;
 mod slices;
 mod snap;
 mod symmetry;
@@ -89,6 +90,7 @@ pub(crate) use phase::*;
 pub(crate) use readout::*;
 pub(crate) use reference_pick::*;
 pub(crate) use regions::*;
+use render_detail::*;
 pub(crate) use selection_painting::*;
 pub(crate) use slices::*;
 pub(crate) use snap::*;
@@ -113,6 +115,8 @@ fn finite_rect_intersects(a: egui::Rect, b: egui::Rect) -> bool {
 #[cfg(test)]
 #[path = "mod_tests.rs"]
 mod tests;
+#[cfg(test)]
+mod workspace_render_bench;
 
 #[derive(Clone, Copy)]
 pub(crate) enum CanvasInteractionClearScope {

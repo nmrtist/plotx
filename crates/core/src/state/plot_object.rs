@@ -3,6 +3,17 @@ use super::{
     SeriesId, StackSpec,
 };
 use plotx_figure::{Figure, FigureTypography};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static NEXT_FIGURE_GEOMETRY_GENERATION: AtomicU64 = AtomicU64::new(1);
+
+fn next_figure_geometry_generation() -> u64 {
+    NEXT_FIGURE_GEOMETRY_GENERATION
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+            value.checked_add(1)
+        })
+        .expect("figure geometry generation overflow")
+}
 
 #[derive(Clone)]
 pub struct PlotObject {
@@ -25,6 +36,9 @@ pub struct PlotObject {
     /// overrides are applied. Derived property defaults read this artifact.
     derived_axes: DerivedAxes,
     figure: Figure,
+    /// Runtime-only identity for screen geometry caches. Clones retain it because
+    /// their contour buffers have identical contents; figure rebuilds replace it.
+    figure_geometry_generation: u64,
     pub viewport: CanvasViewport,
 }
 
@@ -52,6 +66,7 @@ impl PlotObject {
             axis_overrides,
             derived_axes,
             figure,
+            figure_geometry_generation: next_figure_geometry_generation(),
             viewport,
         }
     }
@@ -81,12 +96,17 @@ impl PlotObject {
             axis_overrides,
             derived_axes,
             figure,
+            figure_geometry_generation: next_figure_geometry_generation(),
             viewport,
         }
     }
 
     pub fn figure(&self) -> &Figure {
         &self.figure
+    }
+
+    pub fn figure_geometry_generation(&self) -> u64 {
+        self.figure_geometry_generation
     }
 
     pub fn derived_axes(&self) -> &DerivedAxes {
@@ -139,6 +159,7 @@ impl PlotObject {
         self.derived_axes = DerivedAxes::from_figure(&figure);
         prepare(self, &mut figure);
         self.figure = figure;
+        self.figure_geometry_generation = next_figure_geometry_generation();
     }
 
     /// Adopt a rebuilt figure whose chart semantics may have changed.
@@ -206,6 +227,23 @@ impl PlotObject {
         self.viewport.apply_to(&mut self.figure);
     }
 
+    /// Zoom the requested axes in place without cloning the materialized figure.
+    /// Anchors are data coordinates; `None` leaves that axis unchanged.
+    pub fn zoom_viewport_around(
+        &mut self,
+        x_anchor: Option<f64>,
+        y_anchor: Option<f64>,
+        scale: f64,
+    ) {
+        if let Some(anchor) = x_anchor {
+            self.viewport.zoom_x(&self.figure, anchor, scale);
+        }
+        if let Some(anchor) = y_anchor {
+            self.viewport.zoom_y(anchor, scale);
+        }
+        self.viewport.apply_to(&mut self.figure);
+    }
+
     pub(crate) fn apply_axis_overrides(&mut self) {
         self.axis_overrides.apply_to(&mut self.figure);
     }
@@ -241,5 +279,47 @@ impl PlotObject {
 
     fn has_manual_y_range(&self, figure: &Figure) -> bool {
         self.axis_overrides.y_range.is_some() && figure.y.categories.is_none()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use plotx_figure::{Axis, Color, Contour, Series};
+
+    #[test]
+    fn in_place_zoom_preserves_figure_buffers() {
+        let mut figure = Figure::new("", Axis::new("x", 0.0, 10.0), Axis::new("y", 0.0, 10.0));
+        figure.series.push(Series::line(
+            "trace",
+            (0..32)
+                .map(|index| [index as f64 / 3.1, index as f64])
+                .collect(),
+        ));
+        figure.contours.push(Contour {
+            segments: vec![[[0.0, 0.0], [1.0, 1.0]], [[9.0, 1.0], [10.0, 2.0]]],
+            color: Color::BLACK,
+            width: 1.0,
+        });
+        let viewport = CanvasViewport::from_figure(&figure);
+        let mut plot = PlotObject::new(
+            None,
+            SeriesId::new(1),
+            DataBinding { series: Vec::new() },
+            ChartSpec::default(),
+            StackSpec::default(),
+            AxisProjections::default(),
+            AxisOverrides::default(),
+            figure,
+            viewport,
+        );
+        let line_buffer = plot.figure().series[0].points.as_ptr();
+        let contour_buffer = plot.figure().contours[0].segments.as_ptr();
+
+        plot.zoom_viewport_around(Some(5.0), Some(5.0), 0.8);
+        plot.zoom_viewport_around(Some(4.0), None, 0.8);
+
+        assert_eq!(plot.figure().series[0].points.as_ptr(), line_buffer);
+        assert_eq!(plot.figure().contours[0].segments.as_ptr(), contour_buffer);
     }
 }

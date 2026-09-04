@@ -24,6 +24,7 @@ pub(crate) fn request_board_fit(app: &mut PlotxApp, ctx: &egui::Context, frame: 
     };
     app.session.viewport_mode = ViewportMode::Fit(BoardFitTarget::Frame(frame));
     seed_board_fit_springs(app, ctx);
+    mark_workspace_navigation(ctx, ctx.input(|input| input.time));
 }
 
 /// Consume the transient core request once UI animation services are available.
@@ -33,12 +34,14 @@ pub(crate) fn consume_board_reveal(app: &mut PlotxApp, ctx: &egui::Context) {
     {
         app.session.viewport_mode = ViewportMode::Fit(BoardFitTarget::Frame(frame));
         seed_board_fit_springs(app, ctx);
+        mark_workspace_navigation(ctx, ctx.input(|input| input.time));
     }
 }
 
 pub(crate) fn request_board_fit_region(app: &mut PlotxApp, ctx: &egui::Context, bbox: [f32; 4]) {
     app.session.viewport_mode = ViewportMode::Fit(BoardFitTarget::Region(bbox));
     seed_board_fit_springs(app, ctx);
+    mark_workspace_navigation(ctx, ctx.input(|input| input.time));
 }
 
 pub(crate) fn request_board_fit_viewport(
@@ -49,6 +52,7 @@ pub(crate) fn request_board_fit_viewport(
 ) {
     app.session.viewport_mode = ViewportMode::Fit(BoardFitTarget::Viewport { zoom, world_center });
     seed_board_fit_springs(app, ctx);
+    mark_workspace_navigation(ctx, ctx.input(|input| input.time));
 }
 
 /// Hand the board viewport to the user for the lifetime of a direct-manipulation
@@ -162,6 +166,7 @@ pub(crate) fn drive_board_fit(
     };
     let ctx = ui.ctx();
     let dt = ui.input(|i| i.stable_dt);
+    let before = app.session.board;
     app.session.board.zoom =
         crate::ui::switcher::animate_spring(ctx, egui::Id::new(FIT_ZOOM_ID), target.zoom, dt);
     app.session.board.world_center[0] = crate::ui::switcher::animate_spring(
@@ -176,6 +181,9 @@ pub(crate) fn drive_board_fit(
         target.world_center[1],
         dt,
     );
+    if app.session.board != before {
+        mark_workspace_navigation(ctx, ui.input(|input| input.time));
+    }
 }
 
 fn fit_bbox_around_occluders(

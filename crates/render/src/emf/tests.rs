@@ -12,6 +12,7 @@ fn demo_document(fig: &Figure) -> Document<'_> {
             id: "obj".into(),
             frame: Rect::new(20.0, 20.0, 360.0, 260.0),
             figure: fig,
+            geometry_generation: None,
             visible: true,
             title: None,
         })],

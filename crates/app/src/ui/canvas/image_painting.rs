@@ -69,7 +69,8 @@ pub(super) fn paint_document(app: &PlotxApp, ci: usize, rect: egui::Rect, painte
     };
     let zoom = app.session.board.zoom;
     let bp = canvas.board_pos;
-    plotx_render::screen::paint_document_for_editor(
+    let detail = workspace_render_detail(painter.ctx(), painter.ctx().input(|input| input.time));
+    plotx_render::screen::paint_document_for_editor_with_detail(
         painter,
         PlotRect::new(rect.left(), rect.top(), rect.width(), rect.height()),
         &document,
@@ -80,6 +81,7 @@ pub(super) fn paint_document(app: &PlotxApp, ci: usize, rect: egui::Rect, painte
                 rect.height() * 0.5 + (bp[1] - app.session.board.world_center[1]) * zoom,
             ],
         },
+        detail,
     );
 }
 

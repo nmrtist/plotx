@@ -210,6 +210,7 @@ pub(crate) fn handle_navigation(app: &mut PlotxApp, ci: usize, rect: egui::Rect,
                     }
                     Some(TrackpadNavigationTarget::Board) | None => {
                         pan_board_view(app, delta);
+                        mark_workspace_navigation(ui.ctx(), now);
                         ui.ctx().request_repaint();
                     }
                 }
@@ -237,6 +238,7 @@ pub(crate) fn handle_navigation(app: &mut PlotxApp, ci: usize, rect: egui::Rect,
                     None => {
                         app.session.viewport_mode = ViewportMode::Manual;
                         zoom_board_view(app, rect, p, zoom_delta);
+                        mark_workspace_navigation(ui.ctx(), now);
                         ui.ctx().request_repaint();
                     }
                 }
@@ -265,6 +267,7 @@ pub(crate) fn handle_navigation(app: &mut PlotxApp, ci: usize, rect: egui::Rect,
                         let factor = (amount * WHEEL_ZOOM_SPEED).exp();
                         app.session.viewport_mode = ViewportMode::Manual;
                         zoom_board_view(app, rect, p, factor);
+                        mark_workspace_navigation(ui.ctx(), now);
                         ui.ctx().request_repaint();
                         true
                     }
@@ -320,6 +323,7 @@ pub(crate) fn handle_navigation(app: &mut PlotxApp, ci: usize, rect: egui::Rect,
         }
         if delta != Vec2::ZERO {
             pan_board_view(app, delta);
+            mark_workspace_navigation(ui.ctx(), now);
         }
         ui.ctx().request_repaint();
         return true;
@@ -779,16 +783,10 @@ pub(crate) fn zoom_plot_viewport(
     else {
         return;
     };
-    let fig = plot_object.figure().clone();
-    if zoom_x {
-        let anchor = screen_to_x(p.x, plot, fig.x.min, fig.x.span(), fig.x.reversed);
-        plot_object.viewport.zoom_x(&fig, anchor, scale);
-    }
-    if zoom_y {
-        let anchor = screen_to_y(p.y, plot, fig.y.min, fig.y.span(), fig.y.reversed);
-        plot_object.viewport.zoom_y(anchor, scale);
-    }
-    plot_object.apply_viewport();
+    let fig = plot_object.figure();
+    let x_anchor = zoom_x.then(|| screen_to_x(p.x, plot, fig.x.min, fig.x.span(), fig.x.reversed));
+    let y_anchor = zoom_y.then(|| screen_to_y(p.y, plot, fig.y.min, fig.y.span(), fig.y.reversed));
+    plot_object.zoom_viewport_around(x_anchor, y_anchor, scale);
     app.sync_linked_x_viewports(ci, object_id);
     app.mark_document_dirty();
     ui.ctx()
