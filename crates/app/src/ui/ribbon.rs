@@ -48,7 +48,7 @@ pub(crate) fn render(
         let plan = tab_plan(ui, &groups, &measure, width);
         layout::density(app.session.ui.ribbon_expanded, &plan)
     };
-    task_row(app, clipboard, ui, density, chrome);
+    task_row(app, clipboard, ui, chrome);
     if density != RibbonDensity::Collapsed {
         ui.separator();
         command_row(app, clipboard, ui, density);
@@ -59,13 +59,12 @@ fn task_row(
     app: &mut PlotxApp,
     clipboard: &mut ClipboardTablePaste,
     ui: &mut Ui,
-    density: RibbonDensity,
     chrome: super::RibbonChrome,
 ) {
     let Some(traffic_lights) = chrome.macos_traffic_lights else {
         // Windows and Linux retain the original Ribbon task-row layout; their
         // separate custom title bar owns all window chrome and dragging.
-        ui.horizontal(|ui| render_task_row_contents(app, clipboard, ui, density, false, None));
+        ui.horizontal(|ui| render_task_row_contents(app, clipboard, ui, false, None));
         return;
     };
 
@@ -97,17 +96,11 @@ fn task_row(
     );
     let leading = traffic_lights.x + 4.0;
     ui.add_space(leading);
-    let compact_controls = super::ribbon_chrome::controls_need_compacting(
-        app,
-        &ui,
-        density,
-        leading,
-        row_rect.width(),
-    );
+    let compact_controls =
+        super::ribbon_chrome::controls_need_compacting(app, &ui, leading, row_rect.width());
     let inline_title_width = super::ribbon_chrome::available_title_width(
         app,
         &ui,
-        density,
         leading,
         row_rect.width(),
         compact_controls,
@@ -116,7 +109,6 @@ fn task_row(
         app,
         clipboard,
         &mut ui,
-        density,
         compact_controls,
         inline_title_width,
     );
@@ -126,18 +118,10 @@ fn render_task_row_contents(
     app: &mut PlotxApp,
     clipboard: &mut ClipboardTablePaste,
     ui: &mut Ui,
-    density: RibbonDensity,
     compact_controls: bool,
     inline_title_width: Option<f32>,
 ) {
-    ui.spacing_mut().item_spacing.x = if density == RibbonDensity::Full {
-        8.0
-    } else {
-        3.0
-    };
-    for tab in WorkflowTab::ALL {
-        let selected = app.session.ui.ribbon_tab == tab;
-        let response = ui.selectable_label(selected, crate::typography::headline(tab.label()));
+    for (tab, response) in task_tab_buttons(ui, app.session.ui.ribbon_tab) {
         if response.clicked() {
             select_workflow_tab(app, tab);
             // Picking a task re-opens a manually collapsed command area.
@@ -162,9 +146,8 @@ fn render_task_row_contents(
     }
 
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-        // The controls keep their own spacing: the density-dependent gap set
-        // above belongs to the tab strip, and inheriting it moved the
-        // controls on every tab switch that changed the density.
+        // The controls keep their own spacing instead of inheriting the tab
+        // strip's gap.
         ui.spacing_mut().item_spacing.x = super::ribbon_chrome::CONTROL_SPACING;
         // Stable id scope: siblings earlier in this row (the inline project
         // title, tab labels) come and go with app state; without this every
@@ -177,6 +160,15 @@ fn render_task_row_contents(
             render_chrome_controls(app, clipboard, ui, compact_controls)
         });
     });
+}
+
+fn task_tab_buttons(ui: &mut Ui, selected: WorkflowTab) -> [(WorkflowTab, egui::Response); 6] {
+    ui.spacing_mut().item_spacing.x = super::ribbon_chrome::TASK_TAB_SPACING;
+    WorkflowTab::ALL.map(|tab| {
+        let response =
+            ui.selectable_label(selected == tab, crate::typography::headline(tab.label()));
+        (tab, response)
+    })
 }
 
 fn render_chrome_controls(
@@ -504,5 +496,59 @@ fn update_button(app: &mut PlotxApp, ui: &mut Ui, compact: bool) {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn task_tab_rects(
+        ctx: &egui::Context,
+        selected: WorkflowTab,
+        _command_density: RibbonDensity,
+    ) -> [egui::Rect; 6] {
+        let mut rects = None;
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    vec2(900.0, 120.0),
+                )),
+                ..Default::default()
+            },
+            |ui| {
+                rects = Some(
+                    ui.horizontal(|ui| {
+                        task_tab_buttons(ui, selected).map(|(_, response)| response.rect)
+                    })
+                    .inner,
+                );
+            },
+        );
+        rects.expect("the task tab row was rendered")
+    }
+
+    #[test]
+    fn task_tab_geometry_is_stable_across_selection_and_command_density() {
+        let ctx = crate::typography::test_context();
+        let expected = task_tab_rects(&ctx, WorkflowTab::Data, RibbonDensity::Full);
+
+        for selected in WorkflowTab::ALL {
+            for density in [RibbonDensity::Full, RibbonDensity::Scaled] {
+                let actual = task_tab_rects(&ctx, selected, density);
+                for (tab, (expected, actual)) in WorkflowTab::ALL
+                    .into_iter()
+                    .zip(expected.into_iter().zip(actual))
+                {
+                    assert_eq!(actual.left(), expected.left(), "{tab:?} x at {density:?}");
+                    assert_eq!(
+                        actual.width(),
+                        expected.width(),
+                        "{tab:?} width at {density:?}"
+                    );
+                }
+            }
+        }
     }
 }

@@ -2,8 +2,6 @@ use egui::{TextStyle, TextWrapMode, Ui, Vec2, WidgetText};
 use egui_phosphor::regular as icon;
 use plotx_core::state::{PlotxApp, WorkflowTab};
 
-use super::ribbon::RibbonDensity;
-
 const INLINE_TITLE_MAX_WIDTH: f32 = 240.0;
 const INLINE_TITLE_MIN_WIDTH: f32 = 72.0;
 
@@ -73,35 +71,28 @@ pub(super) fn inline_project_title(app: &PlotxApp) -> Option<String> {
 pub(super) fn controls_need_compacting(
     app: &PlotxApp,
     ui: &Ui,
-    density: RibbonDensity,
     leading: f32,
     row_width: f32,
 ) -> bool {
-    leading + task_tabs_width(ui, density) + controls_width(app, ui, false) + 16.0 > row_width
+    leading + task_tabs_width(ui) + controls_width(app, ui, false) + 16.0 > row_width
 }
 
 pub(super) fn available_title_width(
     app: &PlotxApp,
     ui: &Ui,
-    density: RibbonDensity,
     leading: f32,
     row_width: f32,
     compact_controls: bool,
 ) -> Option<f32> {
     let remaining = row_width
         - leading
-        - task_tabs_width(ui, density)
+        - task_tabs_width(ui)
         - controls_width(app, ui, compact_controls)
         - 24.0;
     (remaining >= INLINE_TITLE_MIN_WIDTH).then(|| remaining.min(INLINE_TITLE_MAX_WIDTH))
 }
 
-fn task_tabs_width(ui: &Ui, density: RibbonDensity) -> f32 {
-    let spacing = if density == RibbonDensity::Full {
-        8.0
-    } else {
-        3.0
-    };
+fn task_tabs_width(ui: &Ui) -> f32 {
     WorkflowTab::ALL
         .iter()
         .map(|tab| {
@@ -112,7 +103,7 @@ fn task_tabs_width(ui: &Ui, density: RibbonDensity) -> f32 {
             )
         })
         .sum::<f32>()
-        + spacing * (WorkflowTab::ALL.len().saturating_sub(1) as f32)
+        + TASK_TAB_SPACING * (WorkflowTab::ALL.len().saturating_sub(1) as f32)
 }
 
 fn controls_width(app: &PlotxApp, ui: &Ui, compact: bool) -> f32 {
@@ -160,10 +151,11 @@ fn controls_width(app: &PlotxApp, ui: &Ui, compact: bool) -> f32 {
 /// in `controls_width` so compaction accounts for the pair.
 pub(super) const SIDEBAR_TOGGLE_WIDTH: f32 = 30.0;
 
-/// Gap between the trailing chrome controls. The tab strip's spacing follows
-/// the Ribbon density, and the controls must not inherit it: a tab switch
-/// that changes density would otherwise slide the collapse, search and
-/// sidebar buttons sideways.
+/// Fixed gap between task tabs. Command density applies only below this row,
+/// so switching tabs cannot move the task buttons or trailing chrome.
+pub(super) const TASK_TAB_SPACING: f32 = 8.0;
+
+/// Gap between the trailing chrome controls.
 pub(super) const CONTROL_SPACING: f32 = 8.0;
 
 /// Always-visible sidebar toggle for the task row. The glyph mirrors the
@@ -314,5 +306,26 @@ mod tests {
             inline_project_title(&app).as_deref(),
             Some("* report.plotx")
         );
+    }
+
+    #[test]
+    fn task_tabs_width_uses_the_fixed_tab_spacing() {
+        let ctx = crate::typography::test_context();
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let labels_width = WorkflowTab::ALL
+                .iter()
+                .map(|tab| {
+                    text_width(
+                        ui,
+                        crate::typography::headline(tab.label()),
+                        TextStyle::Button,
+                    )
+                })
+                .sum::<f32>();
+            let gaps = WorkflowTab::ALL.len().saturating_sub(1) as f32;
+
+            assert_eq!(task_tabs_width(ui), labels_width + gaps * 8.0);
+            assert_eq!(TASK_TAB_SPACING, 8.0);
+        });
     }
 }
