@@ -1,5 +1,4 @@
 use egui::{Button, Ui};
-use egui_phosphor::regular as icon;
 use plotx_core::state::{
     CraftAnalysisIntent, CraftTaskPage, Dataset, FrameRef, PlotxApp, Selection, TaskDockTab, Tool,
 };
@@ -207,27 +206,10 @@ pub(crate) fn render_task(app: &mut PlotxApp, host: &mut Ui) {
         ui.set_width(width);
         crate::ui::card_frame(dark, egui::Margin::ZERO).show(ui, |ui| {
             task_card::header(ui, area_id, "CRAFT", None::<&str>, |ui| {
-                if ui
-                    .small_button(icon::X)
-                    .on_hover_text("Close CRAFT")
-                    .clicked()
-                {
+                if crate::ui::panel_chrome::close(ui, "Close CRAFT").clicked() {
                     close = true;
                 }
-                let glyph = if collapsed {
-                    icon::CARET_DOWN
-                } else {
-                    icon::CARET_UP
-                };
-                if ui
-                    .small_button(glyph)
-                    .on_hover_text(if collapsed {
-                        "Expand CRAFT"
-                    } else {
-                        "Collapse CRAFT"
-                    })
-                    .clicked()
-                {
+                if crate::ui::panel_chrome::collapse(ui, collapsed, "CRAFT").clicked() {
                     toggle_collapse = true;
                 }
             });

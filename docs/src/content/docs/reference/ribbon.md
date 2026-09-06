@@ -49,7 +49,7 @@ The Ribbon measures the active tab's content against the window:
   lower priority, and every group keeps its position.
 - Only when every group is already a single button and the row still does not
   fit do whole groups move into the **More** menu.
-- The command area never hides by itself. **Collapse ribbon** (the caret at
+- The command area never hides by itself. **Collapse ribbon** (the window icon with a top band at
   the right end of the task row) puts it away and brings it back.
 
 Buttons that start a computation, such as **Run Peak Fit**, use the filled

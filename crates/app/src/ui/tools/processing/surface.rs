@@ -140,19 +140,10 @@ pub(super) fn render(app: &mut PlotxApp, host: &mut Ui) {
                 "Frequency-domain output"
             };
             task_card::header(ui, area_id, "Processing", Some(domain), |ui| {
-                if ui
-                    .small_button(icon::X)
-                    .on_hover_text("Close Processing")
-                    .clicked()
-                {
+                if crate::ui::panel_chrome::close(ui, "Close Processing").clicked() {
                     close = true;
                 }
-                let glyph = if collapsed {
-                    icon::CARET_DOWN
-                } else {
-                    icon::CARET_UP
-                };
-                if ui.small_button(glyph).clicked() {
+                if crate::ui::panel_chrome::collapse(ui, collapsed, "Processing").clicked() {
                     toggle = true;
                 }
                 ui.menu_button(icon::DOTS_THREE_VERTICAL, |ui| panel_menu(app, di, ui));
@@ -238,19 +229,10 @@ fn render_xrd(app: &mut PlotxApp, host: &mut Ui, di: usize) {
         ui.set_width(width);
         crate::ui::card_frame(dark, egui::Margin::ZERO).show(ui, |ui| {
             task_card::header(ui, area_id, "XRD Processing", None::<&str>, |ui| {
-                if ui
-                    .small_button(icon::X)
-                    .on_hover_text("Close Processing")
-                    .clicked()
-                {
+                if crate::ui::panel_chrome::close(ui, "Close Processing").clicked() {
                     close = true;
                 }
-                let glyph = if collapsed {
-                    icon::CARET_DOWN
-                } else {
-                    icon::CARET_UP
-                };
-                if ui.small_button(glyph).clicked() {
+                if crate::ui::panel_chrome::collapse(ui, collapsed, "Processing").clicked() {
                     toggle = true;
                 }
                 ui.menu_button(icon::DOTS_THREE_VERTICAL, |ui| panel_menu(app, di, ui));

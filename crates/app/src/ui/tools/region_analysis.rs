@@ -93,27 +93,10 @@ pub(crate) fn render_task(app: &mut PlotxApp, host: &mut Ui) {
                 format!("{count} regions")
             };
             task_card::header(ui, area_id, "Regions", Some(state), |ui| {
-                if ui
-                    .small_button(icon::X)
-                    .on_hover_text("Close region tools")
-                    .clicked()
-                {
+                if crate::ui::panel_chrome::close(ui, "Close region tools").clicked() {
                     close = true;
                 }
-                let glyph = if collapsed {
-                    icon::CARET_DOWN
-                } else {
-                    icon::CARET_UP
-                };
-                if ui
-                    .small_button(glyph)
-                    .on_hover_text(if collapsed {
-                        "Expand region tools"
-                    } else {
-                        "Collapse region tools"
-                    })
-                    .clicked()
-                {
+                if crate::ui::panel_chrome::collapse(ui, collapsed, "region tools").clicked() {
                     toggle_collapse = true;
                 }
                 if collapsed

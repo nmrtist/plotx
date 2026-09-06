@@ -82,27 +82,10 @@ pub(crate) fn render_task(app: &mut PlotxApp, host: &mut Ui) {
                 "Curve Fit",
                 Some(format!("{curve_count} · {points} points each")),
                 |ui| {
-                    if ui
-                        .small_button(icon::X)
-                        .on_hover_text("Close Curve Fit")
-                        .clicked()
-                    {
+                    if crate::ui::panel_chrome::close(ui, "Close Curve Fit").clicked() {
                         close = true;
                     }
-                    let glyph = if collapsed {
-                        icon::CARET_DOWN
-                    } else {
-                        icon::CARET_UP
-                    };
-                    if ui
-                        .small_button(glyph)
-                        .on_hover_text(if collapsed {
-                            "Expand Curve Fit"
-                        } else {
-                            "Collapse Curve Fit"
-                        })
-                        .clicked()
-                    {
+                    if crate::ui::panel_chrome::collapse(ui, collapsed, "Curve Fit").clicked() {
                         toggle_collapse = true;
                     }
                 },

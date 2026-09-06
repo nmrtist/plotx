@@ -177,22 +177,16 @@ fn render_chrome_controls(
     ui: &mut Ui,
     compact_controls: bool,
 ) {
-    let collapse_label = if compact_controls {
+    let collapse = super::panel_chrome::toggle(
+        ui,
+        super::panel_chrome::Edge::Top,
+        app.session.ui.ribbon_expanded,
         if app.session.ui.ribbon_expanded {
-            icon::CARET_UP.to_owned()
+            "Collapse ribbon"
         } else {
-            icon::CARET_DOWN.to_owned()
-        }
-    } else if app.session.ui.ribbon_expanded {
-        format!("{} Collapse ribbon", icon::CARET_UP)
-    } else {
-        format!("{} Expand ribbon", icon::CARET_DOWN)
-    };
-    // The strip next to the task tabs stays quiet: chrome buttons show
-    // their frame only on hover so they read no heavier than the tabs.
-    let collapse = ui
-        .add(Button::new(collapse_label).frame_when_inactive(false))
-        .on_hover_text("Collapse or expand the ribbon command area");
+            "Expand ribbon"
+        },
+    );
     if collapse.clicked() {
         app.session.ui.ribbon_expanded = !app.session.ui.ribbon_expanded;
     }

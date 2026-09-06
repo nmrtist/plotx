@@ -22,6 +22,7 @@ mod menus;
 #[cfg(target_os = "macos")]
 pub(crate) mod native_menu;
 mod object_inspector;
+mod panel_chrome;
 mod present;
 mod primary_sidebar;
 pub(crate) mod processing_templates;

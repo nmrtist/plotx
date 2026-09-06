@@ -46,6 +46,10 @@ buttons at the right end of the Ribbon's task row, press
 (right; <kbd>Cmd</kbd> on macOS), or drag a Side Bar's inner edge past its
 minimum width to hide it.
 
+The Ribbon's show/hide button uses the same window-outline style, with a band
+at the top. Task cards use a bottom band for their body; a filled band means
+the region is visible. Closing a task card remains a separate **×** button.
+
 ## Recurring elements
 
 - **Figure panel (Panel)** — a labelled section of a figure that can contain

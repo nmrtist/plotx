@@ -83,27 +83,10 @@ pub(crate) fn render_task(app: &mut PlotxApp, host: &mut Ui) {
                 "Statistics",
                 Some(format!("{columns} columns · {points} rows")),
                 |ui| {
-                    if ui
-                        .small_button(icon::X)
-                        .on_hover_text("Close Statistics")
-                        .clicked()
-                    {
+                    if crate::ui::panel_chrome::close(ui, "Close Statistics").clicked() {
                         close = true;
                     }
-                    let glyph = if collapsed {
-                        icon::CARET_DOWN
-                    } else {
-                        icon::CARET_UP
-                    };
-                    if ui
-                        .small_button(glyph)
-                        .on_hover_text(if collapsed {
-                            "Expand Statistics"
-                        } else {
-                            "Collapse Statistics"
-                        })
-                        .clicked()
-                    {
+                    if crate::ui::panel_chrome::collapse(ui, collapsed, "Statistics").clicked() {
                         toggle_collapse = true;
                     }
                 },
