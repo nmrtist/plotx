@@ -42,7 +42,7 @@ mod cursors;
 mod furniture;
 mod geometry;
 mod image_drop;
-mod image_painting;
+pub(crate) mod image_painting;
 mod selection_painting;
 pub(crate) use image_drop::{ImagePanelDropTarget, image_drop_target};
 mod integrals;

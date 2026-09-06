@@ -12,7 +12,8 @@ introduces the same regions in walkthrough form.
 
 - **Primary Side Bar** — the left panel. Its **Canvas** mode lists plots,
   pages, and saved board views; its **Data** mode shows every dataset and the
-  results derived from it.
+  results derived from it. Each canvas row includes a live page thumbnail;
+  click to select it, double-click its name to rename it, or use its context menu.
 - **Canvas** / **the board** — the central area: an infinite board holding
   your plots and ordinary data sheets. "Page" is one framed area of the board
   that exports as one figure. Drag a page or table-sheet header to place it;

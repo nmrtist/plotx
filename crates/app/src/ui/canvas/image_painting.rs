@@ -1,5 +1,5 @@
 use super::*;
-pub(super) fn paint_document(app: &PlotxApp, ci: usize, rect: egui::Rect, painter: &egui::Painter) {
+pub(crate) fn canvas_document(app: &PlotxApp, ci: usize) -> plotx_render::Document<'_> {
     let canvas = &app.doc.canvases[ci];
     let [width, height] = canvas.size_pt();
     let mut items = plotx_core::state::document_items(canvas);
@@ -61,12 +61,17 @@ pub(super) fn paint_document(app: &PlotxApp, ci: usize, rect: egui::Rect, painte
             visible: panel_visible && object.visible,
         });
     }
-    let document = plotx_render::Document {
+    plotx_render::Document {
         width,
         height,
         background: canvas.background,
         items,
-    };
+    }
+}
+
+pub(super) fn paint_document(app: &PlotxApp, ci: usize, rect: egui::Rect, painter: &egui::Painter) {
+    let canvas = &app.doc.canvases[ci];
+    let document = canvas_document(app, ci);
     let zoom = app.session.board.zoom;
     let bp = canvas.board_pos;
     let detail = workspace_render_detail(painter.ctx(), painter.ctx().input(|input| input.time));

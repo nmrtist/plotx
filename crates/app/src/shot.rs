@@ -32,6 +32,7 @@ use plotx_io::xps::{
 use plotx_io::{AxisSource, Dim, Domain, NmrData, NmrData2D, PseudoAxis, PseudoKind, QuadMode};
 
 mod craft_shot;
+mod thumbnail_shot;
 
 const FIT_LO: f64 = 1.4;
 const FIT_HI: f64 = 3.2;
@@ -76,6 +77,7 @@ enum Op {
     Setup,
     /// Fit the FID band and frame the result.
     LineFit,
+    Thumbnails,
     /// Load a homonuclear COSY plane and open its symmetry-review workflow.
     SymmetrySetup,
     /// Pin the ordinary readout cursor on the synthetic COSY.
@@ -138,6 +140,8 @@ const SCENES: &[Scene] = &[
     shot(8, "band"),
     act(2, Op::LineFit),
     shot(10, "fitted"),
+    act(2, Op::Thumbnails),
+    shot(8, "canvas_thumbnails"),
     // The three widths bracket the Ribbon's width budget: 720 steps the
     // low-priority groups down to their Small and Collapsed scales, 900
     // catches the first Medium steps, and 1440 shows every group at Large.
@@ -368,6 +372,7 @@ fn run_op(op: Op, app: &mut PlotxApp, ctx: &egui::Context) -> Result<(), String>
             setup(app);
         }
         Op::LineFit => line_fit(app, ctx)?,
+        Op::Thumbnails => thumbnail_shot::setup(app),
         Op::SymmetrySetup => symmetry_setup(app)?,
         Op::InspectCursor => inspect_cursor(app)?,
         Op::DeltaCursor => delta_cursor(app)?,
@@ -773,24 +778,5 @@ fn save_png(path: &Path, image: &egui::ColorImage) -> Result<(), String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn automated_exit_bypasses_dirty_project_prompt() {
-        let mut app = PlotxApp::new_with_settings(plotx_core::settings::Settings::default());
-        app.mark_document_dirty();
-        let ctx = egui::Context::default();
-
-        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
-            request_exit(&mut app, ui.ctx());
-        });
-
-        assert!(app.session.allow_close);
-        let root = output
-            .viewport_output
-            .get(&egui::ViewportId::ROOT)
-            .expect("root viewport output");
-        assert!(root.commands.contains(&egui::ViewportCommand::Close));
-    }
-}
+#[path = "shot/tests.rs"]
+mod tests;

@@ -10,9 +10,9 @@ mod data_browser;
 mod layer_controls;
 mod layers_tree;
 pub(crate) mod selection;
+mod thumbnails;
 use board_views::board_views_section;
 use data_browser::{AnalysisItem, AnalysisKind, DataTree, DatasetNode};
-use layer_controls::truncated_selectable;
 use selection::*;
 
 pub fn render(app: &mut PlotxApp, ui: &mut Ui) {
@@ -101,8 +101,12 @@ fn canvas_list(app: &mut PlotxApp, ui: &mut Ui) {
             Some(RenameState { target: RenameTarget::Canvas(i), .. }) if *i == ci
         );
         if renaming {
+            let row = thumbnails::canvas_row(app, ci, ui, true, "");
+            let mut rect = row.rect.shrink2(egui::vec2(6.0, 12.0));
+            rect.min.x += 80.0;
+            let mut editor = ui.new_child(egui::UiBuilder::new().max_rect(rect));
             let rs = app.session.ui.rename.as_mut().unwrap();
-            match rename_edit(ui, rs, egui::Id::new(("rename_canvas", ci))) {
+            match rename_edit(&mut editor, rs, egui::Id::new(("rename_canvas", ci))) {
                 RenameOutcome::Commit(s) => commit = Some((ci, s)),
                 RenameOutcome::Cancel => cancel = true,
                 RenameOutcome::Editing => {}
@@ -111,7 +115,7 @@ fn canvas_list(app: &mut PlotxApp, ui: &mut Ui) {
         }
         let name = app.doc.canvases[ci].name.clone();
         let selected = crate::ui::canvas::frame_is_selected(app, FrameRef::Page(ci));
-        let resp = truncated_selectable(ui, selected, name);
+        let resp = thumbnails::canvas_row(app, ci, ui, selected, &name);
         if resp.clicked() {
             claim_list_keyboard_focus(ui, &resp);
             select = Some((ci, select_modifiers(ui)));
