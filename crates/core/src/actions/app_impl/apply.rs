@@ -316,8 +316,13 @@ impl PlotxApp {
                     self.session.ui.rename = None;
                 }
             }
-            Action::InsertCanvas { index, canvas, .. } => {
-                self.insert_canvas_value(*index, canvas.as_ref().clone());
+            Action::InsertCanvas {
+                index,
+                canvas,
+                auto_place,
+                ..
+            } => {
+                self.insert_canvas_value(*index, canvas.as_ref().clone(), *auto_place);
             }
             Action::ApplyTheme { canvas, after, .. } => {
                 self.apply_theme_snapshot(*canvas, after);

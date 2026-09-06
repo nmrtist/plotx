@@ -471,6 +471,7 @@ impl Action {
     ) -> Self {
         Self::InsertCanvas {
             index,
+            auto_place: canvas.board_pos == [0.0, 0.0],
             canvas: Box::new(canvas),
             active_before,
         }

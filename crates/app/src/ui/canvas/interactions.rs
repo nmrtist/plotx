@@ -544,7 +544,15 @@ pub(crate) fn handle_object_interactions(
             }));
         }
     }
-    handle_panel_drag(app, ci, rect, hover, primary_down, primary_released, alt);
+    handle_panel_drag(
+        app,
+        ci,
+        rect,
+        hover,
+        primary_down,
+        primary_released,
+        ui.ctx(),
+    );
     let object_drag = match &app.session.ui.interaction {
         Interaction::Object(d) if d.canvas == ci => Some(d.clone()),
         _ => None,

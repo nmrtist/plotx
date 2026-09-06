@@ -1,5 +1,8 @@
 use super::*;
 
+mod detach;
+pub(crate) use detach::{paint_panel_detach, paint_panel_detach_background};
+
 pub(crate) fn handle_panel_drag(
     app: &mut PlotxApp,
     ci: usize,
@@ -7,7 +10,7 @@ pub(crate) fn handle_panel_drag(
     hover: Option<Pos2>,
     primary_down: bool,
     primary_released: bool,
-    alt: bool,
+    ctx: &egui::Context,
 ) {
     let Some(mut drag) = (match &app.session.ui.interaction {
         Interaction::Panel(d) if d.canvas == ci => Some(d.clone()),
@@ -74,6 +77,7 @@ pub(crate) fn handle_panel_drag(
             }
         }
     }
+    detach::update(app, rect, hover, ctx);
     if (primary_released || !primary_down)
         && active
         && let Some(target) = swap::target(app, &drag, rect, hover)
@@ -86,10 +90,12 @@ pub(crate) fn handle_panel_drag(
         && let Interaction::Panel(drag) = app.take_interaction()
         && active
     {
-        if let Some(preview) = app.session.ui.tile_drop.take()
+        if primary_released && detach::ready(&drag, ctx.input(|input| input.time)) {
+            detach::commit(app, &drag);
+        } else if let Some(preview) = app.session.ui.tile_drop.take()
             && let Some(source) = tile_source_for_panel(app, &drag)
         {
-            commit_tile_drop(app, source, preview, alt);
+            commit_tile_drop(app, source, preview, ctx.input(|input| input.modifiers.alt));
         } else {
             finish_panel_drag(app, ci, drag);
         }
@@ -151,6 +157,7 @@ pub(crate) fn begin_panel_drag(
         start_pointer: start,
         start_pointer_screen: [screen_pos.x, screen_pos.y],
         active: matches!(kind, ObjectDragKind::Resize(_)),
+        detached_since: None,
     }));
 }
 

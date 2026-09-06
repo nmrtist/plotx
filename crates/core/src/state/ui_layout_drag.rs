@@ -50,4 +50,6 @@ pub struct PanelDrag {
     pub start_pointer: [f32; 2],
     pub start_pointer_screen: [f32; 2],
     pub active: bool,
+    /// Start of continuous full separation from every canvas, in UI clock seconds.
+    pub detached_since: Option<f64>,
 }

@@ -106,6 +106,15 @@ left to right, then top to bottom. A letter placed over an image automatically
 switches between black and white for contrast. Manual and locked labels remain
 visible on a page with one Panel.
 
+Drag a single Panel completely clear of every canvas and keep it outside for
+0.5 seconds to prepare a new canvas. The preview shows a progress bar, then a
+green outline and **Release to create canvas**. Release to move the whole Panel
+onto a new canvas fitted to its current size at that board position. Its contents,
+labels, note, and internal layout are retained; the source canvas stays in place.
+The move and canvas creation undo together. Returning any part of the Panel to a
+canvas resets the timer. Resizing or dragging multiple Panels does not create a
+canvas, and pressing `Esc` cancels the gesture.
+
 ## Canvas size
 
 The active page shows a size chip above its top-left corner — the current

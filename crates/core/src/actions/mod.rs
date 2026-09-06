@@ -470,6 +470,8 @@ pub enum Action {
         index: usize,
         canvas: Box<CanvasDocument>,
         active_before: Option<usize>,
+        /// Resolve a default position on insertion; false preserves an explicit origin.
+        auto_place: bool,
     },
     /// Apply a document-level style theme to a canvas: its background, the app's
     /// new-object style defaults, and its existing objects' colours, as one step.

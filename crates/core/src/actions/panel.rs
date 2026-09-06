@@ -4,6 +4,9 @@ use crate::state::{
     PanelLabelMode, PanelLayout, PlotxApp,
 };
 
+#[path = "panel_detach.rs"]
+mod detach;
+
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum PanelActionError {
     #[error("canvas {0} does not exist")]

@@ -206,11 +206,11 @@ impl PlotxApp {
         }
     }
 
-    fn insert_canvas_value(&mut self, index: usize, mut canvas: CanvasDocument) {
+    fn insert_canvas_value(&mut self, index: usize, mut canvas: CanvasDocument, auto_place: bool) {
         if index > self.doc.canvases.len() {
             return;
         }
-        if canvas.board_pos == [0.0, 0.0] {
+        if auto_place {
             canvas.board_pos = crate::state::next_board_frame_pos(self, canvas.size_pt());
         }
         self.doc.canvases.insert(index, canvas);

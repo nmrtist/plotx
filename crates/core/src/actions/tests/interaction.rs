@@ -60,6 +60,7 @@ fn gesture_active_covers_only_the_board_freezing_drags() {
                 before: frame,
                 others: Vec::new(),
                 children: Vec::new(),
+                detached_since: None,
                 start_pointer: [0.0, 0.0],
                 start_pointer_screen: [0.0, 0.0],
                 active: true,

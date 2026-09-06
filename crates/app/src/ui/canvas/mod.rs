@@ -245,6 +245,7 @@ pub fn render_central(app: &mut PlotxApp, ui: &mut Ui) {
         }
         let editor_bounds = board_transform.canvas_editor_screen_rect(&app.doc.canvases[other]);
         if finite_rect_intersects(editor_bounds, clip) {
+            paint_panel_detach_background(app, other, rect, &painter);
             paint_document(app, other, rect, &painter);
         }
         if finite_rect_intersects(other_page, clip) && other != ci {
@@ -264,6 +265,7 @@ pub fn render_central(app: &mut PlotxApp, ui: &mut Ui) {
     paint_property_readouts(app, ci, rect, &painter, chrome, ui.visuals().dark_mode);
     paint_wheel_target_hint(app, ci, rect, ui, &painter, chrome, ui.visuals().dark_mode);
     paint_tile_ghost(app, &painter, chrome);
+    paint_panel_detach(app, rect, &painter, chrome);
     paint_tile_preview(app, rect, &painter, chrome);
     paint_panel_swap(app, rect, &painter, chrome);
     super::canvas_size::page_size_chrome(app, ci, page, rect, ui);
