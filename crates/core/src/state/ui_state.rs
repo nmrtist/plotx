@@ -626,6 +626,7 @@ pub struct Session {
     pub secondary_sidebar_visible: bool,
     pub status: String,
     pub operation_history: OperationHistory,
+    pub status_history: super::StatusHistory,
     /// Non-fatal resource failures collected while opening the current project.
     pub project_load_warnings: Vec<String>,
     /// Runtime cache of the persisted recent-files list (newest first), seeded
@@ -678,16 +679,18 @@ impl Session {
         self.operation_history.next_id()
     }
 
-    /// Stores the report and projects its summary onto the legacy status line.
+    /// Stores the report and makes its summary the current activity message.
     pub fn record_operation<T>(&mut self, report: OperationReport<T>) -> Option<T> {
         let (record, value) = report.into_parts();
         self.status = record.summary.clone();
+        self.status_history.observe(&self.status);
         self.operation_history.push(record);
         value
     }
 
     pub fn clear_operation_history(&mut self) {
         self.operation_history.clear();
+        self.status_history.clear();
     }
 
     pub fn sanitized_diagnostics_text(&self) -> String {

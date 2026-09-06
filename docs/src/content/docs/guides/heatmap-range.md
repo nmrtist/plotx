@@ -30,7 +30,7 @@ returns the whole range to the field's finite minimum and maximum as they are
 now, rather than restoring an older number.
 **Reset heatmap** rebuilds the whole heatmap encoding from its defaults, and
 touches only the series drawn as heatmaps: contours in the same plot are left
-alone and reported as skipped in the status bar.
+alone and reported as skipped in the Operation history.
 
 A field with no finite values has nothing to derive a scale from, and the rows
 say so instead of showing a number.

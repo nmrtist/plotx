@@ -164,7 +164,7 @@ fn execute_inner(
             app.session.updates.check_now();
             app.open_settings();
         }
-        CommandId::OperationHistory => app.session.ui.diagnostics_open = true,
+        CommandId::OperationHistory => super::activity::open_diagnostics(app, ctx),
         CommandId::About => app.session.ui.about_open = true,
         CommandId::SaveProcessingTemplate | CommandId::ApplyProcessingTemplate => {
             if let Some(dataset) = app.active_dataset() {

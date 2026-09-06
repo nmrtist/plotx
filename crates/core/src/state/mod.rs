@@ -48,6 +48,8 @@ mod app_impl_statistics_tests;
 mod app_impl_symmetry;
 mod app_impl_xps;
 mod app_state;
+mod status_history;
+pub use status_history::{StatusHistory, StatusMessage};
 mod axis_overrides;
 mod board;
 mod charts;

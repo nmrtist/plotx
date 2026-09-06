@@ -1,3 +1,4 @@
+mod activity;
 pub(crate) mod affordance;
 pub(crate) mod align;
 pub(crate) mod arithmetic;
@@ -150,7 +151,7 @@ pub fn render(
         });
 
     feedback_banner(app, ui, dark);
-    render_status(app, ui, dark);
+    activity::observe(app);
 
     let workspace_width = ui.available_width();
     sidebars::render(app, ui, dark, workspace_width);
@@ -215,6 +216,7 @@ pub fn render(
     let now = ctx.input(|i| i.time);
     app.finish_pending_wheel_zoom(now, false);
     app.finish_pending_wheel_property(now, false);
+    activity::observe(app);
 }
 
 fn project_window_title(app: &PlotxApp) -> String {
@@ -242,45 +244,6 @@ fn copy_table_export(ctx: &egui::Context, payload: plotx_core::data_export::Clip
         }
     }
     ctx.copy_text(payload.text);
-}
-
-fn render_status(app: &PlotxApp, ui: &mut Ui, dark: bool) {
-    if !app.settings.appearance.show_status_bar {
-        return;
-    }
-    egui::Panel::bottom("status")
-        .frame(
-            card_frame(
-                dark,
-                egui::Margin {
-                    left: 8,
-                    right: 8,
-                    top: 4,
-                    bottom: 8,
-                },
-            )
-            .inner_margin(egui::Margin::symmetric(10, 4)),
-        )
-        .show_separator_line(false)
-        .show_inside(ui, |ui| {
-            ui.horizontal(|ui| {
-                let show_summary = ui.available_width() > 460.0;
-                ui.add(
-                    egui::Label::new(crate::typography::callout(&app.session.status))
-                        .truncate()
-                        .sense(Sense::hover()),
-                )
-                .on_hover_text(&app.session.status);
-                if show_summary && let Some(di) = app.active_dataset() {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(
-                            crate::typography::callout(app.doc.datasets[di].summary())
-                                .color(ui.visuals().weak_text_color()),
-                        );
-                    });
-                }
-            });
-        });
 }
 
 /// The newest *unacknowledged* warning/failure plus how many older ones are
@@ -375,7 +338,7 @@ fn feedback_banner(app: &mut PlotxApp, ui: &mut Ui, dark: bool) {
                             app.session.ui.dismissed_feedback_order = Some(completion_order);
                         }
                         if ui.button("Details").clicked() {
-                            app.session.ui.diagnostics_open = true;
+                            activity::open_diagnostics(app, ui.ctx());
                         }
                     },
                 );
@@ -623,37 +586,6 @@ fn flush_frame(dark: bool, inner_margin: egui::Margin) -> egui::Frame {
 #[cfg(test)]
 #[path = "sidebar_tests.rs"]
 mod sidebar_tests;
-
-#[cfg(test)]
-mod status_bar_tests {
-    use super::*;
-    use egui::{Pos2, RawInput, Rect, vec2};
-
-    fn remaining_height(app: &PlotxApp) -> f32 {
-        let ctx = crate::typography::test_context();
-        let input = RawInput {
-            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0))),
-            ..Default::default()
-        };
-        let mut height = 0.0;
-        let _ = ctx.run_ui(input, |ui| {
-            render_status(app, ui, false);
-            height = ui.available_height();
-        });
-        height
-    }
-
-    #[test]
-    fn status_bar_only_reserves_workspace_when_enabled() {
-        let mut app = PlotxApp::new_with_settings(plotx_core::settings::Settings::default());
-        let hidden_height = remaining_height(&app);
-
-        app.settings.appearance.show_status_bar = true;
-        let shown_height = remaining_height(&app);
-
-        assert!(shown_height < hidden_height);
-    }
-}
 
 #[cfg(test)]
 mod feedback_tests {

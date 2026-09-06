@@ -66,6 +66,7 @@ impl PlotxApp {
                 secondary_sidebar_visible: true,
                 status: "Open data or a project to begin.".into(),
                 operation_history: OperationHistory::default(),
+                status_history: super::StatusHistory::default(),
                 project_load_warnings: Vec::new(),
                 recent_files: {
                     let mut files = settings.recent.files.clone();

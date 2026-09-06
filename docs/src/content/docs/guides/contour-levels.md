@@ -55,7 +55,7 @@ ceiling on what you can ask for: choose the **Absolute level** anchor to set any
 level you like, including one inside the noise.
 
 If you set an **Absolute level** the data never reaches, that half draws nothing
-and the status bar reports both numbers — for example, *The positive contour
+and the Operation history reports both numbers — for example, *The positive contour
 threshold 20000 is above this field's positive peak 1800, so no positive
 contours are drawn. Lower the threshold below 1800.* A slipped decimal point is
 visible at a glance that way.
@@ -86,7 +86,7 @@ corner of the plot, resolved the same way as in the panel — `5 × σ = 1.2e4`.
 plot whose contour series do not all sit at the same level says so instead of
 showing one of them. Stepping is an
 ordinary edit: it can be undone, and a step past the highest value the current
-anchor allows is refused, with the reason in the status bar.
+anchor allows is refused, with the reason in the Operation history.
 
 ## Line width
 
@@ -136,7 +136,7 @@ A ladder can also stop early at the bottom. A level that falls inside the noise
 crosses most of the grid, and there is a limit to how much line one plot can
 draw. Past that limit PlotX drops the remaining levels whole — never cutting a
 contour off part-way along its own path — and drops the same levels from both
-signs, so what you see is a complete ladder with a higher floor. The status bar
+signs, so what you see is a complete ladder with a higher floor. The Operation history
 says how many went and what to set instead, for example: *The lowest 14 contour
 levels were not drawn: at 5.052e4 and below, this field crosses more of the grid
 than one plot can render. Raise the lowest level to 6.820e4 or above to see
@@ -149,7 +149,7 @@ signs — the negative half mirrors the positive ladder and applies its own sign
 
 Contour geometry, and the noise or background estimate a ladder is anchored to,
 are computed away from the interface so a large plane never freezes the
-application. Until they land the plot is empty, and the status bar says which
+application. Until they land the plot is empty, and the Operation history says which
 step is running — *Measuring this field's noise scale…*, then *Building contour
 geometry…* — so a plot that is merely slow is never mistaken for one that has
 failed. Large planes take a moment; the plot fills in by itself. The work is
@@ -193,7 +193,7 @@ the range and you get a fraction, not a noise multiple.
 **Reset contour** rebuilds the whole contour — anchor, ladder and colours — from
 the defaults for this data. It touches only the series drawn as contours;
 anything else in the same plot, such as a heatmap underneath, is left as it is
-and reported as skipped in the status bar.
+and reported as skipped in the Operation history.
 
 ## Finding a setting
 

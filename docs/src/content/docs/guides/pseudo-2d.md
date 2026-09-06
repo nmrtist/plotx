@@ -66,7 +66,7 @@ chemical-shift × diffusion map. Map builds run in the background and you can
 keep working; **Cancel** discards one. A map cannot be rebuilt for the same
 dataset until the current build finishes or is cancelled. Changing the
 dataset's processing while a map is building cancels the build — the map would
-no longer match the spectrum. The status bar tells you when that happens;
+no longer match the spectrum. The Operation history tells you when that happens;
 simply rebuild the map after the processing change. Changing the processing
 also discards a finished map for the same reason, so the plot falls back to the
 stack until you rebuild.
@@ -81,7 +81,7 @@ Both kinds of DOSY map are saved in the `.plotx` project along with your
 **Show** and **DOSY method** choices, so reopening a project puts the same plot
 back on screen without rebuilding. If a saved map was built from data that the
 project's stored processing no longer reproduces, PlotX keeps showing the saved
-map and warns you — in the status bar as the project opens, and in the
+map and warns you — in the Operation history as the project opens, and in the
 **Experiment** card. If a saved map cannot be read back at all, PlotX shows the
 stack instead and says so in the same two places. Rebuilding the map clears the
 warning.

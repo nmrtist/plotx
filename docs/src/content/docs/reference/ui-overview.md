@@ -36,9 +36,11 @@ introduces the same regions in walkthrough form.
   task row also holds the native window controls and project name. It is a
   shortcut surface: everything on it is also in the menus or command palette.
   See [the Ribbon](/reference/ribbon/) for every tab's groups.
-- **Status bar** — the bottom strip, showing hints, progress, and selection
-  details. It is hidden by default to leave more room for the workspace; enable
-  **Show status bar** under **Preferences → Appearance** when you want it.
+- **Operation history** — the clock-arrow button in the Ribbon task row opens
+  the current status and dataset summary. **Messages** keeps the latest 200
+  observed status changes for this session; **Diagnostics** shows structured
+  operation reports. **Clear** clears both lists. Hover the button for the
+  current status. Errors and warnings also appear in the feedback banner.
 
 Both Side Bars can be shown or hidden at any time: click the pair of layout
 buttons at the right end of the Ribbon's task row, press

@@ -6,7 +6,7 @@ description: 报告 PlotX 崩溃或运行问题时，找到需要附上的诊断
 ## 崩溃之后
 
 PlotX 捕获到内部错误时，会保存纯文本崩溃报告并显示完整路径。下次启动时，
-恢复对话框或状态栏会再次显示该路径。请把报告附到
+恢复对话框或操作历史窗口会再次显示该路径。请把报告附到
 [GitHub issue](https://github.com/nmrtist/plotx/issues)；其中包含 PlotX
 版本、平台、panic 位置、回溯以及会话日志末尾。
 

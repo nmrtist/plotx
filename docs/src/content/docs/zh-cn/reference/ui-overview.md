@@ -31,9 +31,10 @@ PlotX 的界面为英文；手册中加粗的英文词即界面上的原文标�
   **Analyze**、**Figure**、**Arrange**、**View**）。在 macOS 上，其任务行
   还承载原生窗口按钮和项目名。它是快捷入口：其上的一切也都能在菜单或命令面板中找到。
   各页签的分组详见 [Ribbon](/zh-cn/reference/ribbon/)。
-- **状态栏**——底部条带，显示提示、进度和选择详情。默认隐藏，以便为工作区
-  留出更多空间；需要时可在 **Preferences → Appearance** 中开启
-  **Show status bar**。
+- **操作历史（Operation history）**——点击 Ribbon 任务行的时钟箭头图标，
+  可查看当前状态和数据集摘要。**Messages** 保留本次运行最近 200 条已观察到的
+  状态变化，**Diagnostics** 显示结构化操作报告；**Clear** 清空两个列表。
+  悬停图标可查看当前状态，错误与警告也会出现在反馈横幅中。
 
 两个侧栏随时可以显示或隐藏：点击 Ribbon 任务行右端的一对布局按钮，按
 <kbd>Ctrl</kbd>+<kbd>B</kbd>（左）或 <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd>

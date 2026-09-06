@@ -17,7 +17,7 @@ pub(in crate::ui) fn save_project_window(app: &mut PlotxApp, ctx: &egui::Context
         if app.session.status.starts_with("Save failed:") {
             ui.colored_label(ui.visuals().error_fg_color, &app.session.status);
             if ui.link("Open diagnostic details").clicked() {
-                app.session.ui.diagnostics_open = true;
+                crate::ui::activity::open_diagnostics(app, ui.ctx());
             }
             ui.add_space(8.0);
         }
@@ -145,7 +145,7 @@ fn project_transition_dialog(app: &mut PlotxApp, ctx: &egui::Context, saving: bo
                     .show(ui, |ui| {
                         ui.colored_label(ui.visuals().error_fg_color, &app.session.status);
                         if ui.link("Open diagnostic details").clicked() {
-                            app.session.ui.diagnostics_open = true;
+                            crate::ui::activity::open_diagnostics(app, ui.ctx());
                         }
                     });
             }

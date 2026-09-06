@@ -44,7 +44,7 @@ measured`（未测出离散度）：此时倍数无从锚定，层级会退回�
 **Absolute level**（绝对强度）锚定即可设成任意值，包括落在噪声里的值。
 
 如果把 **Absolute level**（绝对强度）设成数据根本达不到的值，该半区将什么都不画，
-状态栏会同时给出两个数字，例如：*The positive contour threshold 20000 is above
+操作历史窗口会同时给出两个数字，例如：*The positive contour threshold 20000 is above
 this field's positive peak 1800, so no positive contours are drawn. Lower the
 threshold below 1800.*（正半区阈值 20000 高于该场的正向峰值 1800，因此不绘制正
 等高线；请把阈值降到 1800 以下。）小数点打错一位，一眼就能看出来。
@@ -69,7 +69,7 @@ threshold below 1800.*（正半区阈值 20000 高于该场的正向峰值 1800�
 `5 × σ = 1.2e4`；若图中多条等高线谱线的最低层并不一致，它会如实说明，而不是拿
 其中一条冒充整体。这种调整就是一次普通
 编辑：可以撤销；若一步会越过当前锚定允许的最大值，该步会被拒绝，原因显示在
-状态栏。
+操作历史窗口。
 
 ## 线宽
 
@@ -110,7 +110,7 @@ threshold below 1800.*（正半区阈值 20000 高于该场的正向峰值 1800�
 阶梯也可能从下端提前终止。落在噪声里的层会穿过网格的大部分区域，而一幅图能绘制
 的线量是有上限的。超过该上限后，PlotX 会整层丢弃剩余层级——绝不会把某条等高线
 从中途截断——并且正负两个半区同时丢弃同样的层，因此你看到的始终是一组完整的、
-只是下限更高的阶梯。状态栏会说明丢弃了多少层、应改设成什么，例如：*The lowest 14
+只是下限更高的阶梯。操作历史窗口会说明丢弃了多少层、应改设成什么，例如：*The lowest 14
 contour levels were not drawn: at 5.052e4 and below, this field crosses more of
 the grid than one plot can render. Raise the lowest level to 6.820e4 or above to
 see every level the panel lists.*（最低的 14 层未绘制：在 5.052e4 及以下，该场
@@ -123,7 +123,7 @@ see every level the panel lists.*（最低的 14 层未绘制：在 5.052e4 及�
 ## 绘制过程中
 
 等高线几何，以及阶梯所锚定的噪声或背景估计，都在界面之外计算，因此再大的平面也
-不会卡住整个程序。在结果到达之前图上是空的，状态栏会说明当前进行到哪一步——
+不会卡住整个程序。在结果到达之前图上是空的，操作历史窗口会说明当前进行到哪一步——
 *Measuring this field's noise scale…*（正在测量该场的噪声尺度）、
 *Building contour geometry…*（正在构建等高线几何）——这样"只是慢"就不会被当成
 "坏掉了"。大平面需要片刻，图会自行填充。这些计算是共享的：同一份数据、同一组层级
@@ -158,7 +158,7 @@ see every level the panel lists.*（最低的 14 层未绘制：在 5.052e4 及�
 
 **Reset contour**（重置等高线）会按该数据的默认值重建整条等高线——锚定、阶梯和
 颜色。它只作用于以等高线绘制的谱线；同一张图里的其他内容（例如底下的热图）保持
-原样，并在状态栏中作为跳过项报告。
+原样，并在操作历史窗口中作为跳过项报告。
 
 ## 找到某个设置
 

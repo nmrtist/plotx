@@ -6,7 +6,7 @@ description: Find the diagnostic files to attach when reporting a PlotX crash or
 ## After a crash
 
 When PlotX catches an internal error, it saves a plain-text crash report and
-shows its full path. On the next launch, the recovery dialog or status bar
+shows its full path. On the next launch, the recovery dialog or Operation history
 shows that path again. Attach the report to a
 [GitHub issue](https://github.com/nmrtist/plotx/issues); it contains the PlotX
 version, platform, panic location, backtrace, and the tail of the session log.

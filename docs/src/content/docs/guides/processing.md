@@ -45,7 +45,7 @@ invent an FID for data it never acquired.
 Processing opens as a card at the upper right of the canvas — from the
 **Process** tab of the Ribbon, or by activating a processing setting found with
 <kbd>Ctrl</kbd>+<kbd>K</kbd>. If the active dataset is not an NMR dataset, the
-status bar reads *Select an NMR dataset before opening Processing.* instead.
+Operation history reads *Select an NMR dataset before opening Processing.* instead.
 
 The card can also host the CRAFT, Regions, Curve Fit, and Statistics tasks.
 When two or more tasks are open, tabs appear along the top — **Process**,

@@ -133,7 +133,6 @@ fn all_thirteen_app_preferences_reset_through_their_catalog_definitions() {
     settings.general.keep_empty_source_canvas = true;
     settings.general.project_backup_generations = MAX_PROJECT_BACKUP_GENERATIONS;
     settings.appearance.theme = ThemeMode::Dark;
-    settings.appearance.show_status_bar = true;
     settings.appearance.graphics_power = GraphicsPowerPreference::HighPerformance;
     settings.appearance.canvas_accent = Some([12, 34, 56]);
     settings.export.include_view_snapshots = true;
@@ -149,7 +148,6 @@ fn all_thirteen_app_preferences_reset_through_their_catalog_definitions() {
         KEEP_EMPTY_SOURCE_CANVAS,
         PROJECT_BACKUP_GENERATIONS,
         THEME,
-        SHOW_STATUS_BAR,
         GRAPHICS_POWER,
         ACCENT_COLOR,
         INCLUDE_VIEW_SNAPSHOTS,
@@ -172,10 +170,6 @@ fn all_thirteen_app_preferences_reset_through_their_catalog_definitions() {
     let defaults = Settings::default();
     assert_eq!(app.settings.general, defaults.general);
     assert_eq!(app.settings.appearance.theme, defaults.appearance.theme);
-    assert_eq!(
-        app.settings.appearance.show_status_bar,
-        defaults.appearance.show_status_bar
-    );
     assert_eq!(
         app.settings.appearance.graphics_power,
         defaults.appearance.graphics_power

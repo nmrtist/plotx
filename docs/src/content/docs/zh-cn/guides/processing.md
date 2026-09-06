@@ -34,7 +34,7 @@ XPS 为每个谱区使用独立的有序 recipe，而不是 NMR 管线。recipe 
 
 处理以卡片形式出现在画布右上角，可从 Ribbon 的 **Process** 页签打开，或用
 <kbd>Ctrl</kbd>+<kbd>K</kbd> 搜到某个处理设置后激活它。若当前数据集不是 NMR
-数据集，状态栏会提示 *Select an NMR dataset before opening Processing.*，卡片
+数据集，操作历史窗口会提示 *Select an NMR dataset before opening Processing.*，卡片
 不会打开。
 
 该卡片也可以承载 CRAFT、Regions、Curve Fit 和 Statistics 任务。同时打开两个及以上

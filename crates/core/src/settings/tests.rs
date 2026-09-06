@@ -20,7 +20,6 @@ fn missing_fields_take_defaults() {
         settings.appearance.graphics_power,
         GraphicsPowerPreference::LowPower
     );
-    assert!(!settings.appearance.show_status_bar);
     assert_eq!(settings.window.task_cards.craft.width, 520.0);
     assert_eq!(settings.window.task_cards.processing.width, 340.0);
 }
@@ -104,7 +103,6 @@ fn save_and_load_roundtrip() {
     settings.general.project_backup_generations = 3;
     settings.export.include_view_snapshots = true;
     settings.export.trim_to_visible_content = true;
-    settings.appearance.show_status_bar = true;
     settings.window.task_cards.craft = TaskCardSize::new(612.0, 688.0);
 
     io::save_to_path(&path, &settings).unwrap();
@@ -116,7 +114,6 @@ fn save_and_load_roundtrip() {
     assert_eq!(loaded.general.project_backup_generations, 3);
     assert!(loaded.export.include_view_snapshots);
     assert!(loaded.export.trim_to_visible_content);
-    assert!(loaded.appearance.show_status_bar);
     assert_eq!(
         loaded.window.task_cards.craft,
         TaskCardSize::new(612.0, 688.0)

@@ -169,7 +169,7 @@ at.
 
 If the move leaves the source page empty, PlotX deletes that page as part of the
 drop, so the move and the deletion undo together. Hold `Alt` as you release to
-keep the empty page instead; the status bar shows which way `Alt` will flip the
+keep the empty page instead; the Operation history shows which way `Alt` will flip the
 current drop. To keep empty source pages by default, turn on **Keep source canvas
 when tiling its last object** in Preferences → General — `Alt` then removes them
 for that one drop.
@@ -195,7 +195,7 @@ There are two ways in:
 - Run **Simplify Inner Axes** — on the Arrange Ribbon tab, in the canvas
   right-click Arrange menu, or from the command palette — to simplify plots
   that are already in place. It needs at least two plots aligned in a grid;
-  otherwise the status bar says what to fix.
+  otherwise the Operation history says what to fix.
 
 To bring text back on one panel, select it and use **Axes** in the Object
 inspector: the **X text** and **Y text** rows toggle **Tick labels** and
@@ -283,7 +283,7 @@ What you control directly:
   em dash and the word *mixed* rather than presenting one of them as the
   setting; setting the row is what makes them agree. A selected series that is
   drawn as something else — a contour, say — is reported as skipped in the
-  status bar, and the rest still take the value. A width that differs from the
+  Operation history, and the rest still take the value. A width that differs from the
   one PlotX would choose for this data is marked with a dot, and the reset
   button beside it re-derives that default.
 - **Canvas themes** carry matching sizes — the Presentation Dark theme, for
