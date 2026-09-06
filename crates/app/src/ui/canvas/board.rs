@@ -134,11 +134,13 @@ pub(crate) fn drive_board_fit(
         BoardFitTarget::Frame(frame) => {
             match board_frame_ref(app, frame).and_then(|frame| frame_board_rect(app, frame)) {
                 Some(r) => {
-                    let vp = fit_bbox_around_occluders(
+                    let Some(vp) = fit_bbox_around_occluders(
                         (r.left, r.top, r.right(), r.bottom()),
                         geometry,
                         ui.ctx(),
-                    );
+                    ) else {
+                        return;
+                    };
                     (vp.zoom, vp.world_center)
                 }
                 None => {
@@ -151,11 +153,16 @@ pub(crate) fn drive_board_fit(
             let Some(b) = all_frames_bbox(app) else {
                 return;
             };
-            let vp = fit_bbox_around_occluders(b, geometry, ui.ctx());
+            let Some(vp) = fit_bbox_around_occluders(b, geometry, ui.ctx()) else {
+                return;
+            };
             (vp.zoom, vp.world_center)
         }
         BoardFitTarget::Region(b) => {
-            let vp = fit_bbox_around_occluders((b[0], b[1], b[2], b[3]), geometry, ui.ctx());
+            let Some(vp) = fit_bbox_around_occluders((b[0], b[1], b[2], b[3]), geometry, ui.ctx())
+            else {
+                return;
+            };
             (vp.zoom, vp.world_center)
         }
         BoardFitTarget::Viewport { zoom, world_center } => (zoom, world_center),
@@ -190,7 +197,7 @@ fn fit_bbox_around_occluders(
     bbox: (f32, f32, f32, f32),
     geometry: &crate::ui::workspace_geometry::WorkspaceGeometry,
     ctx: &egui::Context,
-) -> BoardViewport {
+) -> Option<BoardViewport> {
     let mut best = None;
     for (index, safe) in geometry.fit_candidates().enumerate() {
         let viewport = board_fit_bbox_with_chrome_in_rect(bbox, geometry.board_rect, safe);
@@ -201,7 +208,9 @@ fn fit_bbox_around_occluders(
             best = Some((index, viewport));
         }
     }
-    let (best_index, best_viewport) = best.expect("board geometry always has a fit candidate");
+    // A card can cover the entire board while the window is being resized.
+    // Keep the camera until usable space returns; there is no valid fit yet.
+    let (best_index, best_viewport) = best?;
     let id = egui::Id::new(FIT_CANDIDATE_ID);
     let previous_index = ctx.data(|data| data.get_temp::<usize>(id));
     let chosen = previous_index
@@ -217,7 +226,7 @@ fn fit_bbox_around_occluders(
         .filter(|(_, viewport)| viewport.zoom >= best_viewport.zoom * FIT_CANDIDATE_HYSTERESIS)
         .unwrap_or((best_index, best_viewport));
     ctx.data_mut(|data| data.insert_temp(id, chosen.0));
-    chosen.1
+    Some(chosen.1)
 }
 
 /// Rounding of a header strip's top corners; the frame shadow shares it so the

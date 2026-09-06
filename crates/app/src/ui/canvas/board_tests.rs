@@ -286,6 +286,31 @@ fn floating_task_cards_do_not_change_a_manual_camera() {
 }
 
 #[test]
+fn fully_occluded_board_preserves_the_camera_and_resumes_fit_when_uncovered() {
+    let mut app = app_with_pages(&[[0.0, 0.0]]);
+    let ctx = egui::Context::default();
+    request_board_fit(&mut app, &ctx, FrameRef::Page(0));
+    let before = app.session.board;
+    let board = egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(260.0, 400.0));
+    let mut geometry = workspace(board);
+    geometry.fit_occluders = vec![board];
+    assert!(fit_bbox_around_occluders((0.0, 0.0, 800.0, 100.0), &geometry, &ctx).is_none());
+    let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+        drive_board_fit(&mut app, ui, &geometry);
+    });
+    assert_eq!(app.session.board, before);
+    assert!(matches!(app.session.viewport_mode, ViewportMode::Fit(_)));
+    geometry.fit_occluders.clear();
+    for _ in 0..30 {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            drive_board_fit(&mut app, ui, &geometry);
+        });
+    }
+    assert_ne!(app.session.board, before);
+    assert!(app.session.board.zoom.is_finite());
+}
+
+#[test]
 fn dragging_a_focused_frame_immediately_takes_ownership_from_fit() {
     let mut app = app_with_pages(&[[100.0, 100.0]]);
     let ctx = egui::Context::default();
