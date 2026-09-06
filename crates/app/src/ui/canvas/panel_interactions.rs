@@ -9,14 +9,14 @@ pub(crate) fn handle_panel_drag(
     primary_released: bool,
     alt: bool,
 ) {
-    let Some(drag) = (match &app.session.ui.interaction {
+    let Some(mut drag) = (match &app.session.ui.interaction {
         Interaction::Panel(d) if d.canvas == ci => Some(d.clone()),
         _ => None,
     }) else {
         return;
     };
     let mut active = drag.active;
-    if primary_down
+    if (primary_down || primary_released)
         && let Some(screen_now) = hover
         && let Some(pointer_page) =
             screen_to_page_unbounded(app.session.board, &app.doc.canvases[ci], rect, screen_now)
@@ -26,6 +26,7 @@ pub(crate) fn handle_panel_drag(
         let dsx = screen_now.x - drag.start_pointer_screen[0];
         let dsy = screen_now.y - drag.start_pointer_screen[1];
         active |= dsx.hypot(dsy) > DRAG_START_PX;
+        drag.active = active;
         if let Interaction::Panel(current) = &mut app.session.ui.interaction {
             current.active = active;
         }
@@ -65,12 +66,21 @@ pub(crate) fn handle_panel_drag(
                     }
                 }
             }
+            swap::restore_preview(app, rect, hover);
             if let Some(source) = tile_source_for_panel(app, &drag)
                 && update_tile_drop(app, ci, rect, source, hover)
             {
                 app.session.ui.snap_guides.clear();
             }
         }
+    }
+    if (primary_released || !primary_down)
+        && active
+        && let Some(target) = swap::target(app, &drag, rect, hover)
+    {
+        app.take_interaction();
+        swap::commit(app, &drag, target);
+        return;
     }
     if (primary_released || !primary_down)
         && let Interaction::Panel(drag) = app.take_interaction()
@@ -85,6 +95,9 @@ pub(crate) fn handle_panel_drag(
         }
     }
 }
+
+mod swap;
+pub(crate) use swap::paint_panel_swap;
 
 pub(crate) fn begin_panel_drag(
     app: &mut PlotxApp,

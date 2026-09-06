@@ -86,6 +86,11 @@ Panels. To work with an object inside a Panel, double-click the Panel or press
 `Enter`. Use the breadcrumb above the page or press `Esc` to return to the page.
 You can also `Ctrl`/`Cmd`-click an object to select it without entering first.
 
+To exchange two Panels on the same canvas, drag one over the other and release
+when both slots are highlighted. The Panels exchange positions and sizes; their
+contents scale with the destination slot. This is one undoable step. Hidden or
+locked Panels cannot be swap targets, and multi-Panel drags remain group moves.
+
 Inside a Panel, objects snap to the Panel edge and to one another. To move an
 object into another unlocked Panel, drag it over the Panel and release when the
 target is highlighted. You can make the same move in Layers by dragging the

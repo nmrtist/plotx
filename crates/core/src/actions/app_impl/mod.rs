@@ -10,14 +10,16 @@ pub use validate::ActionApplyError;
 use validate::{ValidationShape, validate_action};
 
 impl PlotxApp {
-    fn set_panel_state(&mut self, canvas: usize, state: &PanelState) {
-        if let Some(canvas) = self.doc.canvases.get_mut(canvas) {
+    fn set_panel_state(&mut self, canvas_index: usize, state: &PanelState) {
+        if let Some(canvas) = self.doc.canvases.get_mut(canvas_index) {
             canvas.objects.clone_from(&state.objects);
             canvas.panels.clone_from(&state.panels);
             canvas.groups.clone_from(&state.groups);
             canvas.next_object_id = state.next_object_id;
             canvas.next_group_id = state.next_group_id;
             canvas.next_panel_label_slot = state.next_panel_label_slot;
+            // Apply, undo and redo must render plots at their restored content sizes.
+            self.rebuild_canvas(canvas_index);
         }
     }
 

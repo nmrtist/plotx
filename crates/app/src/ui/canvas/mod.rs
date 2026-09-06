@@ -265,6 +265,7 @@ pub fn render_central(app: &mut PlotxApp, ui: &mut Ui) {
     paint_wheel_target_hint(app, ci, rect, ui, &painter, chrome, ui.visuals().dark_mode);
     paint_tile_ghost(app, &painter, chrome);
     paint_tile_preview(app, rect, &painter, chrome);
+    paint_panel_swap(app, rect, &painter, chrome);
     super::canvas_size::page_size_chrome(app, ci, page, rect, ui);
     if pointer_owned {
         canvas_cursor(app, ci, rect, ui);

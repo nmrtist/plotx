@@ -16,6 +16,7 @@ use plotx_processing::{AxisPipeline, Params2D, Preset2D};
 mod app_impl;
 mod arrange;
 mod panel;
+mod panel_swap;
 mod processing_state;
 mod transfer;
 mod zorder;
