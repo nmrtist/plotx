@@ -22,8 +22,11 @@ flow from raw data to a finished figure.
 Hide either side bar to give the canvas more room: click its layout button at
 the right end of the Ribbon's task row, press <kbd>Ctrl</kbd>+<kbd>B</kbd>
 (left) or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd> (right;
-<kbd>Cmd</kbd> on macOS), or drag the side bar's inner edge past its minimum
-width. The same commands live in the **View** menu and the **View** Ribbon.
+<kbd>Cmd</kbd> on macOS), or drag the side bar's inner edge toward the nearest
+window edge. When **Release to hide sidebar** appears, release to hide it.
+You can make the side bar as narrow as possible without hiding it; just stop
+before reaching the window edge. To cancel hiding, drag back before releasing.
+The same commands live in the **View** menu and the **View** Ribbon.
 
 ## Menus and task Ribbon
 

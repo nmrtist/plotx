@@ -1,10 +1,8 @@
 use super::*;
 
 const MIN_WORKSPACE_WIDTH: f32 = 320.0;
-/// Releasing a resize drag with the pointer this far past the sidebar's
-/// minimum width hides the sidebar. Wide enough that overshooting a fast
-/// resize does not hide it by accident.
-const HIDE_DRAG_SLACK: f32 = 60.0;
+/// Logical pixels from the window's outer edge, independent of sidebar width.
+const HIDE_EDGE_DISTANCE: f32 = 24.0;
 
 pub(super) fn render(app: &mut PlotxApp, ui: &mut Ui, dark: bool, workspace_width: f32) {
     let mut primary_rect = None;
@@ -39,7 +37,7 @@ pub(super) fn render(app: &mut PlotxApp, ui: &mut Ui, dark: bool, workspace_widt
                     .clamp(min_width, max_width),
             )
             .size_range(min_width..=max_width);
-        let response = show_sidebar(panel, app, ui, dark, true);
+        let response = show_sidebar(panel, app, ui, dark, true, min_width..=max_width);
         paint_sidebar_resize_edge(
             ui,
             Id::new("primary_sidebar"),
@@ -49,12 +47,8 @@ pub(super) fn render(app: &mut PlotxApp, ui: &mut Ui, dark: bool, workspace_widt
         );
         app.session.primary_sidebar_width = response.response.rect.width();
         primary_rect = Some(response.inner);
-        if resize_dragged_past_min(
-            ui.ctx(),
-            Id::new("primary_sidebar"),
-            response.inner,
-            SidebarEdge::Right,
-        ) {
+        if resize_released_at_window_edge(ui.ctx(), Id::new("primary_sidebar"), SidebarEdge::Right)
+        {
             app.session.primary_sidebar_visible = false;
             sidebar_hidden_status(app, commands::CommandId::TogglePrimarySidebar, "Left");
         }
@@ -89,7 +83,7 @@ pub(super) fn render(app: &mut PlotxApp, ui: &mut Ui, dark: bool, workspace_widt
                     .clamp(min_width, max_width),
             )
             .size_range(min_width..=max_width);
-        let response = show_sidebar(panel, app, ui, dark, false);
+        let response = show_sidebar(panel, app, ui, dark, false, min_width..=max_width);
         paint_sidebar_resize_edge(
             ui,
             Id::new("secondary_sidebar"),
@@ -99,12 +93,8 @@ pub(super) fn render(app: &mut PlotxApp, ui: &mut Ui, dark: bool, workspace_widt
         );
         app.session.secondary_sidebar_width = response.response.rect.width();
         secondary_rect = Some(response.inner);
-        if resize_dragged_past_min(
-            ui.ctx(),
-            Id::new("secondary_sidebar"),
-            response.inner,
-            SidebarEdge::Left,
-        ) {
+        if resize_released_at_window_edge(ui.ctx(), Id::new("secondary_sidebar"), SidebarEdge::Left)
+        {
             app.session.secondary_sidebar_visible = false;
             sidebar_hidden_status(app, commands::CommandId::ToggleSecondarySidebar, "Right");
         }
@@ -115,20 +105,17 @@ pub(super) fn render(app: &mut PlotxApp, ui: &mut Ui, dark: bool, workspace_widt
     super::workspace_geometry::set_sidebar_rects(ui.ctx(), primary_rect, secondary_rect);
 }
 
-/// True when a resize drag on `panel_id` just ended with the pointer well past
-/// the sidebar's minimum width — the user pulled the edge "through" the
-/// sidebar. egui clamps the panel at its minimum during the drag, so the
-/// overshoot is the pointer-to-edge distance on release.
-fn resize_dragged_past_min(
+/// Preview and commit use the same current pointer position: dragging back
+/// from the window edge cancels hiding without any latched state.
+pub(super) fn resize_released_at_window_edge(
     ctx: &egui::Context,
     panel_id: Id,
-    card_rect: Rect,
     edge: SidebarEdge,
 ) -> bool {
     let Some(resize) = ctx.read_response(panel_id.with("__resize")) else {
         return false;
     };
-    if !resize.drag_stopped() {
+    if !resize.dragged() && !resize.drag_stopped() {
         return false;
     }
     let Some(pointer) = resize
@@ -137,10 +124,24 @@ fn resize_dragged_past_min(
     else {
         return false;
     };
-    match edge {
-        SidebarEdge::Right => pointer.x < card_rect.right() - HIDE_DRAG_SLACK,
-        SidebarEdge::Left => pointer.x > card_rect.left() + HIDE_DRAG_SLACK,
+    let window = ctx.content_rect();
+    let near_edge = match edge {
+        SidebarEdge::Right => pointer.x <= window.left() + HIDE_EDGE_DISTANCE,
+        SidebarEdge::Left => pointer.x >= window.right() - HIDE_EDGE_DISTANCE,
+    };
+    if near_edge && resize.dragged() {
+        // Keep the hint visible even when the pointer is outside the window.
+        egui::Tooltip::always_open(
+            ctx.clone(),
+            resize.layer_id,
+            panel_id.with("hide_hint"),
+            window.shrink(12.0).clamp(pointer),
+        )
+        .show(|ui| {
+            ui.label("Release to hide sidebar");
+        });
     }
+    near_edge && resize.drag_stopped()
 }
 
 fn sidebar_hidden_status(app: &mut PlotxApp, id: commands::CommandId, side: &str) {
@@ -157,13 +158,14 @@ fn show_sidebar(
     ui: &mut Ui,
     dark: bool,
     primary: bool,
+    width_range: std::ops::RangeInclusive<f32>,
 ) -> InnerResponse<Rect> {
     let (id, edge) = if primary {
         (Id::new("primary_sidebar"), SidebarEdge::Right)
     } else {
         (Id::new("secondary_sidebar"), SidebarEdge::Left)
     };
-    show_resizable_sidebar(panel, ui, id, edge, |ui| {
+    show_resizable_sidebar(panel, ui, id, edge, width_range, |ui| {
         // Anchor the content ids globally: a Ui's per-pass unique id folds in
         // the parent's auto-id counter, so without this every widget in this
         // sidebar changes id whenever an earlier sibling panel toggles. That
