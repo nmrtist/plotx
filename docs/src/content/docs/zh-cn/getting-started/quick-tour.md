@@ -18,7 +18,9 @@ description: 五分钟了解 PlotX 的界面与典型工作流。
 
 隐藏任意一侧侧栏可为画布腾出空间：点击 Ribbon 任务行右端对应的布局按钮，按
 <kbd>Ctrl</kbd>+<kbd>B</kbd>（左）或 <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd>
-（右；macOS 上为 <kbd>Cmd</kbd>），或把侧栏内缘拖过其最小宽度。同样的命令也在
+（右；macOS 上为 <kbd>Cmd</kbd>），或将侧栏内缘拖向同一侧的窗口边缘，看到
+**Release to hide sidebar**（松开以隐藏侧栏）提示后松手。
+只想把侧栏缩到最窄时，不必一直拖到窗口边缘；如果看到提示后改变主意，松手前拖回即可取消隐藏。同样的命令也在
 **View** 菜单和 **View** Ribbon 中。
 
 ## 菜单与任务 Ribbon

@@ -371,9 +371,25 @@ fn show_resizable_sidebar<R>(
     ui: &mut Ui,
     panel_id: Id,
     edge: SidebarEdge,
+    width_range: std::ops::RangeInclusive<f32>,
     add_contents: impl FnOnce(&mut Ui) -> R,
 ) -> InnerResponse<R> {
     let resizable = sidebar_resize_enabled(ui, panel_id, edge);
+    // egui 0.34 uses an absolute distance from the fixed edge. Preserve the
+    // direction before clamping so dragging through that edge cannot grow it.
+    let panel = if let Some(resize) = ui.ctx().read_response(panel_id.with("__resize"))
+        && resize.dragged()
+        && let Some(pointer) = resize.interact_pointer_pos()
+    {
+        let available = ui.available_rect_before_wrap();
+        let width = match edge {
+            SidebarEdge::Left => available.right() - pointer.x,
+            SidebarEdge::Right => pointer.x - available.left(),
+        };
+        panel.exact_size(width.clamp(*width_range.start(), *width_range.end()))
+    } else {
+        panel
+    };
     let normal_style = ui.style().clone();
     ui.style_mut().visuals.widgets.hovered.fg_stroke = Stroke::NONE;
     ui.style_mut().visuals.widgets.active.fg_stroke = Stroke::NONE;

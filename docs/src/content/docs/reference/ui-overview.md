@@ -45,8 +45,11 @@ introduces the same regions in walkthrough form.
 Both Side Bars can be shown or hidden at any time: click the pair of layout
 buttons at the right end of the Ribbon's task row, press
 <kbd>Ctrl</kbd>+<kbd>B</kbd> (left) or <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd>
-(right; <kbd>Cmd</kbd> on macOS), or drag a Side Bar's inner edge past its
-minimum width to hide it.
+(right; <kbd>Cmd</kbd> on macOS), or drag a Side Bar's inner edge toward the
+nearest window edge. When **Release to hide sidebar** appears, release to
+hide it. You can make the Side Bar as narrow as possible without hiding it;
+just stop before reaching the window edge. To cancel hiding, drag back
+before releasing.
 
 The Ribbon's show/hide button uses the same window-outline style, with a band
 at the top. Task cards use a bottom band for their body; a filled band means
