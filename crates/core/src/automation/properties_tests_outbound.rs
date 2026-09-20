@@ -202,9 +202,8 @@ fn document_property_tools_address_the_document_root() {
 #[test]
 fn dataset_property_tools_expand_processing_steps_and_report_non_apodization_skips() {
     let mut app = PlotxApp::new();
-    app.doc
-        .datasets
-        .push(Dataset::Nmr(Box::new(NmrDataset::load(NmrData {
+    app.doc.datasets.push(Dataset::Nmr(Box::new(
+        NmrDataset::load(NmrData {
             points: (0..32)
                 .map(|value| num_complex::Complex64::new(f64::from(value), 0.0))
                 .collect(),
@@ -215,7 +214,9 @@ fn dataset_property_tools_expand_processing_steps_and_report_non_apodization_ski
             nucleus: "1H".to_owned(),
             source: "automation apodization".to_owned(),
             group_delay: 0.0,
-        }))));
+        })
+        .unwrap(),
+    )));
     let dataset = app.doc.datasets[0].resource_id().to_string();
     let request = request(
         &app,
@@ -268,9 +269,8 @@ fn dataset_property_tools_expand_processing_steps_and_report_non_apodization_ski
 #[test]
 fn inspect_reports_the_actionable_reason_for_a_disabled_phase_parameter() {
     let mut app = PlotxApp::new();
-    app.doc
-        .datasets
-        .push(Dataset::Nmr(Box::new(NmrDataset::load(NmrData {
+    app.doc.datasets.push(Dataset::Nmr(Box::new(
+        NmrDataset::load(NmrData {
             points: (0..32)
                 .map(|value| num_complex::Complex64::new(f64::from(value), 0.25))
                 .collect(),
@@ -281,7 +281,9 @@ fn inspect_reports_the_actionable_reason_for_a_disabled_phase_parameter() {
             nucleus: "1H".to_owned(),
             source: "automation phase availability".to_owned(),
             group_delay: 0.0,
-        }))));
+        })
+        .unwrap(),
+    )));
     let dataset = app.doc.datasets[0].resource_id().to_string();
     let inspect = request(
         &app,
@@ -301,9 +303,8 @@ fn inspect_reports_the_actionable_reason_for_a_disabled_phase_parameter() {
 #[test]
 fn degree_schema_dto_keeps_display_log_and_unit_consistent() {
     let mut app = PlotxApp::new();
-    app.doc
-        .datasets
-        .push(Dataset::Nmr(Box::new(NmrDataset::load(NmrData {
+    app.doc.datasets.push(Dataset::Nmr(Box::new(
+        NmrDataset::load(NmrData {
             points: (0..32)
                 .map(|value| num_complex::Complex64::new(f64::from(value), 0.25))
                 .collect(),
@@ -314,7 +315,9 @@ fn degree_schema_dto_keeps_display_log_and_unit_consistent() {
             nucleus: "1H".to_owned(),
             source: "automation phase display".to_owned(),
             group_delay: 0.0,
-        }))));
+        })
+        .unwrap(),
+    )));
     let dataset = app.doc.datasets[0].resource_id().to_string();
     let inspect = request(
         &app,

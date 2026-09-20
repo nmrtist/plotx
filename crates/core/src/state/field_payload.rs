@@ -274,7 +274,7 @@ impl super::Dataset {
             .cloned()
             .unwrap_or_else(|| {
                 let (source, algorithm) = match self {
-                    Self::Nmr(dataset) => (dataset.data.source.as_str(), None),
+                    Self::Nmr(dataset) => (dataset.data.source(), None),
                     Self::Nmr2D(dataset) => (
                         dataset.data.source.as_str(),
                         Some(FieldAlgorithmProvenance {
@@ -318,7 +318,7 @@ fn nmr_field_payload(dataset: &super::Nmr2DDataset, id: FieldId) -> Option<Field
             None
         }
         plotx_processing::Processed2D::Stack(stack)
-            if dataset.field_catalog.id_for_key("nmr.stack") == Some(id) =>
+            if dataset.field_catalog.id_for_key(dataset.stack_field_key()) == Some(id) =>
         {
             let values = stack
                 .traces
@@ -360,7 +360,7 @@ fn nmr_field_representation(
             })
         }
         plotx_processing::Processed2D::Stack(_)
-            if dataset.field_catalog.id_for_key("nmr.stack") == Some(id) =>
+            if dataset.field_catalog.id_for_key(dataset.stack_field_key()) == Some(id) =>
         {
             Some(FieldRepresentation::Curve1D)
         }

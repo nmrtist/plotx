@@ -1,37 +1,43 @@
-//! Signal processing over [`plotx_io::NmrData`]: FID → FFT → phase → baseline.
+//! PlotX processing recipes, native NMR execution, and domain-specific analyses.
 
 pub mod align;
 pub mod arithmetic;
-pub mod autophase;
-pub mod baseline;
-pub mod cleanup;
 pub mod craft;
-pub mod fft;
-pub mod fft2;
-pub mod nus;
+pub mod nmr_bridge;
+pub mod nmr_execution;
 mod output;
-pub mod phase;
-mod preview;
 pub mod slice;
 pub mod timeseries;
 pub mod xps;
 pub mod xrd;
 
 pub use output::{Processed1D, TimeTrace};
-pub use preview::{Preview, process_up_to};
 pub use slice::{ProjectionMode, Slice1D, SliceKind};
 
 use num_complex::Complex64;
 use plotx_io::Domain;
 
+/// Labels for scientific coordinates supported by NMR display views.
+pub fn axis_unit_label(unit: Option<nmr::axis::AxisUnit>) -> &'static str {
+    use nmr::axis::AxisUnit;
+    match unit {
+        Some(AxisUnit::Ppm) => "ppm",
+        Some(AxisUnit::Hertz) => "Hz",
+        Some(AxisUnit::Second) => "s",
+        Some(AxisUnit::TeslaPerMeter) => "T/m",
+        _ => "",
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Spectrum {
-    /// Chemical-shift axis in ppm, ordered low → high index. The reversed NMR
+    /// Spectral coordinates in `unit`. The reversed NMR
     /// display (high ppm on the left) is a rendering concern, not applied here.
     pub ppm: Vec<f64>,
     pub values: Vec<Complex64>,
-    pub hz_per_point: f64,
-    pub observe_freq_mhz: f64,
+    pub unit: nmr::axis::AxisUnit,
+    pub hz_per_point: Option<f64>,
+    pub observe_freq_mhz: Option<f64>,
     pub nucleus: String,
 }
 
@@ -64,6 +70,15 @@ impl Spectrum {
 
     pub fn real_points(&self) -> Vec<[f64; 2]> {
         self.points(DisplayMode::Real)
+    }
+
+    /// Average spacing for UI bounds; numerical validation belongs to nmr.
+    pub fn coordinate_spacing(&self) -> Option<f64> {
+        if self.ppm.len() < 2 {
+            return None;
+        }
+        let step = (self.ppm.last()? - self.ppm.first()?).abs() / (self.ppm.len() - 1) as f64;
+        (step.is_finite() && step > 0.0).then_some(step)
     }
 
     pub fn ppm_bounds(&self) -> (f64, f64) {
@@ -195,11 +210,7 @@ impl PhaseParams {
         pivot_frac: 0.0,
         auto: None,
     };
-    /// Entropy recovers real first-order phase (tens-to-hundreds of degrees) while
-    /// staying clean on single peaks and under noise, and — once large spectra are
-    /// downsampled by peak-preserving pooling rather than plain striding (see
-    /// `autophase::decimate`) — phases real 13C data without spurious negative
-    /// peaks. See the ground-truth and large-spectrum tests in `tests.rs`.
+    /// Library entropy estimation with its versioned scientific quality contract.
     pub const AUTO: Self = Self {
         auto: Some(AutoPhaseMethod::Entropy),
         ..Self::MANUAL_ZERO
@@ -678,100 +689,6 @@ impl AxisPipeline {
     }
 }
 
-pub use fft::transform_base;
-
-/// Apply one frequency-domain step to an already transformed spectrum.
-pub fn apply_freq_step(spec: &mut Spectrum, kind: &StepKind) {
-    match kind {
-        StepKind::Phase(p) => {
-            let (p0, p1, piv) = match p.auto {
-                Some(m) => auto_phase(spec, m),
-                None => (p.phase0, p.phase1, p.pivot_frac),
-            };
-            phase::apply_with_pivot(spec, p0, p1, piv);
-        }
-        StepKind::Baseline(m) => baseline::apply(spec, *m),
-        StepKind::Reference(r) => {
-            let delta = r.target_ppm - r.at_ppm;
-            for p in &mut spec.ppm {
-                *p += delta;
-            }
-        }
-        StepKind::Magnitude => {
-            for c in &mut spec.values {
-                *c = Complex64::new(c.norm(), 0.0);
-            }
-        }
-        StepKind::Smooth(m) => cleanup::smooth(spec, *m),
-        StepKind::Normalize(m) => cleanup::normalize(spec, *m),
-        StepKind::Bin(p) => cleanup::bin(spec, *p),
-        StepKind::Reverse => cleanup::reverse(spec),
-        StepKind::Invert => cleanup::invert(spec),
-        StepKind::Apodize(_) | StepKind::ZeroFill(_) | StepKind::Fft => {}
-    }
-}
-
-/// Cheap stage: apply the enabled frequency-domain steps in list order to an
-/// unphased `base` from [`transform_base`], producing the display spectrum.
-pub fn reapply(base: &Spectrum, pipe: &AxisPipeline) -> Spectrum {
-    let mut spec = base.clone();
-    for step in &pipe.steps {
-        if step.enabled && !step.kind.at_or_before_fft() {
-            apply_freq_step(&mut spec, &step.kind);
-        }
-    }
-    spec
-}
-
-pub fn transform_output_base(
-    data: &plotx_io::NmrData,
-    pipe: &AxisPipeline,
-    group_delay_correct: bool,
-) -> Result<Processed1D, PipelineDomainError> {
-    match pipe.output_domain(data.domain)? {
-        Domain::Time => Ok(Processed1D::Time(fft::transform_time(data, pipe))),
-        Domain::Frequency => Ok(Processed1D::Frequency(transform_base(
-            data,
-            pipe,
-            group_delay_correct,
-        ))),
-    }
-}
-
-pub fn reapply_output(base: &Processed1D, pipe: &AxisPipeline) -> Processed1D {
-    match base {
-        Processed1D::Time(trace) => Processed1D::Time(trace.clone()),
-        Processed1D::Frequency(spectrum) => Processed1D::Frequency(reapply(spectrum, pipe)),
-    }
-}
-
-pub fn process_output(
-    data: &plotx_io::NmrData,
-    pipe: &AxisPipeline,
-    group_delay_correct: bool,
-) -> Result<Processed1D, PipelineDomainError> {
-    transform_output_base(data, pipe, group_delay_correct).map(|base| reapply_output(&base, pipe))
-}
-
-/// Full 1D pipeline, preserving whether the recipe ends in time or frequency.
-///
-/// Callers that specifically require a spectrum must inspect the returned
-/// [`Processed1D`] instead of turning a valid time-domain output into a panic.
-pub fn process(
-    data: &plotx_io::NmrData,
-    pipe: &AxisPipeline,
-    group_delay_correct: bool,
-) -> Result<Processed1D, PipelineDomainError> {
-    process_output(data, pipe, group_delay_correct)
-}
-
-/// Compute a phase `(phase0, phase1, pivot_frac)` from the spectrum itself, per
-/// the chosen [`AutoPhaseMethod`]. The ramp pivots at the tallest peak so the
-/// on-plot handle is consistent across methods. See [`autophase`] for the rules.
-pub fn auto_phase(spec: &Spectrum, method: AutoPhaseMethod) -> (f64, f64, f64) {
-    autophase::compute(&spec.values, method)
-}
-
 fn time_side(pipe: &AxisPipeline) -> Vec<(StepKind, bool)> {
     pipe.steps
         .iter()
@@ -782,7 +699,7 @@ fn time_side(pipe: &AxisPipeline) -> Vec<(StepKind, bool)> {
 
 /// Whether moving from `a` to `b` requires re-running the FFT: true iff the
 /// at-or-before-FFT subsequence (kinds, params, enabled, order) differs, or the
-/// group-delay flags differ. Frequency-only edits need only a cheap [`reapply`].
+/// group-delay flags differ. Frequency-only edits need only a cached-base library pass.
 pub fn needs_retransform(a: &AxisPipeline, b: &AxisPipeline, gd_a: bool, gd_b: bool) -> bool {
     gd_a != gd_b || time_side(a) != time_side(b)
 }

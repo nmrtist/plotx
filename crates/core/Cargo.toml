@@ -15,6 +15,7 @@ default = []
 datafusion = ["dep:plotx-datafusion"]
 
 [dependencies]
+nmr.workspace = true
 plotx-data.workspace = true
 plotx-datafusion = { workspace = true, optional = true }
 plotx-io.workspace = true

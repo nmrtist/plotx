@@ -44,11 +44,14 @@ impl PlotxApp {
                 DatasetProcessingState::Nmr2D {
                     params,
                     preset,
+                    nus_request,
                     group_delay_correct,
                 },
             ) => {
                 n.params = params.clone();
                 n.preset = *preset;
+                n.base_stale |= n.nus_request != *nus_request;
+                n.nus_request = *nus_request;
                 n.group_delay_correct = *group_delay_correct;
             }
             (Dataset::Xrd(data), DatasetProcessingState::Xrd(processing)) => {
@@ -94,13 +97,17 @@ impl PlotxApp {
             DatasetProcessingState::Nmr2D {
                 params,
                 preset,
+                nus_request,
                 group_delay_correct,
             },
         ) = (self.doc.datasets.get_mut(dataset), state)
         {
-            let force_full = current.group_delay_correct != *group_delay_correct;
+            let force_full = current.group_delay_correct != *group_delay_correct
+                || current.nus_request != *nus_request;
+            current.base_stale |= force_full;
             current.params = params.clone();
             current.preset = *preset;
+            current.nus_request = *nus_request;
             current.group_delay_correct = *group_delay_correct;
             self.schedule_2d_processing(dataset, force_full);
             return Ok(());
@@ -393,18 +400,11 @@ pub(super) fn validate_processing_state(
 ) -> Result<(), String> {
     match (dataset, state) {
         (Dataset::Nmr(dataset), DatasetProcessingState::Nmr { pipeline, .. }) => pipeline
-            .output_domain(dataset.data.domain)
+            .output_domain(dataset.input_domain())
             .map(|_| ())
             .map_err(|error| format!("Cannot apply invalid direct processing pipeline: {error}")),
         (Dataset::Nmr2D(dataset), DatasetProcessingState::Nmr2D { params, .. }) => {
-            params
-                .f2
-                .output_domain(dataset.data.domain)
-                .map_err(|error| format!("Cannot apply invalid F2 processing pipeline: {error}"))?;
-            params
-                .f1
-                .output_domain(dataset.data.domain)
-                .map_err(|error| format!("Cannot apply invalid F1 processing pipeline: {error}"))?;
+            plotx_processing::nmr_execution::validate_2d_domains(&dataset.data, params)?;
             Ok(())
         }
         (Dataset::Xrd(_), DatasetProcessingState::Xrd(processing)) => {

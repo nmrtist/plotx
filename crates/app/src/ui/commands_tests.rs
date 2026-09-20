@@ -70,7 +70,7 @@ pub(super) fn app_with_nmr() -> PlotxApp {
     };
     let action = Action::insert_dataset_with_default_canvas(
         &app,
-        Dataset::Nmr(Box::new(NmrDataset::load(data))),
+        Dataset::Nmr(Box::new(NmrDataset::load(data).unwrap())),
         "Canvas — 1D NMR".to_owned(),
         DEFAULT_CANVAS_SIZE_MM,
     );
@@ -127,7 +127,7 @@ fn time_domain_nmr_hides_frequency_analysis_and_disables_spectral_commands() {
                 | plotx_processing::StepKind::Invert
         )
     });
-    dataset.retransform();
+    dataset.retransform().unwrap();
 
     assert!(
         !app.doc.datasets[0]

@@ -362,13 +362,29 @@ fn inspect_text(app: &PlotxApp, dataset: usize, point: CursorPoint) -> String {
         return String::new();
     };
     match data {
-        Dataset::Nmr(_) => format!("x {:.4} ppm · I {}", point.x, fmt_number(point.intensity)),
-        Dataset::Nmr2D(_) => format!(
-            "F2 {:.4} ppm · F1 {:.4} ppm · I {}",
-            point.x,
-            point.y.unwrap_or_default(),
-            fmt_number(point.intensity),
-        ),
+        Dataset::Nmr(n) => {
+            let unit = n
+                .spectrum()
+                .map_or("s", |s| plotx_processing::axis_unit_label(Some(s.unit)));
+            format!(
+                "x {:.4} {unit} · I {}",
+                point.x,
+                fmt_number(point.intensity)
+            )
+        }
+        Dataset::Nmr2D(n) => {
+            let Processed2D::Ft(s) = &n.processed else {
+                return String::new();
+            };
+            format!(
+                "F2 {:.4} {} · F1 {:.4} {} · I {}",
+                point.x,
+                s.direct.unit_label(),
+                point.y.unwrap_or_default(),
+                s.indirect.unit_label(),
+                fmt_number(point.intensity)
+            )
+        }
         _ => String::new(),
     }
 }
@@ -380,24 +396,41 @@ fn delta_text(app: &PlotxApp, dataset: usize, delta: CursorDelta) -> String {
     let dx = delta.second.x - delta.first.x;
     let di = delta.second.intensity - delta.first.intensity;
     match data {
-        Dataset::Nmr(nmr) => format!(
-            "Δx {} ppm ({} Hz) · ΔI {}",
-            fmt_delta(dx),
-            fmt_delta(dx * nmr.data.observe_freq_mhz),
-            fmt_number(di),
-        ),
+        Dataset::Nmr(nmr) => {
+            if let Some(spectrum) = nmr.spectrum() {
+                if spectrum.unit == nmr::axis::AxisUnit::Hertz {
+                    format!("Δx {} Hz · ΔI {}", fmt_delta(dx), fmt_number(di))
+                } else {
+                    let hz = nmr
+                        .native_processed
+                        .reference_frequency_mhz(0)
+                        .map(|frequency| format!(" ({} Hz)", fmt_delta(dx * frequency)))
+                        .unwrap_or_default();
+                    format!("Δx {} ppm{hz} · ΔI {}", fmt_delta(dx), fmt_number(di))
+                }
+            } else {
+                format!("Δt {} s · ΔI {}", fmt_delta(dx), fmt_number(di))
+            }
+        }
         Dataset::Nmr2D(nmr) => {
             let Processed2D::Ft(spectrum) = &nmr.processed else {
                 return String::new();
             };
             let dy = delta.second.y.unwrap_or_default() - delta.first.y.unwrap_or_default();
+            let axis_delta = |value: f64, meta: &plotx_processing::AxisMeta| {
+                let unit = match meta.unit {
+                    Some(nmr::axis::AxisUnit::Second) => "s",
+                    Some(nmr::axis::AxisUnit::Hertz) => "Hz",
+                    Some(nmr::axis::AxisUnit::Ppm) => "ppm",
+                    _ => "",
+                };
+                format!("{} {unit}", fmt_delta(value))
+            };
             format!(
-                "ΔF2 {} ppm ({} Hz) · ΔF1 {} ppm ({} Hz) · ΔI {}",
-                fmt_delta(dx),
-                fmt_delta(dx * spectrum.direct.observe_freq_mhz),
-                fmt_delta(dy),
-                fmt_delta(dy * spectrum.indirect.observe_freq_mhz),
-                fmt_number(di),
+                "ΔF2 {} · ΔF1 {} · ΔI {}",
+                axis_delta(dx, &spectrum.direct),
+                axis_delta(dy, &spectrum.indirect),
+                fmt_number(di)
             )
         }
         _ => String::new(),

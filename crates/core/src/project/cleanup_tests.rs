@@ -5,7 +5,7 @@ use crate::state::Dataset;
 #[test]
 fn project_and_scheme_roundtrips_preserve_cleanup_steps() {
     let mut app = PlotxApp::new();
-    let mut dataset = NmrDataset::load(synthetic_1d());
+    let mut dataset = NmrDataset::load(synthetic_1d()).unwrap();
     let cleanup = [
         StepKind::Smooth(SmoothMethod::SavitzkyGolay {
             window: 11,
@@ -26,7 +26,7 @@ fn project_and_scheme_roundtrips_preserve_cleanup_steps() {
             .steps
             .push(ProcessingStep::new(id, kind.clone(), StepSource::User));
     }
-    dataset.retransform();
+    dataset.retransform().unwrap();
     let expected: Vec<StepKind> = cleanup.to_vec();
     app.doc.datasets.push(Dataset::Nmr(Box::new(dataset)));
 
@@ -49,7 +49,7 @@ fn project_and_scheme_roundtrips_preserve_cleanup_steps() {
     save_scheme(&scheme_path, &loaded.doc.datasets[0]).unwrap();
     let scheme = load_scheme(&scheme_path).unwrap();
     let _ = std::fs::remove_file(&scheme_path);
-    let target = Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d())));
+    let target = Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()).unwrap()));
     let crate::actions::DatasetProcessingState::Nmr { pipeline, .. } =
         apply_scheme(&scheme, &target).unwrap()
     else {
@@ -64,7 +64,7 @@ fn project_and_scheme_roundtrips_preserve_cleanup_steps() {
 
 #[test]
 fn applying_a_scheme_reports_an_invalid_stored_smoothing_window() {
-    let target = Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d())));
+    let target = Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()).unwrap()));
     let mut pipeline = AxisPipeline::default_1d();
     pipeline.steps.push(ProcessingStep::new(
         StepId::new(99),

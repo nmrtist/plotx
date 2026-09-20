@@ -9,7 +9,7 @@ use plotx_processing::{ProcessingStep, StepKind, StepSource};
 #[test]
 fn dataset_delete_undo_restores_identity_and_persistent_references() {
     let mut app = sample_app();
-    let mut inserted = Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d())));
+    let mut inserted = Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()).unwrap()));
     let inserted_id = DatasetId::new();
     inserted.set_resource_id(inserted_id);
     let action = Action::insert_dataset_with_default_canvas(
@@ -71,7 +71,7 @@ fn canvas_dataset_ids_follow_first_appearance_and_page_indices_follow_document_o
     ];
     app.doc.datasets[0].set_resource_id(ids[0]);
     for id in &ids[1..] {
-        let mut dataset = Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d())));
+        let mut dataset = Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()).unwrap()));
         dataset.set_resource_id(*id);
         app.doc.datasets.push(dataset);
     }
@@ -121,7 +121,7 @@ fn syncing_integral_curves_ignores_a_stale_dataset_index() {
 #[test]
 fn series_reorder_preserves_ids_and_only_changes_order() {
     let mut app = sample_app();
-    let second = Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d())));
+    let second = Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()).unwrap()));
     let second_id = second.resource_id();
     app.doc.datasets.push(second);
     let plot = app.doc.canvases[0].objects[0].plot_mut().unwrap();
@@ -144,7 +144,7 @@ fn series_reorder_preserves_ids_and_only_changes_order() {
 #[test]
 fn step_and_series_allocators_do_not_rollback_with_undo() {
     let mut app = sample_app();
-    let second = Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d())));
+    let second = Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()).unwrap()));
     let second_id = second.resource_id();
     app.doc.datasets.push(second);
 
@@ -254,9 +254,9 @@ fn step_and_series_allocators_do_not_rollback_with_undo() {
 #[test]
 fn an_expanded_step_does_not_leak_onto_another_dataset_with_the_same_id() {
     let mut app = sample_app();
-    app.doc
-        .datasets
-        .push(Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()))));
+    app.doc.datasets.push(Dataset::Nmr(Box::new(
+        NmrDataset::load(synthetic_1d()).unwrap(),
+    )));
 
     let phase_id = |app: &crate::state::PlotxApp, index: usize| {
         app.doc.datasets[index]

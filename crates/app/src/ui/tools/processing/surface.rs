@@ -45,15 +45,15 @@ struct SurfaceShape {
 fn surface_shape(dataset: &Dataset) -> Option<SurfaceShape> {
     let (input_domain, source) = match dataset {
         Dataset::Nmr(dataset) => (
-            dataset.data.domain,
-            match dataset.data.domain {
+            dataset.input_domain(),
+            match dataset.input_domain() {
                 Domain::Time => SourceShape::RawFid,
                 Domain::Frequency => SourceShape::ImportedSpectrum,
             },
         ),
         Dataset::Nmr2D(dataset) => (
-            dataset.data.domain,
-            match dataset.data.domain {
+            dataset.input_domain(PhaseAxis::F2).ok()?,
+            match dataset.input_domain(PhaseAxis::F2).ok()? {
                 Domain::Time => SourceShape::RawAcquisition2D,
                 Domain::Frequency => SourceShape::ImportedSpectrum,
             },

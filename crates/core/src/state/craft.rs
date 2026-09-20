@@ -1,12 +1,11 @@
 use super::{FloatSeries, NmrDataset, TableDataset, materialized_float_series_table};
-use plotx_io::NmrData;
+use plotx_io::nmr_view::NmrSource;
 use plotx_processing::craft::{
     CRAFT_ALGORITHM, CRAFT_ALGORITHM_VERSION, CraftAmplitudeReport, CraftComponent,
     CraftDiagnostics, CraftInvocation, CraftReference, CraftRegionRatio, CraftRegionSummary,
     CraftReportDefinition, CraftResult, calculate_craft_report,
 };
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct CraftRunId(pub u64);
@@ -46,7 +45,7 @@ impl StoredCraftRun {
     }
     pub fn from_result(
         id: CraftRunId,
-        data: &NmrData,
+        data: &NmrSource,
         invocation: CraftInvocation,
         parent_run: Option<CraftRunId>,
         result: CraftResult,
@@ -68,20 +67,27 @@ impl StoredCraftRun {
         }
     }
 
-    pub fn is_stale_for(&self, data: &NmrData, reference: CraftReference) -> bool {
+    pub fn is_stale_for(&self, data: &NmrSource, reference: Option<CraftReference>) -> bool {
         self.provenance.input_sha256 != craft_input_sha256(data)
-            || self.provenance.invocation.reference != reference
+            || Some(self.provenance.invocation.reference) != reference
     }
 }
 
 impl NmrDataset {
     /// Reference context used by analyses that fit the original FID but report
     /// chemical shifts on the processed spectrum's visible axis.
-    pub fn craft_reference(&self) -> CraftReference {
-        CraftReference::new(
-            self.data.carrier_ppm,
+    pub fn craft_reference(&self) -> Option<CraftReference> {
+        let raw = self.data.dataset().as_raw()?;
+        let reference = raw
+            .descriptor()
+            .axes()
+            .first()?
+            .chemical_shift_reference()?;
+        Some(CraftReference::new(
+            reference.carrier_ppm(),
+            reference.reference_frequency_mhz(),
             self.pipeline.chemical_shift_reference_offset_ppm(),
-        )
+        ))
     }
 
     pub fn allocate_craft_run_id(&mut self) -> CraftRunId {
@@ -114,27 +120,14 @@ impl NmrDataset {
     }
 }
 
-pub fn craft_input_sha256(data: &NmrData) -> String {
-    let mut digest = Sha256::new();
-    digest.update(b"plotx.craft.input.v1\0");
-    digest.update([match data.domain {
-        plotx_io::Domain::Time => 0,
-        plotx_io::Domain::Frequency => 1,
-    }]);
-    for value in [
-        data.spectral_width_hz,
-        data.observe_freq_mhz,
-        data.carrier_ppm,
-        data.group_delay,
-    ] {
-        digest.update(value.to_le_bytes());
-    }
-    digest.update((data.points.len() as u64).to_le_bytes());
-    for point in &data.points {
-        digest.update(point.re.to_le_bytes());
-        digest.update(point.im.to_le_bytes());
-    }
-    format!("{:x}", digest.finalize())
+pub fn craft_input_sha256(data: &NmrSource) -> String {
+    data.dataset()
+        .canonical_digests()
+        .dataset()
+        .as_bytes()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 pub fn craft_component_table(run: &StoredCraftRun) -> Result<TableDataset, String> {

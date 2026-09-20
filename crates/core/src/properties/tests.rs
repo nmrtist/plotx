@@ -6,8 +6,7 @@ use crate::automation::{
 };
 use crate::state::{
     CONTOUR_BASE_ABSOLUTE, CONTOUR_BASE_FRACTION_OF_RANGE, CONTOUR_BASE_NOISE_FLOOR,
-    CanvasDocument, Dataset, Nmr2DDataset, NmrDataset, ObjectFrame, PlotxApp, SeriesBinding,
-    SeriesId,
+    CanvasDocument, Dataset, NmrDataset, ObjectFrame, PlotxApp, SeriesBinding, SeriesId,
 };
 
 #[path = "tests_fixture.rs"]

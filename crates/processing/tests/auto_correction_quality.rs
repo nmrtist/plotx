@@ -6,7 +6,59 @@
 //! preserved.
 
 use num_complex::Complex64;
-use plotx_processing::{AutoPhaseMethod, BaselineMethod, Spectrum, auto_phase, baseline, phase};
+use plotx_processing::{
+    AutoPhaseMethod, AxisPipeline, BaselineMethod, PhaseParams, ProcessingStep, Spectrum, StepId,
+    StepKind, StepSource, nmr_bridge,
+};
+
+fn apply(spectrum: &mut Spectrum, kind: StepKind) {
+    let axis = nmr::processed::ProcessedAxis::new(
+        nmr::axis::AxisRole::Signal,
+        nmr::axis::AxisDomain::Frequency,
+        Some(nmr::axis::AxisUnit::Ppm),
+        spectrum.values.len(),
+        nmr::axis::AxisCoordinates::Explicit(spectrum.ppm.clone()),
+        nmr::processed::ComponentBasis::Cartesian,
+    )
+    .unwrap();
+    let input = std::sync::Arc::new(nmr::Dataset::from_processed(
+        nmr::processed::ProcessedDataset::from_complex_trace(
+            axis,
+            spectrum.values.clone(),
+            nmr::processed::ProcessedProvenance::new(
+                nmr::processed::ProcessedOrigin::Unknown,
+                vec![],
+            )
+            .unwrap(),
+        )
+        .unwrap(),
+    ));
+    let pipeline = AxisPipeline {
+        steps: vec![ProcessingStep::new(StepId::new(1), kind, StepSource::User)],
+    };
+    let output = nmr_bridge::compile(
+        input,
+        &pipeline,
+        0,
+        nmr_bridge::DelayPolicy::Disabled,
+        nmr_bridge::RecipeRange::All,
+    )
+    .unwrap()
+    .execute(
+        nmr::processing::ProcessingOptions::new(),
+        &mut nmr::ExecutionContext::default(),
+    )
+    .unwrap();
+    spectrum.values = output
+        .as_dense_processed()
+        .unwrap()
+        .samples()
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|v| Complex64::new(v[0], v[1]))
+        .collect();
+}
 
 const PHASE_POINTS: usize = 512;
 const BASELINE_POINTS: usize = 640;
@@ -16,8 +68,9 @@ fn spectrum(values: Vec<Complex64>) -> Spectrum {
     Spectrum {
         ppm: (0..n).map(|i| i as f64).collect(),
         values,
-        hz_per_point: 1.0,
-        observe_freq_mhz: 400.0,
+        unit: nmr::axis::AxisUnit::Ppm,
+        hz_per_point: Some(1.0),
+        observe_freq_mhz: Some(400.0),
         nucleus: "1H".into(),
     }
 }
@@ -120,8 +173,13 @@ fn assess_phase_quality(corrected: &[Complex64], reference: &[Complex64]) -> Pha
 fn robust_phase_quality(phase0: f64, phase1: f64, scale: f64) -> PhaseQuality {
     let reference = ideal_phase_spectrum(scale);
     let mut observed = spectrum(inject_phase(&reference, phase0, phase1));
-    let correction = auto_phase(&observed, AutoPhaseMethod::RobustConsensus);
-    phase::apply_with_pivot(&mut observed, correction.0, correction.1, correction.2);
+    apply(
+        &mut observed,
+        StepKind::Phase(PhaseParams {
+            auto: Some(AutoPhaseMethod::RobustConsensus),
+            ..PhaseParams::MANUAL_ZERO
+        }),
+    );
     assess_phase_quality(&observed.values, &reference)
 }
 
@@ -254,7 +312,7 @@ fn asls_quality(shape: BaselineShape, scale: f64) -> BaselineQuality {
     }
     let observed = values.clone();
     let mut corrected = spectrum(values);
-    baseline::apply(&mut corrected, BaselineMethod::AUTO);
+    apply(&mut corrected, StepKind::Baseline(BaselineMethod::AUTO));
 
     // Baseline correction is a real-channel operation. Treating the imaginary
     // channel as immutable is part of its public signal-preservation contract.
@@ -397,7 +455,7 @@ fn asls_non_target_peak_shapes_remain_numerically_safe() {
             .map(|value| value.re.abs())
             .fold(0.0_f64, f64::max);
         let mut corrected = spectrum(values);
-        baseline::apply(&mut corrected, BaselineMethod::AUTO);
+        apply(&mut corrected, StepKind::Baseline(BaselineMethod::AUTO));
 
         assert!(corrected.values.iter().all(|value| value.re.is_finite()));
         for (value, expected_imaginary) in corrected.values.iter().zip(&imaginary_before) {

@@ -76,10 +76,7 @@ fn scratch_dir() -> PathBuf {
 // is loaded as a unit and not descended into; any other directory is recursed;
 // loose JEOL and JCAMP-DX files are read individually.
 fn collect_acquisitions(dir: &Path, out: &mut ArchiveLoadResult) {
-    if crate::bruker::detect_processed(dir).is_some()
-        || crate::bruker::is_bruker_dir(dir)
-        || crate::varian::is_varian(dir)
-    {
+    if crate::nmr_bridge::is_candidate(dir) {
         match crate::load_path(dir) {
             Ok(result) => out.items.push(result),
             Err(error) => out.warnings.push(entry_warning(dir, error)),
@@ -115,14 +112,6 @@ fn entry_warning(path: &Path, error: IoError) -> LoadWarning {
     }
 }
 
-fn is_jdf(path: &Path) -> bool {
-    path.extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.eq_ignore_ascii_case("jdf"))
-        .unwrap_or(false)
-        || crate::jeol::is_jdf(path)
-}
-
 fn is_supported_spectrum(path: &Path) -> bool {
-    is_jdf(path) || crate::jcamp_dx::has_jcamp_extension(path)
+    crate::nmr_bridge::is_candidate(path)
 }

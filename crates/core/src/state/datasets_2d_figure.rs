@@ -168,24 +168,8 @@ impl Nmr2DDataset {
 fn nmr_axes(spectrum: &plotx_processing::Spectrum2D) -> (Axis, Axis) {
     let (f2_lo, f2_hi) = spectrum.f2_bounds();
     let (f1_lo, f1_hi) = spectrum.f1_bounds();
-    let f2 = match spectrum.f2_domain {
-        plotx_io::Domain::Time => Axis::new("F2 acquisition time (s)", f2_lo, f2_hi),
-        plotx_io::Domain::Frequency => Axis::new(
-            format!("{} chemical shift (ppm)", spectrum.direct.nucleus),
-            f2_lo,
-            f2_hi,
-        )
-        .reversed(true),
-    };
-    let f1 = match spectrum.f1_domain {
-        plotx_io::Domain::Time => Axis::new("F1 acquisition time (s)", f1_lo, f1_hi),
-        plotx_io::Domain::Frequency => Axis::new(
-            format!("{} chemical shift (ppm)", spectrum.indirect.nucleus),
-            f1_lo,
-            f1_hi,
-        )
-        .reversed(true),
-    };
+    let f2 = crate::figures::nmr_axis(&spectrum.direct, f2_lo, f2_hi);
+    let f1 = crate::figures::nmr_axis(&spectrum.indirect, f1_lo, f1_hi);
     (f2, f1)
 }
 

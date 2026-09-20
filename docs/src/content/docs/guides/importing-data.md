@@ -10,9 +10,9 @@ no conversion step is needed.
 
 | Format | Extension | Notes |
 | --- | --- | --- |
-| JEOL Delta | `.jdf` | 1D, 2D, and pseudo-2D (DOSY / T1 / T2) |
-| Bruker TopSpin | `fid` / `ser` directories | 1D and 2D |
-| Varian/Agilent VnmrJ | `.fid` directory | Raw time-domain 1D and conventional 2D |
+| JEOL Delta | `.jdf` | Raw and processed 1D/2D and parameter series; experimental support |
+| Bruker TopSpin | `fid` / `ser` / `pdata` | Raw and processed 1D/2D; NUS support is experimental |
+| Varian/Agilent VnmrJ | `.fid` directory | Raw 1D, 2D with `phase=[1,2]`, or a series varying one parameter |
 | Waters MassLynx RAW | `.raw` directory | Validated low-resolution runs, including SQD2 data |
 | SCIEX legacy WIFF | `.wiff` + `.wiff.scan` | Single- and multi-sample legacy runs; both files must remain together |
 | Rigaku powder XRD | `.rasx`, FI `.raw`, RAS_RAW `.txt` | Diffraction pattern, acquisition metadata, and attenuation when available |
@@ -46,6 +46,45 @@ CasaXPS `.txt` files are recognized from their structured header, not from the
 extension alone. Other `.txt` files continue through table import. See the
 [XPS workflow](/guides/xps/) for energy-axis and fitting details.
 
+## Follow import progress
+
+Scientific data files and acquisition folders load one dataset at a time in the
+background, so you can continue working. Completed datasets appear on the board
+without changing your current page or selection. The status bar shows the current
+file and success/failure counts; review failures in the diagnostic history.
+Additional imports wait for the current batch. Opening, closing, or creating a
+project cancels unfinished imports for the previous project.
+
+NMR import includes default processing. NUS reconstruction can take substantially
+longer than reading the file. Project files, table previews, ZIP files, and imports
+with a manually supplied sampling table use separate import workflows.
+
+## Supplying a missing NMR sampling table
+
+Use this option for supported 2D Bruker NUS or JEOL acquisitions that sampled only
+part of the indirect grid. You need the original sampling table and acquisition
+files with enough grid and calibration information to check it.
+
+1. Choose **File → Import NMR with Sampling Table…** (also available in the
+   command palette), then select the Bruker `ser` or JEOL `.jdf` file.
+2. Enter the table's source or an explanation, and the full original indirect
+   grid size, including unsampled points.
+3. Enter **Lanes per observation**: the number of component records acquired at
+   each listed indirect point. Use the acquisition's value, not the number of
+   points in the table.
+4. Select **Zero-based** or **One-based** to match the original table. Enter one
+   indirect index per line, in acquisition order. Each line represents all lanes
+   for that observation; keep repeated observations.
+5. Click **Validate and import**. If validation fails, check the reported mismatch
+   against the acquisition records. Conflicts with an existing sampling list,
+   incorrect observation or lane counts, and missing grid or calibration information
+   prevent import.
+
+Vendor files are not modified. Save the project to retain the table and its source;
+reopening the project does not require the original files. Repeated coordinates
+can be imported but currently prevent [NUS reconstruction](/guides/processing/#reconstruct-a-non-uniformly-sampled-spectrum).
+For scripts, see the [CLI declaration format](/reference/cli/#sampling-declarations).
+
 ## Varian/Agilent VnmrJ
 
 To import a raw 1D or conventional 2D acquisition, choose **Open Folder…** and
@@ -53,9 +92,11 @@ select its `.fid` directory. You can instead choose **Open File…** and select
 the `fid` file inside. Keep the `fid` and `procpar` files together in the same
 directory.
 
-Processed spectra, 3D or 4D experiments, imaging, pseudo-2D experiments,
-non-uniform sampling, and other arrayed experiments are not supported. See
-[File formats](/reference/file-formats/) for compatibility details.
+You can also import a series varying one ungrouped parameter. Supported 2D data
+requires `phase=[1,2]`. Grouped or multiple parameter arrays, other phase orders,
+Varian NUS, processed spectra, and more than two dimensions are unsupported.
+See [File formats](/reference/file-formats/#nmr-data-and-projects) for calibration
+requirements and format limitations.
 
 ## mzML
 

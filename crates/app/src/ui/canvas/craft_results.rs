@@ -50,7 +50,6 @@ pub(crate) fn handle_and_paint_craft_result(
         dataset,
         run,
         stored,
-        nmr,
         plot,
         figure,
         painter,
@@ -119,7 +118,6 @@ struct CraftRangePaintContext<'a> {
     dataset: plotx_core::state::DatasetId,
     run: plotx_core::state::CraftRunId,
     stored: &'a plotx_core::state::StoredCraftRun,
-    nmr: &'a plotx_core::state::NmrDataset,
     plot: PlotRect,
     figure: &'a plotx_figure::Figure,
     painter: &'a egui::Painter,
@@ -132,7 +130,6 @@ fn paint_craft_ranges(context: CraftRangePaintContext<'_>) {
         dataset,
         run,
         stored,
-        nmr,
         plot,
         figure,
         painter,
@@ -143,7 +140,11 @@ fn paint_craft_ranges(context: CraftRangePaintContext<'_>) {
         .invocation
         .reference
         .effective_carrier_ppm();
-    let observe = nmr.data.observe_freq_mhz;
+    let observe = stored
+        .provenance
+        .invocation
+        .reference
+        .reference_frequency_mhz;
     let modeling = stored
         .diagnostics
         .modeling_windows

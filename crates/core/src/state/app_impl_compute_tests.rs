@@ -55,11 +55,50 @@ fn craft_data() -> plotx_io::NmrData {
 }
 
 #[test]
+fn native_processing_failure_reaches_status_without_replacing_the_display() {
+    let mut app = PlotxApp::new();
+    let mut dataset = Nmr2DDataset::load(data_2d("failure target")).unwrap();
+    let original = dataset.native_processed.dataset().canonical_digests();
+    let step = dataset.allocate_step_id();
+    dataset.params.f2.steps.push(ProcessingStep::new(
+        step,
+        StepKind::Phase(plotx_processing::PhaseParams {
+            phase0: f64::NAN,
+            ..plotx_processing::PhaseParams::MANUAL_ZERO
+        }),
+        StepSource::User,
+    ));
+    app.doc.datasets.push(Dataset::Nmr2D(Box::new(dataset)));
+    assert!(app.schedule_2d_processing(0, false));
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while app.compute_busy() && Instant::now() < deadline {
+        app.poll_compute();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    app.poll_compute();
+    assert!(!app.compute_busy());
+    assert!(
+        app.session.status.contains("2D processing failed"),
+        "{}",
+        app.session.status
+    );
+    assert_eq!(
+        app.doc.datasets[0]
+            .as_nmr2d()
+            .unwrap()
+            .native_processed
+            .dataset()
+            .canonical_digests(),
+        original
+    );
+}
+
+#[test]
 fn craft_result_is_installed_with_provenance_by_dataset_identity() {
     let mut app = PlotxApp::new();
-    app.doc
-        .datasets
-        .push(Dataset::Nmr(Box::new(NmrDataset::load(craft_data()))));
+    app.doc.datasets.push(Dataset::Nmr(Box::new(
+        NmrDataset::load(craft_data()).unwrap(),
+    )));
     let nmr = app.doc.datasets[0].as_nmr_mut().unwrap();
     let reference_id = nmr.allocate_step_id();
     nmr.pipeline.steps.push(ProcessingStep::new(
@@ -70,7 +109,7 @@ fn craft_result_is_installed_with_provenance_by_dataset_identity() {
         }),
         StepSource::User,
     ));
-    nmr.rebuild();
+    nmr.rebuild().unwrap();
     let target = app.doc.datasets[0].resource_id();
     app.session.ui.craft_task_dataset = Some(target);
     let mut params = plotx_processing::craft::CraftParams::conventional();
@@ -159,16 +198,16 @@ fn craft_result_is_installed_with_provenance_by_dataset_identity() {
         })
         .unwrap();
     reference.target_ppm += 0.1;
-    nmr.rebuild();
+    nmr.rebuild().unwrap();
     assert!(nmr.craft_runs[0].is_stale_for(&nmr.data, nmr.craft_reference()));
 }
 
 #[test]
 fn craft_rerun_keeps_requested_parent_without_hijacking_another_task() {
     let mut app = PlotxApp::new();
-    app.doc
-        .datasets
-        .push(Dataset::Nmr(Box::new(NmrDataset::load(craft_data()))));
+    app.doc.datasets.push(Dataset::Nmr(Box::new(
+        NmrDataset::load(craft_data()).unwrap(),
+    )));
     let target = app.doc.datasets[0].resource_id();
     app.session.ui.craft_task_dataset = Some(target);
     let mut params = plotx_processing::craft::CraftParams::conventional();
@@ -193,9 +232,9 @@ fn craft_rerun_keeps_requested_parent_without_hijacking_another_task() {
         plotx_processing::craft::CraftParamOverrides::default(),
         Some(CraftRunId(0)),
     ));
-    app.doc
-        .datasets
-        .push(Dataset::Nmr(Box::new(NmrDataset::load(craft_data()))));
+    app.doc.datasets.push(Dataset::Nmr(Box::new(
+        NmrDataset::load(craft_data()).unwrap(),
+    )));
     let other = app.doc.datasets[1].resource_id();
     app.session.ui.craft_task_dataset = Some(other);
     app.session.ui.craft_base_run = None;
@@ -225,16 +264,12 @@ fn craft_rerun_keeps_requested_parent_without_hijacking_another_task() {
 #[test]
 fn process_2d_result_follows_dataset_identity_after_earlier_deletion() {
     let mut app = PlotxApp::new();
-    app.doc
-        .datasets
-        .push(Dataset::Nmr2D(Box::new(Nmr2DDataset::load(data_2d(
-            "unrelated",
-        )))));
-    app.doc
-        .datasets
-        .push(Dataset::Nmr2D(Box::new(Nmr2DDataset::load(data_2d(
-            "target",
-        )))));
+    app.doc.datasets.push(Dataset::Nmr2D(Box::new(
+        Nmr2DDataset::load(data_2d("unrelated")).unwrap(),
+    )));
+    app.doc.datasets.push(Dataset::Nmr2D(Box::new(
+        Nmr2DDataset::load(data_2d("target")).unwrap(),
+    )));
     let target_id = app.doc.datasets[1].resource_id();
     let before = app.doc.datasets[1].as_nmr2d().unwrap().processed.clone();
     let target = app.doc.datasets[1].as_nmr2d_mut().unwrap();
@@ -273,11 +308,9 @@ fn process_2d_result_follows_dataset_identity_after_earlier_deletion() {
 #[test]
 fn successful_processing_promotes_fresh_runtime_versions_for_each_scalar_field() {
     let mut app = PlotxApp::new();
-    app.doc
-        .datasets
-        .push(Dataset::Nmr2D(Box::new(Nmr2DDataset::load(data_2d(
-            "versioned target",
-        )))));
+    app.doc.datasets.push(Dataset::Nmr2D(Box::new(
+        Nmr2DDataset::load(data_2d("versioned target")).unwrap(),
+    )));
     let resource = app.doc.datasets[0].resource_id();
     let fields = app.doc.datasets[0]
         .field_descriptors()

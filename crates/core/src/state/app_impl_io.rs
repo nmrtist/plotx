@@ -218,14 +218,73 @@ impl PlotxApp {
             self.load_archive_from(path);
             return;
         }
+        self.install_import_result(path, plotx_io::load_path(path));
+    }
+
+    pub fn load_nmr_with_sampling(
+        &mut self,
+        path: &std::path::Path,
+        declaration: plotx_io::nmr_sampling::SamplingDeclaration,
+    ) -> bool {
+        self.install_import_result(path, plotx_io::nmr_sampling::load(path, declaration))
+    }
+
+    fn install_import_result(
+        &mut self,
+        path: &std::path::Path,
+        result: Result<plotx_io::LoadResult, plotx_io::IoError>,
+    ) -> bool {
+        let prepared = result
+            .map_err(|error| error.to_string())
+            .and_then(|loaded| {
+                super::data_import::PreparedImport::new(
+                    loaded,
+                    self.settings.general.equal_scale_homonuclear_2d_imports,
+                )
+            });
+        self.install_prepared_import(path, prepared)
+    }
+
+    pub(super) fn install_prepared_import(
+        &mut self,
+        path: &std::path::Path,
+        result: Result<super::data_import::PreparedImport, String>,
+    ) -> bool {
         let operation_id = self.session.begin_operation();
-        match plotx_io::load_path(path) {
-            Ok(result) => {
-                let (acquisition, acquisition_identity, format, _, nmr_origin, warnings) =
-                    result.into_parts();
-                let format = format.as_str();
-                let source = self.insert_acquisition(acquisition, acquisition_identity, nmr_origin);
-                let mut report = if warnings.is_empty() {
+        match result {
+            Ok(prepared) => {
+                let super::data_import::PreparedImport {
+                    dataset,
+                    source,
+                    format,
+                    warnings,
+                } = prepared;
+                let reconstruction_warning = dataset
+                    .as_nmr2d()
+                    .and_then(|data| data.reconstruction_warning.clone());
+                let before = self.doc.datasets.len();
+                if let Err(error) = self.insert_prepared_dataset(dataset, &source) {
+                    return self.install_prepared_import(path, Err(error));
+                }
+                if self.doc.datasets.len() == before {
+                    return self.install_prepared_import(path, Err(self.session.status.clone()));
+                }
+                let mut report = if let Some(warning) = reconstruction_warning {
+                    OperationReport::warning(
+                        operation_id,
+                        OperationKind::DatasetLoad,
+                        format!("Loaded {source}. {warning}"),
+                        (),
+                    )
+                    .with_diagnostic(
+                        Diagnostic::new(
+                            Severity::Warning,
+                            DiagnosticCode::DatasetLoadWarning,
+                            warning,
+                        )
+                        .with_source("core.nmr_reconstruction"),
+                    )
+                } else if warnings.is_empty() {
                     OperationReport::success(
                         operation_id,
                         OperationKind::DatasetLoad,
@@ -246,7 +305,7 @@ impl PlotxApp {
                         DiagnosticCode::DatasetLoadSucceeded,
                         "Dataset loaded",
                     )
-                    .with_context("format", format)
+                    .with_context("format", format.as_str())
                     .with_context("path", path.display().to_string())
                     .with_source("core.loading"),
                 );
@@ -255,6 +314,7 @@ impl PlotxApp {
                 }
                 self.session.status = report.summary.clone();
                 self.session.record_operation(report);
+                true
             }
             Err(e) => {
                 self.session.status = format!("Failed to load {}: {e}", path.display());
@@ -271,6 +331,7 @@ impl PlotxApp {
                         .with_context("path", path.display().to_string())
                         .with_source("core.loading"),
                     ));
+                false
             }
         }
     }
@@ -297,13 +358,29 @@ impl PlotxApp {
                     self.session.record_operation(report);
                     return;
                 }
-                let count = result.items.len();
+                let mut count = 0;
                 let mut warnings = result.warnings;
                 for item in result.items {
-                    let (acquisition, acquisition_identity, _, _, nmr_origin, item_warnings) =
+                    let (acquisition, acquisition_identity, _, _, item_warnings) =
                         item.into_parts();
                     warnings.extend(item_warnings);
-                    self.insert_acquisition(acquisition, acquisition_identity, nmr_origin);
+                    match self.insert_acquisition(acquisition, acquisition_identity) {
+                        Ok((_, warning)) => {
+                            count += 1;
+                            if let Some(message) = warning {
+                                warnings.push(plotx_io::LoadWarning {
+                                    code: plotx_io::LoadWarningCode::UnsupportedFunction,
+                                    message,
+                                    path: None,
+                                });
+                            }
+                        }
+                        Err(error) => warnings.push(plotx_io::LoadWarning {
+                            code: plotx_io::LoadWarningCode::InvalidMetadata,
+                            message: format!("Archive dataset could not be opened: {error}"),
+                            path: Some(path.to_owned()),
+                        }),
+                    }
                 }
                 let summary = if warnings.is_empty() {
                     format!("Loaded {count} spectra from {archive}")
@@ -369,22 +446,29 @@ impl PlotxApp {
         &mut self,
         acq: plotx_io::Acquisition,
         acquisition_identity: plotx_io::AcquisitionIdentity,
-        nmr_origin: Option<plotx_io::NmrOrigin>,
-    ) -> String {
+    ) -> Result<(String, Option<String>), crate::workflow::WorkflowError> {
         let (dataset, source) = crate::workflow::dataset_from_loaded_acquisition(
             acq,
             acquisition_identity,
-            nmr_origin,
             self.settings.general.equal_scale_homonuclear_2d_imports,
-        );
-        let name = Self::short_name(&source);
-        self.execute_action(Action::insert_dataset_with_default_canvas(
+        )?;
+        let warning = dataset
+            .as_nmr2d()
+            .and_then(|data| data.reconstruction_warning.clone());
+        self.insert_prepared_dataset(dataset, &source)
+            .map_err(crate::workflow::WorkflowError::FieldRuntime)?;
+        Ok((source, warning))
+    }
+
+    fn insert_prepared_dataset(&mut self, dataset: Dataset, source: &str) -> Result<(), String> {
+        let name = Self::short_name(source);
+        self.try_execute_action(Action::insert_dataset_with_default_canvas(
             self,
             dataset,
             format!("Canvas {} — {}", self.doc.canvases.len() + 1, name),
             DEFAULT_CANVAS_SIZE_MM,
-        ));
-        source
+        ))
+        .map_err(|error| error.to_string())
     }
 
     pub fn request_export(&mut self, format: ExportFormat) {
@@ -565,159 +649,5 @@ fn export_status(format: ExportFormat, paths: &[std::path::PathBuf]) -> String {
 }
 
 #[cfg(test)]
-mod export_operation_tests {
-    use super::*;
-    use crate::operation::{DiagnosticCode, OperationOutcome};
-
-    #[test]
-    fn unavailable_export_is_recorded_and_projects_its_summary() {
-        let mut app = PlotxApp::new_with_settings(crate::settings::Settings::default());
-
-        app.request_export(ExportFormat::Svg);
-
-        let operation = app
-            .session
-            .operation_history
-            .operations()
-            .next_back()
-            .unwrap();
-        assert_eq!(operation.kind, OperationKind::Export);
-        assert_eq!(operation.outcome, OperationOutcome::Failure);
-        assert_eq!(operation.summary, app.session.status);
-        assert_eq!(operation.diagnostics.len(), 1);
-        assert_eq!(
-            operation.diagnostics[0].code,
-            DiagnosticCode::ExportUnavailable
-        );
-    }
-
-    #[test]
-    fn typed_export_error_is_mapped_at_the_workflow_boundary() {
-        let mut app = PlotxApp::new_with_settings(crate::settings::Settings::default());
-        app.doc.canvases.push(CanvasDocument::new(
-            "page".to_owned(),
-            DEFAULT_CANVAS_SIZE_MM,
-        ));
-        app.session.active_canvas = Some(0);
-
-        app.export_to(
-            ExportSettings {
-                format: ExportFormat::Svg,
-                scope: crate::export::ExportPageScope::Range { start: 2, end: 1 },
-                dpi: crate::export::DEFAULT_BITMAP_DPI,
-                target_width_mm: None,
-                trim_to_visible_content: false,
-                allow_missing_images: false,
-            },
-            std::path::Path::new("unused.svg"),
-        );
-
-        let operation = app
-            .session
-            .operation_history
-            .operations()
-            .next_back()
-            .unwrap();
-        assert_eq!(operation.outcome, OperationOutcome::Failure);
-        assert_eq!(operation.summary, app.session.status);
-        assert_eq!(operation.diagnostics[0].code, DiagnosticCode::ExportFailed);
-        assert_eq!(
-            operation.diagnostics[0]
-                .context
-                .get("error_kind")
-                .map(String::as_str),
-            Some("invalid_page_range")
-        );
-    }
-
-    #[test]
-    fn image_pages_open_export_options_for_precheck_and_placeholder_choice() {
-        let mut app = PlotxApp::new_with_settings(crate::settings::Settings::default());
-        app.doc.canvases.push(CanvasDocument::new(
-            "clean".to_owned(),
-            DEFAULT_CANVAS_SIZE_MM,
-        ));
-        let mut raster_page = CanvasDocument::new("raster".to_owned(), DEFAULT_CANVAS_SIZE_MM);
-        let id = raster_page.allocate_object_id();
-        raster_page.objects.push(crate::state::CanvasObject {
-            id,
-            name: "image".to_owned(),
-            frame: crate::state::ObjectFrame::new(0.0, 0.0, 10.0, 10.0),
-            locked: false,
-            visible: true,
-            kind: crate::state::CanvasObjectKind::RasterImage(
-                crate::state::RasterImageContent::new(crate::state::AssetId::new()),
-            ),
-        });
-        app.doc.canvases.push(raster_page);
-        app.session.active_canvas = Some(0);
-
-        app.request_export(ExportFormat::Svg);
-        assert!(app.session.ui.export_options.is_some());
-        app.session.ui.export_options = None;
-        app.session.active_canvas = Some(1);
-        app.request_export(ExportFormat::Svg);
-        assert!(app.session.ui.export_options.is_some());
-    }
-}
-
-#[cfg(test)]
-mod install_loaded_project_tests {
-    use super::*;
-
-    fn record_failure(app: &mut PlotxApp) -> OperationId {
-        let id = app.session.begin_operation();
-        app.session.record_operation(OperationReport::<()>::failure(
-            id,
-            OperationKind::DatasetLoad,
-            "boom",
-            Diagnostic::new(Severity::Error, DiagnosticCode::DatasetLoadFailed, "boom"),
-        ));
-        id
-    }
-
-    /// The invariant the feedback watermark hinges on: a project swap carries
-    /// the operation history *including its counters*, so reports recorded
-    /// after the load always come after a pre-load acknowledgement.
-    #[test]
-    fn project_swap_carries_history_counter_and_watermark() {
-        let mut app = PlotxApp::new_with_settings(crate::settings::Settings::default());
-        let before = record_failure(&mut app);
-        let before_order = app
-            .session
-            .operation_history
-            .operations()
-            .next_back()
-            .expect("failure recorded")
-            .completion_order;
-        app.session.ui.dismissed_feedback_order = Some(before_order);
-
-        let loaded = PlotxApp::new_with_settings(crate::settings::Settings::default());
-        app.install_loaded_project(loaded);
-
-        assert_eq!(app.session.ui.dismissed_feedback_order, Some(before_order));
-        let after = record_failure(&mut app);
-        let after_order = app
-            .session
-            .operation_history
-            .operations()
-            .next_back()
-            .expect("failure recorded")
-            .completion_order;
-        assert!(
-            after > before,
-            "post-load ids must stay above the watermark"
-        );
-        assert!(
-            after_order > before_order,
-            "post-load reports must stay after the acknowledgement"
-        );
-        assert!(
-            app.session
-                .operation_history
-                .operations()
-                .any(|operation| operation.id == before),
-            "pre-load history is carried across the swap"
-        );
-    }
-}
+#[path = "app_impl_io_tests.rs"]
+mod tests;

@@ -1,31 +1,6 @@
 use super::*;
 
 impl PlotxApp {
-    /// Apply a user-entered non-uniform-sampling schedule to a 2D dataset and
-    /// re-run the reconstruction. Returns the validation error (if any) so the
-    /// caller can surface it next to the input field.
-    pub fn apply_nus_schedule(
-        &mut self,
-        dataset: usize,
-        values: &[usize],
-        base: usize,
-    ) -> Result<(), String> {
-        let Some(d2) = self
-            .doc
-            .datasets
-            .get_mut(dataset)
-            .and_then(Dataset::as_nmr2d_mut)
-        else {
-            return Err("NUS reconstruction needs a 2D dataset.".into());
-        };
-        d2.set_nus_schedule(values, base)?;
-        self.schedule_2d_processing(dataset, true);
-        self.mark_document_dirty();
-        self.session.status =
-            "Reconstructing the NUS spectrum from the entered sampling list…".into();
-        Ok(())
-    }
-
     /// Fit every column to build the DOSY contour map (diffusion datasets only).
     pub fn build_dosy_map_for(&mut self, dataset: usize) {
         let Some(d2) = self
@@ -37,6 +12,10 @@ impl PlotxApp {
             self.session.status = "DOSY maps need a diffusion dataset.".into();
             return;
         };
+        if let Some(error) = d2.dosy_input_error() {
+            self.session.status = error.into();
+            return;
+        }
         if d2.data.diffusion.is_none() {
             self.session.status =
                 "This dataset has no diffusion parameters (not a DOSY array).".into();
@@ -77,6 +56,10 @@ impl PlotxApp {
             self.session.status = "ILT DOSY maps need a diffusion dataset.".into();
             return;
         };
+        if let Some(error) = d2.dosy_input_error() {
+            self.session.status = error.into();
+            return;
+        }
         if d2.data.diffusion.is_none() {
             self.session.status =
                 "This dataset has no diffusion parameters (not a DOSY array).".into();

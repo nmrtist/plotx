@@ -15,9 +15,9 @@ fn invalid_stack_pipelines() -> Vec<AxisPipelineDto> {
 
 #[test]
 fn stack_scheme_rejects_an_invalid_dormant_f1_pipeline() {
-    let target = Dataset::Nmr2D(Box::new(Nmr2DDataset::load(
-        super::tests::synthetic_dosy_2d(),
-    )));
+    let target = Dataset::Nmr2D(Box::new(
+        Nmr2DDataset::load(super::tests::synthetic_dosy_2d()).unwrap(),
+    ));
     let scheme = ProcessingScheme {
         schema_version: 1,
         dimension_count: 2,
@@ -31,7 +31,7 @@ fn stack_scheme_rejects_an_invalid_dormant_f1_pipeline() {
 
 #[test]
 fn project_recipe_rejects_an_invalid_2d_pipeline_before_retransform() {
-    let mut dataset = Nmr2DDataset::load(super::tests::synthetic_dosy_2d());
+    let mut dataset = Nmr2DDataset::load(super::tests::synthetic_dosy_2d()).unwrap();
     let recipe = RecipeObject {
         id: "recipe_000000".to_owned(),
         role: "recipe".to_owned(),

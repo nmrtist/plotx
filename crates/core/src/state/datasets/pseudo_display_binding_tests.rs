@@ -3,7 +3,7 @@ use super::*;
 
 #[test]
 fn trace_alignment_merges_stack_projection_without_changing_map_bindings() {
-    let mut owner = Nmr2DDataset::load(synthetic_dosy(1.2e-9));
+    let mut owner = Nmr2DDataset::load(synthetic_dosy(1.2e-9)).unwrap();
     assert!(owner.build_dosy_map());
     owner.display = PseudoDisplay::Stack;
     let mut app = PlotxApp::new_with_settings(crate::settings::Settings::default());
@@ -61,10 +61,10 @@ fn trace_alignment_merges_stack_projection_without_changing_map_bindings() {
 
 #[test]
 fn live_binding_projects_the_current_field_and_keeps_external_series() {
-    let mut owner = Nmr2DDataset::load(synthetic_dosy(1.2e-9));
+    let mut owner = Nmr2DDataset::load(synthetic_dosy(1.2e-9)).unwrap();
     assert!(owner.build_dosy_map());
     owner.display = PseudoDisplay::Stack;
-    let mut external = Nmr2DDataset::load(synthetic_dosy(1.5e-9));
+    let mut external = Nmr2DDataset::load(synthetic_dosy(1.5e-9)).unwrap();
     assert!(external.build_dosy_map());
     let mut app = PlotxApp::new_with_settings(crate::settings::Settings::default());
     app.doc.datasets.push(Dataset::Nmr2D(Box::new(owner)));
@@ -249,7 +249,7 @@ fn dosy_map_honors_non_default_contour_levels_and_style() {
         PositiveFiniteF32, PositiveFiniteF64, SeriesEncoding,
     };
 
-    let mut dataset = Nmr2DDataset::load(synthetic_dosy(1.2e-9));
+    let mut dataset = Nmr2DDataset::load(synthetic_dosy(1.2e-9)).unwrap();
     assert!(dataset.build_dosy_map());
     let peak = dosy_scalar_grid(dataset.dosy_map.as_ref().unwrap())
         .values
@@ -307,7 +307,7 @@ fn ilt_map_honors_non_default_contour_style() {
         PositiveFiniteF32, PositiveFiniteF64, SeriesEncoding,
     };
 
-    let mut dataset = Nmr2DDataset::load(synthetic_dosy(1.2e-9));
+    let mut dataset = Nmr2DDataset::load(synthetic_dosy(1.2e-9)).unwrap();
     assert!(dataset.build_ilt_map(IltParams {
         lambda: 1e-2,
         d_min: 1e-10,

@@ -8,14 +8,22 @@ use std::sync::Arc;
 #[derive(Debug, Clone)]
 pub struct AxisMeta {
     pub nucleus: String,
-    pub observe_freq_mhz: f64,
+    pub observe_freq_mhz: Option<f64>,
+    pub unit: Option<nmr::axis::AxisUnit>,
+}
+
+impl AxisMeta {
+    pub fn unit_label(&self) -> &'static str {
+        crate::axis_unit_label(self.unit)
+    }
 }
 
 impl From<&plotx_io::Dim> for AxisMeta {
     fn from(d: &plotx_io::Dim) -> Self {
         Self {
             nucleus: d.nucleus.clone(),
-            observe_freq_mhz: d.observe_freq_mhz,
+            observe_freq_mhz: Some(d.observe_freq_mhz),
+            unit: Some(nmr::axis::AxisUnit::Ppm),
         }
     }
 }
@@ -81,7 +89,7 @@ impl Preset2D {
 /// Best-guess preset for a dataset from its experiment hint and nuclei. Pseudo-2D
 /// families (DOSY, relaxation) are matched first; otherwise homo- vs
 /// heteronuclear is decided from the two axes' nuclei.
-pub fn recommend_preset(data: &plotx_io::NmrData2D) -> Preset2D {
+pub fn recommend_preset(data: &plotx_io::nmr_series::NmrSeriesSource) -> Preset2D {
     // A recovered indirect ruler is the strongest signal: some JEOL relaxation
     // arrays carry no relaxation keyword in the experiment name, but do embed a
     // delay/gradient `y_acq` axis. Trust it over the hint.
@@ -123,7 +131,9 @@ pub fn recommend_preset(data: &plotx_io::NmrData2D) -> Preset2D {
     if has(&["cosy"]) {
         return Preset2D::Cosy;
     }
-    if data.direct.nucleus == data.indirect.nucleus {
+    if data.direct.nucleus.is_empty() || data.indirect.nucleus.is_empty() {
+        Preset2D::Generic
+    } else if data.direct.nucleus == data.indirect.nucleus {
         Preset2D::Cosy
     } else {
         Preset2D::Hsqc
@@ -178,11 +188,11 @@ pub fn needs_retransform_2d(a: &Params2D, b: &Params2D) -> bool {
 /// indirect one.
 #[derive(Debug, Clone)]
 pub struct Spectrum2D {
-    /// Coordinate values for F2. The historical field name is retained for
-    /// project-internal compatibility; `f2_domain` decides whether values are
-    /// ppm or acquisition seconds.
+    /// Full Cartesian magnitude projected for display, including indirect lanes.
+    pub magnitude_plane: Option<Arc<[f64]>>,
+    /// Coordinate values for F2, interpreted through `direct.unit`.
     pub f2_ppm: Vec<f64>,
-    /// Coordinate values for F1; interpreted through `f1_domain`.
+    /// Coordinate values for F1, interpreted through `indirect.unit`.
     pub f1_ppm: Vec<f64>,
     pub f2_domain: plotx_io::Domain,
     pub f1_domain: plotx_io::Domain,
@@ -207,7 +217,18 @@ impl Spectrum2D {
 
     /// Row-major magnitude grid, `f1_size × f2_size`.
     pub fn magnitude(&self) -> Vec<f32> {
-        self.data.iter().map(|c| c.norm() as f32).collect()
+        self.magnitude_plane.as_ref().map_or_else(
+            || self.data.iter().map(|c| c.norm() as f32).collect(),
+            |plane| plane.iter().map(|value| *value as f32).collect(),
+        )
+    }
+
+    /// Full Cartesian magnitude at a checked row-major view position.
+    pub fn magnitude_at(&self, index: usize) -> Option<f64> {
+        self.magnitude_plane.as_ref().map_or_else(
+            || self.data.get(index).map(|value| value.norm()),
+            |plane| plane.get(index).copied(),
+        )
     }
 
     /// Row-major real (absorption) grid, `f1_size × f2_size`. Meaningful once
@@ -225,7 +246,10 @@ impl Spectrum2D {
     }
 
     pub fn max_magnitude(&self) -> f64 {
-        self.data.iter().map(|c| c.norm()).fold(0.0, f64::max)
+        self.magnitude_plane.as_ref().map_or_else(
+            || self.data.iter().map(|c| c.norm()).fold(0.0, f64::max),
+            |plane| plane.iter().copied().fold(0.0, f64::max),
+        )
     }
 
     /// Default first-order phase pivots `(f2_frac, f1_frac)` at the tallest peak.
@@ -313,161 +337,6 @@ impl plotx_analysis::SpectrumStack for StackSpectrum {
 pub enum Processed2D {
     Ft(Arc<Spectrum2D>),
     Stack(Arc<StackSpectrum>),
-}
-
-/// Transform a 2D acquisition into an *unphased* frequency-domain result. This
-/// is the expensive stage (FFT + window + zero-fill); the app caches it as the
-/// `base` and re-derives the phased, display-ready spectrum with [`reapply_2d`].
-pub fn process_2d(data: &plotx_io::NmrData2D, params: &Params2D) -> Processed2D {
-    process_2d_cancellable(data, params, &|| false).expect("non-cancelling 2D transform")
-}
-
-pub fn process_2d_cancellable(
-    data: &plotx_io::NmrData2D,
-    params: &Params2D,
-    cancelled: &impl Fn() -> bool,
-) -> Option<Processed2D> {
-    match params.layout {
-        Layout2D::Ft => fft2::transform_cancellable(data, params, cancelled)
-            .map(Arc::new)
-            .map(Processed2D::Ft),
-        Layout2D::Stack => fft2::stack_cancellable(data, params, cancelled)
-            .map(Arc::new)
-            .map(Processed2D::Stack),
-    }
-}
-
-/// Cheap stage: apply the enabled frequency-domain steps in `params` to an
-/// unphased `base` from [`process_2d`], producing the display-ready spectrum.
-/// Baseline steps are not supported for 2D and are ignored. No FFT is run.
-pub fn reapply_2d(base: &Processed2D, params: &Params2D) -> Processed2D {
-    reapply_2d_cancellable(base, params, &|| false).expect("non-cancelling 2D reapply")
-}
-
-pub fn reapply_2d_cancellable(
-    base: &Processed2D,
-    params: &Params2D,
-    cancelled: &impl Fn() -> bool,
-) -> Option<Processed2D> {
-    match base {
-        Processed2D::Ft(s) => reapply_ft(s, params, cancelled)
-            .map(Arc::new)
-            .map(Processed2D::Ft),
-        Processed2D::Stack(s) => reapply_stack(s, params, cancelled)
-            .map(Arc::new)
-            .map(Processed2D::Stack),
-    }
-}
-
-// Reduce an axis pipeline's enabled Phase steps to one `(phase0, phase1, pivot)`:
-// stored terms sum, and any auto step contributes the phase from `auto`.
-fn axis_phase(
-    pipe: &AxisPipeline,
-    auto: impl Fn() -> (f64, f64),
-    default_pivot: f64,
-) -> (f64, f64, f64) {
-    let (mut p0, mut p1, mut pivot) = (0.0, 0.0, default_pivot);
-    for step in &pipe.steps {
-        if !step.enabled {
-            continue;
-        }
-        if let StepKind::Phase(p) = &step.kind {
-            match p.auto {
-                Some(_) => {
-                    let (a0, a1) = auto();
-                    p0 += a0;
-                    p1 += a1;
-                }
-                None => {
-                    p0 += p.phase0;
-                    p1 += p.phase1;
-                    pivot = p.pivot_frac;
-                }
-            }
-        }
-    }
-    (p0, p1, pivot)
-}
-
-fn has_magnitude(pipe: &AxisPipeline) -> bool {
-    pipe.steps
-        .iter()
-        .any(|s| s.enabled && matches!(s.kind, StepKind::Magnitude))
-}
-
-fn shift_reference(ppm: &mut [f64], pipe: &AxisPipeline) {
-    let delta: f64 = pipe
-        .steps
-        .iter()
-        .filter(|s| s.enabled)
-        .filter_map(|s| match &s.kind {
-            StepKind::Reference(r) => Some(r.target_ppm - r.at_ppm),
-            _ => None,
-        })
-        .sum();
-    if delta != 0.0 {
-        for p in ppm.iter_mut() {
-            *p += delta;
-        }
-    }
-}
-
-fn reapply_ft(
-    s: &Spectrum2D,
-    params: &Params2D,
-    cancelled: &impl Fn() -> bool,
-) -> Option<Spectrum2D> {
-    if cancelled() {
-        return None;
-    }
-    let (f2_pivot, f1_pivot) = s.peak_pivot_fracs();
-    let peak_arg = s
-        .data
-        .iter()
-        .max_by(|a, b| a.norm().total_cmp(&b.norm()))
-        .map_or(0.0, |c| c.arg());
-    let f2 = axis_phase(&params.f2, || (peak_arg, 0.0), f2_pivot);
-    let f1 = axis_phase(&params.f1, || (peak_arg, 0.0), f1_pivot);
-    let mut out = fft2::reapply_phase_2d_cancellable(s, f2, f1, cancelled)?;
-    if has_magnitude(&params.f2) || has_magnitude(&params.f1) {
-        for row in out.data.chunks_mut(out.f2_size.max(1)) {
-            if cancelled() {
-                return None;
-            }
-            for c in row {
-                *c = Complex64::new(c.norm(), 0.0);
-            }
-        }
-    }
-    shift_reference(&mut out.f2_ppm, &params.f2);
-    shift_reference(&mut out.f1_ppm, &params.f1);
-    Some(out)
-}
-
-fn reapply_stack(
-    s: &StackSpectrum,
-    params: &Params2D,
-    cancelled: &impl Fn() -> bool,
-) -> Option<StackSpectrum> {
-    if cancelled() {
-        return None;
-    }
-    let pivot = s.peak_pivot_frac();
-    let auto = fft2::absorptive_phase(&s.traces).unwrap_or((0.0, 0.0));
-    let f2 = axis_phase(&params.f2, || auto, pivot);
-    let mut out = fft2::reapply_phase_stack_cancellable(s, f2, cancelled)?;
-    if has_magnitude(&params.f2) {
-        for t in &mut out.traces {
-            if cancelled() {
-                return None;
-            }
-            for c in t {
-                *c = Complex64::new(c.norm(), 0.0);
-            }
-        }
-    }
-    shift_reference(&mut out.ppm, &params.f2);
-    Some(out)
 }
 
 /// Index `i` as a `0..=1` fraction of a `size`-point axis (`0.0` if degenerate).

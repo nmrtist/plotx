@@ -38,7 +38,7 @@ fn step_ids_and_allocator_survive_project_roundtrip() {
 #[test]
 fn project_roundtrip_preserves_custom_pipeline_steps() {
     let mut app = PlotxApp::new();
-    let mut dataset = NmrDataset::load(synthetic_1d());
+    let mut dataset = NmrDataset::load(synthetic_1d()).unwrap();
     // One time-side step (an exponential window before the FFT) and one
     // frequency-side step (a referencing shift) that must both survive.
     let fft_pos = dataset
@@ -65,7 +65,7 @@ fn project_roundtrip_preserves_custom_pipeline_steps() {
         }),
         StepSource::User,
     ));
-    dataset.retransform();
+    dataset.retransform().unwrap();
     app.doc.datasets.push(Dataset::Nmr(Box::new(dataset)));
 
     let path = temp_project("pipeline");

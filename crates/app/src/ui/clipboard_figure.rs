@@ -401,7 +401,7 @@ mod tests {
         let mut app = plotx_core::state::PlotxApp::new();
         let action = Action::insert_dataset_with_default_canvas(
             &app,
-            Dataset::Nmr(Box::new(NmrDataset::load(data))),
+            Dataset::Nmr(Box::new(NmrDataset::load(data).unwrap())),
             "probe".to_owned(),
             DEFAULT_CANVAS_SIZE_MM,
         );

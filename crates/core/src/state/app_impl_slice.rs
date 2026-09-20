@@ -1,114 +1,86 @@
 use super::*;
-use plotx_processing::{Processed1D, ProjectionMode, Slice1D, SliceKind};
+use plotx_processing::{ProjectionMode, Slice1D, SliceKind};
+use std::sync::Arc;
 
 impl NmrDataset {
-    /// Build a standalone 1D trace from a slice/projection lifted out of a 2D
-    /// dataset without changing its scientific domain.
-    pub fn from_slice(slice: Slice1D, source: String) -> Self {
-        let Slice1D {
-            coordinates,
-            domain,
-            values,
-            nucleus,
-            observe_freq_mhz,
-            ..
-        } = slice;
-        let (spectral_width_hz, carrier_ppm) = match domain {
-            plotx_io::Domain::Frequency => linear_axis_params(&coordinates, observe_freq_mhz),
-            plotx_io::Domain::Time => (time_axis_spectral_width(&coordinates), 0.0),
+    /// Explicit coordinates are retained for a standalone programmatic trace.
+    pub fn from_slice(slice: Slice1D, source: String) -> Result<Self, String> {
+        use nmr::axis::{AxisCoordinates, AxisDomain, AxisRole, AxisUnit, FrequencyEvidence};
+        use nmr::processed::{
+            ComponentBasis, ProcessedAxis, ProcessedDataset, ProcessedOrigin, ProcessedProvenance,
         };
-        let data = NmrData {
-            points: values.clone(),
-            domain,
-            spectral_width_hz,
-            observe_freq_mhz,
-            carrier_ppm,
-            nucleus: nucleus.clone(),
-            source: source.clone(),
-            group_delay: 0.0,
+        let fail = |error: &dyn std::fmt::Display| error.to_string();
+        let (domain, unit) = match slice.domain {
+            Domain::Time => (AxisDomain::Time, AxisUnit::Second),
+            Domain::Frequency => (AxisDomain::Frequency, slice.unit),
         };
-        let group_delay_correct = super::default_group_delay_correct(data.domain);
-        let pipeline = AxisPipeline { steps: Vec::new() };
-        let processed = match domain {
-            plotx_io::Domain::Frequency => {
-                let n = coordinates.len().max(1);
-                Processed1D::Frequency(Spectrum {
-                    ppm: coordinates,
-                    values,
-                    hz_per_point: (spectral_width_hz / n as f64).abs(),
-                    observe_freq_mhz,
-                    nucleus,
-                })
-            }
-            plotx_io::Domain::Time => Processed1D::Time(plotx_processing::TimeTrace {
-                time_s: coordinates,
-                values,
-                nucleus,
-                source: source.clone(),
+        let reference = (unit == AxisUnit::Ppm)
+            .then_some(slice.reference_freq_mhz)
+            .flatten();
+        let coordinates = if let Some(frequency) = reference {
+            slice
+                .coordinates
+                .into_iter()
+                .map(|value| value * frequency)
+                .collect()
+        } else {
+            slice.coordinates
+        };
+        let axis = ProcessedAxis::new(
+            AxisRole::Signal,
+            domain,
+            Some(if reference.is_some() {
+                AxisUnit::Hertz
+            } else {
+                unit
             }),
+            slice.values.len(),
+            AxisCoordinates::Explicit(coordinates),
+            ComponentBasis::Cartesian,
+        )
+        .map_err(|error| fail(&error))?
+        .with_nucleus((!slice.nucleus.is_empty()).then_some(slice.nucleus))
+        .map_err(|error| fail(&error))?
+        .with_frequency_evidence(Some(
+            FrequencyEvidence::new(slice.observe_freq_mhz, None).map_err(|error| fail(&error))?,
+        ))
+        .map_err(|error| fail(&error))?;
+        let data = ProcessedDataset::from_complex_trace(
+            axis,
+            slice.values,
+            ProcessedProvenance::new(ProcessedOrigin::Unknown, Vec::new())
+                .map_err(|error| fail(&error))?,
+        )
+        .map_err(|error| fail(&error))?;
+        let data = if let Some(frequency) = reference {
+            use nmr::processing::{
+                FrequencyFrame, ProcessingOperation, ProcessingPlan, ReferenceSource,
+            };
+            ProcessingPlan::new(vec![ProcessingOperation::ResolveFrequencyFrame {
+                axis: 0,
+                frame: FrequencyFrame::Ppm(ReferenceSource::Explicit(
+                    nmr::raw::ChemicalShiftReference::user_constructed(0.0, frequency)
+                        .map_err(|error| fail(&error))?,
+                )),
+            }])
+            .map_err(|error| fail(&error))?
+            .apply(&data.into())
+            .map_err(|error| fail(&error))?
+        } else {
+            data.into()
         };
-        let mut field_catalog = nmr_field_catalog();
-        field_catalog.attach_provenance(&data.source, None);
-        Self {
-            resource_id: DatasetId::new(),
-            field_catalog,
-            acquisition_identity: plotx_io::AcquisitionIdentity {
-                subject: None,
-                acquisition: None,
-                source_label: source.clone(),
-            },
-            data,
-            origin: plotx_io::NmrOrigin::Derived,
-            base: processed.clone(),
-            pipeline,
-            next_step_id: 0,
-            group_delay_correct,
-            has_imaginary: true,
-            processed,
-            name: Some(source),
-            lineage: None,
-            peaks: PeakSet::default(),
-            integrals: Vec::new(),
-            next_integral_id: 0,
-            line_fits: Vec::new(),
-            next_line_fit_id: 0,
-            multiplets: Vec::new(),
-            next_multiplet_id: 0,
-            craft_runs: Vec::new(),
-            next_craft_run_id: 0,
-            craft_spectrum_cache: Default::default(),
-        }
-    }
-}
-
-/// Spectral width and carrier (ppm) that make [`fft::transform_base`] reproduce a
-/// linear ppm axis `p`: `ppm[i] = carrier + (i − n/2)·sw/(n·obs)`.
-fn linear_axis_params(ppm: &[f64], obs: f64) -> (f64, f64) {
-    let n = ppm.len();
-    if n < 2 {
-        return (
-            obs.max(f64::MIN_POSITIVE),
-            ppm.first().copied().unwrap_or(0.0),
-        );
-    }
-    let dp = (ppm[n - 1] - ppm[0]) / (n - 1) as f64;
-    let sw = dp * n as f64 * obs;
-    let carrier = ppm[0] + (n as f64 / 2.0) * dp;
-    (sw, carrier)
-}
-
-fn time_axis_spectral_width(time_s: &[f64]) -> f64 {
-    let Some((&first, &last)) = time_s.first().zip(time_s.last()) else {
-        return 1.0;
-    };
-    if time_s.len() < 2 {
-        return 1.0;
-    }
-    let dwell = (last - first).abs() / (time_s.len() - 1) as f64;
-    if dwell.is_finite() && dwell > f64::MIN_POSITIVE {
-        1.0 / dwell
-    } else {
-        1.0
+        let input = plotx_io::nmr_view::NmrSource::new(Arc::new(data))
+            .map_err(|error| fail(&error))?
+            .with_display_label(source.clone());
+        let mut dataset =
+            Self::load_with_pipeline(input, Some(AxisPipeline { steps: Vec::new() }), Some(false))?;
+        dataset.acquisition_identity = plotx_io::AcquisitionIdentity {
+            source_label: source.clone(),
+            subject: None,
+            acquisition: None,
+        };
+        dataset.name = Some(source);
+        Ok(dataset)
     }
 }
 
@@ -125,12 +97,25 @@ impl PlotxApp {
             return;
         };
         let parent = self.doc.datasets[dataset].display_name();
-        let (slice, is_stack) = match &d2.processed {
-            Processed2D::Ft(s) => (s.slice(cursor.kind, cursor.index), false),
-            Processed2D::Stack(s) => (s.slice(cursor.index), true),
+        let is_stack = matches!(d2.processed, Processed2D::Stack(_));
+        let kind = if is_stack {
+            SliceKind::Row
+        } else {
+            cursor.kind
         };
-        let name = slice_name(&parent, &slice, cursor.kind, is_stack, cursor.index);
-        self.insert_slice_dataset(slice, name, dataset, DerivationKind::Slice);
+        let (source, slice) = match plotx_processing::slice::extract(
+            &d2.native_processed,
+            kind,
+            plotx_processing::slice::Reduction::Slice(cursor.index),
+        ) {
+            Ok(output) => output,
+            Err(error) => {
+                self.session.status = format!("Slice extraction failed: {error}");
+                return;
+            }
+        };
+        let name = slice_name(&parent, &slice, kind, is_stack, cursor.index);
+        self.insert_slice_dataset(source, name, dataset, DerivationKind::Slice);
     }
 
     /// Materialize a whole-axis projection of a true-2D spectrum as a new 1D
@@ -144,28 +129,51 @@ impl PlotxApp {
         let Some(d2) = self.doc.datasets.get(dataset).and_then(Dataset::as_nmr2d) else {
             return;
         };
-        let Processed2D::Ft(s) = &d2.processed else {
+        let Processed2D::Ft(_) = &d2.processed else {
             self.session.status = "Projections are available for true-2D spectra.".into();
             return;
         };
         let parent = self.doc.datasets[dataset].display_name();
-        let slice = s.project(kind, mode);
+        let source = match plotx_processing::slice::extract(
+            &d2.native_processed,
+            kind,
+            plotx_processing::slice::Reduction::Projection(mode),
+        ) {
+            Ok((source, _)) => source,
+            Err(error) => {
+                self.session.status = format!("Projection failed: {error}");
+                return;
+            }
+        };
         let word = match mode {
             ProjectionMode::Sum => "sum",
             ProjectionMode::Skyline => "skyline",
         };
         let name = format!("{parent} — {} {word} projection", slice_axis_label(kind));
-        self.insert_slice_dataset(slice, name, dataset, DerivationKind::Projection);
+        self.insert_slice_dataset(source, name, dataset, DerivationKind::Projection);
     }
 
     fn insert_slice_dataset(
         &mut self,
-        slice: Slice1D,
+        source_data: plotx_io::nmr_view::NmrSource,
         name: String,
         source: usize,
         kind: DerivationKind,
     ) {
-        let mut ds = Dataset::Nmr(Box::new(NmrDataset::from_slice(slice, name.clone())));
+        let dataset = match NmrDataset::load_with_pipeline(
+            source_data,
+            Some(AxisPipeline { steps: Vec::new() }),
+            Some(false),
+        ) {
+            Ok(dataset) => dataset,
+            Err(error) => {
+                self.session.status = format!("Slice extraction failed: {error}");
+                return;
+            }
+        };
+        let mut dataset = dataset;
+        dataset.name = Some(name.clone());
+        let mut ds = Dataset::Nmr(Box::new(dataset));
         ds.set_lineage(Some(DatasetLineage::new(
             kind,
             [self.doc.datasets[source].resource_id()],
@@ -227,7 +235,9 @@ mod tests {
             domain: plotx_io::Domain::Frequency,
             values: vec![Complex64::new(1.0, 0.0), Complex64::new(0.5, 0.0)],
             nucleus: "1H".to_owned(),
-            observe_freq_mhz: 400.0,
+            observe_freq_mhz: Some(400.0),
+            reference_freq_mhz: Some(400.0),
+            unit: nmr::axis::AxisUnit::Ppm,
             position: Some(3.0),
             position_domain: plotx_io::Domain::Frequency,
         }
@@ -236,16 +246,26 @@ mod tests {
     #[test]
     fn slice_and_projection_insertions_record_the_source() {
         let mut app = PlotxApp::new();
-        app.doc
-            .datasets
-            .push(Dataset::Nmr(Box::new(NmrDataset::from_slice(
-                slice(),
-                "source".to_owned(),
-            ))));
+        app.doc.datasets.push(Dataset::Nmr(Box::new(
+            NmrDataset::from_slice(slice(), "source".to_owned()).unwrap(),
+        )));
 
-        app.insert_slice_dataset(slice(), "slice".to_owned(), 0, DerivationKind::Slice);
         app.insert_slice_dataset(
-            slice(),
+            app.doc.datasets[0]
+                .as_nmr()
+                .unwrap()
+                .native_processed
+                .clone(),
+            "slice".to_owned(),
+            0,
+            DerivationKind::Slice,
+        );
+        app.insert_slice_dataset(
+            app.doc.datasets[0]
+                .as_nmr()
+                .unwrap()
+                .native_processed
+                .clone(),
             "projection".to_owned(),
             0,
             DerivationKind::Projection,
@@ -269,11 +289,11 @@ mod tests {
 
     #[test]
     fn frequency_domain_slices_share_the_factory_group_delay_default() {
-        let dataset = NmrDataset::from_slice(slice(), "slice".to_owned());
+        let dataset = NmrDataset::from_slice(slice(), "slice".to_owned()).unwrap();
         assert!(!dataset.group_delay_correct);
         assert_eq!(
             dataset.group_delay_correct,
-            default_group_delay_correct(dataset.data.domain)
+            default_group_delay_correct(&dataset.data)
         );
     }
 
@@ -282,8 +302,8 @@ mod tests {
         let mut time = slice();
         time.coordinates = vec![0.0, 0.002];
         time.domain = plotx_io::Domain::Time;
-        let dataset = NmrDataset::from_slice(time, "FID slice".to_owned());
-        assert_eq!(dataset.data.domain, plotx_io::Domain::Time);
+        let dataset = NmrDataset::from_slice(time, "FID slice".to_owned()).unwrap();
+        assert_eq!(dataset.input_domain(), plotx_io::Domain::Time);
         assert_eq!(dataset.output_domain(), plotx_io::Domain::Time);
         assert_eq!(dataset.time_trace().unwrap().time_s, vec![0.0, 0.002]);
     }

@@ -1,0 +1,16 @@
+##TITLE=PlotX synthetic NMR integration fixture
+##$TD= 4
+##$PARMODE= 1
+##$AQSEQ= 0
+##$FnTYPE= 0
+##$GO_block_size= <continuous>
+##$AQ_mod= 3
+##$BYTORDA= 0
+##$DTYPA= 0
+##$SW_h= 4000
+##$SFO1= 400
+##$BF1= 400
+##$O1= 0
+##$NUC1= <1H>
+##$GRPDLY= 0
+##END=

@@ -5,8 +5,10 @@ use crate::state::{
     ObjectFrame, ObjectId, PlotObject, PlotxApp, PrimaryView, SeriesBinding, ShapeKind,
     ShapeObject, StackMode, StackSpec, TextAlign, TextBox, Tool,
 };
+#[cfg(test)]
 use num_complex::Complex64;
 use plotx_figure::Color;
+#[cfg(test)]
 use plotx_io::{
     AxisSource, DiffusionMeta, Dim, Domain, NmrData, NmrData2D, PseudoAxis, PseudoKind, QuadMode,
 };
@@ -29,7 +31,6 @@ mod asset_codec;
 mod axis_overrides;
 mod codec;
 mod convert;
-mod convert_dimensions;
 mod convert_recipes;
 mod convert_views;
 mod dosy_convert;
@@ -39,6 +40,7 @@ mod field_catalog;
 mod integrals2d;
 mod lineage_convert;
 mod mass_spec_convert;
+mod nmr_snapshot;
 mod peaks2d;
 mod persistence;
 mod pipeline_conv;
@@ -50,7 +52,6 @@ mod xrd_convert;
 
 pub use codec::*;
 pub use convert::*;
-pub use convert_dimensions::*;
 pub use convert_recipes::*;
 pub use convert_views::*;
 pub use dto::*;
@@ -66,7 +67,6 @@ pub use typed_table::*;
 
 const FORMAT: &str = "plotx-project";
 const SCHEMA_VERSION: u32 = 1;
-const STORAGE_COMPLEX_F64_LE: &str = "complex_f64_le";
 const STORAGE_TABLE_V1: &str = "plotx_table_envelope_v1";
 const STORAGE_AFM_V1: &str = "plotx_afm_v1";
 const STORAGE_DOSY_V1: &str = "plotx_dosy_v1";
@@ -678,6 +678,8 @@ mod lineage_tests;
 mod linefit_tests;
 #[cfg(test)]
 mod multiplet_tests;
+#[cfg(test)]
+mod nmr_snapshot_tests;
 #[cfg(test)]
 mod panel_schema_tests;
 #[cfg(test)]

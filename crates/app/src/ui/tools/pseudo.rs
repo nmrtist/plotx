@@ -32,6 +32,12 @@ pub(super) fn experiment_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) -> bo
         let n = app.doc.datasets[di].as_nmr2d().unwrap();
         let layout = match n.params.layout {
             Layout2D::Ft => "Contour (true 2D FT)",
+            Layout2D::Stack
+                if n.native_processed.dataset().as_raw().is_some() && n.data.nus.is_some() =>
+            {
+                "Acquired NUS observations (not reconstructed)"
+            }
+            Layout2D::Stack if n.data.nus.is_some() => "Stack (reconstructed NUS slices)",
             Layout2D::Stack => "Stack (pseudo-2D 1D slices)",
         };
         ui.label(format!("Layout: {layout}"));
@@ -48,7 +54,7 @@ pub(super) fn experiment_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) -> bo
     if is_pseudo {
         ui.separator();
         pseudo_group(app, di, ui);
-    } else if is_stack {
+    } else if is_stack && app.doc.datasets[di].as_nmr2d().unwrap().data.nus.is_none() {
         ui.separator();
         ui.small(
             "This looks like a pseudo-2D array but no indirect-axis ruler \
@@ -65,99 +71,59 @@ pub(super) fn experiment_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) -> bo
     false
 }
 
-/// Non-uniform-sampling controls. The reader normally recovers JEOL schedules;
-/// manual entry remains available for older or malformed files.
+/// Reconstruction inputs apply to the imported sampling coordinates.
 fn nus_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
-    let Some(nus) = app.doc.datasets[di]
-        .as_nmr2d()
-        .and_then(|n| n.data.nus.clone())
-    else {
+    let Some(dataset) = app.doc.datasets[di].as_nmr2d() else {
+        return;
+    };
+    let Some(nus) = &dataset.data.nus else {
         return;
     };
     ui.separator();
     ui.label(crate::typography::headline("Non-uniform sampling"));
-    let scheme = if nus.echo_antiecho {
-        "echo/anti-echo (P/N)"
-    } else {
-        "phase-modulated"
-    };
+    if let Some(warning) = &dataset.reconstruction_warning {
+        ui.colored_label(ui.visuals().warn_fg_color, warning);
+    }
     ui.small(format!(
-        "{} scheduling — {} of {} F1 increments acquired ({}).",
-        nus.mode, nus.acquired, nus.grid, scheme,
+        "{} observations on a {}-point indirect grid.",
+        nus.acquired, nus.grid
     ));
-
-    if nus.schedule.is_some() {
-        ui.small("Spectrum reconstructed from the available sampling list.");
-    } else {
-        ui.colored_label(
-            ui.visuals().warn_fg_color,
-            "No valid NUS schedule was found in the data file. Paste the sampling \
-             list (space/comma separated) to reconstruct the spectrum.",
-        );
+    let mut request = dataset.nus_request.unwrap_or_default();
+    let mut noise_known = request.noise_standard_deviation.is_some();
+    let mut changed = ui
+        .checkbox(&mut noise_known, "Override automatic noise estimate")
+        .changed();
+    let mut noise = request.noise_standard_deviation.unwrap_or(0.0);
+    changed |= ui
+        .add_enabled(
+            noise_known,
+            DragValue::new(&mut noise)
+                .range(0.0..=f64::MAX)
+                .prefix("Noise σ "),
+        )
+        .changed();
+    ui.small("Noise is estimated automatically from acquired data. An override uses the standard deviation after the current F2 recipe; zero explicitly asserts noiseless input.");
+    request.noise_standard_deviation = noise_known.then_some(noise);
+    changed |= ui
+        .add(
+            DragValue::new(&mut request.max_iterations)
+                .range(1..=2048)
+                .prefix("Maximum iterations "),
+        )
+        .changed();
+    let before = DatasetProcessingState::from_dataset(&app.doc.datasets[di]);
+    let mut after = before.clone();
+    if let DatasetProcessingState::Nmr2D { nus_request, .. } = &mut after {
+        *nus_request = Some(request);
     }
-
-    let text_id = ui.make_persistent_id(("nus_list", di));
-    let base_id = ui.make_persistent_id(("nus_base", di));
-    let err_id = ui.make_persistent_id(("nus_err", di));
-    let mut text = ui.data_mut(|d| d.get_temp::<String>(text_id).unwrap_or_default());
-    let mut base = ui.data_mut(|d| d.get_temp::<usize>(base_id).unwrap_or(nus.idx_base));
-
-    ui.horizontal(|ui| {
-        ui.label("Index base");
-        if ui.selectable_label(base == 1, "1-based").clicked() {
-            base = 1;
-        }
-        if ui.selectable_label(base == 0, "0-based").clicked() {
-            base = 0;
-        }
-    });
-    ui.data_mut(|d| d.insert_temp(base_id, base));
-
-    let resp = ui.add(
-        egui::TextEdit::multiline(&mut text)
-            .hint_text("1 2 3 5 7 9 …")
-            .desired_rows(2)
-            .desired_width(f32::INFINITY),
-    );
-    if resp.changed() {
-        ui.data_mut(|d| d.insert_temp(text_id, text.clone()));
+    if changed && before != after {
+        app.execute_action(Action::update_dataset_processing(
+            app.doc.datasets[di].resource_id(),
+            before,
+            after,
+        ));
     }
-
-    if ui
-        .add(Button::new(format!(
-            "Reconstruct ({} indices)",
-            nus.acquired
-        )))
-        .clicked()
-    {
-        let result = match parse_indices(&text) {
-            Ok(values) => app.apply_nus_schedule(di, &values, base),
-            Err(e) => Err(e),
-        };
-        let err = result.err().unwrap_or_default();
-        ui.data_mut(|d| d.insert_temp::<String>(err_id, err));
-    }
-    let err = ui.data_mut(|d| d.get_temp::<String>(err_id).unwrap_or_default());
-    if !err.is_empty() {
-        ui.colored_label(ui.visuals().error_fg_color, err);
-    }
-}
-
-fn parse_indices(text: &str) -> Result<Vec<usize>, String> {
-    let mut out = Vec::new();
-    for tok in text
-        .split(|c: char| c.is_whitespace() || c == ',' || c == ';')
-        .filter(|s| !s.is_empty())
-    {
-        let v: usize = tok
-            .parse()
-            .map_err(|_| format!("'{tok}' is not a whole number."))?;
-        out.push(v);
-    }
-    if out.is_empty() {
-        return Err("Enter the sampling indices.".into());
-    }
-    Ok(out)
+    ui.small("NUS reconstruction runs automatically with the F2 FFT. The F1 FFT produces the second frequency axis.");
 }
 
 fn pseudo_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
@@ -302,6 +268,12 @@ fn pseudo_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
         }
     }
 
+    let input_error = app.doc.datasets[di]
+        .as_nmr2d()
+        .and_then(|n| n.dosy_input_error());
+    if let Some(error) = input_error {
+        ui.small(error);
+    }
     let progress = app
         .doc
         .datasets
@@ -311,7 +283,10 @@ fn pseudo_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
         if is_dosy
             && !is_ilt
             && ui
-                .add_enabled(progress.is_none(), Button::new("Build DOSY map"))
+                .add_enabled(
+                    input_error.is_none() && progress.is_none(),
+                    Button::new("Build DOSY map"),
+                )
                 .clicked()
         {
             app.request_dosy_map(di);
@@ -320,7 +295,7 @@ fn pseudo_group(app: &mut PlotxApp, di: usize, ui: &mut Ui) {
             && is_ilt
             && ui
                 .add_enabled(
-                    is_gradient && progress.is_none(),
+                    is_gradient && input_error.is_none() && progress.is_none(),
                     Button::new("Build ILT DOSY map"),
                 )
                 .clicked()

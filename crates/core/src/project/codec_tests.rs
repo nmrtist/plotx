@@ -141,7 +141,7 @@ fn crc_failure_surfaces_when_success_path_consumes_eof() {
 }
 
 #[test]
-fn complex_decoder_uses_constant_sized_read_requests() {
+fn native_snapshot_decoder_keeps_streamed_reads_bounded() {
     struct Probe {
         inner: Cursor<Vec<u8>>,
         largest_request: usize,
@@ -152,13 +152,33 @@ fn complex_decoder_uses_constant_sized_read_requests() {
             self.inner.read(buffer)
         }
     }
+    let input = plotx_io::nmr_view::NmrSource::try_from(NmrData {
+        points: vec![Complex64::new(0.0, 0.0); 100_000],
+        domain: Domain::Frequency,
+        spectral_width_hz: 1000.0,
+        observe_freq_mhz: 100.0,
+        carrier_ppm: 0.0,
+        nucleus: "1H".into(),
+        source: "streamed snapshot".into(),
+        group_delay: 0.0,
+    })
+    .unwrap();
+    let limits = nmr::snapshot::SnapshotLimits::default();
+    let mut bytes = Vec::new();
+    let mut context = nmr::ExecutionContext::default();
+    plotx_io::nmr_bridge::snapshot::write(input.dataset(), &mut bytes, limits, &mut context)
+        .unwrap();
+    let length = bytes.len() as u64;
     let probe = Probe {
-        inner: Cursor::new(vec![0_u8; 16 * 100_000]),
+        inner: Cursor::new(bytes),
         largest_request: 0,
     };
-    let mut reader = EntryReader::new(probe, "nmr.bin", "NMR", 1_600_000, 1_600_000).unwrap();
-    let values = complex_from_reader(&mut reader).unwrap();
-    assert_eq!(values.len(), 100_000);
-    assert!(reader.inner.largest_request <= 16);
+    let mut reader = EntryReader::new(probe, "nmr.bin", "NMR snapshot", length, length).unwrap();
+    let output = plotx_io::nmr_bridge::snapshot::read(&mut reader, limits, &mut context).unwrap();
+    assert_eq!(
+        output.canonical_digests(),
+        input.dataset().canonical_digests()
+    );
+    assert!(reader.inner.largest_request <= 64 * 1024);
     reader.finish().unwrap();
 }

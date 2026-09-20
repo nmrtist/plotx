@@ -23,7 +23,7 @@ fn nmr1d(domain: plotx_io::Domain) -> Dataset {
         source: "fixture".to_owned(),
         group_delay: 0.0,
     };
-    Dataset::Nmr(Box::new(NmrDataset::load(data)))
+    Dataset::Nmr(Box::new(NmrDataset::load(data).unwrap()))
 }
 
 pub(crate) fn time_domain_1d() -> Dataset {
@@ -64,9 +64,9 @@ fn nmr2d(source: &str) -> plotx_io::NmrData2D {
 /// One page holding `plots` contour plots of one 2D spectrum, all selected.
 pub(crate) fn contour_page(plots: usize) -> (PlotxApp, Vec<ObjectId>) {
     let mut app = PlotxApp::new();
-    app.doc
-        .datasets
-        .push(Dataset::Nmr2D(Box::new(Nmr2DDataset::load(nmr2d("panel")))));
+    app.doc.datasets.push(Dataset::Nmr2D(Box::new(
+        Nmr2DDataset::load(nmr2d("panel")).unwrap(),
+    )));
     let mut canvas = CanvasDocument::new("page".to_owned(), [200.0, 200.0]);
     let mut ids = Vec::new();
     for index in 0..plots {
@@ -89,11 +89,9 @@ pub(crate) fn contour_page(plots: usize) -> (PlotxApp, Vec<ObjectId>) {
 /// A second dataset, so a navigation test can tell whether the data focus
 /// followed the object it landed on.
 pub(crate) fn add_dataset(app: &mut PlotxApp) -> usize {
-    app.doc
-        .datasets
-        .push(Dataset::Nmr2D(Box::new(Nmr2DDataset::load(nmr2d(
-            "second",
-        )))));
+    app.doc.datasets.push(Dataset::Nmr2D(Box::new(
+        Nmr2DDataset::load(nmr2d("second")).unwrap(),
+    )));
     app.doc.datasets.len() - 1
 }
 
@@ -159,12 +157,12 @@ pub(crate) fn set_lowest_level(app: &mut PlotxApp, object: ObjectId, multiplier:
 pub(crate) fn time_domain_2d() -> Dataset {
     let mut data = nmr2d("time domain");
     data.domain = plotx_io::Domain::Time;
-    Dataset::Nmr2D(Box::new(Nmr2DDataset::load(data)))
+    Dataset::Nmr2D(Box::new(Nmr2DDataset::load(data).unwrap()))
 }
 
 pub(crate) fn homonuclear_frequency_2d() -> Dataset {
     let mut data = nmr2d("homonuclear frequency domain");
     data.indirect = data.direct.clone();
     data.experiment = Some("cosy".to_owned());
-    Dataset::Nmr2D(Box::new(Nmr2DDataset::load(data)))
+    Dataset::Nmr2D(Box::new(Nmr2DDataset::load(data).unwrap()))
 }

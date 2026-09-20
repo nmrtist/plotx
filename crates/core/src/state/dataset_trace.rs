@@ -23,6 +23,9 @@ impl Dataset {
                 data.craft_group_figure(spec, region, label)
             }
             Self::Nmr2D(data) => {
+                if data.field_catalog.id_for_key(data.stack_field_key()) != Some(field) {
+                    return None;
+                }
                 let plotx_processing::Processed2D::Stack(stack) = &data.processed else {
                     return None;
                 };
@@ -44,13 +47,7 @@ impl Dataset {
                     y0 = -0.5;
                     y1 = 0.5;
                 }
-                let x_name = if stack.direct_domain == plotx_io::Domain::Frequency {
-                    crate::figures::axis_label(&stack.direct.nucleus)
-                } else {
-                    "Time (s)".to_owned()
-                };
-                let x_axis = plotx_figure::Axis::new(x_name, x0, x1)
-                    .reversed(stack.direct_domain == plotx_io::Domain::Frequency);
+                let x_axis = crate::figures::nmr_axis(&stack.direct, x0, x1);
                 Some(
                     plotx_figure::Figure::new(
                         "",

@@ -85,9 +85,9 @@ impl NmrDataset {
     }
 
     pub fn pivot_ppm(&self) -> f64 {
-        let Some(base) = self.base.as_frequency() else {
+        if self.base.as_frequency().is_none() {
             return 0.0;
-        };
+        }
         let (lo, hi) = self.ppm_ends();
         let frac = self
             .pipeline
@@ -99,7 +99,11 @@ impl NmrDataset {
                 // show the peak the pass actually rotates about so the on-plot handle
                 // sits where the user expects instead of pinned to an edge.
                 StepKind::Phase(p) => Some(match p.auto {
-                    Some(_) => plotx_processing::phase::peak_pivot_frac(&base.values),
+                    Some(_) => self
+                        .phase_reports
+                        .iter()
+                        .find(|report| report.step == s.id)
+                        .map_or(p.pivot_frac, |report| report.recipe_parameters().2),
                     None => p.pivot_frac,
                 }),
                 _ => None,

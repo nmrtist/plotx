@@ -7,7 +7,7 @@ use plotx_figure::{
     Annotation, Axis, AxisFrame, Color, Contour, ContourBasePolicy, ContourLevelSpec, ContourSpec,
     Figure, Series,
 };
-use plotx_io::NmrData;
+use plotx_io::nmr_view::NmrSource;
 use plotx_processing::{Preset2D, Processed1D, Spectrum, Spectrum2D, StackSpectrum, TimeTrace};
 
 use crate::state::{
@@ -15,22 +15,35 @@ use crate::state::{
     scalar_grid_capabilities,
 };
 
-pub fn build_figure(data: &NmrData, spec: &Spectrum, peaks: &[ResolvedPeak]) -> Figure {
+pub fn build_figure(data: &NmrSource, spec: &Spectrum, peaks: &[ResolvedPeak]) -> Figure {
     let (ppm_lo, ppm_hi) = spec.ppm_bounds();
     let (i_lo, i_hi) = spec.intensity_bounds();
     let range = (i_hi - i_lo).max(f64::MIN_POSITIVE);
     // Pad the intensity range, with extra headroom on top for peak labels.
     let y = Axis::new("Intensity (a.u.)", i_lo - 0.05 * range, i_hi + 0.08 * range);
     // NMR convention: chemical shift increases to the left.
-    let x = Axis::new(axis_label(&data.nucleus), ppm_lo, ppm_hi).reversed(true);
+    let x = Axis::new(
+        if spec.unit == nmr::axis::AxisUnit::Ppm {
+            axis_label(data.nucleus())
+        } else {
+            "Frequency (Hz)".into()
+        },
+        ppm_lo,
+        ppm_hi,
+    )
+    .reversed(spec.unit == nmr::axis::AxisUnit::Ppm);
 
-    let fig = Figure::new(format!("{} spectrum — {}", data.nucleus, data.source), x, y)
-        .with_series(Series::line("real", spec.real_points()).colored(Color::TRACE));
+    let fig = Figure::new(
+        format!("{} spectrum — {}", data.nucleus(), data.source()),
+        x,
+        y,
+    )
+    .with_series(Series::line("real", spec.real_points()).colored(Color::TRACE));
 
     apply_peak_labels(fig, peaks)
 }
 
-pub fn build_time_figure(data: &NmrData, trace: &TimeTrace) -> Figure {
+pub fn build_time_figure(data: &NmrSource, trace: &TimeTrace) -> Figure {
     let (time_lo, time_hi) = trace.time_bounds();
     let mut intensity = trace.values.iter().map(|value| value.re);
     let first = intensity.next().unwrap_or(0.0);
@@ -44,12 +57,12 @@ pub fn build_time_figure(data: &NmrData, trace: &TimeTrace) -> Figure {
         minimum - 0.05 * range,
         maximum + 0.05 * range,
     );
-    Figure::new(format!("{} FID — {}", data.nucleus, data.source), x, y)
+    Figure::new(format!("{} FID — {}", data.nucleus(), data.source()), x, y)
         .with_series(Series::line("real", trace.real_points()).colored(Color::TRACE))
 }
 
 pub fn build_processed_1d_figure(
-    data: &NmrData,
+    data: &NmrSource,
     processed: &Processed1D,
     peaks: &[ResolvedPeak],
 ) -> Figure {
@@ -77,8 +90,8 @@ pub fn apply_peak_labels(mut fig: Figure, peaks: &[ResolvedPeak]) -> Figure {
 pub fn build_figure_2d(spec: &Spectrum2D, preset: Preset2D) -> Figure {
     let (f2_lo, f2_hi) = spec.f2_bounds();
     let (f1_lo, f1_hi) = spec.f1_bounds();
-    let x = Axis::new(axis_label(&spec.direct.nucleus), f2_lo, f2_hi).reversed(true);
-    let y = Axis::new(axis_label(&spec.indirect.nucleus), f1_lo, f1_hi).reversed(true);
+    let x = nmr_axis(&spec.direct, f2_lo, f2_hi);
+    let y = nmr_axis(&spec.indirect, f1_lo, f1_hi);
 
     let mut fig = Figure::new(format!("{} — {}", preset.label(), spec.source), x, y)
         .with_axis_frame(AxisFrame::Box);
@@ -91,7 +104,9 @@ pub fn build_figure_2d(spec: &Spectrum2D, preset: Preset2D) -> Figure {
 pub(crate) fn equal_scale_for_nmr_2d(spec: &Spectrum2D) -> bool {
     if spec.f2_domain != plotx_io::Domain::Frequency
         || spec.f1_domain != plotx_io::Domain::Frequency
+        || spec.direct.nucleus.is_empty()
         || spec.direct.nucleus != spec.indirect.nucleus
+        || spec.direct.unit != spec.indirect.unit
     {
         return false;
     }
@@ -192,9 +207,7 @@ pub fn build_stack_figure(stack: &StackSpectrum) -> Figure {
 
     let x = match stack.direct_domain {
         plotx_io::Domain::Time => Axis::new("Direct acquisition time (s)", lo, hi),
-        plotx_io::Domain::Frequency => {
-            Axis::new(axis_label(&stack.direct.nucleus), lo, hi).reversed(true)
-        }
+        plotx_io::Domain::Frequency => nmr_axis(&stack.direct, lo, hi),
     };
     // The stack is phased to absorptive, so traces carry the signed real part:
     // short-τ relaxation increments dip below their baseline (inverted peaks).
@@ -213,6 +226,17 @@ pub fn build_stack_figure(stack: &StackSpectrum) -> Figure {
         fig = fig.with_series(Series::line(format!("{i}"), pts).colored(Color::TRACE));
     }
     fig
+}
+
+pub(crate) fn nmr_axis(meta: &plotx_processing::AxisMeta, lo: f64, hi: f64) -> Axis {
+    use nmr::axis::AxisUnit;
+    let label = match meta.unit {
+        Some(AxisUnit::Ppm) => axis_label(&meta.nucleus),
+        Some(AxisUnit::Hertz) => format!("{} frequency (Hz)", format_nucleus(&meta.nucleus)),
+        Some(AxisUnit::Second) => "Acquisition time (s)".into(),
+        _ => "Coordinate".into(),
+    };
+    Axis::new(label, lo, hi).reversed(meta.unit == Some(AxisUnit::Ppm))
 }
 
 pub(crate) fn axis_label(nucleus: &str) -> String {
@@ -559,6 +583,7 @@ mod tests {
         let f1_ppm = vec![0.0, 1.0, 2.0, 3.0];
         let (f2_size, f1_size) = (f2_ppm.len(), f1_ppm.len());
         Spectrum2D {
+            magnitude_plane: None,
             f2_domain: plotx_io::Domain::Frequency,
             f1_domain: plotx_io::Domain::Frequency,
             data: vec![Complex64::new(1.0, 0.0); f1_size * f2_size],
@@ -568,11 +593,13 @@ mod tests {
             f1_size,
             direct: AxisMeta {
                 nucleus: "1H".to_owned(),
-                observe_freq_mhz: 400.0,
+                observe_freq_mhz: Some(400.0),
+                unit: Some(nmr::axis::AxisUnit::Ppm),
             },
             indirect: AxisMeta {
                 nucleus: "13C".to_owned(),
-                observe_freq_mhz: 100.0,
+                observe_freq_mhz: Some(100.0),
+                unit: Some(nmr::axis::AxisUnit::Ppm),
             },
             source: "test".to_owned(),
         }

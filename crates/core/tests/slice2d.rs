@@ -17,7 +17,7 @@ use plotx_core::state::{
     CanvasDocument, Dataset, Nmr2DDataset, ObjectFrame, ObjectId, PlotxApp, SeriesBinding,
 };
 use plotx_io::{Dim, Domain, NmrData2D, QuadMode};
-use plotx_processing::{Layout2D, Params2D, Preset2D, Processed2D, process_2d, recommend_preset};
+use plotx_processing::{Layout2D, Params2D, Preset2D, Processed2D, recommend_preset};
 use std::f64::consts::TAU;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -32,7 +32,7 @@ fn dim(sw: f64, obs: f64, nucleus: &str) -> Dim {
     }
 }
 
-/// A phase-modulated 2D FID with a single cross peak at `(f2_ppm, f1_ppm)`.
+/// A Cartesian (States) 2D FID with a single cross peak at `(f2_ppm, f1_ppm)`.
 fn synthetic_hsqc(f2_ppm: f64, f1_ppm: f64, experiment: &str) -> NmrData2D {
     let (cols, rows) = (256usize, 128usize);
     let direct = dim(4000.0, 400.0, "1H");
@@ -41,26 +41,31 @@ fn synthetic_hsqc(f2_ppm: f64, f1_ppm: f64, experiment: &str) -> NmrData2D {
     let dt1 = 1.0 / indirect.spectral_width_hz;
     let f2_hz = f2_ppm * direct.observe_freq_mhz;
     let f1_hz = f1_ppm * indirect.observe_freq_mhz;
-    let mut data = Vec::with_capacity(rows * cols);
+    let mut data = Vec::with_capacity(2 * rows * cols);
     for k in 0..rows {
         let t1 = k as f64 * dt1;
-        for j in 0..cols {
-            let t2 = j as f64 * dt2;
-            let decay = (-t2 / 0.3 - t1 / 0.3).exp();
-            data.push(Complex64::from_polar(
-                decay,
-                TAU * (f2_hz * t2 + f1_hz * t1),
-            ));
+        for component in 0..2 {
+            let indirect = if component == 0 {
+                (TAU * f1_hz * t1).cos()
+            } else {
+                (TAU * f1_hz * t1).sin()
+            };
+            for j in 0..cols {
+                let t2 = j as f64 * dt2;
+                let decay = (-t2 / 0.3 - t1 / 0.3).exp();
+                data.push(Complex64::from_polar(decay, TAU * f2_hz * t2) * indirect);
+            }
         }
     }
+
     NmrData2D {
         data,
-        rows,
+        rows: 2 * rows,
         cols,
         domain: Domain::Time,
         direct,
         indirect,
-        quad: QuadMode::Complex,
+        quad: QuadMode::States,
         indirect_conjugate: false,
         experiment: Some(experiment.to_owned()),
         pseudo_axis: None,
@@ -74,7 +79,7 @@ fn synthetic_hsqc(f2_ppm: f64, f1_ppm: f64, experiment: &str) -> NmrData2D {
 fn contour_slice_places_peak_and_exports_svg() {
     // Shifts stay inside the ±SW/2 Nyquist range (F1: 10 ppm × 100 MHz = 1 kHz).
     let data = synthetic_hsqc(3.0, 10.0, "hsqcetgpsisp");
-    let preset = recommend_preset(&data);
+    let preset = recommend_preset(&data.clone().try_into().unwrap());
     assert_eq!(preset, Preset2D::Hsqc);
     assert_eq!(preset.layout(), Layout2D::Ft);
 
@@ -108,7 +113,7 @@ fn contour_slice_places_peak_and_exports_svg() {
     let mut app = PlotxApp::new();
     app.doc
         .datasets
-        .push(Dataset::Nmr2D(Box::new(Nmr2DDataset::load(data))));
+        .push(Dataset::Nmr2D(Box::new(Nmr2DDataset::load(data).unwrap())));
     let mut canvas = CanvasDocument::new("contour".to_owned(), [120.0, 80.0]);
     let [width, height] = canvas.size_pt();
     let object = app.build_plot_object(
@@ -167,11 +172,9 @@ fn settle(app: &mut PlotxApp) {
 /// a genuine noise estimate rather than a hand-written grid.
 fn contour_page() -> (PlotxApp, ObjectId) {
     let mut app = PlotxApp::new();
-    app.doc
-        .datasets
-        .push(Dataset::Nmr2D(Box::new(Nmr2DDataset::load(
-            synthetic_hsqc(3.0, 10.0, "hsqcetgpsisp"),
-        ))));
+    app.doc.datasets.push(Dataset::Nmr2D(Box::new(
+        Nmr2DDataset::load(synthetic_hsqc(3.0, 10.0, "hsqcetgpsisp")).unwrap(),
+    )));
     let mut canvas = CanvasDocument::new("contour".to_owned(), [120.0, 80.0]);
     let [width, height] = canvas.size_pt();
     let id = canvas.allocate_object_id();
@@ -639,7 +642,10 @@ fn stack_slice_exports_waterfall() {
     let mut data = synthetic_hsqc(3.0, 40.0, "ledbpgp2s");
     // A DOSY-style hint should recommend the stacked (pseudo-2D) layout.
     data.experiment = Some("ledbpgp2s".into());
-    assert_eq!(recommend_preset(&data).layout(), Layout2D::Stack);
+    assert_eq!(
+        recommend_preset(&data.clone().try_into().unwrap()).layout(),
+        Layout2D::Stack
+    );
 
     let stack = match process_2d(
         &data,
@@ -651,10 +657,25 @@ fn stack_slice_exports_waterfall() {
         Processed2D::Stack(s) => s,
         Processed2D::Ft(_) => panic!("expected Stack"),
     };
-    assert_eq!(stack.increments(), data.rows);
+    // States stores two component rows for each logical increment.
+    assert_eq!(stack.increments(), data.rows / 2);
 
     let fig = build_stack_figure(&stack);
     assert!(!fig.series.is_empty());
     let svg = plotx_render::svg::export(&fig);
     assert!(svg.contains("<polyline"), "stack traces present");
+}
+
+fn process_2d(data: &NmrData2D, params: &Params2D) -> Processed2D {
+    let source = plotx_io::nmr_series::NmrSeriesSource::try_from(data.clone()).unwrap();
+    plotx_processing::nmr_execution::execute_2d(
+        source.source_dataset(),
+        params,
+        plotx_processing::nmr_bridge::DelayPolicy::AxisEvidence,
+        plotx_processing::nmr_bridge::RecipeRange::Base,
+        None,
+        &mut nmr::ExecutionContext::default(),
+    )
+    .unwrap()
+    .view
 }

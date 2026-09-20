@@ -78,8 +78,10 @@ impl PropertyProvider for StepEnabledProvider {
             EditOp::Step(_) => return Err(no_step_gesture(definition)),
         };
         let input_domain = match context.dataset {
-            crate::state::Dataset::Nmr(dataset) => dataset.data.domain,
-            crate::state::Dataset::Nmr2D(dataset) => dataset.data.domain,
+            crate::state::Dataset::Nmr(dataset) => dataset.input_domain(),
+            crate::state::Dataset::Nmr2D(dataset) => dataset
+                .input_domain(context.axis)
+                .map_err(PropertyError::NotApplicable)?,
             crate::state::Dataset::Table(_)
             | crate::state::Dataset::Electrophysiology(_)
             | crate::state::Dataset::Afm(_)

@@ -51,6 +51,7 @@ fn execute_inner(
         }
         CommandId::OpenFile => super::file_dialogs::open_file(app),
         CommandId::OpenFolder => super::file_dialogs::open_folder(app),
+        CommandId::ImportNmrSampling => super::file_dialogs::nmr_sampling::open(app),
         CommandId::RunBatchWorkflow => super::batch_workflow::AutomationUi::request_open(ctx),
         CommandId::RunScientificScript => {
             super::batch_workflow::AutomationUi::request_run_script(ctx)

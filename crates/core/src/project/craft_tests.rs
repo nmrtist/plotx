@@ -15,10 +15,10 @@ use plotx_processing::craft::{
 fn sample_run(data: &NmrData) -> StoredCraftRun {
     StoredCraftRun::from_result(
         CraftRunId(4),
-        data,
+        &data.clone().try_into().unwrap(),
         resolve_craft_invocation(
             data,
-            CraftReference::new(data.carrier_ppm, 0.25),
+            CraftReference::new(data.carrier_ppm, data.observe_freq_mhz, 0.25),
             &CraftParamOverrides::from_params(CraftParams::conventional()),
             None,
         ),
@@ -143,7 +143,7 @@ fn sample_run(data: &NmrData) -> StoredCraftRun {
 #[test]
 fn craft_runs_survive_project_roundtrip_and_reseed_ids() {
     let data = synthetic_1d();
-    let mut dataset = NmrDataset::load(data.clone());
+    let mut dataset = NmrDataset::load(data.clone()).unwrap();
     dataset.craft_runs.push(sample_run(&data));
     dataset.reconcile_craft_fields();
     dataset.next_craft_run_id = 5;
@@ -166,7 +166,7 @@ fn craft_runs_survive_project_roundtrip_and_reseed_ids() {
 #[test]
 fn recipe_without_craft_runs_is_rejected() {
     let data = synthetic_1d();
-    let mut dataset = NmrDataset::load(data.clone());
+    let mut dataset = NmrDataset::load(data.clone()).unwrap();
     dataset.craft_runs.push(sample_run(&data));
     dataset.next_craft_run_id = 5;
     let recipe = RecipeObject {
@@ -210,7 +210,7 @@ fn unavailable_craft_diagnostics_survive_project_roundtrip() {
     run.components[0].phase_std_rad = None;
     run.diagnostics.maximum_condition_number = None;
     run.diagnostics.modeling_windows[0].training_bic = None;
-    let mut dataset = NmrDataset::load(data);
+    let mut dataset = NmrDataset::load(data).unwrap();
     dataset.craft_runs.push(run.clone());
     dataset.reconcile_craft_fields();
     let mut app = crate::state::PlotxApp::new();
@@ -250,9 +250,9 @@ fn only_stable_complete_runs_create_quantitative_reports() {
 #[test]
 fn report_status_tracks_stability_and_source_availability() {
     let data = synthetic_1d();
-    let mut dataset = NmrDataset::load(data.clone());
+    let mut dataset = NmrDataset::load(data.clone()).unwrap();
     let mut run = sample_run(&data);
-    run.provenance.invocation.reference = dataset.craft_reference();
+    run.provenance.invocation.reference = dataset.craft_reference().unwrap();
     let definition = CraftReportDefinition::default();
     let snapshot = run.amplitude_report(definition.clone()).unwrap();
     let source = ReportSource {
@@ -269,7 +269,7 @@ fn report_status_tracks_stability_and_source_availability() {
         source,
         definition: serde_json::to_value(definition).unwrap(),
         snapshot: serde_json::to_value(snapshot).unwrap(),
-        source_fingerprint: crate::state::craft_input_sha256(&data),
+        source_fingerprint: crate::state::craft_input_sha256(&data.clone().try_into().unwrap()),
         schema_version: 1,
     });
 
@@ -303,7 +303,7 @@ fn stability_snapshot_survives_project_roundtrip() {
         maximum: 0.502,
         relative_dispersion: 0.008,
     });
-    let mut dataset = NmrDataset::load(data);
+    let mut dataset = NmrDataset::load(data).unwrap();
     dataset.craft_runs.push(run.clone());
     dataset.reconcile_craft_fields();
     let mut app = crate::state::PlotxApp::new();
@@ -326,7 +326,7 @@ fn stability_snapshot_survives_project_roundtrip() {
 #[test]
 fn craft_component_table_link_and_board_visibility_survive_roundtrip() {
     let data = synthetic_1d();
-    let mut dataset = NmrDataset::load(data.clone());
+    let mut dataset = NmrDataset::load(data.clone()).unwrap();
     dataset.craft_runs.push(sample_run(&data));
     dataset.reconcile_craft_fields();
     let mut app = crate::state::PlotxApp::new();
@@ -357,7 +357,7 @@ fn craft_component_table_link_and_board_visibility_survive_roundtrip() {
 #[test]
 fn craft_result_canvas_round_trips_binding_fields_and_linked_x_axis() {
     let data = synthetic_1d();
-    let mut dataset = NmrDataset::load(data.clone());
+    let mut dataset = NmrDataset::load(data.clone()).unwrap();
     let dataset_id = dataset.resource_id;
     dataset.store_craft_run(sample_run(&data));
     let mut app = crate::state::PlotxApp::new();
@@ -471,7 +471,7 @@ fn craft_group_field_uses_requested_reconstruction_duration() {
         run.provenance.invocation.derived_plan.reconstruction_points,
         requested_points
     );
-    let mut dataset = NmrDataset::load(data);
+    let mut dataset = NmrDataset::load(data).unwrap();
     dataset.store_craft_run(run);
     let dataset = Dataset::Nmr(Box::new(dataset));
     let group_field = dataset

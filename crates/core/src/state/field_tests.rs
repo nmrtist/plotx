@@ -1,6 +1,6 @@
 use super::*;
 use crate::state::{
-    AfmDataset, Dataset, ElectrophysiologyDataset, Nmr2DDataset, ToolGroup, default_contour_spec,
+    AfmDataset, Dataset, ElectrophysiologyDataset, ToolGroup, default_contour_spec,
     default_encoding,
 };
 use plotx_figure::HeatmapSpec;
@@ -118,8 +118,8 @@ fn afm_dataset(scan_size_x: f64, raw: Vec<i32>, forces: bool) -> Dataset {
 
 #[test]
 fn cheap_representation_matches_the_materialized_payload() {
-    let nmr_1d = Dataset::Nmr(Box::new(crate::state::NmrDataset::load(
-        plotx_io::NmrData {
+    let nmr_1d = Dataset::Nmr(Box::new(
+        crate::nmr_test_support::load_1d(plotx_io::NmrData {
             points: vec![num_complex::Complex64::new(1.0, 0.0); 8],
             domain: plotx_io::Domain::Frequency,
             spectral_width_hz: 4_000.0,
@@ -128,14 +128,19 @@ fn cheap_representation_matches_the_materialized_payload() {
             nucleus: "1H".to_owned(),
             source: "representation test".to_owned(),
             group_delay: 0.0,
-        },
-    )));
+        })
+        .unwrap(),
+    ));
     assert_representation_matches_payload(&nmr_1d, "nmr 1d");
 
-    let nmr_2d = Dataset::Nmr2D(Box::new(Nmr2DDataset::load(nmr2d_data("true 2d", None))));
+    let nmr_2d = Dataset::Nmr2D(Box::new(
+        crate::nmr_test_support::load_2d(nmr2d_data("true 2d", None)).unwrap(),
+    ));
     assert_representation_matches_payload(&nmr_2d, "nmr 2d");
 
-    let mut irregular = Dataset::Nmr2D(Box::new(Nmr2DDataset::load(nmr2d_data("explicit", None))));
+    let mut irregular = Dataset::Nmr2D(Box::new(
+        crate::nmr_test_support::load_2d(nmr2d_data("explicit", None)).unwrap(),
+    ));
     let Dataset::Nmr2D(nmr) = &mut irregular else {
         panic!("fixture is NMR 2D");
     };
@@ -145,16 +150,19 @@ fn cheap_representation_matches_the_materialized_payload() {
     Arc::make_mut(spectrum).f1_ppm[2] += 0.25;
     assert_representation_matches_payload(&irregular, "nmr 2d, explicitly sampled");
 
-    let pseudo = Dataset::Nmr2D(Box::new(Nmr2DDataset::load(nmr2d_data(
-        "pseudo 2d",
-        Some(plotx_io::PseudoAxis {
-            name: "delay".to_owned(),
-            kind: plotx_io::PseudoKind::Delay,
-            values: vec![0.1, 0.2, 0.3, 0.4],
-            unit: "s".to_owned(),
-            source: plotx_io::AxisSource::EmbeddedList,
-        }),
-    ))));
+    let pseudo = Dataset::Nmr2D(Box::new(
+        crate::nmr_test_support::load_2d(nmr2d_data(
+            "pseudo 2d",
+            Some(plotx_io::PseudoAxis {
+                name: "delay".to_owned(),
+                kind: plotx_io::PseudoKind::Delay,
+                values: vec![0.1, 0.2, 0.3, 0.4],
+                unit: "s".to_owned(),
+                source: plotx_io::AxisSource::EmbeddedList,
+            }),
+        ))
+        .unwrap(),
+    ));
     assert!(
         !matches!(&pseudo, Dataset::Nmr2D(nmr) if nmr.is_true_2d()),
         "the pseudo-2D fixture must exercise the stack branch"
@@ -587,26 +595,29 @@ fn magnitude_field_renders_magnitude_instead_of_falling_back_to_real() {
         nucleus: nucleus.to_owned(),
         group_delay: 0.0,
     };
-    let dataset = Dataset::Nmr2D(Box::new(Nmr2DDataset::load(plotx_io::NmrData2D {
-        data: vec![
-            num_complex::Complex64::new(-3.0, 4.0),
-            num_complex::Complex64::new(5.0, 12.0),
-            num_complex::Complex64::new(8.0, 15.0),
-            num_complex::Complex64::new(-7.0, 24.0),
-        ],
-        rows: 2,
-        cols: 2,
-        domain: plotx_io::Domain::Frequency,
-        direct: dimension("1H"),
-        indirect: dimension("13C"),
-        quad: plotx_io::QuadMode::Complex,
-        indirect_conjugate: false,
-        experiment: None,
-        pseudo_axis: None,
-        diffusion: None,
-        nus: None,
-        source: "magnitude test".to_owned(),
-    })));
+    let dataset = Dataset::Nmr2D(Box::new(
+        crate::nmr_test_support::load_2d(plotx_io::NmrData2D {
+            data: vec![
+                num_complex::Complex64::new(-3.0, 4.0),
+                num_complex::Complex64::new(5.0, 12.0),
+                num_complex::Complex64::new(8.0, 15.0),
+                num_complex::Complex64::new(-7.0, 24.0),
+            ],
+            rows: 2,
+            cols: 2,
+            domain: plotx_io::Domain::Frequency,
+            direct: dimension("1H"),
+            indirect: dimension("13C"),
+            quad: plotx_io::QuadMode::Complex,
+            indirect_conjugate: false,
+            experiment: None,
+            pseudo_axis: None,
+            diffusion: None,
+            nus: None,
+            source: "magnitude test".to_owned(),
+        })
+        .unwrap(),
+    ));
     let magnitude = dataset
         .field_descriptors()
         .into_iter()
@@ -632,21 +643,24 @@ fn default_nmr_contour_never_builds_geometry_inline() {
         nucleus: nucleus.to_owned(),
         group_delay: 0.0,
     };
-    let dataset = Dataset::Nmr2D(Box::new(Nmr2DDataset::load(plotx_io::NmrData2D {
-        data: vec![num_complex::Complex64::new(1.0, 0.0); 16],
-        rows: 4,
-        cols: 4,
-        domain: plotx_io::Domain::Frequency,
-        direct: dimension("1H"),
-        indirect: dimension("13C"),
-        quad: plotx_io::QuadMode::Complex,
-        indirect_conjugate: false,
-        experiment: None,
-        pseudo_axis: None,
-        diffusion: None,
-        nus: None,
-        source: "cache test".to_owned(),
-    })));
+    let dataset = Dataset::Nmr2D(Box::new(
+        crate::nmr_test_support::load_2d(plotx_io::NmrData2D {
+            data: vec![num_complex::Complex64::new(1.0, 0.0); 16],
+            rows: 4,
+            cols: 4,
+            domain: plotx_io::Domain::Frequency,
+            direct: dimension("1H"),
+            indirect: dimension("13C"),
+            quad: plotx_io::QuadMode::Complex,
+            indirect_conjugate: false,
+            experiment: None,
+            pseudo_axis: None,
+            diffusion: None,
+            nus: None,
+            source: "cache test".to_owned(),
+        })
+        .unwrap(),
+    ));
     let real = dataset
         .field_descriptors()
         .into_iter()

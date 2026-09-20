@@ -240,19 +240,7 @@ pub fn write_dataset_blob(
 ) -> Result<()> {
     zip.start_file(path, options)?;
     match blob {
-        DatasetBlob::Complex(values) => {
-            const VALUES_PER_CHUNK: usize = 4096;
-            let mut buffer = Vec::with_capacity(VALUES_PER_CHUNK * 16);
-            for chunk in values.chunks(VALUES_PER_CHUNK) {
-                buffer.clear();
-                for value in chunk {
-                    buffer.extend_from_slice(&value.re.to_le_bytes());
-                    buffer.extend_from_slice(&value.im.to_le_bytes());
-                }
-                zip.write_all(&buffer)?;
-            }
-            Ok(())
-        }
+        DatasetBlob::Nmr(source) => super::nmr_snapshot::write(zip, source),
         DatasetBlob::Electrophysiology(recording) => {
             super::electrophysiology_convert::write_electrophysiology_blob(zip, recording)
         }
@@ -318,105 +306,6 @@ pub fn validate_manifest(manifest: &Manifest) -> Result<()> {
     Ok(())
 }
 
-pub fn complex_to_bytes(values: &[Complex64]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(values.len() * 16);
-    for c in values {
-        out.extend_from_slice(&c.re.to_le_bytes());
-        out.extend_from_slice(&c.im.to_le_bytes());
-    }
-    out
-}
-
-pub fn complex_from_bytes(raw: &[u8]) -> Result<Vec<Complex64>> {
-    if !raw.len().is_multiple_of(16) {
-        return Err(ProjectError::Invalid(format!(
-            "complex blob length {} is not divisible by 16",
-            raw.len()
-        )));
-    }
-    Ok(raw
-        .as_chunks::<16>()
-        .0
-        .iter()
-        .map(|chunk| {
-            let mut re = [0u8; 8];
-            let mut im = [0u8; 8];
-            re.copy_from_slice(&chunk[..8]);
-            im.copy_from_slice(&chunk[8..]);
-            Complex64::new(f64::from_le_bytes(re), f64::from_le_bytes(im))
-        })
-        .collect())
-}
-
-pub fn complex_from_reader<R: Read>(reader: &mut EntryReader<'_, R>) -> Result<Vec<Complex64>> {
-    if !reader.remaining().is_multiple_of(16) {
-        return Err(reader.invalid(format!(
-            "complex blob length {} is not divisible by 16",
-            reader.remaining()
-        )));
-    }
-    let count = usize::try_from(reader.remaining() / 16)
-        .map_err(|_| reader.invalid("complex element count exceeds usize"))?;
-    let mut values = Vec::new();
-    values
-        .try_reserve_exact(count)
-        .map_err(|_| reader.invalid("could not reserve complex data"))?;
-    let mut bytes = [0_u8; 16];
-    for _ in 0..count {
-        reader
-            .read_exact(&mut bytes)
-            .map_err(|error| reader.invalid(format!("complex blob is truncated: {error}")))?;
-        let re = f64::from_le_bytes(bytes[..8].try_into().expect("fixed eight-byte half"));
-        let im = f64::from_le_bytes(bytes[8..].try_into().expect("fixed eight-byte half"));
-        values.push(Complex64::new(re, im));
-    }
-    Ok(values)
-}
-
-pub fn required(value: Option<f64>, name: &str) -> Result<f64> {
-    value.ok_or_else(|| ProjectError::Invalid(format!("missing dimension field {name}")))
-}
-
-pub fn nmr_source(data: &DataObject) -> String {
-    nmr_ext_str(data, "source")
-        .map(str::to_owned)
-        .unwrap_or_else(|| data.id.clone())
-}
-
-pub fn read_nmr_origin(data: &DataObject) -> Result<plotx_io::NmrOrigin> {
-    let value = data
-        .extensions
-        .get("plotx.nmr")
-        .and_then(|value| value.get("origin"))
-        .cloned()
-        .ok_or_else(|| {
-            ProjectError::Invalid(format!(
-                "NMR dataset {} is missing required plotx.nmr.origin",
-                data.id
-            ))
-        })?;
-    serde_json::from_value(value).map_err(|error| {
-        ProjectError::Invalid(format!(
-            "NMR dataset {} has invalid plotx.nmr.origin: {error}",
-            data.id
-        ))
-    })
-}
-
-pub fn nmr_ext_str<'a>(data: &'a DataObject, key: &str) -> Option<&'a str> {
-    data.extensions
-        .get("plotx.nmr")
-        .and_then(|v| v.get(key))
-        .and_then(|v| v.as_str())
-}
-
-pub fn nmr_ext_bool(data: &DataObject, key: &str) -> Option<bool> {
-    data.extensions
-        .get("plotx.nmr")
-        .and_then(|v| v.get(key))
-        .and_then(|v| v.as_bool())
-}
-
 pub fn temporary_path(path: &Path) -> PathBuf {
     let mut tmp = path.to_owned();
     let name = path
@@ -426,20 +315,6 @@ pub fn temporary_path(path: &Path) -> PathBuf {
         .unwrap_or_else(|| "project.plotx.tmp".to_owned());
     tmp.set_file_name(name);
     tmp
-}
-
-pub fn domain_to_str(v: Domain) -> &'static str {
-    match v {
-        Domain::Time => "time",
-        Domain::Frequency => "frequency",
-    }
-}
-
-pub fn domain_from_str(v: &str) -> Domain {
-    match v {
-        "frequency" => Domain::Frequency,
-        _ => Domain::Time,
-    }
 }
 
 pub fn layout_to_str(v: Layout2D) -> &'static str {
@@ -480,112 +355,6 @@ pub fn preset_from_str(v: &str) -> Preset2D {
         "relaxation" => Preset2D::Relaxation,
         _ => Preset2D::Generic,
     }
-}
-
-pub fn quad_to_str(v: QuadMode) -> &'static str {
-    match v {
-        QuadMode::Complex => "complex",
-        QuadMode::States => "states",
-        QuadMode::StatesTppi => "states_tppi",
-        QuadMode::EchoAntiecho => "echo_antiecho",
-    }
-}
-
-pub fn quad_from_str(v: &str) -> QuadMode {
-    match v {
-        "states" => QuadMode::States,
-        "states_tppi" => QuadMode::StatesTppi,
-        "echo_antiecho" => QuadMode::EchoAntiecho,
-        _ => QuadMode::Complex,
-    }
-}
-
-pub fn pseudo_kind_to_str(v: PseudoKind) -> &'static str {
-    match v {
-        PseudoKind::Gradient => "gradient",
-        PseudoKind::Delay => "delay",
-        PseudoKind::Generic => "generic",
-    }
-}
-
-pub fn pseudo_kind_from_str(v: &str) -> PseudoKind {
-    match v {
-        "gradient" => PseudoKind::Gradient,
-        "delay" => PseudoKind::Delay,
-        _ => PseudoKind::Generic,
-    }
-}
-
-pub fn axis_source_to_str(v: AxisSource) -> &'static str {
-    match v {
-        AxisSource::EmbeddedList => "embedded_list",
-        AxisSource::EmbeddedRamp => "embedded_ramp",
-        AxisSource::LinearHeader => "linear_header",
-        AxisSource::Manual => "manual",
-    }
-}
-
-pub fn axis_source_from_str(v: &str) -> AxisSource {
-    match v {
-        "embedded_list" => AxisSource::EmbeddedList,
-        "embedded_ramp" => AxisSource::EmbeddedRamp,
-        "manual" => AxisSource::Manual,
-        _ => AxisSource::LinearHeader,
-    }
-}
-
-pub fn pseudo_axis_to_dto(axis: &PseudoAxis) -> PseudoAxisDto {
-    PseudoAxisDto {
-        name: axis.name.clone(),
-        kind: pseudo_kind_to_str(axis.kind).to_owned(),
-        values: axis.values.clone(),
-        unit: axis.unit.clone(),
-        source: axis_source_to_str(axis.source).to_owned(),
-    }
-}
-
-pub fn pseudo_axis_from_dto(dto: PseudoAxisDto) -> PseudoAxis {
-    PseudoAxis {
-        name: dto.name,
-        kind: pseudo_kind_from_str(&dto.kind),
-        values: dto.values,
-        unit: dto.unit,
-        source: axis_source_from_str(&dto.source),
-    }
-}
-
-pub fn diffusion_to_dto(meta: &DiffusionMeta) -> DiffusionMetaDto {
-    DiffusionMetaDto {
-        gamma: meta.gamma,
-        delta: meta.delta,
-        big_delta: meta.big_delta,
-        tau: meta.tau,
-        shape_factor: meta.shape_factor,
-    }
-}
-
-pub fn diffusion_from_dto(dto: DiffusionMetaDto) -> DiffusionMeta {
-    DiffusionMeta {
-        gamma: dto.gamma,
-        delta: dto.delta,
-        big_delta: dto.big_delta,
-        tau: dto.tau,
-        shape_factor: dto.shape_factor,
-    }
-}
-
-pub fn read_pseudo_axis(data: &DataObject) -> Option<PseudoAxis> {
-    let value = data.extensions.get("plotx.nmr")?.get("pseudo_axis")?;
-    serde_json::from_value::<PseudoAxisDto>(value.clone())
-        .ok()
-        .map(pseudo_axis_from_dto)
-}
-
-pub fn read_diffusion(data: &DataObject) -> Option<DiffusionMeta> {
-    let value = data.extensions.get("plotx.nmr")?.get("diffusion")?;
-    serde_json::from_value::<DiffusionMetaDto>(value.clone())
-        .ok()
-        .map(diffusion_from_dto)
 }
 
 pub fn primary_view_to_str(v: PrimaryView) -> &'static str {

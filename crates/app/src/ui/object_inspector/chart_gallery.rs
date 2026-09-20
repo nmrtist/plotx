@@ -193,21 +193,34 @@ mod tests {
             nucleus: nucleus.to_owned(),
             group_delay: 0.0,
         };
-        let nmr = Dataset::Nmr2D(Box::new(Nmr2DDataset::load(plotx_io::NmrData2D {
-            data: vec![num_complex::Complex64::new(1.0, 0.0); 4],
-            rows: 2,
-            cols: 2,
-            domain: plotx_io::Domain::Frequency,
-            direct: dimension("1H"),
-            indirect: dimension("13C"),
-            quad: plotx_io::QuadMode::Complex,
-            indirect_conjugate: false,
-            experiment: None,
-            pseudo_axis: None,
-            diffusion: None,
-            nus: None,
-            source: "gallery NMR".to_owned(),
-        })));
+        let nmr = Dataset::Nmr2D(Box::new(
+            Nmr2DDataset::load_with_pipeline(
+                plotx_io::NmrData2D {
+                    data: vec![num_complex::Complex64::new(1.0, 0.0); 4],
+                    rows: 2,
+                    cols: 2,
+                    domain: plotx_io::Domain::Frequency,
+                    direct: dimension("1H"),
+                    indirect: dimension("13C"),
+                    quad: plotx_io::QuadMode::Complex,
+                    indirect_conjugate: false,
+                    experiment: None,
+                    pseudo_axis: None,
+                    diffusion: None,
+                    nus: None,
+                    source: "gallery NMR".to_owned(),
+                },
+                Some(plotx_processing::Params2D {
+                    layout: plotx_processing::Layout2D::Ft,
+                    f2: plotx_processing::AxisPipeline { steps: Vec::new() },
+                    f1: plotx_processing::AxisPipeline { steps: Vec::new() },
+                }),
+                Some(false),
+                None,
+                true,
+            )
+            .unwrap(),
+        ));
         let nmr_plane = nmr
             .field_descriptors()
             .into_iter()

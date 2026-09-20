@@ -260,8 +260,9 @@ mod tests {
                 .into_iter()
                 .map(|v| Complex64::new(v, 0.0))
                 .collect(),
-            hz_per_point: 1.0,
-            observe_freq_mhz: 400.0,
+            unit: nmr::axis::AxisUnit::Ppm,
+            hz_per_point: Some(1.0),
+            observe_freq_mhz: Some(400.0),
             nucleus: "1H".to_owned(),
         }
     }
@@ -274,3 +275,6 @@ mod tests {
         assert!((integral.area - 9.0).abs() < 1e-9);
     }
 }
+
+#[cfg(test)]
+mod nmr_test_support;

@@ -4,7 +4,7 @@ use crate::state::{Peak2DOrigin, Peak2DPoint, Peak2DReview};
 #[test]
 fn project_roundtrip_preserves_cross_peak_pairs_and_review_state() {
     let mut app = PlotxApp::new();
-    let mut dataset = Nmr2DDataset::load(super::tests::synthetic_true_2d());
+    let mut dataset = crate::nmr_test_support::load_2d(super::tests::synthetic_true_2d()).unwrap();
     let ids = dataset
         .peaks
         .add_pair(

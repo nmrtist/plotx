@@ -387,7 +387,9 @@ fn stacked_shift_bounds_union_each_provider_range() {
 
 #[test]
 fn pseudo_increment_uses_the_same_plot_owned_plan() {
-    let dataset = Dataset::Nmr2D(Box::new(Nmr2DDataset::load(pseudo_data())));
+    let dataset = Dataset::Nmr2D(Box::new(
+        crate::nmr_test_support::load_2d(pseudo_data()).unwrap(),
+    ));
     let field = dataset.field_catalog().id_for_key("nmr.stack").unwrap();
     let mut app = PlotxApp::new();
     app.doc.datasets.push(dataset);
@@ -507,7 +509,9 @@ fn selected_channel_projection_preserves_other_channel_bindings() {
 #[test]
 fn automatic_alignment_skips_incompatible_x_units() {
     let (mut app, canvas, object, ids) = alignment_recording_app();
-    let pseudo = Dataset::Nmr2D(Box::new(Nmr2DDataset::load(pseudo_data())));
+    let pseudo = Dataset::Nmr2D(Box::new(
+        crate::nmr_test_support::load_2d(pseudo_data()).unwrap(),
+    ));
     let field = pseudo.field_catalog().id_for_key("nmr.stack").unwrap();
     let mut extra = SeriesBinding::from_field_all(&pseudo, field)[0].clone();
     extra.id = SeriesId::new(99);
@@ -544,7 +548,9 @@ fn provider_line_x_units_describe_plotted_x_axes() {
             Some("s")
         );
     }
-    let pseudo = Dataset::Nmr2D(Box::new(Nmr2DDataset::load(pseudo_data())));
+    let pseudo = Dataset::Nmr2D(Box::new(
+        crate::nmr_test_support::load_2d(pseudo_data()).unwrap(),
+    ));
     let field = pseudo.field_catalog().id_for_key("nmr.stack").unwrap();
     assert_eq!(
         pseudo.field_descriptor(field).unwrap().line_x_unit(),
@@ -553,16 +559,19 @@ fn provider_line_x_units_describe_plotted_x_axes() {
 }
 
 fn scalar_nmr(source: &str, carrier_ppm: f64) -> Dataset {
-    Dataset::Nmr(Box::new(NmrDataset::load(plotx_io::NmrData {
-        points: vec![num_complex::Complex64::new(1.0, 0.0); 8],
-        domain: plotx_io::Domain::Frequency,
-        spectral_width_hz: 4_000.0,
-        observe_freq_mhz: 400.0,
-        carrier_ppm,
-        nucleus: "1H".to_owned(),
-        source: source.to_owned(),
-        group_delay: 0.0,
-    })))
+    Dataset::Nmr(Box::new(
+        crate::nmr_test_support::load_1d(plotx_io::NmrData {
+            points: vec![num_complex::Complex64::new(1.0, 0.0); 8],
+            domain: plotx_io::Domain::Frequency,
+            spectral_width_hz: 4_000.0,
+            observe_freq_mhz: 400.0,
+            carrier_ppm,
+            nucleus: "1H".to_owned(),
+            source: source.to_owned(),
+            group_delay: 0.0,
+        })
+        .unwrap(),
+    ))
 }
 
 #[test]
@@ -613,7 +622,8 @@ fn ordinary_scalar_line_stack_uses_the_same_alignment_planner() {
                 .as_nmr()
                 .unwrap()
                 .data
-                .points
+                .trace()
+                .unwrap()
                 .iter()
                 .map(|point| (point.re.to_bits(), point.im.to_bits()))
                 .collect::<Vec<_>>()
@@ -668,7 +678,8 @@ fn ordinary_scalar_line_stack_uses_the_same_alignment_planner() {
                     .as_nmr()
                     .unwrap()
                     .data
-                    .points
+                    .trace()
+                    .unwrap()
                     .iter()
                     .map(|point| (point.re.to_bits(), point.im.to_bits()))
                     .collect::<Vec<_>>()

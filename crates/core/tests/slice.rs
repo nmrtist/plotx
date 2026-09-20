@@ -4,7 +4,7 @@ use num_complex::Complex64;
 use plotx_analysis::peaks::{DetectParams, detect_peaks, estimate_noise};
 use plotx_core::build_figure;
 use plotx_io::{Domain, NmrData};
-use plotx_processing::{AxisPipeline, process};
+use plotx_processing::AxisPipeline;
 use std::f64::consts::TAU;
 
 /// An ethanol-like ¹H FID (three singlets at 3:2:1), so the test needs no file.
@@ -44,7 +44,16 @@ fn full_slice_load_process_figure_export() {
     let data = ethanol_fid();
     assert_eq!(data.len(), 16_384);
 
-    let processed = process(&data, &AxisPipeline::default_1d(), true).unwrap();
+    let source = plotx_io::nmr_view::NmrSource::try_from(data.clone()).unwrap();
+    let processed = plotx_processing::nmr_execution::execute_1d(
+        &source,
+        &AxisPipeline::default_1d(),
+        plotx_processing::nmr_bridge::DelayPolicy::AxisEvidence,
+        plotx_processing::nmr_bridge::RecipeRange::All,
+        &mut nmr::ExecutionContext::default(),
+    )
+    .unwrap()
+    .view;
     let spec = processed.as_frequency().unwrap();
     assert_eq!(spec.len(), data.len());
 
@@ -65,7 +74,7 @@ fn full_slice_load_process_figure_export() {
     assert!(has(2.61), "missing OH peak; got {peaks:?}");
     assert!(has(3.70), "missing CH2 peak; got {peaks:?}");
 
-    let fig = build_figure(&data, spec, &[]);
+    let fig = build_figure(&data.try_into().unwrap(), spec, &[]);
     let svg = plotx_render::svg::export(&fig);
     assert!(svg.starts_with("<svg"));
     assert!(svg.contains("<polyline"));

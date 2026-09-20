@@ -78,9 +78,9 @@ fn stack_app() -> (PlotxApp, ObjectId) {
             source: source.to_owned(),
             group_delay: 0.0,
         };
-        app.doc
-            .datasets
-            .push(Dataset::Nmr(Box::new(crate::state::NmrDataset::load(data))));
+        app.doc.datasets.push(Dataset::Nmr(Box::new(
+            crate::state::NmrDataset::load(data).unwrap(),
+        )));
     }
     let mut canvas = CanvasDocument::new("stack".to_owned(), [120.0, 80.0]);
     let id = canvas.allocate_object_id();

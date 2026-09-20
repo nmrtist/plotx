@@ -15,14 +15,19 @@ use crate::automation::{
     CAP_FIELD_XPS_SPECTRUM, CapabilityId,
 };
 use plotx_figure::{ContourStyle, SeriesEncoding};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 #[path = "field_contour.rs"]
 mod field_contour;
 pub use field_contour::*;
 #[path = "field_mass_spec.rs"]
 mod field_mass_spec;
-
+#[path = "field_metadata.rs"]
+mod field_metadata;
+#[path = "field_nmr.rs"]
+mod field_nmr;
+use field_metadata::LINE_X_UNIT_METADATA_KEY;
+pub use field_metadata::{FieldCapabilities, FieldDescriptor, FieldMetadata};
 impl super::Dataset {
     /// Describes stable child fields and their encoding capabilities.
     pub fn field_descriptors(&self) -> Vec<FieldDescriptor> {
@@ -75,13 +80,17 @@ impl super::Dataset {
                             },
                             capabilities(id, &[CAP_FIELD_NMR_SIGNAL]),
                             vec![nmr.processed.values().len()],
-                            vec![match nmr.output_domain() {
-                                plotx_io::Domain::Time => "s".to_owned(),
-                                plotx_io::Domain::Frequency => "ppm".to_owned(),
-                            }],
+                            vec![
+                                plotx_processing::axis_unit_label(
+                                    nmr.native_processed.axes()[0].unit,
+                                )
+                                .to_owned(),
+                            ],
                             "line",
                         )
-                        .with_line_x_unit(domain_unit(nmr.output_domain()))
+                        .with_line_x_unit(
+                            plotx_processing::axis_unit_label(nmr.native_processed.axes()[0].unit),
+                        )
                     })
                     .collect::<Vec<_>>();
                 fields.extend(nmr.craft_field_specs().filter_map(|spec| {
@@ -115,8 +124,8 @@ impl super::Dataset {
                     plotx_processing::Processed2D::Ft(spectrum) => (
                         vec![spectrum.f1_size, spectrum.f2_size],
                         vec![
-                            domain_unit(spectrum.f1_domain),
-                            domain_unit(spectrum.f2_domain),
+                            spectrum.indirect.unit_label().to_owned(),
+                            spectrum.direct.unit_label().to_owned(),
                         ],
                     ),
                     plotx_processing::Processed2D::Stack(_) => unreachable!("true 2D is FT"),
@@ -161,12 +170,16 @@ impl super::Dataset {
                     unreachable!("pseudo 2D is stack")
                 };
                 let mut fields = Vec::new();
-                if let Some(id) = nmr.field_catalog.id_for_key("nmr.stack") {
+                if let Some(id) = nmr.field_catalog.id_for_key(nmr.stack_field_key()) {
                     fields.push(
                         descriptor(
                             id,
-                            "nmr.stack",
-                            "Stack",
+                            nmr.stack_field_key(),
+                            if nmr.stack_field_key() == "nmr.observations" {
+                                "Acquired NUS observations"
+                            } else {
+                                "Stack"
+                            },
                             capabilities(
                                 id,
                                 &[
@@ -175,11 +188,11 @@ impl super::Dataset {
                                     CAP_FIELD_REGION_SERIES,
                                 ],
                             ),
-                            vec![nmr.data.rows, nmr.data.cols],
-                            vec![String::new(), domain_unit(stack.direct_domain)],
+                            vec![stack.increments(), stack.ppm.len()],
+                            vec![String::new(), stack.direct.unit_label().to_owned()],
                             "line",
                         )
-                        .with_line_x_unit(domain_unit(stack.direct_domain)),
+                        .with_line_x_unit(stack.direct.unit_label().to_owned()),
                     );
                 }
                 if let Some(id) = nmr.field_catalog.id_for_key("nmr.dosy_map") {
@@ -193,7 +206,10 @@ impl super::Dataset {
                         "DOSY map",
                         capabilities(id, &[CAP_FIELD_BOUNDED, CAP_FIELD_SCALAR_GRID_2D_REGULAR]),
                         dimensions,
-                        vec!["log10(m2/s)".to_owned(), domain_unit(stack.direct_domain)],
+                        vec![
+                            "log10(m2/s)".to_owned(),
+                            stack.direct.unit_label().to_owned(),
+                        ],
                         "contour",
                     ));
                 }
@@ -208,7 +224,10 @@ impl super::Dataset {
                         "ILT map",
                         capabilities(id, &[CAP_FIELD_BOUNDED, CAP_FIELD_SCALAR_GRID_2D_REGULAR]),
                         dimensions,
-                        vec!["log10(m2/s)".to_owned(), domain_unit(stack.direct_domain)],
+                        vec![
+                            "log10(m2/s)".to_owned(),
+                            stack.direct.unit_label().to_owned(),
+                        ],
                         "contour",
                     ));
                 }
@@ -451,7 +470,6 @@ impl super::Dataset {
                 .collect(),
         }
     }
-
     pub fn default_field_id(&self) -> Option<FieldId> {
         if let Self::MassSpec(dataset) = self {
             return field_mass_spec::default_field_id(dataset);
@@ -460,25 +478,23 @@ impl super::Dataset {
             && !dataset.is_true_2d()
         {
             let key = match dataset.display {
-                super::PseudoDisplay::Stack => "nmr.stack",
+                super::PseudoDisplay::Stack => dataset.stack_field_key(),
                 super::PseudoDisplay::DosyMap => match dataset.dosy_method {
                     super::DosyMethod::MonoExp if dataset.dosy_map.is_some() => "nmr.dosy_map",
                     super::DosyMethod::Ilt(_) if dataset.ilt_map.is_some() => "nmr.ilt_map",
-                    _ => "nmr.stack",
+                    _ => dataset.stack_field_key(),
                 },
             };
             return dataset.field_catalog.id_for_key(key);
         }
         self.field_descriptors().first().map(|field| field.id)
     }
-
     pub fn has_field(&self, id: FieldId) -> bool {
         if let Self::MassSpec(dataset) = self {
             return dataset.field_catalog.key_for_id(id).is_some();
         }
-        self.field_descriptors().iter().any(|field| field.id == id)
+        self.field_descriptor(id).is_some()
     }
-
     pub fn field_descriptor(&self, id: FieldId) -> Option<FieldDescriptor> {
         if let Self::MassSpec(dataset) = self {
             return field_mass_spec::descriptor(dataset, id);
@@ -486,6 +502,7 @@ impl super::Dataset {
         self.field_descriptors()
             .into_iter()
             .find(|field| field.id == id)
+            .or_else(|| field_nmr::inactive_descriptor(self, id))
     }
 
     /// A persisted encoding is valid only when its source field exposes the
@@ -628,6 +645,7 @@ impl super::Dataset {
                 "nmr.stack".to_owned(),
                 "nmr.dosy_map".to_owned(),
                 "nmr.ilt_map".to_owned(),
+                "nmr.observations".to_owned(),
             ],
             Self::Table(_) => vec!["table.default_series".to_owned()],
             Self::Electrophysiology(dataset) => (0..dataset.data.channels.len())
@@ -656,15 +674,6 @@ impl super::Dataset {
         }
     }
 }
-
-fn domain_unit(domain: plotx_io::Domain) -> String {
-    match domain {
-        plotx_io::Domain::Time => "s",
-        plotx_io::Domain::Frequency => "ppm",
-    }
-    .to_owned()
-}
-
 /// Central capability gate for scalar fields. A provider must derive
 /// `regular` from its actual coordinate representation, not from its domain.
 pub fn scalar_grid_capabilities(regular: bool, extra: &[&str]) -> FieldCapabilities {
@@ -678,78 +687,6 @@ pub fn scalar_grid_capabilities(regular: bool, extra: &[&str]) -> FieldCapabilit
                     .map(|capability| CapabilityId::new(*capability)),
             ),
     )
-}
-
-/// Stable child-resource metadata, including the capabilities used by encoding
-/// and chart applicability checks.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FieldDescriptor {
-    pub id: FieldId,
-    pub local_id: String,
-    pub name: String,
-    /// The scientific concept represented by this field. This is required so
-    /// every new field participates in the v1 summary contract by construction.
-    pub scientific_observation: SummaryPart,
-    pub capabilities: FieldCapabilities,
-    pub dimensions: Vec<usize>,
-    pub units: Vec<String>,
-    pub metadata: FieldMetadata,
-}
-
-impl FieldDescriptor {
-    pub(crate) fn with_line_x_unit(mut self, unit: impl Into<String>) -> Self {
-        self.metadata
-            .0
-            .insert(LINE_X_UNIT_METADATA_KEY.to_owned(), unit.into());
-        self
-    }
-
-    pub fn line_x_unit(&self) -> Option<&str> {
-        self.metadata.line_x_unit()
-    }
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct FieldCapabilities(BTreeSet<CapabilityId>);
-
-impl FieldCapabilities {
-    pub fn new(values: impl IntoIterator<Item = CapabilityId>) -> Self {
-        Self(values.into_iter().collect())
-    }
-
-    pub fn contains(&self, capability: &str) -> bool {
-        self.0.contains(capability)
-    }
-
-    /// Reject scalar-grid renderers for a colored raster even when a malformed
-    /// provider advertises both mutually exclusive capabilities.
-    pub fn supports(&self, required: &[&str]) -> bool {
-        required.iter().all(|capability| self.contains(capability))
-            && !(required.contains(&CAP_FIELD_SCALAR_GRID_2D_REGULAR)
-                && self.contains(CAP_FIELD_COLORED_RASTER_2D))
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = &CapabilityId> {
-        self.0.iter()
-    }
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct FieldMetadata(pub BTreeMap<String, String>);
-
-const LINE_X_UNIT_METADATA_KEY: &str = "line_x_unit";
-
-impl FieldMetadata {
-    pub fn recommended_encoding(&self) -> Option<&str> {
-        self.0.get("recommended_encoding").map(String::as_str)
-    }
-
-    pub fn line_x_unit(&self) -> Option<&str> {
-        self.0
-            .get(LINE_X_UNIT_METADATA_KEY)
-            .map(String::as_str)
-            .filter(|unit| !unit.is_empty())
-    }
 }
 
 /// A creation-time request. It is resolved to a concrete `SeriesEncoding`

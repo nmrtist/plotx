@@ -150,7 +150,7 @@ fn rewrite_project(path: &Path, mut edit: impl FnMut(&str, &mut Vec<u8>) -> bool
 
 fn pseudo_project_with_view(name: &str) -> PathBuf {
     let mut app = PlotxApp::new();
-    let dataset = Dataset::Nmr2D(Box::new(Nmr2DDataset::load(synthetic_dosy_2d())));
+    let dataset = Dataset::Nmr2D(Box::new(Nmr2DDataset::load(synthetic_dosy_2d()).unwrap()));
     let canvas = crate::workflow::build_default_canvas(&dataset, "strict-pseudo");
     app.doc.datasets.push(dataset);
     app.doc.canvases.push(canvas);
@@ -217,7 +217,7 @@ fn assert_f64_bits_equal(actual: &[f64], expected: &[f64]) {
 #[test]
 fn project_load_ignores_stored_pseudo_fit_curve() {
     let mut app = PlotxApp::new();
-    let ds = Nmr2DDataset::load(synthetic_dosy_2d());
+    let ds = Nmr2DDataset::load(synthetic_dosy_2d()).unwrap();
     app.doc.datasets.push(Dataset::Nmr2D(Box::new(ds)));
 
     let path = temp_project("pseudo-fit-curve");
@@ -240,7 +240,7 @@ fn project_load_ignores_stored_pseudo_fit_curve() {
 #[test]
 fn project_round_trip_restores_both_real_dosy_maps_after_retransform() {
     let mut app = PlotxApp::new();
-    let mut ds = Nmr2DDataset::load(synthetic_dosy_2d());
+    let mut ds = Nmr2DDataset::load(synthetic_dosy_2d()).unwrap();
     assert!(ds.build_dosy_map(), "the real per-column fit must populate");
     let original_dosy = ds.dosy_map.clone().unwrap();
     let params = crate::IltParams {
@@ -365,7 +365,7 @@ fn project_round_trip_restores_both_real_dosy_maps_after_retransform() {
 #[test]
 fn mismatched_fingerprint_keeps_the_stored_map_and_reports_both_fingerprints() {
     let mut app = PlotxApp::new();
-    let mut ds = Nmr2DDataset::load(synthetic_dosy_2d());
+    let mut ds = Nmr2DDataset::load(synthetic_dosy_2d()).unwrap();
     assert!(ds.build_dosy_map());
     let original = ds.dosy_map.clone().unwrap();
     app.doc.datasets.push(Dataset::Nmr2D(Box::new(ds)));
@@ -374,8 +374,14 @@ fn mismatched_fingerprint_keeps_the_stored_map_and_reports_both_fingerprints() {
     let _ = std::fs::remove_file(&path);
     save_project(&app, &path, false).unwrap();
     rewrite_project(&path, |name, bytes| {
-        if name.ends_with("/data.bin") {
-            bytes[0] ^= 1;
+        if name.ends_with(".json") {
+            let mut value: serde_json::Value = serde_json::from_slice(bytes).unwrap();
+            if let Some(fingerprint) =
+                value.pointer_mut("/extensions/plotx.dosy/provenance/diffusion/data_fingerprint")
+            {
+                *fingerprint = serde_json::Value::String("0".repeat(64));
+                *bytes = serde_json::to_vec(&value).unwrap();
+            }
         }
         true
     });
@@ -424,7 +430,7 @@ fn mismatched_fingerprint_keeps_the_stored_map_and_reports_both_fingerprints() {
 #[test]
 fn missing_selected_blob_explains_the_stack_fallback() {
     let mut app = PlotxApp::new();
-    let mut ds = Nmr2DDataset::load(synthetic_dosy_2d());
+    let mut ds = Nmr2DDataset::load(synthetic_dosy_2d()).unwrap();
     assert!(ds.build_dosy_map());
     app.doc.datasets.push(Dataset::Nmr2D(Box::new(ds)));
 
@@ -491,7 +497,7 @@ fn project_json_numbers_survive_a_round_trip_bit_for_bit() {
 #[test]
 fn a_snapshot_is_not_replayed_when_the_stored_map_could_not_be_restored() {
     let mut app = PlotxApp::new();
-    let mut ds = Nmr2DDataset::load(synthetic_dosy_2d());
+    let mut ds = Nmr2DDataset::load(synthetic_dosy_2d()).unwrap();
     assert!(ds.build_dosy_map());
     let action = crate::actions::Action::insert_dataset_with_default_canvas(
         &app,
@@ -552,7 +558,7 @@ fn a_snapshot_is_not_replayed_when_the_stored_map_could_not_be_restored() {
 #[test]
 fn the_missing_map_complaint_does_not_survive_selecting_a_method_that_has_one() {
     let mut app = PlotxApp::new();
-    let mut ds = Nmr2DDataset::load(synthetic_dosy_2d());
+    let mut ds = Nmr2DDataset::load(synthetic_dosy_2d()).unwrap();
     let params = IltParams {
         lambda: 0.02,
         d_min: 1e-11,

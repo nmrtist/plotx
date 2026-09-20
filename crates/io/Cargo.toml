@@ -11,6 +11,7 @@ name = "plotx_io"
 path = "src/lib.rs"
 
 [dependencies]
+nmr.workspace = true
 num-complex.workspace = true
 thiserror.workspace = true
 zip.workspace = true

@@ -41,6 +41,7 @@ pub enum DatasetProcessingState {
         params: Params2D,
         preset: Preset2D,
         group_delay_correct: bool,
+        nus_request: Option<plotx_processing::nmr_execution::NusRequest>,
     },
     /// A table has no reversible processing recipe; its curve fits are edited
     /// through their own actions.

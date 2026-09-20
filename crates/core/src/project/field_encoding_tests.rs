@@ -1,6 +1,6 @@
 use super::tests::{first_plot, synthetic_true_2d, temp_project};
 use super::*;
-use crate::state::{AfmDataset, CanvasDocument, Dataset, Nmr2DDataset, ObjectFrame, PlotxApp};
+use crate::state::{AfmDataset, CanvasDocument, Dataset, ObjectFrame, PlotxApp};
 use plotx_figure::{HeatmapSpec, SeriesEncoding};
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -8,11 +8,9 @@ use std::sync::Arc;
 #[test]
 fn project_roundtrip_preserves_concrete_contour_series_encoding() {
     let mut app = PlotxApp::new();
-    app.doc
-        .datasets
-        .push(Dataset::Nmr2D(Box::new(Nmr2DDataset::load(
-            synthetic_true_2d(),
-        ))));
+    app.doc.datasets.push(Dataset::Nmr2D(Box::new(
+        crate::nmr_test_support::load_2d(synthetic_true_2d()).unwrap(),
+    )));
     let mut canvas = CanvasDocument::new("contour".to_owned(), [120.0, 80.0]);
     let [width, height] = canvas.size_pt();
     let object = app.build_plot_object(
@@ -40,7 +38,9 @@ fn project_roundtrip_preserves_concrete_contour_series_encoding() {
 
 #[test]
 fn nmr_two_dimensional_fields_expose_real_and_magnitude_capabilities() {
-    let dataset = Dataset::Nmr2D(Box::new(Nmr2DDataset::load(synthetic_true_2d())));
+    let dataset = Dataset::Nmr2D(Box::new(
+        crate::nmr_test_support::load_2d(synthetic_true_2d()).unwrap(),
+    ));
     let fields = dataset.field_descriptors();
     assert_eq!(fields.len(), 2);
     assert_eq!(fields[0].local_id, "nmr.real");

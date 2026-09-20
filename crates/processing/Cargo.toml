@@ -11,9 +11,9 @@ name = "plotx_processing"
 path = "src/lib.rs"
 
 [dependencies]
+nmr.workspace = true
 plotx-io.workspace = true
 plotx-analysis.workspace = true
 num-complex.workspace = true
-rustfft.workspace = true
 thiserror.workspace = true
 serde.workspace = true

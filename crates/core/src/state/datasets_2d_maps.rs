@@ -102,9 +102,24 @@ impl Nmr2DDataset {
             });
     }
 
+    pub fn dosy_input_error(&self) -> Option<&'static str> {
+        match &self.processed {
+            Processed2D::Stack(stack)
+                if stack.direct.unit == Some(nmr::axis::AxisUnit::Ppm)
+                    && stack.direct_domain == plotx_io::Domain::Frequency =>
+            {
+                None
+            }
+            _ => Some("DOSY maps require a stack of frequency-domain spectra calibrated in ppm."),
+        }
+    }
+
     /// Fit every column to build a DOSY map. Only meaningful for diffusion
     /// datasets.
     pub fn build_dosy_map(&mut self) -> bool {
+        if self.dosy_input_error().is_some() {
+            return false;
+        }
         let (Processed2D::Stack(stack), Some(axis), Some(meta)) = (
             &self.processed,
             &self.data.pseudo_axis,
@@ -132,6 +147,9 @@ impl Nmr2DDataset {
     /// diffusion metadata and a gradient-encoded ruler; each gradient value is
     /// converted to a Stejskal–Tanner b-factor before inversion.
     pub fn build_ilt_map(&mut self, params: IltParams) -> bool {
+        if self.dosy_input_error().is_some() {
+            return false;
+        }
         let (Processed2D::Stack(stack), Some(axis), Some(meta)) = (
             &self.processed,
             &self.data.pseudo_axis,

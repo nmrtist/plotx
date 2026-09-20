@@ -172,8 +172,11 @@ fn move_entry(
 fn add_step_menu(app: &mut PlotxApp, di: usize, axis: PhaseAxis, ui: &mut Ui) {
     let dataset = &app.doc.datasets[di];
     let input_domain = match dataset {
-        Dataset::Nmr(dataset) => dataset.data.domain,
-        Dataset::Nmr2D(dataset) => dataset.data.domain,
+        Dataset::Nmr(dataset) => dataset.input_domain(),
+        Dataset::Nmr2D(dataset) => match dataset.input_domain(axis) {
+            Ok(domain) => domain,
+            Err(_) => return,
+        },
         Dataset::Table(_)
         | Dataset::Electrophysiology(_)
         | Dataset::Afm(_)
@@ -273,7 +276,7 @@ fn default_bin_params(app: &PlotxApp, dataset: usize) -> BinParams {
     let Some(spectrum) = dataset.spectrum() else {
         return BinParams::DEFAULT;
     };
-    let effective_minimum = 1.5 * plotx_processing::cleanup::axis_step(&spectrum.ppm);
+    let effective_minimum = 1.5 * spectrum.coordinate_spacing().unwrap_or(0.0);
     BinParams {
         width: BinParams::DEFAULT.width.max(effective_minimum.next_up()),
         ..BinParams::DEFAULT
@@ -323,8 +326,11 @@ fn apply_row_op(app: &mut PlotxApp, di: usize, axis: PhaseAxis, id: StepId, op: 
     };
     let owner = dataset.resource_id();
     let input_domain = match dataset {
-        Dataset::Nmr(dataset) => dataset.data.domain,
-        Dataset::Nmr2D(dataset) => dataset.data.domain,
+        Dataset::Nmr(dataset) => dataset.input_domain(),
+        Dataset::Nmr2D(dataset) => match dataset.input_domain(axis) {
+            Ok(domain) => domain,
+            Err(_) => return,
+        },
         Dataset::Table(_)
         | Dataset::Electrophysiology(_)
         | Dataset::Afm(_)
@@ -522,7 +528,7 @@ mod tests {
             nus: None,
             source: "default badge".to_owned(),
         };
-        let mut dataset = Dataset::Nmr2D(Box::new(Nmr2DDataset::load(data)));
+        let mut dataset = Dataset::Nmr2D(Box::new(Nmr2DDataset::load(data).unwrap()));
         assert!(is_default_processing(&dataset));
         dataset.as_nmr2d_mut().unwrap().group_delay_correct = false;
         assert!(!is_default_processing(&dataset));

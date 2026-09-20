@@ -214,7 +214,7 @@ fn smoothing_app() -> (PlotxApp, String) {
         source: "automation smoothing".to_owned(),
         group_delay: 0.0,
     };
-    let mut dataset = NmrDataset::load(data);
+    let mut dataset = NmrDataset::load(data).unwrap();
     let id = dataset.allocate_step_id();
     dataset
         .pipeline

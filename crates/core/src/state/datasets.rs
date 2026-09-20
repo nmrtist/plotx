@@ -1,10 +1,8 @@
 use super::*;
 use std::sync::Arc;
 
-/// Factory rule shared by dataset construction, reset, and property defaults.
-pub(crate) fn default_group_delay_correct(domain: Domain) -> bool {
-    matches!(domain, Domain::Time)
-}
+mod nmr_defaults;
+pub(crate) use nmr_defaults::*;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum PhaseDragKind {
@@ -34,10 +32,10 @@ pub struct NmrDataset {
     pub resource_id: DatasetId,
     /// Persisted child-field identity allocator and key mapping.
     pub field_catalog: FieldCatalog,
-    pub data: NmrData,
-    /// Required v1 origin contract. `Derived` is a real scientific state, not
-    /// a fallback for projects that omitted the field.
-    pub origin: plotx_io::NmrOrigin,
+    pub data: plotx_io::nmr_view::NmrSource,
+    pub native_base: plotx_io::nmr_view::NmrSource,
+    pub native_processed: plotx_io::nmr_view::NmrSource,
+    pub phase_reports: Vec<plotx_processing::nmr_bridge::PhaseReport>,
     pub acquisition_identity: plotx_io::AcquisitionIdentity,
     pub base: Processed1D,
     pub pipeline: AxisPipeline,
@@ -70,36 +68,74 @@ pub struct NmrDataset {
 }
 
 impl NmrDataset {
-    pub fn load(data: NmrData) -> Self {
-        Self::load_with_origin(data, plotx_io::NmrOrigin::Derived)
+    pub fn load<T>(input: T) -> Result<Self, String>
+    where
+        T: TryInto<plotx_io::nmr_view::NmrSource>,
+        T::Error: std::fmt::Display,
+    {
+        Self::load_with_pipeline(input, None, None)
     }
 
-    pub fn load_with_origin(data: NmrData, origin: plotx_io::NmrOrigin) -> Self {
-        let acquisition_identity =
-            plotx_io::AcquisitionIdentity::from_path(std::path::Path::new(&data.source));
-        let pipeline = match data.domain {
-            Domain::Time => AxisPipeline::default_1d(),
-            Domain::Frequency => AxisPipeline::frequency_1d(),
-        };
-        let group_delay_correct = default_group_delay_correct(data.domain);
-        let has_imaginary = data.domain == Domain::Time || data.points.iter().any(|v| v.im != 0.0);
-        let base = transform_output_base(&data, &pipeline, group_delay_correct)
-            .expect("factory processing pipeline is domain-valid");
-        let processed = reapply_output(&base, &pipeline);
+    pub fn load_with_pipeline<T>(
+        input: T,
+        pipeline: Option<AxisPipeline>,
+        correct_delay: Option<bool>,
+    ) -> Result<Self, String>
+    where
+        T: TryInto<plotx_io::nmr_view::NmrSource>,
+        T::Error: std::fmt::Display,
+    {
+        use plotx_processing::nmr_bridge::{DelayPolicy, RecipeRange};
+        let data = input.try_into().map_err(|error| error.to_string())?;
+        if data.axes().len() != 1 {
+            return Err("Select a one-dimensional NMR dataset".into());
+        }
+        let acquisition_identity = data.identity();
+        let domain = data.domain().map_err(|error| error.to_string())?;
+        let known_delay = default_group_delay_correct(&data);
+        let has_imaginary = data.has_imaginary(0);
+        let mut pipeline = pipeline.unwrap_or_else(|| default_nmr_pipeline(&data));
+        for (index, step) in pipeline.steps.iter_mut().enumerate() {
+            step.id = StepId::new(index as u64);
+        }
+        let group_delay_correct = correct_delay.unwrap_or(domain == Domain::Time && known_delay);
+        let mut context = nmr::ExecutionContext::default();
+        let base = plotx_processing::nmr_execution::execute_1d(
+            &data,
+            &pipeline,
+            if group_delay_correct {
+                DelayPolicy::AxisEvidence
+            } else {
+                DelayPolicy::Disabled
+            },
+            RecipeRange::Base,
+            &mut context,
+        )
+        .map_err(|error| error.to_string())?;
+        let processed = plotx_processing::nmr_execution::execute_1d(
+            &base.source,
+            &pipeline,
+            DelayPolicy::Disabled,
+            RecipeRange::Frequency,
+            &mut context,
+        )
+        .map_err(|error| error.to_string())?;
         let mut field_catalog = nmr_field_catalog();
-        field_catalog.attach_provenance(&data.source, None);
+        field_catalog.attach_provenance(data.source(), None);
         let mut result = Self {
             resource_id: DatasetId::new(),
             field_catalog,
             data,
-            origin,
             acquisition_identity,
-            base,
+            native_base: base.source,
+            native_processed: processed.source,
+            phase_reports: processed.phases,
+            base: base.view,
             pipeline,
             next_step_id: 0,
             group_delay_correct,
             has_imaginary,
-            processed,
+            processed: processed.view,
             name: None,
             lineage: None,
             peaks: PeakSet::default(),
@@ -117,23 +153,65 @@ impl NmrDataset {
         // allocator starts at 0. Kept so `load` establishes the "ids are unique
         // and below next_step_id" invariant itself, rather than inheriting it
         // from whichever template `pipeline` happened to come from.
-        result.remint_all_steps();
-        result
+        result.repair_step_allocator();
+        Ok(result)
     }
 
-    /// Cheap re-apply of the frequency-domain steps from the cached `base`.
-    pub fn rebuild(&mut self) {
-        self.clear_craft_spectrum_cache();
-        self.processed = reapply_output(&self.base, &self.pipeline);
+    pub fn input_domain(&self) -> Domain {
+        // Construction validates rank and the direct signal domain.
+        match self.data.axes()[0].domain {
+            nmr::axis::AxisDomain::Time => Domain::Time,
+            _ => Domain::Frequency,
+        }
     }
 
-    /// Rebuild `base` from the acquisition, including a real output-domain
-    /// transition when FFT was added or removed.
-    pub fn retransform(&mut self) {
+    pub fn rebuild(&mut self) -> Result<(), String> {
+        use plotx_processing::nmr_bridge::{DelayPolicy, RecipeRange};
+        let output = plotx_processing::nmr_execution::execute_1d(
+            &self.native_base,
+            &self.pipeline,
+            DelayPolicy::Disabled,
+            RecipeRange::Frequency,
+            &mut nmr::ExecutionContext::default(),
+        )
+        .map_err(|error| error.to_string())?;
+        self.native_processed = output.source;
+        self.processed = output.view;
+        self.phase_reports = output.phases;
         self.clear_craft_spectrum_cache();
-        self.base = transform_output_base(&self.data, &self.pipeline, self.group_delay_correct)
-            .expect("live processing pipelines are reconciled before application");
-        self.rebuild();
+        Ok(())
+    }
+
+    pub fn retransform(&mut self) -> Result<(), String> {
+        use plotx_processing::nmr_bridge::{DelayPolicy, RecipeRange};
+        let mut context = nmr::ExecutionContext::default();
+        let base = plotx_processing::nmr_execution::execute_1d(
+            &self.data,
+            &self.pipeline,
+            if self.group_delay_correct {
+                DelayPolicy::AxisEvidence
+            } else {
+                DelayPolicy::Disabled
+            },
+            RecipeRange::Base,
+            &mut context,
+        )
+        .map_err(|error| error.to_string())?;
+        let output = plotx_processing::nmr_execution::execute_1d(
+            &base.source,
+            &self.pipeline,
+            DelayPolicy::Disabled,
+            RecipeRange::Frequency,
+            &mut context,
+        )
+        .map_err(|error| error.to_string())?;
+        self.native_base = base.source;
+        self.base = base.view;
+        self.native_processed = output.source;
+        self.processed = output.view;
+        self.phase_reports = output.phases;
+        self.clear_craft_spectrum_cache();
+        Ok(())
     }
 
     pub fn spectrum(&self) -> Option<&Spectrum> {
@@ -172,13 +250,6 @@ impl NmrDataset {
             .unwrap_or(0);
         self.next_step_id = self.next_step_id.max(required);
     }
-
-    fn remint_all_steps(&mut self) {
-        for step in &mut self.pipeline.steps {
-            step.id = StepId::new(self.next_step_id);
-            self.next_step_id = self.next_step_id.checked_add(1).expect("step id overflow");
-        }
-    }
 }
 
 /// A loaded 2D acquisition and its processing recipe. `base` is the post-FFT,
@@ -189,8 +260,13 @@ pub struct Nmr2DDataset {
     pub resource_id: DatasetId,
     /// Persisted child-field identity allocator and key mapping.
     pub field_catalog: FieldCatalog,
-    pub data: Arc<NmrData2D>,
-    pub origin: plotx_io::NmrOrigin,
+    pub data: Arc<plotx_io::nmr_series::NmrSeriesSource>,
+    pub native_base: plotx_io::nmr_view::NmrSource,
+    pub native_processed: plotx_io::nmr_view::NmrSource,
+    pub phase_reports: Vec<plotx_processing::nmr_bridge::PhaseReport>,
+    pub nus_request: Option<plotx_processing::nmr_execution::NusRequest>,
+    /// Import diagnostic when automatic reconstruction could not produce a spectrum.
+    pub reconstruction_warning: Option<String>,
     pub acquisition_identity: plotx_io::AcquisitionIdentity,
     pub params: Params2D,
     /// Persistent owner-local allocator shared by both axes.
@@ -249,37 +325,96 @@ pub struct Nmr2DDataset {
     pub dosy_provenance_warning: Option<String>,
 }
 impl Nmr2DDataset {
-    pub fn load(data: NmrData2D) -> Self {
-        Self::load_with_origin_and_equal_scale_preference(data, plotx_io::NmrOrigin::Derived, true)
+    pub fn load<T>(input: T) -> Result<Self, String>
+    where
+        T: TryInto<plotx_io::nmr_series::NmrSeriesSource>,
+        T::Error: std::fmt::Display,
+    {
+        Self::load_with_equal_scale_preference(input, true)
     }
 
-    pub fn load_with_equal_scale_preference(
-        data: NmrData2D,
-        equal_scale_homonuclear_2d_imports: bool,
-    ) -> Self {
-        Self::load_with_origin_and_equal_scale_preference(
-            data,
-            plotx_io::NmrOrigin::Derived,
-            equal_scale_homonuclear_2d_imports,
-        )
+    pub fn load_with_equal_scale_preference<T>(input: T, equal_scale: bool) -> Result<Self, String>
+    where
+        T: TryInto<plotx_io::nmr_series::NmrSeriesSource>,
+        T::Error: std::fmt::Display,
+    {
+        let source = input.try_into().map_err(|error| error.to_string())?;
+        match Self::load_with_pipeline(source.clone(), None, None, None, equal_scale) {
+            Ok(dataset) => Ok(dataset),
+            Err(error) if source.nus.is_some() => {
+                // Preserve the acquisition when estimation/reconstruction is unsupported.
+                // Import surfaces must report this as a warning, never a completed spectrum.
+                let params = Params2D {
+                    layout: plotx_processing::Layout2D::Stack,
+                    f2: AxisPipeline { steps: vec![] },
+                    f1: AxisPipeline { steps: vec![] },
+                };
+                let mut dataset =
+                    Self::load_with_pipeline(source, Some(params), Some(false), None, equal_scale)?;
+                dataset.reconstruction_warning = Some(format!(
+                    "Automatic NUS reconstruction failed; showing acquired observations: {error}"
+                ));
+                Ok(dataset)
+            }
+            Err(error) => Err(error),
+        }
     }
 
-    pub fn load_with_origin_and_equal_scale_preference(
-        data: NmrData2D,
-        origin: plotx_io::NmrOrigin,
+    pub fn load_with_pipeline<T>(
+        input: T,
+        params: Option<Params2D>,
+        correct_delay: Option<bool>,
+        nus_request: Option<plotx_processing::nmr_execution::NusRequest>,
         equal_scale_homonuclear_2d_imports: bool,
-    ) -> Self {
-        let acquisition_identity =
-            plotx_io::AcquisitionIdentity::from_path(std::path::Path::new(&data.source));
+    ) -> Result<Self, String>
+    where
+        T: TryInto<plotx_io::nmr_series::NmrSeriesSource>,
+        T::Error: std::fmt::Display,
+    {
+        use plotx_processing::nmr_bridge::{DelayPolicy, RecipeRange};
+        let data = input.try_into().map_err(|error| error.to_string())?;
+        let source = data.source_dataset();
+        let acquisition_identity = source.identity();
         let preset = recommend_preset(&data);
-        let params = match data.domain {
-            Domain::Time => Params2D::default_for(preset),
-            Domain::Frequency => Params2D::frequency_domain(preset),
-        };
-        let group_delay_correct = default_group_delay_correct(data.domain);
-        let has_imaginary = data.domain == Domain::Time || data.data.iter().any(|v| v.im != 0.0);
-        let base = process_2d(&data, &params);
-        let processed = reapply_2d(&base, &params);
+        let known_delay = default_group_delay_correct(source);
+        let mut params = params.unwrap_or_else(|| default_nmr_params(&data, preset));
+        for (index, step) in params
+            .f2
+            .steps
+            .iter_mut()
+            .chain(&mut params.f1.steps)
+            .enumerate()
+        {
+            step.id = StepId::new(index as u64);
+        }
+        let group_delay_correct = correct_delay
+            .unwrap_or(known_delay && data.direct.domain == nmr::axis::AxisDomain::Time);
+        let has_imaginary = source.has_imaginary(1);
+        let mut work = plotx_processing::nmr_execution::processing_2d_work_ledger();
+        let mut context = nmr::ExecutionContext::new(&mut work);
+        let base = plotx_processing::nmr_execution::execute_2d(
+            source,
+            &params,
+            if group_delay_correct {
+                DelayPolicy::AxisEvidence
+            } else {
+                DelayPolicy::Disabled
+            },
+            RecipeRange::Base,
+            nus_request,
+            &mut context,
+        )
+        .map_err(|error| error.to_string())?;
+        let output = plotx_processing::nmr_execution::execute_2d(
+            &base.source,
+            &params,
+            DelayPolicy::Disabled,
+            RecipeRange::Frequency,
+            None,
+            &mut context,
+        )
+        .map_err(|error| error.to_string())?;
+        let processed = output.view;
         let mut processed_figure = build_processed_figure(&processed, preset);
         if !equal_scale_homonuclear_2d_imports {
             processed_figure.lock_aspect = false;
@@ -298,16 +433,20 @@ impl Nmr2DDataset {
             resource_id: DatasetId::new(),
             field_catalog,
             data: Arc::new(data),
-            origin,
             acquisition_identity,
+            native_base: base.source,
+            native_processed: output.source,
+            phase_reports: output.phases,
+            nus_request,
             base_params: params.clone(),
+            reconstruction_warning: None,
             base_stale: false,
             params,
             next_step_id: 0,
             preset,
             group_delay_correct,
             has_imaginary,
-            base,
+            base: base.view,
             processed,
             processed_figure,
             name: None,
@@ -327,40 +466,87 @@ impl Nmr2DDataset {
             integral_error: None,
             dosy_provenance_warning: None,
         };
-        result.remint_all_steps();
-        result
-    }
-    /// Cheap re-apply of per-axis phase from the cached `base` (no FFT).
-    pub fn rebuild(&mut self) {
-        self.processed = reapply_2d(&self.base, &self.params);
-        self.processed_figure = Arc::new(build_processed_figure(&self.processed, self.preset));
-        self.invalidate_dosy_results("Processing changed and invalidated the selected DOSY map");
-    }
-    /// Rebuild `base` from the FID (a time-domain step or the layout changed) then
-    /// re-derive the display result.
-    pub fn retransform(&mut self) {
-        let data = self.processing_data();
-        self.base = process_2d(&data, &self.params);
-        self.base_params = self.params.clone();
-        self.base_stale = false;
-        self.rebuild();
+        result.repair_step_allocator();
+        Ok(result)
     }
 
-    /// Input view for the 2D transform's existing unconditional direct-axis
-    /// delay removal.
-    ///
-    /// Keeping the switch here avoids a second FFT implementation: disabling
-    /// correction presents zero delay metadata to the same scientific kernel.
-    /// The uncommon disabled path owns one copy so the persisted acquisition
-    /// metadata remains untouched.
-    pub(crate) fn processing_data(&self) -> Arc<NmrData2D> {
-        if self.group_delay_correct {
-            return Arc::clone(&self.data);
-        }
-        let mut data = (*self.data).clone();
-        data.direct.group_delay = 0.0;
-        Arc::new(data)
+    pub fn input_domain(&self, axis: PhaseAxis) -> Result<Domain, String> {
+        self.data
+            .input_domain(if axis == PhaseAxis::F1 { 0 } else { 1 })
+            .map_err(|error| error.to_string())
     }
+
+    pub fn rebuild(&mut self) -> Result<(), String> {
+        use plotx_processing::nmr_bridge::{DelayPolicy, RecipeRange};
+        let output = plotx_processing::nmr_execution::execute_2d(
+            &self.native_base,
+            &self.params,
+            DelayPolicy::Disabled,
+            RecipeRange::Frequency,
+            None,
+            &mut nmr::ExecutionContext::default(),
+        )
+        .map_err(|error| error.to_string())?;
+        self.native_processed = output.source;
+        self.processed = output.view;
+        self.phase_reports = output.phases;
+        self.processed_figure = Arc::new(build_processed_figure(&self.processed, self.preset));
+        self.invalidate_dosy_results("Processing changed and invalidated the selected DOSY map");
+        Ok(())
+    }
+
+    pub fn retransform(&mut self) -> Result<(), String> {
+        use plotx_processing::nmr_bridge::{DelayPolicy, RecipeRange};
+        let mut work = plotx_processing::nmr_execution::processing_2d_work_ledger();
+        let mut context = nmr::ExecutionContext::new(&mut work);
+        let base = plotx_processing::nmr_execution::execute_2d(
+            self.data.source_dataset(),
+            &self.params,
+            if self.group_delay_correct {
+                DelayPolicy::AxisEvidence
+            } else {
+                DelayPolicy::Disabled
+            },
+            RecipeRange::Base,
+            self.nus_request,
+            &mut context,
+        )
+        .map_err(|error| error.to_string())?;
+        let output = plotx_processing::nmr_execution::execute_2d(
+            &base.source,
+            &self.params,
+            DelayPolicy::Disabled,
+            RecipeRange::Frequency,
+            None,
+            &mut context,
+        )
+        .map_err(|error| error.to_string())?;
+        self.native_base = base.source;
+        self.reconstruction_warning = None;
+        self.base = base.view;
+        self.native_processed = output.source;
+        self.processed = output.view;
+        self.phase_reports = output.phases;
+        self.base_params = self.params.clone();
+        self.base_stale = false;
+        self.processed_figure = Arc::new(build_processed_figure(&self.processed, self.preset));
+        self.invalidate_dosy_results("Processing changed and invalidated the selected DOSY map");
+        Ok(())
+    }
+
+    pub(crate) fn stack_field_key(&self) -> &'static str {
+        if self
+            .native_processed
+            .dataset()
+            .as_raw()
+            .is_some_and(|raw| raw.data().is_sparse())
+        {
+            "nmr.observations"
+        } else {
+            "nmr.stack"
+        }
+    }
+
     /// A true-2D (contour) result, as opposed to a pseudo-2D stack of slices.
     pub fn is_true_2d(&self) -> bool {
         matches!(self.processed, Processed2D::Ft(_))
@@ -408,24 +594,17 @@ impl Nmr2DDataset {
                 // Auto steps have a placeholder pivot; show the peak the pass really
                 // rotates about so the on-plot handle isn't pinned to an edge.
                 StepKind::Phase(p) => Some(match p.auto {
-                    Some(_) => self.auto_pivot_frac(axis),
+                    Some(_) => self
+                        .phase_reports
+                        .iter()
+                        .find(|report| report.step == s.id)
+                        .map_or(p.pivot_frac, |report| report.recipe_parameters().2),
                     None => p.pivot_frac,
                 }),
                 _ => None,
             })
             .unwrap_or(0.0);
         Some(lo + (hi - lo) * frac)
-    }
-    /// The peak the auto-phase pass rotates about, per axis, read from the cached
-    /// pre-phase `base`.
-    fn auto_pivot_frac(&self, axis: PhaseAxis) -> f64 {
-        match &self.base {
-            Processed2D::Ft(s) => {
-                let (f2, f1) = s.peak_pivot_fracs();
-                if axis == PhaseAxis::F1 { f1 } else { f2 }
-            }
-            Processed2D::Stack(s) => s.peak_pivot_frac(),
-        }
     }
     pub fn set_pivot_ppm(&mut self, axis: PhaseAxis, ppm: f64) {
         let Some((lo, hi)) = self.axis_ppm_ends(axis) else {
@@ -465,19 +644,6 @@ impl Nmr2DDataset {
             .max()
             .unwrap_or(0);
         self.next_step_id = self.next_step_id.max(required);
-    }
-
-    fn remint_all_steps(&mut self) {
-        for step in self
-            .params
-            .f2
-            .steps
-            .iter_mut()
-            .chain(&mut self.params.f1.steps)
-        {
-            step.id = StepId::new(self.next_step_id);
-            self.next_step_id = self.next_step_id.checked_add(1).expect("step id overflow");
-        }
     }
 }
 

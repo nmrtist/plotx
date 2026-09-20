@@ -25,9 +25,9 @@ fn group_delay(app: &PlotxApp, di: usize) -> bool {
 fn batch_template_apply_filters_incompatible_targets_and_undoes_as_one_step() {
     let mut app = PlotxApp::new();
     for _ in 0..2 {
-        app.doc
-            .datasets
-            .push(Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()))));
+        app.doc.datasets.push(Dataset::Nmr(Box::new(
+            NmrDataset::load(synthetic_1d()).unwrap(),
+        )));
     }
     if let Dataset::Nmr(n) = &mut app.doc.datasets[0] {
         n.group_delay_correct = false;
@@ -93,9 +93,9 @@ fn a_hand_written_scheme_without_step_ids_loads_and_applies() {
         serde_json::from_str(json).expect("a recipe may omit step identities");
 
     let mut app = PlotxApp::new();
-    app.doc
-        .datasets
-        .push(Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()))));
+    app.doc.datasets.push(Dataset::Nmr(Box::new(
+        NmrDataset::load(synthetic_1d()).unwrap(),
+    )));
 
     let plan = plan_scheme_application(&scheme, &app.doc.datasets, &[0]);
     assert_eq!(plan.compatible_count(), 1);
@@ -119,9 +119,9 @@ fn a_hand_written_scheme_without_step_ids_loads_and_applies() {
 #[test]
 fn a_saved_scheme_omits_step_identities() {
     let mut app = PlotxApp::new();
-    app.doc
-        .datasets
-        .push(Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()))));
+    app.doc.datasets.push(Dataset::Nmr(Box::new(
+        NmrDataset::load(synthetic_1d()).unwrap(),
+    )));
     let path = temp_scheme("no-step-ids");
     save_scheme(&path, &app.doc.datasets[0]).unwrap();
     let written = std::fs::read_to_string(&path).unwrap();

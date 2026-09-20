@@ -1,5 +1,5 @@
 use super::*;
-use crate::state::{Nmr2DDataset, Peak2DOrigin, Peak2DPoint, Peak2DReview, Peak2DSet};
+use crate::state::{Peak2DOrigin, Peak2DPoint, Peak2DReview, Peak2DSet};
 
 #[test]
 fn cross_peak_pair_is_one_undoable_edit() {
@@ -8,9 +8,9 @@ fn cross_peak_pair_is_one_undoable_edit() {
     data.experiment = Some("cosy".to_owned());
 
     let mut app = PlotxApp::new();
-    app.doc
-        .datasets
-        .push(Dataset::Nmr2D(Box::new(Nmr2DDataset::load(data))));
+    app.doc.datasets.push(Dataset::Nmr2D(Box::new(
+        crate::nmr_test_support::load_2d(data).unwrap(),
+    )));
     let dataset_id = app.doc.datasets[0].resource_id();
     let before = Peak2DSet::default();
     let mut after = before.clone();

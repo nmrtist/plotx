@@ -1,5 +1,6 @@
 use crate::{NormalizeMethod, SmoothMethod, StepId, StepSource};
-use num_complex::Complex64;
+#[path = "xps_signal.rs"]
+mod signal;
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum XpsStepKind {
@@ -81,18 +82,7 @@ pub fn process_region(
                 ) {
                     return Err("XPS normalization divisor must be finite and non-zero");
                 }
-                let mut spectrum = crate::Spectrum {
-                    ppm: energy.clone(),
-                    values: values
-                        .iter()
-                        .map(|value| Complex64::new(*value, 0.0))
-                        .collect(),
-                    hz_per_point: 1.0,
-                    observe_freq_mhz: 1.0,
-                    nucleus: "XPS".into(),
-                };
-                crate::cleanup::normalize(&mut spectrum, method);
-                values = spectrum.values.into_iter().map(|value| value.re).collect();
+                signal::normalize(&energy, &mut values, method);
             }
         }
         if values.iter().any(|value| !value.is_finite()) {
@@ -124,7 +114,7 @@ pub fn estimate_charge_shift(
         return Err("the C 1s reference region is invalid");
     }
     let edge = 3.min(energy_ev.len() / 4);
-    let smoothed = crate::cleanup::gaussian_smooth_real(intensity, 3.0)
+    let smoothed = signal::gaussian_smooth_real(intensity, 3.0)
         .ok_or("the C 1s reference region cannot be smoothed")?;
     let index = smoothed[edge..smoothed.len() - edge]
         .iter()
@@ -135,19 +125,8 @@ pub fn estimate_charge_shift(
     Ok(reference_ev - energy_ev[index])
 }
 
-fn smooth_values(energy: &[f64], values: &[f64], method: SmoothMethod) -> Vec<f64> {
-    let mut spectrum = crate::Spectrum {
-        ppm: energy.to_vec(),
-        values: values
-            .iter()
-            .map(|value| Complex64::new(*value, 0.0))
-            .collect(),
-        hz_per_point: 1.0,
-        observe_freq_mhz: 1.0,
-        nucleus: "XPS".into(),
-    };
-    crate::cleanup::smooth(&mut spectrum, method);
-    spectrum.values.into_iter().map(|value| value.re).collect()
+fn smooth_values(_energy: &[f64], values: &[f64], method: SmoothMethod) -> Vec<f64> {
+    signal::smooth(values, method)
 }
 
 #[cfg(test)]

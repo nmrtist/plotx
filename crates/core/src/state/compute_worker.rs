@@ -20,7 +20,7 @@ pub(super) fn run_job(job: Job) -> Done {
             nucleus,
             source,
         } => {
-            let cancelled = || token.load(Ordering::Relaxed);
+            let cancelled = || token.is_cancelled();
             let provenance = ilt_provenance(&stack, &values, &meta, params);
             match ilt_map_cancellable(&*stack, &b_factors, &d_grid, lambda, &cancelled) {
                 Some(result) if !cancelled() => {
@@ -62,7 +62,7 @@ pub(super) fn run_job(job: Job) -> Done {
             nucleus,
             source,
         } => {
-            let cancelled = || token.load(Ordering::Relaxed);
+            let cancelled = || token.is_cancelled();
             let provenance = mono_exp_provenance(&stack, &values, &meta);
             match diffusion_map_cancellable(&*stack, &values, &meta, MONO_EXP_SNR_FRAC, &cancelled)
             {
@@ -102,7 +102,7 @@ pub(super) fn run_job(job: Job) -> Done {
             invocation,
             parent_run,
         } => {
-            let cancelled = || token.load(Ordering::Relaxed);
+            let cancelled = || token.is_cancelled();
             match process_craft_cancellable(&data, &invocation, &cancelled) {
                 Ok(result) if !cancelled() => Done::Craft {
                     generation,
@@ -133,28 +133,61 @@ pub(super) fn run_job(job: Job) -> Done {
             params,
             fields,
         } => {
-            let cancelled = || token.load(Ordering::Relaxed);
-            let (base, processed) = match input {
-                ProcessingInput::Full(data) => {
-                    let Some(base) = process_2d_cancellable(&data, &params, &cancelled) else {
-                        return cancelled_done(version.0, dataset);
-                    };
-                    let Some(processed) = reapply_2d_cancellable(&base, &params, &cancelled) else {
-                        return cancelled_done(version.0, dataset);
-                    };
-                    (Some(base), processed)
+            let cancelled = || token.is_cancelled();
+            let mut work = plotx_processing::nmr_execution::processing_2d_work_ledger();
+            let mut context =
+                nmr::ExecutionContext::new(&mut work).with_cancellation(token.clone());
+            let result = (|| match input {
+                ProcessingInput::Full(input) => {
+                    let base = execute_2d(
+                        &input.source,
+                        &params,
+                        input.delay,
+                        RecipeRange::Base,
+                        input.nus,
+                        &mut context,
+                    )?;
+                    let processed = execute_2d(
+                        &base.source,
+                        &params,
+                        DelayPolicy::Disabled,
+                        RecipeRange::Frequency,
+                        None,
+                        &mut context,
+                    )?;
+                    Ok((Some(base), processed))
                 }
                 ProcessingInput::Reapply(base) => {
-                    let Some(processed) = reapply_2d_cancellable(&base, &params, &cancelled) else {
-                        return cancelled_done(version.0, dataset);
+                    let processed = execute_2d(
+                        &base,
+                        &params,
+                        DelayPolicy::Disabled,
+                        RecipeRange::Frequency,
+                        None,
+                        &mut context,
+                    )?;
+                    Ok((None, processed))
+                }
+            })();
+            let (base, processed) = match result {
+                Ok(output) => output,
+                Err(error)
+                    if plotx_processing::nmr_execution::ExecutionError::is_cancelled(&error) =>
+                {
+                    return cancelled_done(version.0, dataset);
+                }
+                Err(error) => {
+                    return Done::Processing2DFailed {
+                        version,
+                        dataset,
+                        message: error.to_string(),
                     };
-                    (None, processed)
                 }
             };
             if cancelled() {
                 return cancelled_done(version.0, dataset);
             }
-            let fields = processed_field_artifacts(&processed, &fields);
+            let fields = processed_field_artifacts(&processed.view, &fields);
             Done::Processing2D {
                 version,
                 dataset,

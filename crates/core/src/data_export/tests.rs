@@ -225,6 +225,7 @@ fn complete_table_interleaves_sigma_and_leaves_missing_values_empty() {
 #[test]
 fn true_2d_matrix_and_long_keep_row_major_axis_order() {
     let spectrum = Arc::new(Spectrum2D {
+        magnitude_plane: None,
         f2_domain: plotx_io::Domain::Frequency,
         f1_domain: plotx_io::Domain::Frequency,
         f2_ppm: vec![10.0, 20.0],
@@ -239,11 +240,13 @@ fn true_2d_matrix_and_long_keep_row_major_axis_order() {
         f1_size: 2,
         direct: plotx_processing::AxisMeta {
             nucleus: "1H".into(),
-            observe_freq_mhz: 400.0,
+            observe_freq_mhz: Some(400.0),
+            unit: Some(nmr::axis::AxisUnit::Ppm),
         },
         indirect: plotx_processing::AxisMeta {
             nucleus: "1H".into(),
-            observe_freq_mhz: 400.0,
+            observe_freq_mhz: Some(400.0),
+            unit: Some(nmr::axis::AxisUnit::Ppm),
         },
         source: String::new(),
     });
@@ -320,7 +323,8 @@ fn pseudo_2d_long_uses_the_actual_ruler_name_and_unit() {
         traces: vec![vec![Complex64::new(1.0, 2.0), Complex64::new(3.0, 4.0)]],
         direct: plotx_processing::AxisMeta {
             nucleus: "1H".into(),
-            observe_freq_mhz: 400.0,
+            observe_freq_mhz: Some(400.0),
+            unit: Some(nmr::axis::AxisUnit::Ppm),
         },
         source: String::new(),
     });
@@ -462,7 +466,7 @@ fn default_channel_tracks_the_enabled_magnitude_display_step() {
         source: "spectrum".into(),
         group_delay: 0.0,
     };
-    let mut nmr = crate::state::NmrDataset::load(data);
+    let mut nmr = crate::nmr_test_support::load_1d(data).unwrap();
     let dataset = Dataset::Nmr(Box::new(nmr.clone()));
     assert_eq!(
         DataExportAvailability::for_dataset(&dataset).default_channel,

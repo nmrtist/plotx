@@ -249,7 +249,10 @@ pub(super) fn execute_import(
             parent_id: None,
             local_id: None,
         });
-        let loaded = match crate::workflow::load_dataset(path) {
+        let loaded = match params.sampling_declaration.clone().map_or_else(
+            || crate::workflow::load_dataset(path),
+            |declaration| crate::workflow::load_dataset_with_sampling(path, declaration),
+        ) {
             Ok(loaded) => loaded,
             Err(error) => {
                 item_results.push(TargetResult {

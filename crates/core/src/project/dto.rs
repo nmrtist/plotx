@@ -247,28 +247,6 @@ pub enum StepSourceDto {
     Imported,
 }
 
-/// Serialized in the 2D data extension so a save/load round-trip keeps a dataset
-/// a `PseudoNmr` rather than degrading it to a plain 2D.
-#[derive(Serialize, Deserialize, Clone)]
-pub struct PseudoAxisDto {
-    pub name: String,
-    pub kind: String,
-    pub values: Vec<f64>,
-    pub unit: String,
-    pub source: String,
-}
-
-/// Serialized alongside the pseudo axis so the Stejskal–Tanner b-factor survives
-/// a round-trip.
-#[derive(Serialize, Deserialize, Clone, Copy)]
-pub struct DiffusionMetaDto {
-    pub gamma: f64,
-    pub delta: f64,
-    pub big_delta: f64,
-    pub tau: f64,
-    pub shape_factor: f64,
-}
-
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ViewObject {

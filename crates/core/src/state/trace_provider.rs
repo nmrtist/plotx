@@ -70,6 +70,15 @@ impl Dataset {
                         "NMR trace collection item count does not match the acquisition".to_owned(),
                     );
                 }
+                if let Some(nus) = &dataset.data.nus {
+                    let observations = catalog
+                        .id_for_key("nmr.observations")
+                        .and_then(|field| catalog.trace_collection(field))
+                        .ok_or("NUS observations are missing their trace catalog")?;
+                    if observations.items.len() != nus.acquired {
+                        return Err("NUS trace catalog differs from acquired observations".into());
+                    }
+                }
             }
             Self::Electrophysiology(dataset) => {
                 for field in self

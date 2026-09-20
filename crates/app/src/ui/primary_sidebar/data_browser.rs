@@ -420,16 +420,21 @@ mod tests {
     use plotx_io::{Domain, NmrData};
 
     fn root(name: &str) -> Dataset {
-        let mut dataset = NmrDataset::load(NmrData {
-            points: vec![1.0.into(), 0.0.into()],
-            domain: Domain::Frequency,
-            spectral_width_hz: 1.0,
-            observe_freq_mhz: 1.0,
-            carrier_ppm: 0.0,
-            nucleus: "1H".into(),
-            source: name.into(),
-            group_delay: 0.0,
-        });
+        let mut dataset = NmrDataset::load_with_pipeline(
+            NmrData {
+                points: vec![1.0.into(), 0.0.into()],
+                domain: Domain::Frequency,
+                spectral_width_hz: 1.0,
+                observe_freq_mhz: 1.0,
+                carrier_ppm: 0.0,
+                nucleus: "1H".into(),
+                source: name.into(),
+                group_delay: 0.0,
+            },
+            Some(plotx_processing::AxisPipeline { steps: Vec::new() }),
+            Some(false),
+        )
+        .unwrap();
         dataset.name = Some(name.into());
         Dataset::Nmr(Box::new(dataset))
     }

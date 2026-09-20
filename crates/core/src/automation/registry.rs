@@ -122,6 +122,8 @@ pub(super) struct SchemeParams {
 #[serde(deny_unknown_fields)]
 pub(super) struct ImportParams {
     pub paths: Vec<PathBuf>,
+    #[serde(default)]
+    pub sampling_declaration: Option<plotx_io::nmr_sampling::SamplingDeclaration>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -165,7 +167,7 @@ schema!(CompareParams, [], ["before" => "array"]);
 schema!(RenameParams, ["name" => "string"], []);
 schema!(ThemeParams, ["theme_id" => "string"], []);
 schema!(SchemeParams, ["path" => "string"], ["compatible_only" => "boolean"]);
-schema!(ImportParams, ["paths" => "array"], []);
+schema!(ImportParams, ["paths" => "array"], ["sampling_declaration" => "object"]);
 schema!(TransformParams, ["plan" => "object", "name" => "string"], ["memory_limit_bytes" => "integer"]);
 schema!(ExportParams, ["directory" => "string", "format" => "string"], ["dpi" => "integer", "overwrite" => "boolean"]);
 schema!(super::properties::PropertyKeyParams, ["key" => "string"], []);

@@ -10,7 +10,17 @@ impl PlotxApp {
     /// datasets are plot-owned and remain visible in encoding-compatible modes.
     pub fn display_binding(&self, owner: Option<DatasetId>, binding: &DataBinding) -> DataBinding {
         let Some((resource, field)) = self.live_display_source(owner) else {
-            return binding.clone();
+            let mut displayed = binding.clone();
+            if let Some(dataset @ Dataset::Nmr2D(_)) =
+                owner.and_then(|id| self.doc.dataset_by_id(id))
+            {
+                let active = dataset.field_descriptors();
+                displayed.series.retain(|series| {
+                    series.source.resource != dataset.resource_id()
+                        || active.iter().any(|field| field.id == series.source.field)
+                });
+            }
+            return displayed;
         };
         let mut owner_series = binding
             .series
@@ -54,9 +64,14 @@ impl PlotxApp {
         persisted: &DataBinding,
         displayed: DataBinding,
     ) -> DataBinding {
-        let Some((_resource, _field)) = self.live_display_source(owner) else {
+        let projected_owner = self.live_display_source(owner).is_some()
+            || matches!(
+                owner.and_then(|id| self.doc.dataset_by_id(id)),
+                Some(Dataset::Nmr2D(_))
+            );
+        if !projected_owner {
             return displayed;
-        };
+        }
         let previous_display = self.display_binding(owner, persisted);
         let previous_ids = previous_display
             .series
@@ -85,6 +100,45 @@ impl PlotxApp {
             _ => None,
         }?;
         Some((dataset.resource_id(), field))
+    }
+
+    /// A reconstructed grid is a different field from its acquired observations.
+    /// Retain authored bindings for switching back and allocate fresh series only
+    /// when a completed result first exposes another field on a live owner plot.
+    pub(crate) fn initialize_nmr_result_bindings(
+        &mut self,
+        dataset: usize,
+        previous: Option<FieldId>,
+    ) {
+        let dataset = &self.doc.datasets[dataset];
+        let Some(field) = dataset
+            .default_field_id()
+            .filter(|field| Some(*field) != previous)
+        else {
+            return;
+        };
+        let resource = dataset.resource_id();
+        let additions = SeriesBinding::from_field_all(dataset, field);
+        for canvas in &mut self.doc.canvases {
+            for object in &mut canvas.objects {
+                let Some(plot) = object.plot_mut().filter(|plot| {
+                    plot.display_owner == Some(resource)
+                        && plot.binding.series.iter().any(|series| {
+                            series.source.resource == resource
+                                && Some(series.source.field) == previous
+                        })
+                        && !plot.binding.series.iter().any(|series| {
+                            series.source.resource == resource && series.source.field == field
+                        })
+                }) else {
+                    continue;
+                };
+                for mut series in additions.clone() {
+                    series.id = plot.allocate_series_id();
+                    plot.binding.series.push(series);
+                }
+            }
+        }
     }
 
     /// Build a dataset's figure through the chart registry: resolve `chart`'s

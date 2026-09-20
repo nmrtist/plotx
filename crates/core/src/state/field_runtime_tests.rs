@@ -1,5 +1,5 @@
 use super::*;
-use crate::state::{ComputeService, DataBinding, Dataset, Nmr2DDataset, PlotxApp};
+use crate::state::{ComputeService, DataBinding, Dataset, PlotxApp};
 use num_complex::Complex64;
 use plotx_figure::{
     Color, ColorSource, ContourBasePolicy, ContourLevelSpec, ContourSpec, ContourStyle,
@@ -76,21 +76,24 @@ pub(super) fn grid_dataset(label: &str, values: &[f32]) -> Dataset {
         .copied()
         .map(|value| Complex64::new(f64::from(value), 0.0))
         .collect();
-    Dataset::Nmr2D(Box::new(Nmr2DDataset::load(NmrData2D {
-        data: values,
-        rows: 4,
-        cols: 4,
-        domain: Domain::Frequency,
-        direct: dimension("1H"),
-        indirect: dimension("13C"),
-        quad: QuadMode::Complex,
-        indirect_conjugate: false,
-        experiment: None,
-        pseudo_axis: None,
-        diffusion: None,
-        nus: None,
-        source: label.to_owned(),
-    })))
+    Dataset::Nmr2D(Box::new(
+        crate::nmr_test_support::load_2d(NmrData2D {
+            data: values,
+            rows: 4,
+            cols: 4,
+            domain: Domain::Frequency,
+            direct: dimension("1H"),
+            indirect: dimension("13C"),
+            quad: QuadMode::Complex,
+            indirect_conjugate: false,
+            experiment: None,
+            pseudo_axis: None,
+            diffusion: None,
+            nus: None,
+            source: label.to_owned(),
+        })
+        .unwrap(),
+    ))
 }
 
 fn absolute_signed_contour() -> ContourSpec {
@@ -138,6 +141,7 @@ fn settle_estimates(service: &mut ComputeService) {
                 | crate::state::Done::Craft { .. }
                 | crate::state::Done::CraftFailed { .. }
                 | crate::state::Done::Processing2D { .. }
+                | crate::state::Done::Processing2DFailed { .. }
                 | crate::state::Done::Cancelled { .. }
                 | crate::state::Done::Failed { .. } => {
                     panic!("unexpected non-estimate job while settling estimates");

@@ -37,7 +37,13 @@ impl Nmr2DDataset {
         let grid: Vec<f64> = spectrum
             .data
             .iter()
-            .map(|value| mode.reduce(value))
+            .enumerate()
+            .map(|(index, value)| match mode {
+                DisplayMode::Real => value.re,
+                DisplayMode::Magnitude => spectrum
+                    .magnitude_at(index)
+                    .expect("view planes have the same shape"),
+            })
             .collect();
         let prepared = plotx_analysis::integrate_2d::IntegrationGrid2D::new(
             &spectrum.f2_ppm,
@@ -190,7 +196,7 @@ mod tests {
         let mut dataset = test_dataset();
         dataset.integrals = vec![integral(0, 123.0, Some(1.0))];
 
-        dataset.rebuild();
+        dataset.rebuild().unwrap();
         assert_eq!(dataset.integrals[0].volume, 123.0);
 
         dataset.recompute_integrals().unwrap();
@@ -241,7 +247,7 @@ mod tests {
             nucleus: "X".to_owned(),
             group_delay: 0.0,
         };
-        Nmr2DDataset::load(NmrData2D {
+        crate::nmr_test_support::load_2d(NmrData2D {
             data: vec![Complex64::new(1.0, 0.0); 4],
             rows: 2,
             cols: 2,
@@ -256,5 +262,6 @@ mod tests {
             nus: None,
             source: "test".to_owned(),
         })
+        .unwrap()
     }
 }

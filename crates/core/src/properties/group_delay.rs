@@ -130,8 +130,10 @@ impl NmrDatasetContext<'_> {
 
     fn factory_value(self) -> bool {
         match self {
-            Self::One(dataset) => crate::state::default_group_delay_correct(dataset.data.domain),
-            Self::Two(dataset) => crate::state::default_group_delay_correct(dataset.data.domain),
+            Self::One(dataset) => crate::state::default_group_delay_correct(&dataset.data),
+            Self::Two(dataset) => {
+                crate::state::default_group_delay_correct(dataset.data.source_dataset())
+            }
         }
     }
 }

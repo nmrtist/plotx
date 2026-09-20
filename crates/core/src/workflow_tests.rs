@@ -1,17 +1,24 @@
 use super::*;
 use num_complex::Complex64;
+use plotx_io::Domain;
 
 fn acquisition() -> Acquisition {
-    Acquisition::D1(plotx_io::NmrData {
-        points: vec![Complex64::new(1.0, 0.0); 8],
-        domain: Domain::Frequency,
-        spectral_width_hz: 4_000.0,
-        observe_freq_mhz: 400.0,
-        carrier_ppm: 4.7,
-        nucleus: "1H".to_owned(),
-        source: "sample.dx".to_owned(),
-        group_delay: 0.0,
-    })
+    Acquisition::Nmr(
+        plotx_io::NmrData {
+            points: (0..8)
+                .map(|i| Complex64::new(1.0 / (1.0 + (i as f64 - 3.0).powi(2)), 0.0))
+                .collect(),
+            domain: Domain::Frequency,
+            spectral_width_hz: 4_000.0,
+            observe_freq_mhz: 400.0,
+            carrier_ppm: 4.7,
+            nucleus: "1H".to_owned(),
+            source: "sample.dx".to_owned(),
+            group_delay: 0.0,
+        }
+        .try_into()
+        .unwrap(),
+    )
 }
 
 fn homonuclear_2d_acquisition() -> Acquisition {
@@ -22,8 +29,10 @@ fn homonuclear_2d_acquisition() -> Acquisition {
         nucleus: "1H".to_owned(),
         group_delay: 0.0,
     };
-    Acquisition::D2(Box::new(plotx_io::NmrData2D {
-        data: vec![Complex64::new(1.0, 0.0); 16],
+    let source = plotx_io::nmr_series::NmrSeriesSource::try_from(plotx_io::NmrData2D {
+        data: (0..16)
+            .map(|i| Complex64::new(1.0 / (1.0 + (i as f64 - 5.0).powi(2)), 0.0))
+            .collect(),
         rows: 4,
         cols: 4,
         domain: Domain::Frequency,
@@ -36,12 +45,14 @@ fn homonuclear_2d_acquisition() -> Acquisition {
         diffusion: None,
         nus: None,
         source: "cosy".to_owned(),
-    }))
+    })
+    .unwrap();
+    Acquisition::Nmr(source.source_dataset().clone())
 }
 
 #[test]
 fn canonical_conversion_and_default_canvas_share_dataset_identity() {
-    let (dataset, source) = dataset_from_acquisition(acquisition());
+    let (dataset, source) = dataset_from_acquisition(acquisition()).unwrap();
     assert_eq!(dataset.kind_label(), "NMR 1D");
     let canvas = build_default_canvas(&dataset, &source);
     assert_eq!(canvas.dataset_ids(), vec![dataset.resource_id()]);
@@ -68,7 +79,8 @@ fn import_preference_seeds_one_persistent_plot_override() {
         let (dataset, source) = dataset_from_acquisition_with_equal_scale_preference(
             homonuclear_2d_acquisition(),
             preference,
-        );
+        )
+        .unwrap();
         let canvas = build_default_canvas(&dataset, &source);
         let plot = canvas.objects[0].plot().expect("default plot");
         assert_eq!(plot.axis_overrides.lock_aspect, Some(expected));

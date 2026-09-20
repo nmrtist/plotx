@@ -516,7 +516,9 @@ fn setup(app: &mut PlotxApp) {
     let data = synthetic_fid();
     let action = Action::insert_dataset_with_default_canvas(
         app,
-        Dataset::Nmr(Box::new(NmrDataset::load(data))),
+        Dataset::Nmr(Box::new(
+            NmrDataset::load(data).expect("the synthetic FID is valid"),
+        )),
         "Canvas 1 — synthetic".to_owned(),
         DEFAULT_CANVAS_SIZE_MM,
     );
@@ -553,7 +555,7 @@ fn line_fit(app: &mut PlotxApp, ctx: &egui::Context) -> Result<(), String> {
 
 fn symmetry_setup(app: &mut PlotxApp) -> Result<(), String> {
     *app = PlotxApp::new_with_settings(Settings::default());
-    let mut dataset = Nmr2DDataset::load(synthetic_cosy());
+    let mut dataset = Nmr2DDataset::load(synthetic_cosy()).expect("valid synthetic 2D acquisition");
     let ids = dataset
         .peaks
         .add_pair(
@@ -587,7 +589,8 @@ fn symmetry_setup(app: &mut PlotxApp) -> Result<(), String> {
 
 fn region_result(app: &mut PlotxApp) {
     *app = PlotxApp::new_with_settings(Settings::default());
-    let mut dataset = Nmr2DDataset::load(synthetic_series());
+    let mut dataset =
+        Nmr2DDataset::load(synthetic_series()).expect("valid synthetic 2D acquisition");
     dataset.region_analysis.regions.push(Region {
         id: RegionId::new(0),
         lo: 4.65,

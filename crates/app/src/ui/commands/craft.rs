@@ -14,7 +14,7 @@ pub(super) fn gate(app: &PlotxApp, command: CommandId) -> Result<(), &'static st
             app.active_dataset().is_some_and(|index| {
                 app.doc.datasets[index]
                     .as_nmr()
-                    .is_some_and(|nmr| nmr.data.domain == plotx_io::Domain::Time)
+                    .is_some_and(|nmr| nmr.input_domain() == plotx_io::Domain::Time)
             }),
             "Select a one-dimensional time-domain NMR FID before opening CRAFT.",
         ),
@@ -22,7 +22,7 @@ pub(super) fn gate(app: &PlotxApp, command: CommandId) -> Result<(), &'static st
             target.is_some_and(|index| {
                 app.doc.datasets[index]
                     .as_nmr()
-                    .is_some_and(|nmr| nmr.data.domain == plotx_io::Domain::Time)
+                    .is_some_and(|nmr| nmr.input_domain() == plotx_io::Domain::Time)
             }),
             "Open CRAFT for a one-dimensional time-domain NMR FID before running it.",
         )
@@ -32,15 +32,19 @@ pub(super) fn gate(app: &PlotxApp, command: CommandId) -> Result<(), &'static st
                 if let Some(cache) = &app.session.ui.craft_resolution_cache
                     && cache.dataset == nmr.resource_id
                     && cache.dataset_epoch == app.session.dataset_epoch
-                    && cache.reference == nmr.craft_reference()
+                    && Some(cache.reference) == nmr.craft_reference()
                     && cache.overrides == app.session.ui.craft_overrides
                     && cache.parent_run == app.session.ui.craft_base_run
                 {
                     return cache.invocation.assessment.can_run();
                 }
+                let (Ok(data), Some(reference)) = (nmr.data.craft_fid(), nmr.craft_reference())
+                else {
+                    return false;
+                };
                 plotx_processing::craft::resolve_craft_invocation(
-                    &nmr.data,
-                    nmr.craft_reference(),
+                    &data,
+                    reference,
                     &app.session.ui.craft_overrides,
                     app.session
                         .ui
@@ -58,9 +62,13 @@ pub(super) fn gate(app: &PlotxApp, command: CommandId) -> Result<(), &'static st
         .and_then(|()| {
             let selected_count = target.map_or(0, |index| {
                 let nmr = app.doc.datasets[index].as_nmr().unwrap();
+                let (Ok(data), Some(reference)) = (nmr.data.craft_fid(), nmr.craft_reference())
+                else {
+                    return 0;
+                };
                 let invocation = plotx_processing::craft::resolve_craft_invocation(
-                    &nmr.data,
-                    nmr.craft_reference(),
+                    &data,
+                    reference,
                     &app.session.ui.craft_overrides,
                     app.session
                         .ui

@@ -18,22 +18,37 @@ pub fn pipeline_from_dto(dto: &AxisPipelineDto) -> AxisPipeline {
 /// will receive. The error names the stored value and the data-derived bound so
 /// a malformed project or scheme never opens into a silently rewritten state.
 pub fn validate_1d_pipeline(
-    data: &plotx_io::NmrData,
+    data: &plotx_io::nmr_view::NmrSource,
     pipeline: &AxisPipeline,
     group_delay_correct: bool,
 ) -> std::result::Result<(), String> {
-    let output = pipeline
-        .output_domain(data.domain)
-        .map_err(|error| error.to_string())?;
-    if output == plotx_io::Domain::Time {
-        return Ok(());
-    }
-    let mut spectrum = plotx_processing::transform_base(data, pipeline, group_delay_correct);
-    for step in pipeline
-        .steps
-        .iter()
-        .skip_while(|step| step.kind.at_or_before_fft())
-    {
+    use plotx_processing::nmr_bridge::{DelayPolicy, RecipeRange};
+    for (index, step) in pipeline.steps.iter().enumerate() {
+        if !matches!(
+            step.kind,
+            StepKind::Smooth(_) | StepKind::Normalize(_) | StepKind::Bin(_)
+        ) {
+            continue;
+        }
+        let prefix = AxisPipeline {
+            steps: pipeline.steps[..index].to_vec(),
+        };
+        let output = plotx_processing::nmr_execution::execute_1d(
+            data,
+            &prefix,
+            if group_delay_correct {
+                DelayPolicy::AxisEvidence
+            } else {
+                DelayPolicy::Disabled
+            },
+            RecipeRange::All,
+            &mut nmr::ExecutionContext::default(),
+        )
+        .map_err(|e| e.to_string())?;
+        let spectrum = output
+            .view
+            .as_frequency()
+            .ok_or_else(|| "Cleanup requires frequency-domain data".to_owned())?;
         match step.kind {
             StepKind::Smooth(method) => {
                 let capped = spectrum.values.len().min(201);
@@ -72,7 +87,7 @@ pub fn validate_1d_pipeline(
                 ));
             }
             StepKind::Bin(params) => {
-                let minimum = 1.5 * plotx_processing::cleanup::axis_step(&spectrum.ppm);
+                let minimum = 1.5 * spectrum.coordinate_spacing().unwrap_or(0.0);
                 if !params.width.is_finite() || params.width <= minimum {
                     return Err(format!(
                         "stored bin width {} is out of range: it must be greater than {minimum} for this axis",
@@ -82,11 +97,20 @@ pub fn validate_1d_pipeline(
             }
             _ => {}
         }
-        if step.enabled {
-            plotx_processing::apply_freq_step(&mut spectrum, &step.kind);
-        }
     }
-    Ok(())
+    plotx_processing::nmr_execution::execute_1d(
+        data,
+        pipeline,
+        if group_delay_correct {
+            DelayPolicy::AxisEvidence
+        } else {
+            DelayPolicy::Disabled
+        },
+        RecipeRange::All,
+        &mut nmr::ExecutionContext::default(),
+    )
+    .map(|_| ())
+    .map_err(|error| error.to_string())
 }
 
 /// Drop step identities from a pipeline destined for a detached recipe

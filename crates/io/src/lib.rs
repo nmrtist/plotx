@@ -1,19 +1,20 @@
-//! Data I/O: spectral format parsers producing the neutral [`NmrData`] container.
+//! Data I/O. NMR imports retain the checked, evidence-bearing nmr dataset.
 
 pub mod abf2;
 pub mod archive;
-pub mod bruker;
 pub mod delimited;
 mod format;
-pub mod jcamp_dx;
-pub mod jeol;
 mod mass_spec;
 pub mod mzml;
 pub mod nanoscope;
-mod nmr_origin;
+pub mod nmr_bridge;
+mod nmr_input;
+pub mod nmr_sampling;
+pub mod nmr_series;
+mod nmr_series_input;
+pub mod nmr_view;
 pub mod origin;
 pub mod sciex_wiff;
-pub mod varian;
 pub mod waters;
 pub mod xlsx;
 pub mod xps;
@@ -40,7 +41,6 @@ pub struct Provenance {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoadWarningCode {
     ArchiveEntryFailed,
-    OptionalImaginaryMissing,
     MissingStimulus,
     InvalidMetadata,
     MissingCalibration,
@@ -66,7 +66,6 @@ pub struct LoadResult {
     pub acquisition_identity: AcquisitionIdentity,
     pub format: DataFormat,
     pub provenance: Provenance,
-    nmr_origin: Option<NmrOrigin>,
     pub warnings: Vec<LoadWarning>,
 }
 
@@ -83,18 +82,8 @@ impl LoadResult {
             acquisition_identity,
             format,
             provenance,
-            nmr_origin: None,
             warnings,
         }
-    }
-
-    pub fn with_nmr_origin(mut self, origin: NmrOrigin) -> Self {
-        self.nmr_origin = Some(origin);
-        self
-    }
-
-    pub fn take_nmr_origin(&mut self) -> Option<NmrOrigin> {
-        self.nmr_origin.take()
     }
 
     pub fn into_parts(
@@ -104,7 +93,6 @@ impl LoadResult {
         AcquisitionIdentity,
         DataFormat,
         Provenance,
-        Option<NmrOrigin>,
         Vec<LoadWarning>,
     ) {
         (
@@ -112,15 +100,10 @@ impl LoadResult {
             self.acquisition_identity,
             self.format,
             self.provenance,
-            self.nmr_origin,
             self.warnings,
         )
     }
 }
-
-pub use nmr_origin::{
-    NmrInstrumentOrigin, NmrOrigin, NmrPortableMetadata, NmrSourceFormat, NmrSourceParameters,
-};
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AcquisitionIdentity {
@@ -156,7 +139,8 @@ pub enum Domain {
     Frequency,
 }
 
-/// Neutral, format-independent container for a single 1D acquisition.
+/// Explicit calibrated samples for simulations and CRAFT input views.
+/// File imports and project payloads retain the native NMR Dataset.
 #[derive(Debug, Clone)]
 pub struct NmrData {
     pub points: Vec<Complex64>,
@@ -166,8 +150,8 @@ pub struct NmrData {
     pub carrier_ppm: f64,
     pub nucleus: String,
     pub source: String,
-    /// Digital-filter group delay in points, removed by the FFT stage as a
-    /// first-order phase ramp. Nonzero for Bruker; 0.0 when absent.
+    /// Explicit digital-filter delay in points; zero declares a known zero
+    /// delay. Inputs with unknown delay must use the native Dataset API.
     pub group_delay: f64,
 }
 
@@ -246,6 +230,8 @@ pub enum PseudoKind {
 /// reconstructed or hand-entered rulers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AxisSource {
+    /// Exact portable axis evidence retained by the NMR library.
+    LibraryEvidence,
     /// Explicit `{v1, v2, …}` list embedded in the experiment text (exact).
     EmbeddedList,
     /// `start..stop : step` ramp descriptor embedded in the experiment text.
@@ -319,43 +305,18 @@ pub fn gyromagnetic_ratio(nucleus: &str) -> Option<f64> {
     Some(g)
 }
 
-/// Gradient-shape δ-coefficient for the effective diffusion time, matching the
-/// JEOL `bpp_ste_diffusion` definitions. Defaults to the SQUARE value.
-pub fn gradient_shape_factor(shape: &str) -> f64 {
-    match shape.trim().to_ascii_uppercase().as_str() {
-        "SINE" => 0.3125,
-        "SQUARE_SINE" => 0.30167,
-        "TRAPEZOID" => 0.32545,
-        "S_RECTANGLE" => 0.32526,
-        _ => 1.0 / 3.0,
-    }
-}
-
-/// Non-uniform sampling (NUS) metadata for the indirect axis. Present when the
-/// acquisition sampled only a subset of the nominal F1 grid; the missing
-/// increments must be reconstructed before the F1 FFT. Readers recover the
-/// sampling schedule when the source format stores it; otherwise `schedule`
-/// stays `None` until the user supplies the list.
+/// Explicit sampling declaration for programmatic two-dimensional inputs.
+/// Imported schedules belong to the native Dataset, including order and duplicates.
 #[derive(Debug, Clone)]
 pub struct NusMeta {
-    /// Nominal full grid size N (complex increments) the schedule indexes into.
     pub grid: usize,
-    /// Acquired complex increment count M (the stored, sampled rows).
     pub acquired: usize,
-    /// Index base of a sampling list (JEOL `nuslist_idx_base`, normally 1).
-    pub idx_base: usize,
-    /// Scheduling mode label (`poisson gap`, …), surfaced for the user.
-    pub mode: String,
-    /// True for echo/anti-echo (P/N) coherence selection (`pn_type = "y"`): the
-    /// two stored F1 channels are P and N and need a `pn_to_shr` conversion
-    /// before the States-style hypercomplex assembly.
-    pub echo_antiecho: bool,
-    /// Sampling schedule from the source file or user: one nominal-grid index
-    /// per acquired increment, stored 0-based (`idx_base` already subtracted).
+    /// Zero-based logical indices, one per acquired observation. Construction
+    /// rejects an absent schedule; PlotX never fills missing observations.
     pub schedule: Option<Vec<usize>>,
 }
 
-/// Neutral, format-independent container for a single 2D acquisition. `data` is
+/// Explicit programmatic input, not a vendor reader or persisted payload. `data` is
 /// a row-major matrix of `rows` (indirect / F1) rows, each a complex FID of
 /// `cols` (direct / F2) points.
 #[derive(Debug, Clone)]
@@ -400,8 +361,7 @@ impl NmrData2D {
 /// A loaded acquisition: 1D or 2D. Higher layers dispatch on the dimensionality.
 #[derive(Debug, Clone)]
 pub enum Acquisition {
-    D1(NmrData),
-    D2(Box<NmrData2D>),
+    Nmr(nmr_view::NmrSource),
     Electrophysiology(Box<ElectrophysiologyData>),
     Afm(Box<AfmData>),
     MassSpec(Box<MassSpecRun>),
@@ -613,14 +573,13 @@ pub struct ElectrophysiologyData {
 
 #[derive(Debug, thiserror::Error)]
 pub enum IoError {
+    #[error("NMR read failed: {0}")]
+    Nmr(#[source] Box<nmr::ReadError>),
     #[error("i/o error: {0}")]
     Io(#[from] std::io::Error),
 
     #[error("archive error: {0}")]
     Archive(String),
-
-    #[error("not a JEOL Delta file: bad magic (expected \"JEOL.NMR\")")]
-    BadMagic,
 
     #[error("file is truncated: needed {needed} bytes at offset {offset}, have {have}")]
     Truncated {
@@ -629,14 +588,11 @@ pub enum IoError {
         have: usize,
     },
 
-    #[error("unsupported JEOL feature: {0}")]
+    #[error("unsupported data: {0}")]
     Unsupported(String),
 
     #[error("invalid ABF2 file: {0}")]
     InvalidAbf2(String),
-
-    #[error(transparent)]
-    JcampDx(#[from] jcamp_dx::JcampDxError),
 
     #[error("invalid NanoScope file: {0}")]
     InvalidNanoScope(String),
@@ -669,12 +625,6 @@ pub enum IoError {
     #[error("invalid XPS data: {0}")]
     InvalidXps(String),
 
-    #[error("invalid Varian/Agilent VnmrJ data: {0}")]
-    InvalidVarian(String),
-
-    #[error("unsupported Varian/Agilent VnmrJ data: {0}")]
-    UnsupportedVarian(String),
-
     #[error("NMR conversion failed: {0}")]
     NmrConversion(String),
 }
@@ -694,15 +644,6 @@ pub fn detect_format(path: impl AsRef<Path>) -> Result<DataFormat, IoError> {
         return Ok(DataFormat::MassSpectrometry(
             MassSpectrometryFormat::WatersMassLynxRaw,
         ));
-    }
-    if let Some(format) = bruker::detect_processed(path) {
-        return Ok(format);
-    }
-    if bruker::is_bruker(path) {
-        return Ok(DataFormat::Nmr(NmrFormat::BrukerRaw));
-    }
-    if varian::is_varian(path) {
-        return Ok(DataFormat::Nmr(NmrFormat::VarianAgilentRaw));
     }
     let ext = path
         .extension()
@@ -731,8 +672,6 @@ pub fn detect_format(path: impl AsRef<Path>) -> Result<DataFormat, IoError> {
         "abf" if abf2::is_abf2(path) => {
             Ok(DataFormat::Electrophysiology(ElectrophysiologyFormat::Abf2))
         }
-        "jdf" => Ok(DataFormat::Nmr(NmrFormat::JeolDelta)),
-        "dx" | "jdx" | "jcamp" => Ok(DataFormat::Nmr(NmrFormat::JcampDx1D)),
         "mzml" => Ok(DataFormat::MassSpectrometry(MassSpectrometryFormat::MzMl)),
         "wiff" => Ok(DataFormat::MassSpectrometry(
             MassSpectrometryFormat::SciexWiff,
@@ -748,11 +687,13 @@ pub fn detect_format(path: impl AsRef<Path>) -> Result<DataFormat, IoError> {
         _ if abf2::is_abf2(path) => {
             Ok(DataFormat::Electrophysiology(ElectrophysiologyFormat::Abf2))
         }
-        _ if jeol::is_jdf(path) => Ok(DataFormat::Nmr(NmrFormat::JeolDelta)),
-        _ => Err(IoError::Unsupported(format!(
-            "unrecognised path {}: expected mzML, legacy SCIEX .wiff, Rigaku FI .raw/.rasx/profile .txt, a Waters .raw directory, NanoScope .spm/.pfc, ABF2 .abf, JEOL .jdf, JCAMP-DX .dx/.jdx/.jcamp, Bruker fid/ser or pdata, or a Varian/Agilent VnmrJ .fid directory",
-            path.display()
-        ))),
+        _ => match nmr_bridge::read_options().detect(path) {
+            Ok(format) => nmr_bridge::detected_format(format, path),
+            Err(error) if error.kind() == nmr::ReadErrorKind::Unrecognized => {
+                Err(IoError::Unsupported(format!("unrecognised scientific acquisition {}", path.display())))
+            }
+            Err(error) => Err(IoError::Nmr(Box::new(error))),
+        },
     }
 }
 
@@ -760,13 +701,7 @@ pub fn load_path(path: impl AsRef<Path>) -> Result<LoadResult, IoError> {
     let path = path.as_ref();
     match detect_format(path)? {
         DataFormat::Electrophysiology(ElectrophysiologyFormat::Abf2) => abf2::load(path),
-        DataFormat::Nmr(NmrFormat::JeolDelta) => jeol::load_jdf_path(path),
-        DataFormat::Nmr(NmrFormat::BrukerRaw) => bruker::load_raw(path),
-        DataFormat::Nmr(NmrFormat::VarianAgilentRaw) => varian::load_raw(path),
-        DataFormat::Nmr(NmrFormat::BrukerProcessed1D | NmrFormat::BrukerProcessed2D) => {
-            bruker::load_processed(path)
-        }
-        DataFormat::Nmr(NmrFormat::JcampDx1D) => jcamp_dx::load(path),
+        DataFormat::Nmr(_) => nmr_bridge::load(path),
         DataFormat::Afm(AfmFormat::BrukerNanoScopeSpm | AfmFormat::BrukerPeakForceCapture) => {
             nanoscope::load(path)
         }

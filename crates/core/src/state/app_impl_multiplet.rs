@@ -35,7 +35,16 @@ impl PlotxApp {
         let Some(n) = self.doc.datasets.get(dataset).and_then(Dataset::as_nmr) else {
             return Err("Multiplet analysis needs a 1D NMR dataset.".to_owned());
         };
-        let obs = n.data.observe_freq_mhz;
+        let spectrum = n
+            .spectrum()
+            .ok_or("Multiplet analysis requires a spectrum")?;
+        if spectrum.unit != nmr::axis::AxisUnit::Ppm {
+            return Err("Use a spectrum calibrated in ppm before analyzing multiplets.".into());
+        }
+        let obs = n
+            .native_processed
+            .reference_frequency_mhz(0)
+            .ok_or("Multiplet analysis in ppm requires chemical-shift reference evidence")?;
 
         let mut peaks: Vec<MultipletPeak> = Vec::new();
         let mut areas: Vec<f64> = Vec::new();

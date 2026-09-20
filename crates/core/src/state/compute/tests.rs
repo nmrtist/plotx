@@ -1,12 +1,12 @@
 use super::*;
 use num_complex::Complex64;
-use plotx_io::{Dim, Domain, QuadMode};
-use plotx_processing::{PhaseParams, Preset2D, ProcessingStep, StepKind, process_2d};
+use plotx_io::{Dim, Domain, NmrData2D, QuadMode};
+use plotx_processing::{PhaseParams, Preset2D, ProcessingStep, StepKind};
 
 fn dataset(value: u128) -> DatasetId {
     DatasetId::from_uuid(uuid::Uuid::from_u128(value))
 }
-fn data_2d() -> Arc<NmrData2D> {
+fn data_2d() -> Full2DInput {
     let dim = Dim {
         spectral_width_hz: 1000.0,
         observe_freq_mhz: 100.0,
@@ -14,7 +14,7 @@ fn data_2d() -> Arc<NmrData2D> {
         nucleus: "X".into(),
         group_delay: 0.0,
     };
-    Arc::new(NmrData2D {
+    let data = NmrData2D {
         data: (0..16)
             .map(|i| Complex64::new((i + 1) as f64, 0.0))
             .collect(),
@@ -30,7 +30,13 @@ fn data_2d() -> Arc<NmrData2D> {
         diffusion: None,
         nus: None,
         source: "test".into(),
-    })
+    };
+    let source = plotx_io::nmr_series::NmrSeriesSource::try_from(data).unwrap();
+    Full2DInput {
+        source: source.source_dataset().clone(),
+        delay: DelayPolicy::AxisEvidence,
+        nus: None,
+    }
 }
 
 fn stack_spectrum() -> Arc<StackSpectrum> {
@@ -40,7 +46,8 @@ fn stack_spectrum() -> Arc<StackSpectrum> {
         traces: vec![vec![Complex64::new(1.0, 0.0); 1]; 3],
         direct: plotx_processing::AxisMeta {
             nucleus: "X".into(),
-            observe_freq_mhz: 100.0,
+            observe_freq_mhz: Some(100.0),
+            unit: Some(nmr::axis::AxisUnit::Ppm),
         },
         source: "test".into(),
     })
@@ -140,15 +147,24 @@ fn reapply_to_reapply_keeps_the_active_job_and_replaces_the_deferred_recipe() {
     let mut service = ComputeService::new();
     let preset = Preset2D::Cosy;
     let mut first = Params2D::default_for(preset);
-    let base = process_2d(&data_2d(), &first);
+    let base = execute_2d(
+        &data_2d().source,
+        &first,
+        DelayPolicy::AxisEvidence,
+        RecipeRange::Base,
+        None,
+        &mut nmr::ExecutionContext::default(),
+    )
+    .unwrap()
+    .source;
 
-    let token = Arc::new(AtomicBool::new(false));
+    let token = CancellationToken::new();
     service.active.insert(
         (dataset(0), ComputeKind::Processing2D),
         ActiveJob {
             generation: 10,
             started_at: Instant::now(),
-            token: Arc::clone(&token),
+            token: token.clone(),
             processing_input: Some(ProcessingInputKind::Reapply),
         },
     );
@@ -162,26 +178,26 @@ fn reapply_to_reapply_keeps_the_active_job_and_replaces_the_deferred_recipe() {
     service
         .request_2d_reapply(dataset(0), &fields, base.clone(), first)
         .unwrap();
-    assert!(!token.load(Ordering::Relaxed));
+    assert!(!token.is_cancelled());
     let first_version = service.deferred_processing[&dataset(0)].version;
 
     service
         .request_2d_reapply(dataset(0), &fields, base, Params2D::default_for(preset))
         .unwrap();
-    assert!(!token.load(Ordering::Relaxed));
+    assert!(!token.is_cancelled());
     assert!(service.deferred_processing[&dataset(0)].version > first_version);
 }
 
 #[test]
 fn any_full_retransform_cancels_an_active_reapply() {
     let mut service = ComputeService::new();
-    let token = Arc::new(AtomicBool::new(false));
+    let token = CancellationToken::new();
     service.active.insert(
         (dataset(0), ComputeKind::Processing2D),
         ActiveJob {
             generation: 10,
             started_at: Instant::now(),
-            token: Arc::clone(&token),
+            token: token.clone(),
             processing_input: Some(ProcessingInputKind::Reapply),
         },
     );
@@ -196,7 +212,7 @@ fn any_full_retransform_cancels_an_active_reapply() {
             Params2D::default_for(preset),
         )
         .unwrap();
-    assert!(token.load(Ordering::Relaxed));
+    assert!(token.is_cancelled());
     assert!(matches!(
         service.deferred_processing[&dataset(0)].input,
         ProcessingInput::Full(_)
@@ -320,7 +336,8 @@ fn cancelling_processing_discards_its_result_and_releases_the_service() {
 
 #[test]
 fn cancelled_ilt_job_reports_acknowledgement_without_a_result() {
-    let token = Arc::new(AtomicBool::new(true));
+    let token = CancellationToken::new();
+    token.cancel();
     let stack = stack_spectrum();
     let done = run_job(Job::Ilt {
         generation: 7,

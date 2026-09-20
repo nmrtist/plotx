@@ -57,6 +57,10 @@ impl PlotxApp {
             self.session.status = "DOSY maps need a diffusion dataset.".into();
             return;
         };
+        if let Some(error) = d2.dosy_input_error() {
+            self.session.status = error.into();
+            return;
+        }
         if d2.data.diffusion.is_none() {
             self.session.status =
                 "This dataset has no diffusion parameters (not a DOSY array).".into();
@@ -104,6 +108,10 @@ impl PlotxApp {
             self.session.status = "ILT DOSY maps need a diffusion dataset.".into();
             return;
         };
+        if let Some(error) = d2.dosy_input_error() {
+            self.session.status = error.into();
+            return;
+        }
         if d2.data.diffusion.is_none() {
             self.session.status =
                 "This dataset has no diffusion parameters (not a DOSY array).".into();
@@ -184,18 +192,33 @@ impl PlotxApp {
             self.session.status = "CRAFT requires a one-dimensional NMR dataset.".into();
             return false;
         };
-        if nmr.data.domain != Domain::Time {
+        if nmr.input_domain() != Domain::Time {
             self.session.status = "CRAFT requires the original time-domain FID.".into();
             return false;
         }
         let dataset_id = nmr.resource_id;
-        let reference = nmr.craft_reference();
+        let data = match nmr.data.craft_fid() {
+            Ok(data) => data,
+            Err(error) => {
+                let message = error.to_string();
+                self.session.status = message.clone();
+                self.session
+                    .ui
+                    .craft_feedback
+                    .insert(dataset_id, CraftRunFeedback::Failed { message });
+                return false;
+            }
+        };
+        let Some(reference) = nmr.craft_reference() else {
+            self.session.status = "CRAFT requires chemical-shift reference evidence".into();
+            return false;
+        };
         let provenance =
             base_run.and_then(|id| nmr.craft_run(id).map(|run| &run.provenance.invocation));
         let invocation = plotx_processing::craft::resolve_craft_invocation(
-            &nmr.data, reference, &overrides, provenance,
+            &data, reference, &overrides, provenance,
         );
-        if let Err(error) = invocation.validate(&nmr.data) {
+        if let Err(error) = invocation.validate(&data) {
             self.session.status = error.to_string();
             self.session.ui.craft_feedback.insert(
                 dataset_id,
@@ -205,7 +228,7 @@ impl PlotxApp {
             );
             return false;
         }
-        let data = std::sync::Arc::new(nmr.data.clone());
+        let data = std::sync::Arc::new(data);
         let parent_run = invocation
             .sources
             .uses_result_provenance()
@@ -536,6 +559,7 @@ impl PlotxApp {
                     let Some(dataset) = self.doc.dataset_index(dataset) else {
                         continue;
                     };
+                    let previous_field = self.doc.datasets[dataset].default_field_id();
                     let Some(d2) = self
                         .doc
                         .datasets
@@ -551,11 +575,15 @@ impl PlotxApp {
                     // `params` may also lag `d2.params` for a paused edit, which is
                     // the intended display-trails-recipe contract.
                     if let Some(base) = base {
-                        d2.base = base;
+                        d2.native_base = base.source;
+                        d2.base = base.view;
                         d2.base_params = params;
                         d2.base_stale = false;
                     }
-                    d2.processed = processed;
+                    d2.native_processed = processed.source;
+                    d2.reconstruction_warning = None;
+                    d2.phase_reports = processed.phases;
+                    d2.processed = processed.view;
                     d2.processed_figure =
                         std::sync::Arc::new(build_processed_figure(&d2.processed, d2.preset));
                     d2.invalidate_dosy_results(
@@ -566,10 +594,18 @@ impl PlotxApp {
                             .compute
                             .promote_field_version(field.source, field.summary);
                     }
+                    self.initialize_nmr_result_bindings(dataset, previous_field);
                     self.recompute_integrals_2d_after_processing(dataset);
                     self.rebuild_canvases_for(dataset);
                     self.mark_document_dirty();
                     self.session.status = "Updated 2D processing.".into();
+                }
+                Done::Processing2DFailed {
+                    dataset, message, ..
+                } => {
+                    if self.doc.dataset_index(dataset).is_some() {
+                        self.session.status = format!("2D processing failed: {message}");
+                    }
                 }
                 Done::EstimateField { key, result } => {
                     let dataset =
@@ -672,8 +708,8 @@ impl PlotxApp {
         let Some(d2) = self.doc.datasets.get(dataset).and_then(Dataset::as_nmr2d) else {
             return false;
         };
-        // `base_stale` covers a mutation of `data` itself, which the recipe
-        // comparison cannot see. It stays set until a fresh base lands, so an
+        // `base_stale` covers NUS and delay inputs outside the axis recipes.
+        // It stays set until a fresh base lands, so an
         // intervening frequency-only edit cannot downgrade the pending retransform
         // to a re-apply and strand the reconstruction.
         let full = force_full
@@ -699,13 +735,27 @@ impl PlotxApp {
         .flatten()
         .collect::<Vec<_>>();
         let outcome = if full {
-            self.session
-                .compute
-                .request_2d_full(dataset_id, &fields, d2.processing_data(), params)
+            self.session.compute.request_2d_full(
+                dataset_id,
+                &fields,
+                super::compute::Full2DInput {
+                    source: d2.data.source_dataset().clone(),
+                    delay: if d2.group_delay_correct {
+                        plotx_processing::nmr_bridge::DelayPolicy::AxisEvidence
+                    } else {
+                        plotx_processing::nmr_bridge::DelayPolicy::Disabled
+                    },
+                    nus: d2.nus_request,
+                },
+                params,
+            )
         } else {
-            self.session
-                .compute
-                .request_2d_reapply(dataset_id, &fields, d2.base.clone(), params)
+            self.session.compute.request_2d_reapply(
+                dataset_id,
+                &fields,
+                d2.native_base.clone(),
+                params,
+            )
         };
         let aborted = match outcome {
             Ok(aborted) => aborted,

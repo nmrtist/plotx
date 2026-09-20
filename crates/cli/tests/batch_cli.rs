@@ -47,7 +47,7 @@ fn scheme(path: &Path) {
   "schema_version": 1,
   "dimension_count": 1,
   "pipelines": [{"steps": [
-    {"kind": {"Phase": {"phase0": 0.0, "phase1": 0.0, "pivot_frac": 0.5, "auto": null}}, "enabled": true, "source": "User"}
+    {"kind": "Invert", "enabled": true, "source": "User"}
   ]}],
   "group_delay_correct": false
 }"#,
@@ -114,7 +114,7 @@ fn batch_cli_exit_stdout_and_saved_manifest_form_one_contract() {
     assert_eq!(stdout["schema"], "plotx.run-manifest.v1");
     assert_eq!(stdout["caller"], "workflow");
     assert_eq!(stdout["nodes"].as_array().unwrap().len(), 3);
-    assert_eq!(stdout["errors"].as_array().unwrap().len(), 1);
+    assert_eq!(stdout["errors"].as_array().unwrap().len(), 1, "{stdout:#}");
     assert_eq!(
         stdout["nodes"][0]["result"]["targets"][0]["outcome"],
         "succeeded"

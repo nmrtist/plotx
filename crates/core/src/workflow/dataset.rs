@@ -4,57 +4,52 @@ use crate::state::{Nmr2DDataset, NmrDataset};
 pub fn dataset_from_loaded_acquisition(
     acquisition: Acquisition,
     acquisition_identity: plotx_io::AcquisitionIdentity,
-    nmr_origin: Option<plotx_io::NmrOrigin>,
     equal_scale_homonuclear_2d_imports: bool,
-) -> (Dataset, String) {
-    let (mut dataset, source) = dataset_from_acquisition_with_origin(
-        acquisition,
-        nmr_origin,
-        equal_scale_homonuclear_2d_imports,
-    );
+) -> Result<(Dataset, String), WorkflowError> {
+    let (mut dataset, source) =
+        convert_acquisition(acquisition, equal_scale_homonuclear_2d_imports)?;
     dataset.set_acquisition_identity(acquisition_identity);
-    (dataset, source)
+    Ok((dataset, source))
 }
 
-pub fn dataset_from_acquisition(acquisition: Acquisition) -> (Dataset, String) {
+pub fn dataset_from_acquisition(
+    acquisition: Acquisition,
+) -> Result<(Dataset, String), WorkflowError> {
     dataset_from_acquisition_with_equal_scale_preference(acquisition, true)
 }
 
 pub fn dataset_from_acquisition_with_equal_scale_preference(
     acquisition: Acquisition,
     equal_scale_homonuclear_2d_imports: bool,
-) -> (Dataset, String) {
-    dataset_from_acquisition_with_origin(acquisition, None, equal_scale_homonuclear_2d_imports)
+) -> Result<(Dataset, String), WorkflowError> {
+    convert_acquisition(acquisition, equal_scale_homonuclear_2d_imports)
 }
 
-fn dataset_from_acquisition_with_origin(
+fn convert_acquisition(
     acquisition: Acquisition,
-    nmr_origin: Option<plotx_io::NmrOrigin>,
     equal_scale_homonuclear_2d_imports: bool,
-) -> (Dataset, String) {
-    match acquisition {
-        Acquisition::D1(data) => {
-            let source = data.source.clone();
-            (
-                Dataset::Nmr(Box::new(NmrDataset::load_with_origin(
-                    data,
-                    nmr_origin.unwrap_or(plotx_io::NmrOrigin::Derived),
-                ))),
-                source,
-            )
-        }
-        Acquisition::D2(data) => {
-            let source = data.source.clone();
-            (
-                Dataset::Nmr2D(Box::new(
-                    Nmr2DDataset::load_with_origin_and_equal_scale_preference(
-                        *data,
-                        nmr_origin.unwrap_or(plotx_io::NmrOrigin::Derived),
-                        equal_scale_homonuclear_2d_imports,
-                    ),
+) -> Result<(Dataset, String), WorkflowError> {
+    Ok(match acquisition {
+        Acquisition::Nmr(data) => {
+            let source = data.source().to_owned();
+            let dataset = match data.axes().len() {
+                1 => Dataset::Nmr(Box::new(
+                    NmrDataset::load(data).map_err(WorkflowError::Nmr)?,
                 )),
-                source,
-            )
+                2 => Dataset::Nmr2D(Box::new(
+                    Nmr2DDataset::load_with_equal_scale_preference(
+                        data,
+                        equal_scale_homonuclear_2d_imports,
+                    )
+                    .map_err(WorkflowError::Nmr)?,
+                )),
+                rank => {
+                    return Err(WorkflowError::Nmr(format!(
+                        "PlotX does not yet display rank-{rank} NMR data"
+                    )));
+                }
+            };
+            (dataset, source)
         }
         Acquisition::Electrophysiology(data) => {
             let source = data.source.clone();
@@ -93,7 +88,7 @@ fn dataset_from_acquisition_with_origin(
                 source,
             )
         }
-    }
+    })
 }
 
 pub fn dataset_title(dataset: &Dataset) -> String {
@@ -101,7 +96,7 @@ pub fn dataset_title(dataset: &Dataset) -> String {
         Dataset::Nmr(nmr) => nmr
             .name
             .clone()
-            .unwrap_or_else(|| short_name(&nmr.data.source)),
+            .unwrap_or_else(|| short_name(nmr.data.source())),
         Dataset::Nmr2D(nmr) => nmr
             .name
             .clone()

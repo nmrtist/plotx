@@ -61,11 +61,9 @@ pub(crate) fn contour_app() -> (PlotxApp, TargetRef) {
 /// a given dynamic range in front of the catalog.
 pub(crate) fn contour_app_with_plane(values: &[f64]) -> (PlotxApp, TargetRef) {
     let mut app = PlotxApp::new();
-    app.doc
-        .datasets
-        .push(Dataset::Nmr2D(Box::new(Nmr2DDataset::load(nmr2d_with(
-            "contour", values,
-        )))));
+    app.doc.datasets.push(Dataset::Nmr2D(Box::new(
+        crate::nmr_test_support::load_2d(nmr2d_with("contour", values)).unwrap(),
+    )));
     let mut canvas = CanvasDocument::new("page".to_owned(), [120.0, 80.0]);
     let id = canvas.allocate_object_id();
     let object = app.build_plot_object(

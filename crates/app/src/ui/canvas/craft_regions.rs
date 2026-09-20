@@ -19,9 +19,14 @@ pub(crate) fn handle_craft_region_drag(
     }
     let acquired_bounds = nmr.spectrum().unwrap().ppm_bounds();
     let dataset_id = nmr.resource_id;
-    let observe_freq = nmr.data.observe_freq_mhz.max(f64::MIN_POSITIVE);
-    let point_step =
-        nmr.data.spectral_width_hz.abs() / observe_freq / nmr.data.points.len().max(1) as f64;
+    let Some(reference) = nmr.craft_reference() else {
+        return;
+    };
+    let Some(width) = nmr.data.axes()[0].spectral_width_hz else {
+        return;
+    };
+    let observe_freq = reference.reference_frequency_mhz;
+    let point_step = width / observe_freq / nmr.data.len() as f64;
     let suggestions = app
         .session
         .ui

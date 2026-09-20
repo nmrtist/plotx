@@ -64,7 +64,7 @@ fn time_domain_app_of(experiment: Option<&str>) -> PlotxApp {
     let mut app = PlotxApp::new();
     app.doc
         .datasets
-        .push(Dataset::Nmr2D(Box::new(Nmr2DDataset::load(data))));
+        .push(Dataset::Nmr2D(Box::new(Nmr2DDataset::load(data).unwrap())));
     app
 }
 

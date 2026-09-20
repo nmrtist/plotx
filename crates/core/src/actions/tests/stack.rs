@@ -7,9 +7,9 @@ fn stacked_figure_is_domain_generic_with_offset_scale_and_hide() {
 
     // NMR 1D and Table domains exercise the same generic stacking path.
     let mut nmr = sample_app();
-    nmr.doc
-        .datasets
-        .push(Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()))));
+    nmr.doc.datasets.push(Dataset::Nmr(Box::new(
+        NmrDataset::load(synthetic_1d()).unwrap(),
+    )));
     let (mut table, _) = table_app_with_sigma(vec![0.1, 0.1, 0.1]);
     let second = second_table_with_sigma(vec![0.2, 0.2, 0.2]);
     table.doc.datasets.push(Dataset::Table(Box::new(second)));
@@ -83,16 +83,12 @@ fn field_overlay_stacks_two_2d_contours_in_distinct_colors() {
             0.0,
         );
     }
-    app.doc
-        .datasets
-        .push(Dataset::Nmr2D(Box::new(crate::state::Nmr2DDataset::load(
-            signed_grid.clone(),
-        ))));
-    app.doc
-        .datasets
-        .push(Dataset::Nmr2D(Box::new(crate::state::Nmr2DDataset::load(
-            signed_grid,
-        ))));
+    app.doc.datasets.push(Dataset::Nmr2D(Box::new(
+        crate::nmr_test_support::load_2d(signed_grid.clone()).unwrap(),
+    )));
+    app.doc.datasets.push(Dataset::Nmr2D(Box::new(
+        crate::nmr_test_support::load_2d(signed_grid).unwrap(),
+    )));
     let (a, b) = (app.doc.datasets.len() - 2, app.doc.datasets.len() - 1);
     let mut binding = DataBinding {
         series: vec![
@@ -145,9 +141,9 @@ fn field_overlay_stacks_two_2d_contours_in_distinct_colors() {
 #[test]
 fn plain_then_ctrl_click_selects_two_datasets_for_stacking() {
     let mut app = sample_app();
-    app.doc
-        .datasets
-        .push(Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()))));
+    app.doc.datasets.push(Dataset::Nmr(Box::new(
+        NmrDataset::load(synthetic_1d()).unwrap(),
+    )));
 
     // The first click must count toward the stack: plain-click A then Ctrl-click
     // B yields a two-item selection (no "Ctrl the first item" trap).
@@ -183,9 +179,9 @@ fn plain_then_ctrl_click_selects_two_datasets_for_stacking() {
 #[test]
 fn ctrl_clicking_two_identical_1d_datasets_enables_stack() {
     let mut app = sample_app();
-    app.doc
-        .datasets
-        .push(Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()))));
+    app.doc.datasets.push(Dataset::Nmr(Box::new(
+        NmrDataset::load(synthetic_1d()).unwrap(),
+    )));
 
     app.clear_selection();
     app.toggle_selection(0, true);
@@ -203,9 +199,9 @@ fn ctrl_clicking_two_identical_1d_datasets_enables_stack() {
 #[test]
 fn selecting_canvas_populates_data_selection_with_its_datasets() {
     let mut app = sample_app();
-    app.doc
-        .datasets
-        .push(Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()))));
+    app.doc.datasets.push(Dataset::Nmr(Box::new(
+        NmrDataset::load(synthetic_1d()).unwrap(),
+    )));
     let object = app.doc.canvases[0].objects[0].id;
     let binding = crate::state::DataBinding {
         series: vec![
@@ -238,9 +234,9 @@ fn selecting_canvas_populates_data_selection_with_its_datasets() {
 fn plot_object_reports_every_bound_dataset_for_selection_mirroring() {
     use crate::state::{DataBinding, SeriesBinding};
     let mut app = sample_app();
-    app.doc
-        .datasets
-        .push(Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()))));
+    app.doc.datasets.push(Dataset::Nmr(Box::new(
+        NmrDataset::load(synthetic_1d()).unwrap(),
+    )));
     let object = app.doc.canvases[0].objects[0].id;
     let binding = DataBinding {
         series: vec![
@@ -309,9 +305,9 @@ fn shear_sign_flips_the_pseudo_3d_lean_direction() {
 fn multi_selecting_pages_in_the_workspace_populates_data_for_stacking() {
     use crate::state::FrameRef;
     let mut app = sample_app();
-    app.doc
-        .datasets
-        .push(Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()))));
+    app.doc.datasets.push(Dataset::Nmr(Box::new(
+        NmrDataset::load(synthetic_1d()).unwrap(),
+    )));
     push_canvas(&mut app, 1, "second canvas", [120.0, 80.0]);
 
     app.session.ui.frame_selection =
@@ -331,9 +327,9 @@ fn multi_selecting_pages_in_the_workspace_populates_data_for_stacking() {
 fn selecting_one_page_pulls_active_into_the_set_so_no_phantom_highlight() {
     use crate::state::FrameRef;
     let mut app = sample_app();
-    app.doc
-        .datasets
-        .push(Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()))));
+    app.doc.datasets.push(Dataset::Nmr(Box::new(
+        NmrDataset::load(synthetic_1d()).unwrap(),
+    )));
     push_canvas(&mut app, 1, "second canvas", [120.0, 80.0]);
 
     // A stale active dataset (0) points outside the frame about to be selected.
@@ -352,9 +348,9 @@ fn selecting_one_page_pulls_active_into_the_set_so_no_phantom_highlight() {
 #[test]
 fn every_selection_mutator_keeps_active_inside_the_set() {
     let mut app = sample_app();
-    app.doc
-        .datasets
-        .push(Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()))));
+    app.doc.datasets.push(Dataset::Nmr(Box::new(
+        NmrDataset::load(synthetic_1d()).unwrap(),
+    )));
 
     let holds = |a: &PlotxApp| {
         a.active_dataset()
