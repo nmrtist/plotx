@@ -114,7 +114,7 @@ fn table_statistics_survive_project_roundtrip() {
 
 #[test]
 fn recipe_without_line_fits_key_is_rejected() {
-    let mut dataset = NmrDataset::load(synthetic_1d());
+    let mut dataset = NmrDataset::load(synthetic_1d()).unwrap();
     dataset.line_fits.push(sample_line_fit());
     dataset.next_line_fit_id = 8;
     let recipe = RecipeObject {

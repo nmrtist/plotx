@@ -1,9 +1,12 @@
 //! Unit tests for the processing pipeline and 2D transforms.
 
 use super::*;
+#[path = "nmr_test_execution.rs"]
+mod execution;
+use execution::*;
 use plotx_io::{Dim, Domain, NmrData2D, QuadMode};
 
-fn data2d(exp: Option<&str>, f2_nuc: &str, f1_nuc: &str) -> NmrData2D {
+fn data2d(exp: Option<&str>, f2_nuc: &str, f1_nuc: &str) -> plotx_io::nmr_series::NmrSeriesSource {
     let dim = |nuc: &str| Dim {
         spectral_width_hz: 1000.0,
         observe_freq_mhz: 400.0,
@@ -12,9 +15,9 @@ fn data2d(exp: Option<&str>, f2_nuc: &str, f1_nuc: &str) -> NmrData2D {
         group_delay: 0.0,
     };
     NmrData2D {
-        data: Vec::new(),
-        rows: 0,
-        cols: 0,
+        data: vec![Complex64::new(1.0, 0.0); 4],
+        rows: 2,
+        cols: 2,
         domain: Domain::Time,
         direct: dim(f2_nuc),
         indirect: dim(f1_nuc),
@@ -26,6 +29,8 @@ fn data2d(exp: Option<&str>, f2_nuc: &str, f1_nuc: &str) -> NmrData2D {
         nus: None,
         source: String::new(),
     }
+    .try_into()
+    .unwrap()
 }
 
 #[test]
@@ -279,8 +284,9 @@ mod groundtruth {
         Spectrum {
             ppm: (0..n).map(|i| i as f64).collect(),
             values,
-            hz_per_point: 1.0,
-            observe_freq_mhz: 400.0,
+            unit: nmr::axis::AxisUnit::Ppm,
+            hz_per_point: Some(1.0),
+            observe_freq_mhz: Some(400.0),
             nucleus: "1H".into(),
         }
     }
@@ -318,8 +324,7 @@ mod groundtruth {
     ) -> f64 {
         let truth = clean(n, peaks);
         let mut s = spec(scramble(&truth, a0, a1, noise));
-        let (p0, p1, piv) = auto_phase(&s, m);
-        phase::apply_with_pivot(&mut s, p0, p1, piv);
+        apply_phase(&mut s, m);
         residual(&s.values, &truth)
     }
 
@@ -566,15 +571,15 @@ fn process_up_to_returns_time_then_freq() {
         steps: vec![apo, fft],
     };
     match process_up_to(&data, &pipe, true, apo_id) {
-        Preview::Time { fid, dt } => {
-            assert_eq!(fid.len(), data.len());
-            assert!((dt - 1.0 / data.spectral_width_hz).abs() < 1e-12);
+        Processed1D::Time(trace) => {
+            assert_eq!(trace.values.len(), data.len());
+            assert!((trace.time_s[1] - 1.0 / data.spectral_width_hz).abs() < 1e-12);
         }
         _ => panic!("expected time-domain preview"),
     }
     assert!(matches!(
         process_up_to(&data, &pipe, true, fft_id),
-        Preview::Freq(_)
+        Processed1D::Frequency(_)
     ));
 }
 

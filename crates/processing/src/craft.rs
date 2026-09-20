@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 
 mod diagnostics;
 mod fitting;
+mod nmr_preview;
+pub use nmr_preview::preview_spectrum;
 mod preflight;
 mod reconstruction;
 mod regions;
@@ -81,19 +83,26 @@ pub struct CraftRegionId(pub u64);
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CraftReference {
     pub acquisition_carrier_ppm: f64,
+    /// Frequency defining one ppm, independently of the observed transmitter frequency.
+    pub reference_frequency_mhz: f64,
     pub offset_ppm: f64,
 }
 
 impl CraftReference {
-    pub const fn new(acquisition_carrier_ppm: f64, offset_ppm: f64) -> Self {
+    pub const fn new(
+        acquisition_carrier_ppm: f64,
+        reference_frequency_mhz: f64,
+        offset_ppm: f64,
+    ) -> Self {
         Self {
             acquisition_carrier_ppm,
+            reference_frequency_mhz,
             offset_ppm,
         }
     }
 
     pub fn acquisition(data: &NmrData) -> Self {
-        Self::new(data.carrier_ppm, 0.0)
+        Self::new(data.carrier_ppm, data.observe_freq_mhz, 0.0)
     }
 
     pub fn effective_carrier_ppm(self) -> f64 {
@@ -102,6 +111,8 @@ impl CraftReference {
 
     pub fn validate(self, data: &NmrData) -> Result<(), CraftError> {
         if self.acquisition_carrier_ppm.is_finite()
+            && self.reference_frequency_mhz.is_finite()
+            && self.reference_frequency_mhz > 0.0
             && self.offset_ppm.is_finite()
             && self.effective_carrier_ppm().is_finite()
             && self.acquisition_carrier_ppm == data.carrier_ppm
@@ -349,8 +360,10 @@ pub fn process_craft_cancellable(
         .map(|region| {
             let region = region.normalized();
             (
-                (region.start_ppm - reference.effective_carrier_ppm()) * data.observe_freq_mhz,
-                (region.end_ppm - reference.effective_carrier_ppm()) * data.observe_freq_mhz,
+                (region.start_ppm - reference.effective_carrier_ppm())
+                    * reference.reference_frequency_mhz,
+                (region.end_ppm - reference.effective_carrier_ppm())
+                    * reference.reference_frequency_mhz,
             )
         })
         .collect::<Vec<_>>();
@@ -414,7 +427,7 @@ pub fn process_craft_cancellable(
             region: CraftRegionId(0),
             frequency_hz,
             chemical_shift_ppm: reference.effective_carrier_ppm()
-                + frequency_hz / data.observe_freq_mhz,
+                + frequency_hz / reference.reference_frequency_mhz,
             amplitude_t0: component.amplitude,
             phase_rad: component.phase_rad,
             decay_rate_s_inv: component.decay_rate_s_inv,
@@ -430,7 +443,7 @@ pub fn process_craft_cancellable(
         })
         .collect();
     let selections = if params.regions.is_empty() {
-        let half_width_ppm = sw / (2.0 * data.observe_freq_mhz);
+        let half_width_ppm = sw / (2.0 * reference.reference_frequency_mhz);
         vec![CraftRegion::new(
             CraftRegionId(0),
             reference.effective_carrier_ppm() - half_width_ppm,

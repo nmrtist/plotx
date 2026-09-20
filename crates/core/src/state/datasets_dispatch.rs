@@ -157,10 +157,13 @@ impl Dataset {
     pub fn summary(&self) -> String {
         match self {
             Dataset::Nmr(d) => format!(
-                "{} · {} pts · {:.2} MHz",
-                d.data.nucleus,
+                "{} · {} pts · {}",
+                d.data.nucleus(),
                 d.data.len(),
-                d.data.observe_freq_mhz
+                d.data.axes()[0]
+                    .observe_frequency_mhz()
+                    .map(|value| format!("{value:.1} MHz"))
+                    .unwrap_or_else(|| "frequency unknown".into())
             ),
             Dataset::Nmr2D(d) => d.summary(),
             Dataset::Table(d) => d.summary(),
@@ -496,12 +499,12 @@ impl Dataset {
     /// rather than two derivations that agree only until one of them changes.
     pub fn factory_pipeline(&self, axis: PhaseAxis) -> Option<AxisPipeline> {
         match self {
-            Dataset::Nmr(n) if axis == PhaseAxis::Direct => Some(match n.data.domain {
+            Dataset::Nmr(n) if axis == PhaseAxis::Direct => Some(match n.input_domain() {
                 Domain::Time => AxisPipeline::default_1d(),
                 Domain::Frequency => AxisPipeline::frequency_1d(),
             }),
             Dataset::Nmr2D(n) => {
-                let params = match n.data.domain {
+                let params = match n.input_domain(axis).ok()? {
                     Domain::Time => Params2D::default_for(n.preset),
                     Domain::Frequency => Params2D::frequency_domain(n.preset),
                 };
@@ -527,7 +530,7 @@ impl Dataset {
     }
 
     /// Parameters produced by the currently enabled automatic Phase step.
-    /// This mirrors the processing kernels so switching to manual is lossless.
+    /// Uses the retained library result so switching to manual is lossless.
     pub fn automatic_phase_params(&self, axis: PhaseAxis) -> Option<(f64, f64, f64)> {
         let pipe = self.axis_pipeline(axis)?;
         let method =
@@ -538,27 +541,19 @@ impl Dataset {
                     StepKind::Phase(params) => params.auto,
                     _ => None,
                 })?;
-        match self {
-            Dataset::Nmr(n) => Some(plotx_processing::auto_phase(n.base.as_frequency()?, method)),
-            Dataset::Nmr2D(n) => match &n.base {
-                Processed2D::Ft(s) => {
-                    let peak_arg = s
-                        .data
-                        .iter()
-                        .max_by(|a, b| a.norm().total_cmp(&b.norm()))
-                        .map_or(0.0, |value| value.arg());
-                    let (f2, f1) = s.peak_pivot_fracs();
-                    Some((peak_arg, 0.0, if axis == PhaseAxis::F1 { f1 } else { f2 }))
-                }
-                Processed2D::Stack(s) if axis == PhaseAxis::F2 => {
-                    let (phase0, phase1) =
-                        plotx_processing::fft2::absorptive_phase(&s.traces).unwrap_or((0.0, 0.0));
-                    Some((phase0, phase1, s.peak_pivot_frac()))
-                }
-                Processed2D::Stack(_) => None,
-            },
-            _ => None,
-        }
+        let step = pipe.steps.iter().find(|step| {
+            step.enabled
+                && matches!(step.kind, StepKind::Phase(params) if params.auto == Some(method))
+        })?;
+        let reports = match self {
+            Dataset::Nmr(n) => &n.phase_reports,
+            Dataset::Nmr2D(n) => &n.phase_reports,
+            _ => return None,
+        };
+        reports
+            .iter()
+            .find(|report| report.step == step.id)
+            .map(|report| report.recipe_parameters())
     }
 
     pub fn pivot_ppm(&self, axis: PhaseAxis) -> Option<f64> {

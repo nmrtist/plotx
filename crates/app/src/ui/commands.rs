@@ -30,6 +30,7 @@ pub enum CommandId {
     CloseProject,
     OpenFile,
     OpenFolder,
+    ImportNmrSampling,
     RunBatchWorkflow,
     RunScientificScript,
     OpenRecent(usize),
@@ -257,6 +258,10 @@ pub fn describe(app: &PlotxApp, id: CommandId) -> CommandDescriptor {
         CommandId::ImportTable => requires(
             app.session.ui.table_import_preview.is_none(),
             "Finish or cancel the current table import preview before importing another table.",
+        ),
+        CommandId::ImportNmrSampling => requires(
+            app.session.ui.nmr_import.is_none(),
+            "Finish or cancel the current NMR import before importing another acquisition.",
         ),
         CommandId::ImportImage
         | CommandId::ImportImageFirstFrame

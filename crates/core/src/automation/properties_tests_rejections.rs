@@ -158,9 +158,8 @@ fn whole_encoding_reset_is_not_a_tool() {
 #[test]
 fn the_catalog_capability_follows_addressable_components_not_the_dataset_kind() {
     let (mut app, _) = contour_app();
-    app.doc
-        .datasets
-        .push(Dataset::Nmr(Box::new(NmrDataset::load(NmrData {
+    app.doc.datasets.push(Dataset::Nmr(Box::new(
+        NmrDataset::load(NmrData {
             points: (0..8)
                 .map(|value| num_complex::Complex64::new(f64::from(value), 0.0))
                 .collect(),
@@ -171,7 +170,9 @@ fn the_catalog_capability_follows_addressable_components_not_the_dataset_kind() 
             nucleus: "1H".to_owned(),
             source: "capability gate".to_owned(),
             group_delay: 0.0,
-        }))));
+        })
+        .unwrap(),
+    )));
     let catalog = CapabilityId::new(CAP_PROPERTY_CATALOG);
     let provider = ProjectResourceProvider::new(&app);
     let descriptors = provider.descriptors();

@@ -47,6 +47,7 @@ impl DatasetProcessingState {
             Dataset::Nmr2D(n) => Self::Nmr2D {
                 params: n.params.clone(),
                 preset: n.preset,
+                nus_request: n.nus_request,
                 group_delay_correct: n.group_delay_correct,
             },
             Dataset::Table(_) => Self::Table,
@@ -102,7 +103,7 @@ impl DatasetProcessingState {
                     group_delay_correct,
                 },
             ) => {
-                pipeline.output_domain(n.data.domain).map_err(|error| {
+                pipeline.output_domain(n.input_domain()).map_err(|error| {
                     ProcessingStateError::InvalidPipeline {
                         axis: "direct",
                         details: error.to_string(),
@@ -114,17 +115,26 @@ impl DatasetProcessingState {
                     *group_delay_correct,
                     n.group_delay_correct,
                 );
-                n.pipeline = pipeline.clone();
-                n.repair_step_allocator();
-                n.group_delay_correct = *group_delay_correct;
+                let mut next = (**n).clone();
+                next.pipeline = pipeline.clone();
+                next.repair_step_allocator();
+                next.group_delay_correct = *group_delay_correct;
+                let result = if full {
+                    next.retransform()
+                } else {
+                    next.rebuild()
+                };
+                result.map_err(|details| ProcessingStateError::InvalidPipeline {
+                    axis: "direct",
+                    details,
+                })?;
+                next.recompute_integrals();
+                **n = next;
                 let rebuild = if full {
-                    n.retransform();
                     ProcessingRebuild::Retransformed
                 } else {
-                    n.rebuild();
                     ProcessingRebuild::Rebuilt
                 };
-                n.recompute_integrals();
                 Ok(rebuild)
             }
             (
@@ -132,34 +142,40 @@ impl DatasetProcessingState {
                 Self::Nmr2D {
                     params,
                     preset,
+                    nus_request,
                     group_delay_correct,
                 },
             ) => {
-                params.f2.output_domain(n.data.domain).map_err(|error| {
-                    ProcessingStateError::InvalidPipeline {
-                        axis: "F2",
-                        details: error.to_string(),
-                    }
-                })?;
-                params.f1.output_domain(n.data.domain).map_err(|error| {
-                    ProcessingStateError::InvalidPipeline {
-                        axis: "F1",
-                        details: error.to_string(),
-                    }
-                })?;
-                let full = plotx_processing::needs_retransform_2d(params, &n.params);
-                let full = full || *group_delay_correct != n.group_delay_correct;
-                n.params = params.clone();
-                n.repair_step_allocator();
-                n.preset = *preset;
-                n.group_delay_correct = *group_delay_correct;
-                if full {
-                    n.retransform();
-                    Ok(ProcessingRebuild::Retransformed)
+                plotx_processing::nmr_execution::validate_2d_domains(&n.data, params).map_err(
+                    |details| ProcessingStateError::InvalidPipeline {
+                        axis: "2D",
+                        details,
+                    },
+                )?;
+                let full = plotx_processing::needs_retransform_2d(params, &n.params)
+                    || *group_delay_correct != n.group_delay_correct
+                    || *nus_request != n.nus_request;
+                let mut next = (**n).clone();
+                next.params = params.clone();
+                next.repair_step_allocator();
+                next.preset = *preset;
+                next.nus_request = *nus_request;
+                next.group_delay_correct = *group_delay_correct;
+                let result = if full {
+                    next.retransform()
                 } else {
-                    n.rebuild();
-                    Ok(ProcessingRebuild::Rebuilt)
-                }
+                    next.rebuild()
+                };
+                result.map_err(|details| ProcessingStateError::InvalidPipeline {
+                    axis: "2D",
+                    details,
+                })?;
+                **n = next;
+                Ok(if full {
+                    ProcessingRebuild::Retransformed
+                } else {
+                    ProcessingRebuild::Rebuilt
+                })
             }
             (Dataset::Table(_), Self::Table) => Ok(ProcessingRebuild::Unchanged),
             (Dataset::Electrophysiology(data), Self::Electrophysiology(processing)) => {

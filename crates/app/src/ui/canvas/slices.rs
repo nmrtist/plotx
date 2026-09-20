@@ -110,14 +110,30 @@ pub(crate) fn paint_slice(
     };
 
     // A Row cut runs along F2 (the plot's x-axis); a Column cut along F1 (y).
-    let (slice, along_x, mode) = match &n.processed {
-        Processed2D::Ft(s) => (
-            s.slice(cursor.kind, cursor.index),
-            cursor.kind == SliceKind::Row,
-            DisplayMode::Real,
-        ),
-        Processed2D::Stack(s) => (s.slice(cursor.index), true, DisplayMode::Real),
+    let kind = if matches!(n.processed, Processed2D::Stack(_)) {
+        SliceKind::Row
+    } else {
+        cursor.kind
     };
+    let (_, slice) = match plotx_processing::slice::extract(
+        &n.native_processed,
+        kind,
+        plotx_processing::slice::Reduction::Slice(cursor.index),
+    ) {
+        Ok(output) => output,
+        Err(error) => {
+            painter.text(
+                Pos2::new(plot.left + 8.0, plot.top + 8.0),
+                egui::Align2::LEFT_TOP,
+                format!("Slice unavailable: {error}"),
+                egui::FontId::proportional(12.0),
+                SLICE_COLOR,
+            );
+            return;
+        }
+    };
+    let along_x = kind == SliceKind::Row;
+    let mode = DisplayMode::Real;
 
     if let Some(position) = slice.position {
         if along_x {

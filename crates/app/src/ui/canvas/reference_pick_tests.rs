@@ -30,7 +30,7 @@ fn synthetic_app() -> PlotxApp {
     let mut app = PlotxApp::new();
     app.doc
         .datasets
-        .push(Dataset::Nmr(Box::new(NmrDataset::load(data))));
+        .push(Dataset::Nmr(Box::new(NmrDataset::load(data).unwrap())));
     app.focus_single(0);
     app
 }

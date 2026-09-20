@@ -33,7 +33,7 @@ fn pseudo_data() -> plotx_io::NmrData2D {
 
 #[test]
 fn pseudo_trace_items_keep_identity_and_format_display_units() {
-    let mut dataset = Nmr2DDataset::load(pseudo_data());
+    let mut dataset = crate::nmr_test_support::load_2d(pseudo_data()).unwrap();
     let field = dataset.field_catalog.id_for_key("nmr.stack").unwrap();
     let before = dataset
         .field_catalog
@@ -49,7 +49,7 @@ fn pseudo_trace_items_keep_identity_and_format_display_units() {
             .as_deref(),
         Some("20 mT/m")
     );
-    dataset.rebuild();
+    dataset.rebuild().unwrap();
     assert_eq!(
         before,
         dataset
@@ -433,7 +433,7 @@ fn trace_composer_uses_each_recordings_selected_channel() {
 fn pseudo_map_display_composes_the_stable_stack_collection() {
     let mut app = PlotxApp::new();
     for _ in 0..2 {
-        let mut dataset = Nmr2DDataset::load(pseudo_data());
+        let mut dataset = crate::nmr_test_support::load_2d(pseudo_data()).unwrap();
         dataset.display = PseudoDisplay::DosyMap;
         app.doc.datasets.push(Dataset::Nmr2D(Box::new(dataset)));
     }
@@ -576,7 +576,9 @@ fn trace_contract_uses_capabilities_concrete_encoding_and_units_not_domain_polic
         .unwrap();
     electrophysiology_descriptor.metadata = FieldMetadata::default();
 
-    let pseudo = Dataset::Nmr2D(Box::new(Nmr2DDataset::load(pseudo_data())));
+    let pseudo = Dataset::Nmr2D(Box::new(
+        crate::nmr_test_support::load_2d(pseudo_data()).unwrap(),
+    ));
     let pseudo_field = pseudo.active_trace_collection_field().unwrap();
     let pseudo_binding = SeriesBinding::from_field_all(&pseudo, pseudo_field)
         .into_iter()
@@ -618,9 +620,9 @@ fn trace_stack_forces_offset_even_when_the_primary_domain_is_field_stacked() {
     let mut true_2d = pseudo_data();
     true_2d.pseudo_axis = None;
     let mut app = PlotxApp::new();
-    app.doc
-        .datasets
-        .push(Dataset::Nmr2D(Box::new(Nmr2DDataset::load(true_2d))));
+    app.doc.datasets.push(Dataset::Nmr2D(Box::new(
+        crate::nmr_test_support::load_2d(true_2d).unwrap(),
+    )));
     app.doc.datasets.push(recording("pA", Some("mV")));
     assert_eq!(
         app.doc.datasets[0].domain().stack_kind(),
@@ -691,7 +693,9 @@ fn fixed_prepulse_is_skipped_for_the_varying_abf_test_pulse() {
 
 #[test]
 fn single_and_multi_item_materialization_apply_identical_line_style() {
-    let dataset = Dataset::Nmr2D(Box::new(Nmr2DDataset::load(pseudo_data())));
+    let dataset = Dataset::Nmr2D(Box::new(
+        crate::nmr_test_support::load_2d(pseudo_data()).unwrap(),
+    ));
     let field = dataset.field_catalog().id_for_key("nmr.stack").unwrap();
     let mut bindings = SeriesBinding::from_field_all(&dataset, field);
     for binding in bindings.iter_mut().take(2) {

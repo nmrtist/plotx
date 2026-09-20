@@ -76,7 +76,7 @@ fn frequency_app() -> crate::state::PlotxApp {
     };
     let mut app = crate::state::PlotxApp::new();
     app.doc.datasets.push(crate::state::Dataset::Nmr(Box::new(
-        crate::state::NmrDataset::load(data),
+        crate::state::NmrDataset::load(data).unwrap(),
     )));
     app
 }
@@ -96,7 +96,7 @@ fn apply_reference(app: &mut crate::state::PlotxApp, at_ppm: f64, target_ppm: f6
             plotx_processing::StepSource::User,
         ));
     let nmr = app.doc.datasets[0].as_nmr_mut().expect("NMR dataset");
-    nmr.processed = plotx_processing::reapply_output(&nmr.base, &nmr.pipeline);
+    nmr.rebuild().unwrap();
 }
 
 fn resolved_marks(app: &crate::state::PlotxApp) -> Vec<ResolvedPeak> {

@@ -18,7 +18,7 @@ pub(crate) fn open_for_active(app: &mut PlotxApp) {
     let Some(nmr) = app.doc.datasets.get(index).and_then(Dataset::as_nmr) else {
         return;
     };
-    if nmr.data.domain != plotx_io::Domain::Time {
+    if nmr.input_domain() != plotx_io::Domain::Time {
         return;
     }
     let dataset = nmr.resource_id;
@@ -105,7 +105,13 @@ pub(crate) fn select_regions_on_canvas(app: &mut PlotxApp, index: usize) {
                 .to_owned();
         return;
     };
-    let invocation = setup::resolved(app, index);
+    let invocation = match setup::resolved(app, index) {
+        Ok(invocation) => invocation,
+        Err(error) => {
+            app.session.status = error;
+            return;
+        }
+    };
     if app.session.ui.craft_overrides.regions.is_none() {
         app.session.ui.craft_overrides.regions = Some(
             if invocation.sources.regions
@@ -180,7 +186,7 @@ pub(crate) fn render_task(app: &mut PlotxApp, host: &mut Ui) {
         || !app.doc.datasets.get(index).is_some_and(|dataset| {
             dataset
                 .as_nmr()
-                .is_some_and(|nmr| nmr.data.domain == plotx_io::Domain::Time)
+                .is_some_and(|nmr| nmr.input_domain() == plotx_io::Domain::Time)
         })
     {
         return;
@@ -322,7 +328,7 @@ mod tests {
     fn stored_run(data: &NmrData, params: CraftParams) -> StoredCraftRun {
         StoredCraftRun::from_result(
             CraftRunId(0),
-            data,
+            &data.clone().try_into().unwrap(),
             CraftInvocation::acquisition(data, params),
             None,
             CraftResult {
@@ -347,13 +353,14 @@ mod tests {
 
     #[test]
     fn changing_target_rebuilds_draft_from_target_provenance() {
-        let first = NmrDataset::load(time_domain_data("first"));
-        let mut second = NmrDataset::load(time_domain_data("second"));
+        let first = NmrDataset::load(time_domain_data("first")).unwrap();
+        let mut second = NmrDataset::load(time_domain_data("second")).unwrap();
         let mut provenance_params = CraftParams::ssfp();
         provenance_params.minimum_amplitude_to_noise = 8.5;
-        second
-            .craft_runs
-            .push(stored_run(&second.data, provenance_params.clone()));
+        second.craft_runs.push(stored_run(
+            &second.data.craft_fid().unwrap(),
+            provenance_params.clone(),
+        ));
         let mut app = PlotxApp::new_with_settings(plotx_core::settings::Settings::default());
         app.doc.datasets.push(Dataset::Nmr(Box::new(first)));
         app.doc.datasets.push(Dataset::Nmr(Box::new(second)));
@@ -371,7 +378,10 @@ mod tests {
         open_for_active(&mut app);
 
         assert_eq!(app.session.ui.craft_overrides, Default::default());
-        assert_eq!(setup::resolved(&mut app, 1).params, provenance_params);
+        assert_eq!(
+            setup::resolved(&mut app, 1).unwrap().params,
+            provenance_params
+        );
         assert_eq!(app.session.ui.craft_selected_run, Some(CraftRunId(0)));
         assert_eq!(app.session.ui.craft_task_page, CraftTaskPage::Results);
     }
@@ -398,11 +408,11 @@ mod tests {
                     + Complex64::from_polar(3.0, -std::f64::consts::TAU * 250.0 * time)
             })
             .collect();
-        let dataset = NmrDataset::load(data);
+        let dataset = NmrDataset::load(data).unwrap();
 
         let invocation = plotx_processing::craft::resolve_craft_invocation(
-            &dataset.data,
-            dataset.craft_reference(),
+            &dataset.data.craft_fid().unwrap(),
+            dataset.craft_reference().unwrap(),
             &plotx_processing::craft::CraftParamOverrides {
                 fir_filter_taps: Some(31),
                 ..Default::default()

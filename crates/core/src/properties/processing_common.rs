@@ -154,10 +154,7 @@ pub(super) fn raw_point_count(dataset: &Dataset, axis: PhaseAxis) -> usize {
     match dataset {
         Dataset::Nmr(n) => n.data.len(),
         Dataset::Nmr2D(n) => match axis {
-            PhaseAxis::F1 => n.data.nus.as_ref().map_or_else(
-                || plotx_processing::fft2::f1_increments(n.data.rows, n.data.quad),
-                |nus| nus.grid,
-            ),
+            PhaseAxis::F1 => n.data.source_dataset().axes()[0].points,
             PhaseAxis::F2 | PhaseAxis::Direct => n.data.cols,
         },
         Dataset::Table(_)
@@ -176,19 +173,26 @@ pub(super) fn spectrum_before_step(context: &StepContext<'_>) -> Option<Spectrum
     let Dataset::Nmr(dataset) = context.dataset else {
         return None;
     };
-    let mut spectrum = dataset.base.as_frequency()?.clone();
-    for step in dataset
+    let end = dataset
         .pipeline
         .steps
         .iter()
-        .skip_while(|step| step.kind.at_or_before_fft())
-    {
-        if step.id == context.step.id {
-            return Some(spectrum);
-        }
-        if step.enabled {
-            plotx_processing::apply_freq_step(&mut spectrum, &step.kind);
+        .position(|step| step.id == context.step.id)?;
+    let pipeline = plotx_processing::AxisPipeline {
+        steps: dataset.pipeline.steps[..end].to_vec(),
+    };
+    let result = plotx_processing::nmr_execution::execute_1d(
+        &dataset.native_base,
+        &pipeline,
+        plotx_processing::nmr_bridge::DelayPolicy::Disabled,
+        plotx_processing::nmr_bridge::RecipeRange::Frequency,
+        &mut nmr::ExecutionContext::default(),
+    );
+    match result {
+        Ok(result) => result.view.as_frequency().cloned(),
+        Err(error) => {
+            eprintln!("Cannot resolve NMR property bounds: {error}");
+            None
         }
     }
-    None
 }

@@ -233,14 +233,14 @@ fn overlapping_requested_regions_are_rejected_as_ambiguous() {
 #[test]
 fn reference_maps_displayed_regions_and_reported_shifts_without_changing_frequency() {
     let input = data(&[(120.0, 5.0, 0.2, 2.0)], 4096, 2_000.0);
-    let reference = CraftReference::new(input.carrier_ppm, 0.15);
+    let reference = CraftReference::new(input.carrier_ppm, input.observe_freq_mhz, 0.15);
     let params = CraftParams {
         regions: vec![CraftRegion::new(CraftRegionId(7), 0.38, 0.40)],
         fir_filter_taps: 127,
         ..CraftParams::default()
     };
 
-    let clear_signals = preflight::detect_clear_signals(&input, reference, 0);
+    let clear_signals = preflight::detect_clear_signals(&input, reference, 0).unwrap();
     let regions = build_modeling_windows(&input, &params, reference, &clear_signals).unwrap();
     assert_eq!(regions.len(), 1);
     assert!(
@@ -308,7 +308,7 @@ fn modeling_windows_are_independent_while_components_preserve_region_identity() 
     };
     let reference = CraftReference::acquisition(&input);
 
-    let clear_signals = preflight::detect_clear_signals(&input, reference, 0);
+    let clear_signals = preflight::detect_clear_signals(&input, reference, 0).unwrap();
     let windows = build_modeling_windows(&input, &params, reference, &clear_signals).unwrap();
     assert_eq!(windows.len(), 2);
     assert!(
@@ -393,7 +393,7 @@ fn rejects_non_finite_reference() {
             &input,
             &resolve_craft_invocation(
                 &input,
-                CraftReference::new(input.carrier_ppm, f64::NAN),
+                CraftReference::new(input.carrier_ppm, input.observe_freq_mhz, f64::NAN),
                 &CraftParamOverrides::default(),
                 None,
             ),
@@ -411,7 +411,7 @@ fn rejects_reference_for_a_different_acquisition_carrier() {
             &input,
             &resolve_craft_invocation(
                 &input,
-                CraftReference::new(input.carrier_ppm + 0.1, 0.0),
+                CraftReference::new(input.carrier_ppm + 0.1, input.observe_freq_mhz, 0.0),
                 &CraftParamOverrides::default(),
                 None,
             ),

@@ -38,10 +38,10 @@ publish = false
 repository = "https://github.com/nmrtist/plotx"
 
 [workspace.dependencies]
+nmr = "=0.1.0"
 colorous = "1"
 num-complex = "0.4"
 nalgebra = { version = "0.35", default-features = false, features = ["std"] }
-rustfft = "6.4"
 serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = { version = "1.0", features = ["float_roundtrip"] }
 semver = "1"
@@ -123,7 +123,10 @@ opt-level = 3
 [profile.dev.package.plotx-processing]
 opt-level = 3
 
-# rustfft is the only third-party dependency that needs optimized debug code.
+[profile.dev.package.nmr]
+opt-level = 3
+
+# Optimize the shared FFT backend as well as its callers.
 [profile.dev.package.rustfft]
 opt-level = 2
 

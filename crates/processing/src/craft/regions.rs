@@ -47,8 +47,8 @@ pub(super) fn build_modeling_windows(
     let requested: Vec<(CraftRegion, f64, f64)> = if params.regions.is_empty() {
         let selection = CraftRegion::new(
             CraftRegionId(0),
-            effective_carrier_ppm - half_sw / data.observe_freq_mhz,
-            effective_carrier_ppm + half_sw / data.observe_freq_mhz,
+            effective_carrier_ppm - half_sw / reference.reference_frequency_mhz,
+            effective_carrier_ppm + half_sw / reference.reference_frequency_mhz,
         );
         vec![(selection, -half_sw, half_sw)]
     } else {
@@ -60,8 +60,8 @@ pub(super) fn build_modeling_windows(
             .map(|region| {
                 (
                     region,
-                    (region.start_ppm - effective_carrier_ppm) * data.observe_freq_mhz,
-                    (region.end_ppm - effective_carrier_ppm) * data.observe_freq_mhz,
+                    (region.start_ppm - effective_carrier_ppm) * reference.reference_frequency_mhz,
+                    (region.end_ppm - effective_carrier_ppm) * reference.reference_frequency_mhz,
                 )
             })
             .collect()
@@ -76,8 +76,8 @@ pub(super) fn build_modeling_windows(
         requested_cores.push((
             CraftRegion::new(
                 selection.id,
-                effective_carrier_ppm + start / data.observe_freq_mhz,
-                effective_carrier_ppm + end / data.observe_freq_mhz,
+                effective_carrier_ppm + start / reference.reference_frequency_mhz,
+                effective_carrier_ppm + end / reference.reference_frequency_mhz,
             ),
             start,
             end,
@@ -98,8 +98,8 @@ pub(super) fn build_modeling_windows(
     let signal_hz = clear_signals
         .iter()
         .filter_map(|signal| {
-            let frequency =
-                (signal.chemical_shift_ppm - effective_carrier_ppm) * data.observe_freq_mhz;
+            let frequency = (signal.chemical_shift_ppm - effective_carrier_ppm)
+                * reference.reference_frequency_mhz;
             let weight = signal.prominence_sigma.max(f64::MIN_POSITIVE);
             (frequency.is_finite()
                 && weight.is_finite()

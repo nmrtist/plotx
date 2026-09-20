@@ -138,6 +138,8 @@ pub struct CraftDerivedPlan {
     pub reconstruction_points: usize,
     pub resolved_regions: Vec<CraftRegion>,
     pub modeling_windows: Vec<CraftDerivedModelingWindow>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub processing_error: Option<String>,
 }
 
 pub fn resolve_craft_invocation(
@@ -232,7 +234,7 @@ pub fn resolve_craft_invocation(
 }
 
 fn full_bandwidth_region(data: &NmrData, reference: CraftReference) -> Option<CraftRegion> {
-    let half_width_ppm = data.spectral_width_hz / (2.0 * data.observe_freq_mhz);
+    let half_width_ppm = data.spectral_width_hz / (2.0 * reference.reference_frequency_mhz);
     let carrier = reference.effective_carrier_ppm();
     (half_width_ppm.is_finite() && carrier.is_finite()).then(|| {
         CraftRegion::new(
@@ -302,6 +304,7 @@ fn derive_plan(
     };
     let resolved_regions = params.regions.clone();
     let mut modeling_windows = Vec::new();
+    let mut processing_error = None;
     if data.spectral_width_hz.is_finite()
         && data.spectral_width_hz > 0.0
         && data.observe_freq_mhz.is_finite()
@@ -310,10 +313,16 @@ fn derive_plan(
         && params.profile.modeling_bandwidth_hz().is_finite()
     {
         let filter_input = available_points.min(fit_points.saturating_add(params.fir_filter_taps));
-        let clear_signals = detect_clear_signals(data, reference, effective_skip_points);
-        for window in
-            build_modeling_windows(data, params, reference, &clear_signals).unwrap_or_default()
-        {
+        let windows = detect_clear_signals(data, reference, effective_skip_points)
+            .and_then(|signals| build_modeling_windows(data, params, reference, &signals));
+        let windows = match windows {
+            Ok(windows) => windows,
+            Err(error) => {
+                processing_error = Some(error.to_string());
+                Vec::new()
+            }
+        };
+        for window in windows {
             let modeled_bandwidth_hz = window.modeling_band_hz.1 - window.modeling_band_hz.0;
             let mut decimation = (data.spectral_width_hz
                 / (2.0 * modeled_bandwidth_hz).max(f64::MIN_POSITIVE))
@@ -345,6 +354,7 @@ fn derive_plan(
         reconstruction_points,
         resolved_regions,
         modeling_windows,
+        processing_error,
     }
 }
 

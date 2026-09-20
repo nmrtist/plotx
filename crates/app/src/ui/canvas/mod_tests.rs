@@ -137,7 +137,7 @@ fn phase_editor_open_drives_on_plot_pivot() {
     let mut app = PlotxApp::new();
     app.doc
         .datasets
-        .push(Dataset::Nmr(Box::new(NmrDataset::load(data))));
+        .push(Dataset::Nmr(Box::new(NmrDataset::load(data).unwrap())));
     let mut canvas = CanvasDocument::new("page".to_owned(), [200.0, 200.0]);
     let id = canvas.allocate_object_id();
     let obj = app.build_plot_object(

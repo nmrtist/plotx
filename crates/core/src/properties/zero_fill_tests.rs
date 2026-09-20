@@ -2,7 +2,6 @@ use super::processing_test_support::{
     spectrum, states_2d_app, step, step_mut, target_for, target_for_axis, time_domain_app,
 };
 use super::*;
-use crate::state::Dataset;
 use plotx_processing::{StepKind, ZeroFill};
 
 #[test]
@@ -133,18 +132,15 @@ fn states_f1_uses_complex_increments_as_its_raw_point_count() {
 
 #[test]
 fn nus_f1_uses_the_nominal_reconstruction_grid_as_its_raw_count() {
-    let mut app = states_2d_app(10, 6);
-    let Dataset::Nmr2D(dataset) = &mut app.doc.datasets[0] else {
-        panic!("the fixture is 2D NMR");
-    };
-    std::sync::Arc::make_mut(&mut dataset.data).nus = Some(plotx_io::NusMeta {
-        grid: 17,
-        acquired: 5,
-        idx_base: 0,
-        mode: "test".to_owned(),
-        echo_antiecho: false,
-        schedule: Some(vec![0, 2, 5, 9, 16]),
-    });
+    let mut app = super::processing_test_support::states_2d_app_with_sampling(
+        10,
+        6,
+        Some(plotx_io::NusMeta {
+            grid: 17,
+            acquired: 5,
+            schedule: Some(vec![0, 2, 5, 9, 16]),
+        }),
+    );
     let target = target_for_axis(&app, crate::state::PhaseAxis::F1, |kind| {
         matches!(kind, StepKind::ZeroFill(_))
     });

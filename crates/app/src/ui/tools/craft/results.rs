@@ -277,7 +277,8 @@ fn reports(
             .changed();
         ui.label(format!(
             "Hz ({:.5} ppm)",
-            definition.segment_width_hz / nmr.data.observe_freq_mhz
+            definition.segment_width_hz
+                / run.provenance.invocation.reference.reference_frequency_mhz
         ));
     });
     let mut snapshot: CraftAmplitudeReport = serde_json::from_value(record.snapshot.clone())

@@ -284,11 +284,11 @@ fn nmr_2d_observation(data: &crate::state::Nmr2DDataset) -> SummaryPart {
 fn nmr_1d_observation(data: &crate::state::NmrDataset) -> SummaryPart {
     let domain = data.output_domain();
     SummaryPart::new(
-        format!("nmr:{domain:?}:{}", data.data.nucleus),
+        format!("nmr:{domain:?}:{}", data.data.nucleus()),
         if domain == plotx_io::Domain::Time {
-            format!("{} FID", data.data.nucleus)
+            format!("{} FID", data.data.nucleus())
         } else {
-            data.data.nucleus.clone()
+            data.data.nucleus().to_owned()
         },
     )
 }
@@ -555,7 +555,7 @@ mod tests {
     use plotx_processing::Slice1D;
 
     fn nmr(domain: Domain, subject: &str, acquisition: &str) -> Dataset {
-        let mut data = NmrDataset::load(NmrData {
+        let mut data = crate::nmr_test_support::load_1d(NmrData {
             points: vec![Complex64::new(1.0, 0.0); 8],
             domain,
             spectral_width_hz: 4_000.0,
@@ -564,7 +564,8 @@ mod tests {
             nucleus: "1H".to_owned(),
             source: "fid".to_owned(),
             group_delay: 0.0,
-        });
+        })
+        .unwrap();
         data.acquisition_identity = AcquisitionIdentity {
             subject: Some(subject.to_owned()),
             acquisition: Some(acquisition.to_owned()),
@@ -581,7 +582,7 @@ mod tests {
             nucleus: nucleus.to_owned(),
             group_delay: 0.0,
         };
-        Nmr2DDataset::load(NmrData2D {
+        crate::nmr_test_support::load_2d(NmrData2D {
             data: vec![Complex64::new(1.0, 0.0); 4],
             rows: 2,
             cols: 2,
@@ -596,6 +597,7 @@ mod tests {
             nus: None,
             source: "2d".to_owned(),
         })
+        .unwrap()
     }
 
     #[test]
@@ -608,18 +610,23 @@ mod tests {
     fn derived_slice_inherits_the_source_subject() {
         let source = nmr(Domain::Frequency, "Specimen A", "HSQC");
         let source_id = source.resource_id();
-        let mut derived = Dataset::Nmr(Box::new(NmrDataset::from_slice(
-            Slice1D {
-                coordinates: vec![2.0, 1.0],
-                domain: Domain::Frequency,
-                values: vec![Complex64::new(1.0, 0.0); 2],
-                nucleus: "1H".to_owned(),
-                observe_freq_mhz: 400.0,
-                position: Some(3.0),
-                position_domain: Domain::Frequency,
-            },
-            "F2 slice at 3 ppm".to_owned(),
-        )));
+        let mut derived = Dataset::Nmr(Box::new(
+            NmrDataset::from_slice(
+                Slice1D {
+                    coordinates: vec![2.0, 1.0],
+                    domain: Domain::Frequency,
+                    values: vec![Complex64::new(1.0, 0.0); 2],
+                    nucleus: "1H".to_owned(),
+                    observe_freq_mhz: Some(400.0),
+                    reference_freq_mhz: Some(400.0),
+                    unit: nmr::axis::AxisUnit::Ppm,
+                    position: Some(3.0),
+                    position_domain: Domain::Frequency,
+                },
+                "F2 slice at 3 ppm".to_owned(),
+            )
+            .unwrap(),
+        ));
         derived.set_lineage(Some(DatasetLineage::new(
             DerivationKind::Slice,
             [source_id],
@@ -669,12 +676,15 @@ mod tests {
                 domain: Domain::Time,
                 values: vec![Complex64::new(1.0, 0.0); 2],
                 nucleus: "1H".to_owned(),
-                observe_freq_mhz: 400.0,
+                observe_freq_mhz: Some(400.0),
+                reference_freq_mhz: Some(400.0),
+                unit: nmr::axis::AxisUnit::Ppm,
                 position: None,
                 position_domain: Domain::Time,
             },
             "FID".to_owned(),
-        );
+        )
+        .unwrap();
         let frequency = nmr(Domain::Frequency, "A", "zg30");
         let time = nmr_1d_observation(&time);
         let frequency = nmr_1d_observation(frequency.as_nmr().unwrap());

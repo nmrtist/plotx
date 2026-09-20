@@ -84,7 +84,7 @@ pub(super) fn synthetic_dosy(d_true: f64) -> NmrData2D {
 #[test]
 fn dataset_builds_dosy_map() {
     let d_true = 1.2e-9;
-    let mut ds = Nmr2DDataset::load(synthetic_dosy(d_true));
+    let mut ds = Nmr2DDataset::load(synthetic_dosy(d_true)).unwrap();
     assert!(ds.is_pseudo());
     assert_eq!(ds.preset, Preset2D::Dosy);
 
@@ -95,13 +95,16 @@ fn dataset_builds_dosy_map() {
 
 #[test]
 fn ordered_series_supports_region_analysis() {
-    let series = Dataset::Nmr2D(Box::new(Nmr2DDataset::load(synthetic_dosy(1.2e-9))));
+    let series = Dataset::Nmr2D(Box::new(
+        Nmr2DDataset::load(synthetic_dosy(1.2e-9)).unwrap(),
+    ));
     assert!(series.supports_region_analysis());
     assert!(series.tool_groups().contains(&ToolGroup::RegionAnalysis));
 
     let mut without_ruler = synthetic_dosy(1.2e-9);
     without_ruler.pseudo_axis = None;
-    let not_a_series = Dataset::Nmr2D(Box::new(Nmr2DDataset::load(without_ruler)));
+    without_ruler.diffusion = None;
+    let not_a_series = Dataset::Nmr2D(Box::new(Nmr2DDataset::load(without_ruler).unwrap()));
     assert!(!not_a_series.supports_region_analysis());
     assert!(
         !not_a_series
@@ -117,7 +120,7 @@ fn ordered_series_supports_region_analysis() {
 #[test]
 fn region_support_matches_what_the_table_builder_accepts() {
     let mut app = crate::state::PlotxApp::new_with_settings(crate::settings::Settings::default());
-    let mut series = Nmr2DDataset::load(synthetic_dosy(1.2e-9));
+    let mut series = Nmr2DDataset::load(synthetic_dosy(1.2e-9)).unwrap();
     series.region_analysis.regions = vec![Region {
         id: RegionId::new(0),
         lo: 0.9,
@@ -141,7 +144,8 @@ fn region_support_matches_what_the_table_builder_accepts() {
     // the Series Table command from offering a table that cannot be built.
     let mut ruler_less = synthetic_dosy(1.2e-9);
     ruler_less.pseudo_axis = None;
-    let mut stale = Nmr2DDataset::load(ruler_less);
+    ruler_less.diffusion = None;
+    let mut stale = Nmr2DDataset::load(ruler_less).unwrap();
     stale.region_analysis.regions = vec![Region {
         id: RegionId::new(0),
         lo: 0.9,
@@ -163,7 +167,7 @@ fn region_support_matches_what_the_table_builder_accepts() {
 
 #[test]
 fn dataset_builds_ilt_dosy_map() {
-    let mut ds = Nmr2DDataset::load(synthetic_dosy(1.2e-9));
+    let mut ds = Nmr2DDataset::load(synthetic_dosy(1.2e-9)).unwrap();
     let params = IltParams {
         lambda: 1e-2,
         d_min: 1e-10,
@@ -182,7 +186,7 @@ fn dataset_builds_ilt_dosy_map() {
 
 #[test]
 fn pseudo_map_fields_are_truthful_scalar_grids_with_map_encodings() {
-    let mut dataset = Nmr2DDataset::load(synthetic_dosy(1.2e-9));
+    let mut dataset = Nmr2DDataset::load(synthetic_dosy(1.2e-9)).unwrap();
     assert!(dataset.build_dosy_map());
     assert!(dataset.build_ilt_map(IltParams {
         lambda: 1e-2,
@@ -228,7 +232,7 @@ fn switching_dosy_method_serves_that_methods_figure() {
         d_max: 1e-8,
         n_grid: 64,
     };
-    let mut ds = Nmr2DDataset::load(synthetic_dosy(1.2e-9));
+    let mut ds = Nmr2DDataset::load(synthetic_dosy(1.2e-9)).unwrap();
     assert!(ds.build_dosy_map(), "per-column map should populate");
     assert!(ds.build_ilt_map(params), "ILT map should populate");
     assert!(ds.figure().title.starts_with("DOSY (ILT)"));
@@ -247,41 +251,56 @@ fn switching_dosy_method_serves_that_methods_figure() {
     assert!(ds.figure().title.starts_with("DOSY (ILT)"));
 }
 
-/// A NUS schedule mutates `data` while leaving the recipe untouched, so nothing in
-/// `params` records that the cached base is void. Without the explicit flag, a
-/// frequency-only edit arriving before the reconstruction lands would schedule a
-/// re-apply from the pre-NUS base and strand the reconstruction forever.
+/// Acquisition coordinates stay fixed; reconstruction invocation changes invalidate the base.
 #[test]
-fn entering_a_nus_schedule_forces_a_retransform_until_a_base_lands() {
+fn changing_nus_reconstruction_inputs_keeps_the_base_stale_until_a_result_lands() {
     let mut data = synthetic_dosy(1.2e-9);
+    data.pseudo_axis = None;
+    data.diffusion = None;
     data.nus = Some(plotx_io::NusMeta {
         grid: data.rows * 2,
         acquired: data.rows,
-        idx_base: 0,
-        mode: String::new(),
-        echo_antiecho: false,
-        schedule: None,
+        schedule: Some((0..data.rows).map(|index| 2 * index).collect()),
     });
-    let mut ds = Nmr2DDataset::load(data);
-    assert!(!ds.base_stale);
-
-    let rows = ds.data.rows;
-    ds.set_nus_schedule(&(0..rows).collect::<Vec<_>>(), 0)
-        .expect("a full in-grid schedule is valid");
-    assert!(ds.base_stale, "the cached base no longer derives from data");
-
-    ds.retransform();
-    assert!(!ds.base_stale, "a fresh base clears the flag");
+    let mut app = PlotxApp::new();
+    app.doc
+        .datasets
+        .push(Dataset::Nmr2D(Box::new(Nmr2DDataset::load(data).unwrap())));
+    let before = app.doc.datasets[0]
+        .as_nmr2d()
+        .unwrap()
+        .data
+        .source_dataset()
+        .dataset()
+        .canonical_digests();
+    let mut state = DatasetProcessingState::from_dataset(&app.doc.datasets[0]);
+    if let DatasetProcessingState::Nmr2D { nus_request, .. } = &mut state {
+        *nus_request = Some(plotx_processing::nmr_execution::NusRequest {
+            noise_standard_deviation: Some(0.01),
+            ..Default::default()
+        });
+    }
+    app.set_dataset_processing_state(0, &state).unwrap();
+    let ds = app.doc.datasets[0].as_nmr2d().unwrap();
+    assert!(ds.base_stale);
+    assert_eq!(
+        before,
+        ds.data.source_dataset().dataset().canonical_digests()
+    );
+    app.doc.datasets[0]
+        .as_nmr2d_mut()
+        .unwrap()
+        .retransform()
+        .unwrap();
+    assert!(!app.doc.datasets[0].as_nmr2d().unwrap().base_stale);
 }
 
 #[test]
 fn persisted_display_and_method_changes_mark_the_document_dirty() {
     let mut app = PlotxApp::new_with_settings(crate::settings::Settings::default());
-    app.doc
-        .datasets
-        .push(Dataset::Nmr2D(Box::new(Nmr2DDataset::load(
-            synthetic_dosy(1.2e-9),
-        ))));
+    app.doc.datasets.push(Dataset::Nmr2D(Box::new(
+        Nmr2DDataset::load(synthetic_dosy(1.2e-9)).unwrap(),
+    )));
 
     app.doc.dirty = false;
     app.set_pseudo_display(0, PseudoDisplay::DosyMap);
@@ -302,7 +321,7 @@ fn persisted_display_and_method_changes_mark_the_document_dirty() {
 #[test]
 fn switching_an_existing_stack_canvas_to_dosy_rebuilds_it_as_a_map() {
     let mut app = PlotxApp::new_with_settings(crate::settings::Settings::default());
-    let mut dataset = Nmr2DDataset::load(synthetic_dosy(1.2e-9));
+    let mut dataset = Nmr2DDataset::load(synthetic_dosy(1.2e-9)).unwrap();
     assert!(dataset.build_dosy_map());
     dataset.display = PseudoDisplay::Stack;
     app.doc.datasets.push(Dataset::Nmr2D(Box::new(dataset)));
@@ -444,11 +463,11 @@ fn switching_an_existing_stack_canvas_to_dosy_rebuilds_it_as_a_map() {
 
 #[test]
 fn processing_invalidation_explains_the_stack_fallback() {
-    let mut dataset = Nmr2DDataset::load(synthetic_dosy(1.2e-9));
+    let mut dataset = Nmr2DDataset::load(synthetic_dosy(1.2e-9)).unwrap();
     assert!(dataset.build_dosy_map());
     assert_eq!(dataset.display, PseudoDisplay::DosyMap);
 
-    dataset.rebuild();
+    dataset.rebuild().unwrap();
 
     assert!(dataset.dosy_map.is_none());
     assert!(dataset.figure().title.starts_with("Pseudo-2D stack —"));
@@ -466,7 +485,7 @@ fn ilt_invocation_resolution_obeys_explicit_provenance_default_and_reports_empty
     let mut settings = crate::settings::Settings::default();
     settings.processing.ilt_lambda = 0.8;
     let mut app = PlotxApp::new_with_settings(settings);
-    let mut dataset = Nmr2DDataset::load(synthetic_dosy(1.2e-9));
+    let mut dataset = Nmr2DDataset::load(synthetic_dosy(1.2e-9)).unwrap();
     let previous = IltParams {
         lambda: 0.03,
         d_min: 1e-10,
@@ -488,10 +507,9 @@ fn ilt_invocation_resolution_obeys_explicit_provenance_default_and_reports_empty
     let mut empty = synthetic_dosy(1.2e-9);
     empty.data.fill(Complex64::new(0.0, 0.0));
     let mut empty_app = PlotxApp::new_with_settings(crate::settings::Settings::default());
-    empty_app
-        .doc
-        .datasets
-        .push(Dataset::Nmr2D(Box::new(Nmr2DDataset::load(empty))));
+    empty_app.doc.datasets.push(Dataset::Nmr2D(Box::new(
+        crate::nmr_test_support::load_2d(empty).unwrap(),
+    )));
     // Deliberately not a boundary value: at MIN or MAX the assertion below would
     // be satisfied by the range text the same message prints, and would still
     // pass with the value itself removed from the message.
@@ -545,9 +563,9 @@ fn a_build_that_fits_nothing_still_marks_the_document_dirty() {
         .data
         .iter_mut()
         .for_each(|value| *value = Complex64::ZERO);
-    app.doc
-        .datasets
-        .push(Dataset::Nmr2D(Box::new(Nmr2DDataset::load(empty))));
+    app.doc.datasets.push(Dataset::Nmr2D(Box::new(
+        crate::nmr_test_support::load_2d(empty).unwrap(),
+    )));
 
     app.doc.dirty = false;
     app.build_dosy_map_for(0);
@@ -580,7 +598,7 @@ fn a_build_that_fits_nothing_still_marks_the_document_dirty() {
 #[test]
 fn the_missing_map_note_tracks_the_current_selection_instead_of_persisting() {
     let mut app = PlotxApp::new_with_settings(crate::settings::Settings::default());
-    let mut ds = Nmr2DDataset::load(synthetic_dosy(1.2e-9));
+    let mut ds = Nmr2DDataset::load(synthetic_dosy(1.2e-9)).unwrap();
     assert!(ds.build_dosy_map());
     app.doc.datasets.push(Dataset::Nmr2D(Box::new(ds)));
 
@@ -627,7 +645,7 @@ fn the_missing_map_note_tracks_the_current_selection_instead_of_persisting() {
 /// produce a different digest.
 #[test]
 fn the_data_fingerprint_covers_coordinates_and_diffusion_metadata() {
-    let mut ds = Nmr2DDataset::load(synthetic_dosy(1.2e-9));
+    let mut ds = Nmr2DDataset::load(synthetic_dosy(1.2e-9)).unwrap();
     let Processed2D::Stack(stack) = &ds.processed else {
         panic!("synthetic DOSY must process as a stack");
     };
@@ -713,11 +731,9 @@ fn ilt_parameters_from_a_project_are_validated_before_the_inversion() {
     // And the build path must actually consult it rather than reaching the
     // inversion with the value.
     let mut app = PlotxApp::new_with_settings(crate::settings::Settings::default());
-    app.doc
-        .datasets
-        .push(Dataset::Nmr2D(Box::new(Nmr2DDataset::load(
-            synthetic_dosy(1.2e-9),
-        ))));
+    app.doc.datasets.push(Dataset::Nmr2D(Box::new(
+        Nmr2DDataset::load(synthetic_dosy(1.2e-9)).unwrap(),
+    )));
     app.build_ilt_map_for_with_params(0, Some(huge_grid));
     assert!(
         app.doc.datasets[0].as_nmr2d().unwrap().ilt_map.is_none(),

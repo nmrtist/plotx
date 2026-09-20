@@ -12,8 +12,8 @@
 use super::compute_field::run_build_contour;
 use crate::state::{
     AxisSampling, ChartSpec, ContourGeometryCacheKey, DataBinding, DataDomain, Dataset, DatasetId,
-    FieldId, FieldRef, FieldVersion, FiniteF64, Nmr2DDataset, PlotxApp, ResolvedContourLevels,
-    ScalarGrid2D, StackSpec, VersionedFieldRef,
+    FieldId, FieldRef, FieldVersion, FiniteF64, PlotxApp, ResolvedContourLevels, ScalarGrid2D,
+    StackSpec, VersionedFieldRef,
 };
 use num_complex::Complex64;
 use plotx_figure::{
@@ -180,24 +180,27 @@ fn dense_dataset(label: &str, values: &[f32]) -> Dataset {
         nucleus: nucleus.to_owned(),
         group_delay: 0.0,
     };
-    Dataset::Nmr2D(Box::new(Nmr2DDataset::load(NmrData2D {
-        data: values
-            .iter()
-            .map(|value| Complex64::new(f64::from(*value), 0.0))
-            .collect(),
-        rows: SIDE,
-        cols: SIDE,
-        domain: Domain::Frequency,
-        direct: dimension("1H"),
-        indirect: dimension("13C"),
-        quad: QuadMode::Complex,
-        indirect_conjugate: false,
-        experiment: None,
-        pseudo_axis: None,
-        diffusion: None,
-        nus: None,
-        source: label.to_owned(),
-    })))
+    Dataset::Nmr2D(Box::new(
+        crate::nmr_test_support::load_2d(NmrData2D {
+            data: values
+                .iter()
+                .map(|value| Complex64::new(f64::from(*value), 0.0))
+                .collect(),
+            rows: SIDE,
+            cols: SIDE,
+            domain: Domain::Frequency,
+            direct: dimension("1H"),
+            indirect: dimension("13C"),
+            quad: QuadMode::Complex,
+            indirect_conjugate: false,
+            experiment: None,
+            pseudo_axis: None,
+            diffusion: None,
+            nus: None,
+            source: label.to_owned(),
+        })
+        .unwrap(),
+    ))
 }
 
 #[test]

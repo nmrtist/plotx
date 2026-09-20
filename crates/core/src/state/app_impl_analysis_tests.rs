@@ -35,7 +35,7 @@ fn live_and_frozen_region_tables_record_lineage() {
         nus: None,
         source: "series".to_owned(),
     };
-    let mut source = Nmr2DDataset::load(data);
+    let mut source = crate::nmr_test_support::load_2d(data).unwrap();
     source.region_analysis.regions.push(Region {
         id: RegionId::new(0),
         lo: 4.0,

@@ -59,19 +59,46 @@ A `.plotxproc` file stores one processing pipeline, without any data — save a
 recipe once and apply it to a whole series of similar experiments, on any
 machine. See [Recipes and templates](/guides/templates/).
 
+## NMR data and projects
+
+PlotX supports 1D and 2D NMR, including series with a parameter axis.
+Choose the input that matches the data you want to work with:
+
+- **Bruker:** select an experiment directory for raw data, or a spectrum inside
+  `pdata` for processed data. If a directory contains ambiguous candidates,
+  select a specific file or processing directory. States 2D (`FnMODE=4`) is supported.
+  Processed spectra retain the real and imaginary components present in the files.
+- **JEOL:** select a `.jdf` file containing a supported raw or processed acquisition.
+- **JCAMP-DX:** ordinary XYDATA spectra with one intensity per coordinate,
+  version 5.00 or 5.01, are supported with Hz or ppm axes. LINK, NTUPLES, and
+  peak tables are not supported.
+
+Missing nucleus, frequency-reference, or digital-filter-delay information remains
+unknown. Hz spectra can be displayed directly, but some analyses need additional
+calibration. Raw data with unknown filter delay initially appears as an FID;
+see [Group-delay correction](/guides/processing/#group-delay-correction) to view
+an uncorrected spectrum, and [calibration requirements](/guides/processing/#check-calibration-before-analysis)
+before choosing an analysis. Unknown coordinates or unsupported data arrangements
+produce an import error or diagnostic.
+
+JEOL and Bruker NUS support is experimental and does not cover every instrument
+or acquisition setting. Check import diagnostics and compare results with a trusted
+reference before relying on an unfamiliar acquisition type.
+
+Saving a `.plotx` project retains the imported NMR components, sampling order,
+source information, warnings, and processing settings. Reopening recomputes spectra
+from the saved settings without requiring the original vendor files.
+
 ## Varian/Agilent VnmrJ raw NMR
 
-PlotX imports raw time-domain 1D and conventional 2D acquisitions. Select the
-`.fid` directory or the `fid` file inside it; the `fid` and `procpar` files must
-both be present in that directory. A `.fid` directory name by itself is not
-enough to identify a dataset.
+Select a `.fid` directory containing both `fid` and `procpar`, or the `fid` file
+inside it. Supported acquisitions are raw 1D, a series varying one ungrouped
+parameter, and 2D with `phase=[1,2]`. Samples may be big-endian 16-bit integers,
+32-bit integers, or 32-bit floating-point values.
 
-The importer accepts the common 16-bit integer, 32-bit integer, and 32-bit
-floating-point sample formats, including conventional States 2D data.
-Processed spectra, 3D or 4D experiments, imaging, pseudo-2D experiments,
-non-uniform sampling, and arrayed parameters other than phase are not
-supported. The import also stops if the recorded dimensions do not match the
-data.
+Grouped or multiple parameter arrays, other phase orders, Varian NUS, more than
+two dimensions, and processed spectra are unsupported. Import stops if the
+recorded dimensions or component arrangement do not match the data.
 
 ## SCIEX legacy WIFF
 

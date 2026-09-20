@@ -13,8 +13,9 @@ pub(super) fn setup(app: &mut PlotxApp, ctx: &egui::Context) -> Result<(), Strin
         .clone();
     let mut params = CraftParams::conventional();
     params.maximum_model_order = 8;
-    let invocation = CraftInvocation::acquisition(&data, params);
-    let result = process_craft_cancellable(&data, &invocation, &|| false)
+    let fid = data.craft_fid().map_err(|error| error.to_string())?;
+    let invocation = CraftInvocation::acquisition(&fid, params);
+    let result = process_craft_cancellable(&fid, &invocation, &|| false)
         .map_err(|error| format!("CRAFT screenshot analysis failed: {error}"))?;
     let nmr = app.doc.datasets[0]
         .as_nmr_mut()

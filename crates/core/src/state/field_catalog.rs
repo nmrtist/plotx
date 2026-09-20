@@ -220,8 +220,9 @@ pub(crate) fn pseudo_axis_display_scale(unit: &str) -> f64 {
 
 pub(crate) fn attach_pseudo_trace_collection(
     catalog: &mut FieldCatalog,
-    data: &plotx_io::NmrData2D,
+    data: &plotx_io::nmr_series::NmrSeriesSource,
 ) {
+    attach_nus_observations(catalog, data);
     let Some(field) = catalog.id_for_key("nmr.stack") else {
         return;
     };
@@ -268,6 +269,42 @@ pub(crate) fn attach_pseudo_trace_collection(
             id: collection,
             axis_quantity: quantity.into(),
             axis_unit: unit.into(),
+            items,
+        },
+    );
+}
+
+fn attach_nus_observations(
+    catalog: &mut FieldCatalog,
+    data: &plotx_io::nmr_series::NmrSeriesSource,
+) {
+    let (Some(nus), Some(field)) = (&data.nus, catalog.id_for_key("nmr.observations")) else {
+        return;
+    };
+    let id = TraceCollectionId::derived(data.source.as_bytes(), b"nmr.observations");
+    let items = nus
+        .schedule
+        .iter()
+        .enumerate()
+        .map(|(ordinal, coordinate)| TraceItemDescriptor {
+            id: TraceItemId::derived(id, &(ordinal as u64).to_le_bytes()),
+            parameters: vec![TraceItemParameter {
+                key: "observation".into(),
+                name: "Observation".into(),
+                value: TraceParameterValue::Text {
+                    value: format!("Observation {} (grid index {})", ordinal + 1, coordinate),
+                },
+            }],
+            primary_label_parameter: "observation".into(),
+            label_override: None,
+        })
+        .collect();
+    catalog.set_trace_collection(
+        field,
+        TraceCollectionCatalog {
+            id,
+            axis_quantity: "Acquired NUS observation".into(),
+            axis_unit: "".into(),
             items,
         },
     );
@@ -378,6 +415,7 @@ pub(crate) fn nmr2d_field_catalog() -> FieldCatalog {
         "nmr.stack".to_owned(),
         "nmr.dosy_map".to_owned(),
         "nmr.ilt_map".to_owned(),
+        "nmr.observations".to_owned(),
     ])
 }
 

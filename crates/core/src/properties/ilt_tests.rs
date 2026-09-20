@@ -2,7 +2,7 @@ use super::*;
 use crate::automation::{ResourceRef, TargetRef};
 use crate::properties::ilt;
 use crate::settings::{MAX_ILT_LAMBDA, MIN_ILT_LAMBDA, Settings};
-use crate::state::{Dataset, Nmr2DDataset, PlotxApp};
+use crate::state::{Dataset, PlotxApp};
 use crate::{DosyInvocation, DosyResultProvenance, IltParams};
 use num_complex::Complex64;
 use plotx_io::{
@@ -49,7 +49,7 @@ fn data() -> NmrData2D {
 
 pub(crate) fn ilt_app(lambda: f64) -> (PlotxApp, TargetRef) {
     let mut app = PlotxApp::new_with_settings(Settings::default());
-    let mut dataset = Nmr2DDataset::load(data());
+    let mut dataset = crate::nmr_test_support::load_2d(data()).unwrap();
     dataset.ilt_provenance = Some(DosyResultProvenance {
         algorithm: "ilt_map".to_owned(),
         version: 1,

@@ -1,6 +1,9 @@
 use super::*;
+#[path = "ui_state_nmr_import.rs"]
+mod nmr_import;
 use crate::actions::PendingWheelPropertyEdit;
 use crate::operation::{OperationHistory, OperationId, OperationReport};
+pub use nmr_import::NmrImportDraft;
 use std::collections::{HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
@@ -205,6 +208,7 @@ pub struct UiState {
     pub export_options: Option<ExportDialogState>,
     pub data_export: Option<crate::data_export::DataExportDialogState>,
     pub table_import_preview: Option<TableImportPreviewState>,
+    pub nmr_import: Option<NmrImportDraft>,
     pub settings_dialog: Option<SettingsDialog>,
     pub command_palette: Option<CommandPaletteState>,
     pub ribbon_tab: WorkflowTab,
@@ -444,6 +448,7 @@ impl Default for UiState {
             export_options: None,
             data_export: None,
             table_import_preview: None,
+            nmr_import: None,
             settings_dialog: None,
             command_palette: None,
             ribbon_tab: WorkflowTab::default(),
@@ -637,6 +642,7 @@ pub struct Session {
     /// Off-thread runner for the heaviest button-triggered DOSY computations.
     /// Not serialized; rebuilt fresh whenever a `PlotxApp` is constructed.
     pub compute: ComputeService,
+    pub data_imports: super::DataImports,
     /// Background update checker/downloader. Not serialized.
     pub updates: crate::update::UpdateService,
     pub line_fit_job: Option<crate::state::LineFitJob>,

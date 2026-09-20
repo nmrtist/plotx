@@ -81,6 +81,9 @@ pub fn render(
     sync_chrome_theme(&ctx, app.settings.appearance.theme);
     clipboard_table_paste.begin_frame(app, &ctx);
     file_dialogs::image_import::poll(app, &ctx);
+    if app.poll_data_import() {
+        ctx.request_repaint_after(std::time::Duration::from_millis(16));
+    }
     file_dialogs::image_import::large_image_consent_window(app, &ctx);
     if let Some(payload) = app.poll_data_export() {
         copy_table_export(&ctx, payload);
@@ -116,6 +119,7 @@ pub fn render(
         || app.session.ui.export_options.is_some()
         || app.session.ui.data_export.is_some()
         || app.session.ui.table_import_preview.is_some()
+        || app.session.ui.nmr_import.is_some()
         || app.session.ui.settings_dialog.is_some()
         || batch_workflow.is_open();
     if !modal_open {
@@ -201,6 +205,7 @@ pub fn render(
     quit_confirm_window(app, &ctx);
     diagnostic_history_window(app, &ctx);
     file_dialogs::processing_scheme_window(app, &ctx);
+    file_dialogs::nmr_sampling::window(app, &ctx);
     processing_templates::processing_template_window(app, &ctx);
     arithmetic::spectrum_arithmetic_window(app, &ctx);
     align::align_spectra_window(app, &ctx);
@@ -217,6 +222,11 @@ pub fn render(
     app.finish_pending_wheel_zoom(now, false);
     app.finish_pending_wheel_property(now, false);
     activity::observe(app);
+    // Menus and drops can enqueue after this frame's poll. Schedule the first
+    // worker poll even if the user stops moving the mouse immediately afterward.
+    if app.session.data_imports.is_pending() {
+        ctx.request_repaint_after(std::time::Duration::from_millis(16));
+    }
 }
 
 fn project_window_title(app: &PlotxApp) -> String {

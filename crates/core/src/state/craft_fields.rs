@@ -98,7 +98,7 @@ impl NmrDataset {
             .chain(self.craft_field_specs().map(CraftFieldSpec::key))
             .collect::<Vec<_>>();
         self.field_catalog
-            .reconcile_keys(keys, &self.data.source, None);
+            .reconcile_keys(keys, self.data.source(), None);
         self.attach_craft_trace_collections();
     }
 
@@ -116,7 +116,7 @@ impl NmrDataset {
                 continue;
             };
             let collection =
-                TraceCollectionId::derived(self.data.source.as_bytes(), key.as_bytes());
+                TraceCollectionId::derived(self.data.source().as_bytes(), key.as_bytes());
             let items = run
                 .region_summaries
                 .iter()
@@ -192,7 +192,7 @@ impl NmrDataset {
                 let mut figure = Figure::new(
                     "",
                     Axis::new(
-                        crate::figures::axis_label(&self.data.nucleus),
+                        crate::figures::axis_label(self.data.nucleus()),
                         observed.ppm_bounds().0,
                         observed.ppm_bounds().1,
                     )
@@ -241,7 +241,7 @@ impl NmrDataset {
             CraftFieldKind::Residual | CraftFieldKind::Groups => {
                 let (x, y) = self.craft_curve(spec)?;
                 Some(single_curve_figure(
-                    &self.data.nucleus,
+                    self.data.nucleus(),
                     if spec.kind == CraftFieldKind::Residual {
                         "Complex residual"
                     } else {
@@ -264,7 +264,7 @@ impl NmrDataset {
         self.craft_run(spec.run)?;
         let spectrum = self.cached_model_spectrum(spec.run, Some(region))?;
         single_curve_figure(
-            &self.data.nucleus,
+            self.data.nucleus(),
             &label,
             spectrum.ppm,
             channel_values(&spectrum.values, spec.channel),
@@ -299,7 +299,9 @@ impl NmrDataset {
                 .derived_plan
                 .reconstruction_points
                 .max(1),
-        );
+        )
+        .map_err(|error| eprintln!("CRAFT model display: {error}"))
+        .ok()?;
         if let Ok(mut cache) = self.craft_spectrum_cache.lock() {
             cache.models.insert((run, region), spectrum.clone());
         }
@@ -313,19 +315,25 @@ impl NmrDataset {
             return Some(spectrum.clone());
         }
         let stored = self.craft_run(run)?;
+        let data = self
+            .data
+            .craft_fid()
+            .map_err(|error| eprintln!("CRAFT residual display: {error}"))
+            .ok()?;
         let model = synthesize_craft_fid(
             &stored.components,
-            self.data.points.len(),
-            self.data.spectral_width_hz,
+            data.points.len(),
+            data.spectral_width_hz,
         );
-        let residual = self
-            .data
+        let residual = data
             .points
             .iter()
             .zip(model)
             .map(|(observed, model)| observed - model)
             .collect();
-        let spectrum = transformed_points(self, residual);
+        let spectrum = transformed_points(self, residual)
+            .map_err(|error| eprintln!("CRAFT residual display: {error}"))
+            .ok()?;
         if let Ok(mut cache) = self.craft_spectrum_cache.lock() {
             cache.residuals.insert(run, spectrum.clone());
         }
@@ -337,22 +345,46 @@ fn transformed_fid(
     dataset: &NmrDataset,
     components: &[plotx_processing::craft::CraftComponent],
     point_count: usize,
-) -> plotx_processing::Spectrum {
+) -> Result<plotx_processing::Spectrum, String> {
+    let data = dataset
+        .data
+        .craft_fid()
+        .map_err(|error| error.to_string())?;
     transformed_points(
         dataset,
-        synthesize_craft_fid(components, point_count, dataset.data.spectral_width_hz),
+        synthesize_craft_fid(components, point_count, data.spectral_width_hz),
     )
 }
 
 fn transformed_points(
     dataset: &NmrDataset,
     points: Vec<num_complex::Complex64>,
-) -> plotx_processing::Spectrum {
-    let mut data = dataset.data.clone();
-    data.points = points;
-    let base =
-        plotx_processing::transform_base(&data, dataset.pipeline(), dataset.group_delay_correct);
-    plotx_processing::reapply(&base, dataset.pipeline())
+) -> Result<plotx_processing::Spectrum, String> {
+    use plotx_processing::nmr_bridge::{DelayPolicy, RecipeRange};
+    let mut view = dataset
+        .data
+        .craft_fid()
+        .map_err(|error| error.to_string())?;
+    view.points = points;
+    let source =
+        plotx_io::nmr_view::NmrSource::try_from(view).map_err(|error| error.to_string())?;
+    let output = plotx_processing::nmr_execution::execute_1d(
+        &source,
+        dataset.pipeline(),
+        if dataset.group_delay_correct {
+            DelayPolicy::AxisEvidence
+        } else {
+            DelayPolicy::Disabled
+        },
+        RecipeRange::All,
+        &mut nmr::ExecutionContext::default(),
+    )
+    .map_err(|error| error.to_string())?;
+    output
+        .view
+        .as_frequency()
+        .cloned()
+        .ok_or_else(|| "CRAFT spectrum display requires an FFT".into())
 }
 
 fn channel_values(values: &[num_complex::Complex64], channel: CraftSpectrumChannel) -> Vec<f64> {

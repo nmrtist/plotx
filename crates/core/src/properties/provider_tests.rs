@@ -167,11 +167,9 @@ fn a_same_value_write_is_reported_without_an_empty_commit() {
 #[test]
 fn line_stroke_width_reports_mixed_values_and_skips_other_encodings() {
     let (mut app, contour) = contour_app();
-    app.doc
-        .datasets
-        .push(Dataset::Nmr(Box::new(NmrDataset::load(nmr1d_with(
-            "lines",
-        )))));
+    app.doc.datasets.push(Dataset::Nmr(Box::new(
+        NmrDataset::load(nmr1d_with("lines")).unwrap(),
+    )));
     let mut line_targets = Vec::new();
     for name in ["Line A", "Line B"] {
         let id = app.doc.canvases[0].allocate_object_id();
@@ -274,11 +272,9 @@ fn line_stroke_width_reports_mixed_values_and_skips_other_encodings() {
 #[test]
 fn a_line_readout_dispatches_by_property_address() {
     let (mut app, _) = contour_app();
-    app.doc
-        .datasets
-        .push(Dataset::Nmr(Box::new(NmrDataset::load(nmr1d_with(
-            "line readout",
-        )))));
+    app.doc.datasets.push(Dataset::Nmr(Box::new(
+        NmrDataset::load(nmr1d_with("line readout")).unwrap(),
+    )));
     let id = app.doc.canvases[0].allocate_object_id();
     let object = app.build_plot_object(
         1,

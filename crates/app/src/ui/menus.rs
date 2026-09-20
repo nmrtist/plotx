@@ -54,6 +54,7 @@ pub(crate) fn menu_bar_spec() -> Vec<(&'static str, Vec<MenuEntry>)> {
                 Separator,
                 Command(CommandId::OpenFile),
                 Command(CommandId::OpenFolder),
+                Command(CommandId::ImportNmrSampling),
                 Command(CommandId::RunBatchWorkflow),
                 Submenu(
                     "Open Recent",

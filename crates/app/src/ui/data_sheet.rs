@@ -140,24 +140,16 @@ pub(super) fn data_sheet_window(app: &mut PlotxApp, ctx: &egui::Context) {
 
 pub(super) fn nmr2d_sheet(ui: &mut Ui, n: &plotx_core::state::Nmr2DDataset) {
     let d = &n.data;
-    ui.label(format!(
-        "{} × {} points · indirect quadrature {:?}",
-        d.cols, d.rows, d.quad
-    ));
-    ui.label(format!(
-        "Direct (F2): {} · {:.3} MHz · SW {:.0} Hz · carrier {:.2} ppm",
-        d.direct.nucleus,
-        d.direct.observe_freq_mhz,
-        d.direct.spectral_width_hz,
-        d.direct.carrier_ppm
-    ));
-    ui.label(format!(
-        "Indirect (F1): {} · {:.3} MHz · SW {:.0} Hz · carrier {:.2} ppm",
-        d.indirect.nucleus,
-        d.indirect.observe_freq_mhz,
-        d.indirect.spectral_width_hz,
-        d.indirect.carrier_ppm
-    ));
+    ui.label(format!("{} × {} points (F2 × F1)", d.cols, d.rows));
+    for (name, axis) in [("Direct (F2)", &d.direct), ("Indirect (F1)", &d.indirect)] {
+        ui.label(format!("{name}: {} · {:?}", axis.nucleus, axis.domain));
+        if let Some(frequency) = axis.observe_freq_mhz {
+            ui.label(format!("Observe frequency: {frequency:.3} MHz"));
+        }
+        if let Some(width) = axis.spectral_width_hz {
+            ui.label(format!("Spectral width: {width:.0} Hz"));
+        }
+    }
     if let Some(exp) = &d.experiment {
         ui.label(format!("Experiment hint: {exp}"));
     }
@@ -167,8 +159,8 @@ pub(super) fn nmr2d_sheet(ui: &mut Ui, n: &plotx_core::state::Nmr2DDataset) {
             let (f2lo, f2hi) = s.f2_bounds();
             let (f1lo, f1hi) = s.f1_bounds();
             ui.label(format!(
-                "Contour spectrum {}×{} (F1×F2) — F2 {f2lo:.2}..{f2hi:.2} ppm, F1 {f1lo:.2}..{f1hi:.2} ppm",
-                s.f1_size, s.f2_size
+                "Contour spectrum {}×{} (F1×F2) — F2 {f2lo:.2}..{f2hi:.2} {}, F1 {f1lo:.2}..{f1hi:.2} {}",
+                s.f1_size, s.f2_size, s.direct.unit_label(), s.indirect.unit_label()
             ));
         }
         plotx_processing::Processed2D::Stack(s) => {
@@ -182,7 +174,7 @@ pub(super) fn nmr2d_sheet(ui: &mut Ui, n: &plotx_core::state::Nmr2DDataset) {
 
 pub(super) fn nmr_sheet(ui: &mut Ui, n: &plotx_core::state::NmrDataset) {
     let len = n.processed.values().len();
-    ui.label(format!("{} · {} pts", n.data.nucleus, len));
+    ui.label(format!("{} · {} pts", n.data.nucleus(), len));
     ui.separator();
 
     let columns: Vec<(String, Vec<f64>)> = match &n.processed {
@@ -195,7 +187,10 @@ pub(super) fn nmr_sheet(ui: &mut Ui, n: &plotx_core::state::NmrDataset) {
             ),
         ],
         plotx_processing::Processed1D::Frequency(spec) => vec![
-            ("ppm".to_owned(), spec.ppm.clone()),
+            (
+                plotx_processing::axis_unit_label(Some(spec.unit)).to_owned(),
+                spec.ppm.clone(),
+            ),
             ("Real".to_owned(), spec.real()),
             (
                 "Imag".to_owned(),

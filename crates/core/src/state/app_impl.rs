@@ -79,6 +79,7 @@ impl PlotxApp {
                     ..Default::default()
                 },
                 compute: ComputeService::new(),
+                data_imports: DataImports::default(),
                 updates: crate::update::UpdateService::new(&settings.updates),
                 line_fit_job: None,
                 xps_fit_job: None,
@@ -145,23 +146,25 @@ impl PlotxApp {
         let Some(d2) = self.doc.datasets.get(dataset).and_then(Dataset::as_nmr2d) else {
             return;
         };
-        let Processed2D::Ft(spec) = &d2.processed else {
+        let Processed2D::Ft(_) = &d2.processed else {
             return;
         };
-        fig.top_projection = self.build_axis_trace(spec, SliceKind::Row, &projections.top);
-        fig.left_projection = self.build_axis_trace(spec, SliceKind::Column, &projections.left);
+        fig.top_projection =
+            self.build_axis_trace(&d2.native_processed, SliceKind::Row, &projections.top);
+        fig.left_projection =
+            self.build_axis_trace(&d2.native_processed, SliceKind::Column, &projections.left);
     }
 
     fn build_axis_trace(
         &self,
-        spec: &plotx_processing::Spectrum2D,
+        source: &plotx_io::nmr_view::NmrSource,
         kind: SliceKind,
         cfg: &AxisProjection,
     ) -> Option<plotx_figure::AxisTrace> {
         if !cfg.is_shown() {
             return None;
         }
-        let slice = match &cfg.source {
+        let reduction = match &cfg.source {
             ProjectionSource::None => return None,
             ProjectionSource::Attached(other) => {
                 return self
@@ -169,9 +172,20 @@ impl PlotxApp {
                     .dataset_index(*other)
                     .and_then(|index| self.attached_axis_trace(index));
             }
-            ProjectionSource::Sum => spec.project(kind, ProjectionMode::Sum),
-            ProjectionSource::Skyline => spec.project(kind, ProjectionMode::Skyline),
-            ProjectionSource::Slice(index) => spec.slice(kind, *index),
+            ProjectionSource::Sum => {
+                plotx_processing::slice::Reduction::Projection(ProjectionMode::Sum)
+            }
+            ProjectionSource::Skyline => {
+                plotx_processing::slice::Reduction::Projection(ProjectionMode::Skyline)
+            }
+            ProjectionSource::Slice(index) => plotx_processing::slice::Reduction::Slice(*index),
+        };
+        let (_, slice) = match plotx_processing::slice::extract(source, kind, reduction) {
+            Ok(output) => output,
+            Err(error) => {
+                eprintln!("NMR axis projection unavailable: {error}");
+                return None;
+            }
         };
         let points = slice
             .coordinates
@@ -592,7 +606,10 @@ impl PlotxApp {
     /// Secondary Side Bar tool widgets.
     pub fn apply_dataset_edit(&mut self, dataset: usize) {
         if let Some(n) = self.doc.datasets[dataset].as_nmr_mut() {
-            n.rebuild();
+            if let Err(error) = n.rebuild() {
+                self.session.status = format!("NMR processing failed: {error}");
+                return;
+            }
             n.recompute_integrals();
         } else if self.doc.datasets[dataset].as_nmr2d().is_some() {
             self.schedule_2d_processing(dataset, false);
@@ -618,7 +635,10 @@ impl PlotxApp {
     /// for dragging a time-domain step parameter, where the cached base changes.
     pub fn apply_dataset_retransform(&mut self, dataset: usize) {
         if let Some(n) = self.doc.datasets[dataset].as_nmr_mut() {
-            n.retransform();
+            if let Err(error) = n.retransform() {
+                self.session.status = format!("NMR processing failed: {error}");
+                return;
+            }
             n.recompute_integrals();
         } else if self.doc.datasets[dataset].as_nmr2d().is_some() {
             self.schedule_2d_processing(dataset, true);

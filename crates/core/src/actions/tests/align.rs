@@ -32,11 +32,9 @@ fn app_with(peaks: &[f64]) -> PlotxApp {
     let mut app = PlotxApp::new();
     app.doc.save_include_view_snapshots = false;
     for &p in peaks {
-        app.doc
-            .datasets
-            .push(Dataset::Nmr(Box::new(NmrDataset::load(synthetic_at(
-                p, "1H",
-            )))));
+        app.doc.datasets.push(Dataset::Nmr(Box::new(
+            NmrDataset::load(synthetic_at(p, "1H")).unwrap(),
+        )));
     }
     let all: Vec<usize> = (0..peaks.len()).collect();
     app.focus_datasets(&all, Some(0));
@@ -110,16 +108,12 @@ fn window_without_peak_skips_every_spectrum() {
 #[test]
 fn other_nuclei_and_non_1d_datasets_are_skipped_with_reasons() {
     let mut app = app_with(&[2.0, 2.5]);
-    app.doc
-        .datasets
-        .push(Dataset::Nmr(Box::new(NmrDataset::load(synthetic_at(
-            2.2, "13C",
-        )))));
-    app.doc
-        .datasets
-        .push(Dataset::Nmr2D(Box::new(crate::state::Nmr2DDataset::load(
-            synthetic_2d(),
-        ))));
+    app.doc.datasets.push(Dataset::Nmr(Box::new(
+        NmrDataset::load(synthetic_at(2.2, "13C")).unwrap(),
+    )));
+    app.doc.datasets.push(Dataset::Nmr2D(Box::new(
+        crate::nmr_test_support::load_2d(synthetic_2d()).unwrap(),
+    )));
     app.focus_datasets(&[0, 1, 2, 3], Some(0));
     let carbon_before = peak_ppm(&app, 2);
 

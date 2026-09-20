@@ -9,18 +9,18 @@ use crate::state::{
 #[test]
 fn project_roundtrip_maps_multi_source_lineage_by_data_id() {
     let mut app = PlotxApp::new();
-    app.doc
-        .datasets
-        .push(Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()))));
-    app.doc
-        .datasets
-        .push(Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()))));
+    app.doc.datasets.push(Dataset::Nmr(Box::new(
+        NmrDataset::load(synthetic_1d()).unwrap(),
+    )));
+    app.doc.datasets.push(Dataset::Nmr(Box::new(
+        NmrDataset::load(synthetic_1d()).unwrap(),
+    )));
     let sources = [
         app.doc.datasets[1].resource_id(),
         app.doc.datasets[0].resource_id(),
         app.doc.datasets[1].resource_id(),
     ];
-    let mut derived = Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d())));
+    let mut derived = Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()).unwrap()));
     derived.set_lineage(Some(DatasetLineage::new(
         DerivationKind::SpectrumArithmetic,
         sources,
@@ -48,9 +48,9 @@ fn project_roundtrip_maps_multi_source_lineage_by_data_id() {
 #[test]
 fn region_provenance_without_lineage_stays_unlinked() {
     let mut app = PlotxApp::new();
-    app.doc
-        .datasets
-        .push(Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()))));
+    app.doc.datasets.push(Dataset::Nmr(Box::new(
+        NmrDataset::load(synthetic_1d()).unwrap(),
+    )));
     let source_resource = app.doc.datasets[0].resource_id().to_string();
     let source_field = app.doc.datasets[0].default_field_id().unwrap();
     let mut table = materialized_float_series_table(
@@ -94,8 +94,8 @@ fn region_provenance_without_lineage_stays_unlinked() {
 fn lineage_resolution_rejects_missing_self_and_cycles() {
     let datasets = || {
         vec![
-            Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()))),
-            Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()))),
+            Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()).unwrap())),
+            Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()).unwrap())),
         ]
     };
     let binding = |data: &str, sources: &[&str]| DatasetBinding {
@@ -134,9 +134,9 @@ fn v1_dataset_binding_without_derivation_deserializes() {
 #[test]
 fn v1_table_roundtrip_preserves_units_missing_uncertainty_and_lineage() {
     let mut app = PlotxApp::new();
-    app.doc
-        .datasets
-        .push(Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()))));
+    app.doc.datasets.push(Dataset::Nmr(Box::new(
+        NmrDataset::load(synthetic_1d()).unwrap(),
+    )));
     let mut table = materialized_float_series_table(
         ("Time".into(), "s".into(), vec![Some(0.0), Some(1.0)]),
         vec![FloatSeries {

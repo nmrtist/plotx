@@ -5,9 +5,9 @@ use super::*;
 #[test]
 fn stacked_binding_builds_distinctly_coloured_series_with_legend() {
     let mut app = sample_app();
-    app.doc
-        .datasets
-        .push(Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()))));
+    app.doc.datasets.push(Dataset::Nmr(Box::new(
+        NmrDataset::load(synthetic_1d()).unwrap(),
+    )));
     let object = app.doc.canvases[0].objects[0].id;
     let mut second = crate::state::SeriesBinding::from_dataset(&app.doc.datasets[1]).unwrap();
     second.set_primary_color(plotx_figure::Color::rgb(0x8a, 0x1c, 0x1c));
@@ -133,14 +133,12 @@ fn set_chart_type_switches_table_to_categorical_bars_and_undoes() {
 #[test]
 fn stack_candidates_reject_incompatible_datasets() {
     let mut app = sample_app();
-    app.doc
-        .datasets
-        .push(Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()))));
-    app.doc
-        .datasets
-        .push(Dataset::Nmr2D(Box::new(crate::state::Nmr2DDataset::load(
-            synthetic_2d(),
-        ))));
+    app.doc.datasets.push(Dataset::Nmr(Box::new(
+        NmrDataset::load(synthetic_1d()).unwrap(),
+    )));
+    app.doc.datasets.push(Dataset::Nmr2D(Box::new(
+        crate::nmr_test_support::load_2d(synthetic_2d()).unwrap(),
+    )));
     let binding = crate::state::DataBinding::single(&app.doc.datasets[0]);
 
     let candidates = app.stack_candidates(&binding);
@@ -162,11 +160,9 @@ fn axis_projections_attach_and_project_survive_undo() {
 
     // dataset 0 = 1D (from sample_app), dataset 1 = a true-2D contour on canvas 1.
     let mut app = sample_app();
-    app.doc
-        .datasets
-        .push(Dataset::Nmr2D(Box::new(crate::state::Nmr2DDataset::load(
-            synthetic_2d(),
-        ))));
+    app.doc.datasets.push(Dataset::Nmr2D(Box::new(
+        crate::nmr_test_support::load_2d(synthetic_2d()).unwrap(),
+    )));
     assert!(app.doc.datasets[1].as_nmr2d().unwrap().is_true_2d());
     push_canvas(&mut app, 1, "2d", [120.0, 80.0]);
     let ci = 1;
@@ -224,7 +220,7 @@ fn axis_projections_attach_and_project_survive_undo() {
 fn auto_phase_pivot_reports_the_peak_ppm() {
     use crate::state::PhaseAxis;
 
-    let dataset = Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d())));
+    let dataset = Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()).unwrap()));
     let pivot = dataset.pivot_ppm(PhaseAxis::Direct).unwrap();
     assert!(
         (pivot - 2.0).abs() < 0.2,
@@ -238,7 +234,7 @@ fn auto_phase_pivot_reports_the_peak_ppm() {
 fn auto_phase_pivot_reports_the_peak_ppm_2d() {
     use crate::state::PhaseAxis;
 
-    let dataset = crate::state::Nmr2DDataset::load(synthetic_2d());
+    let dataset = crate::state::Nmr2DDataset::load(synthetic_2d()).unwrap();
     let s = match &dataset.base {
         plotx_processing::Processed2D::Ft(s) => s,
         plotx_processing::Processed2D::Stack(_) => unreachable!("synthetic_2d is true-2D"),
@@ -273,11 +269,9 @@ fn manual_2d_phase_inherits_the_automatic_solution() {
     use crate::state::PhaseAxis;
 
     let mut app = PlotxApp::new();
-    app.doc
-        .datasets
-        .push(Dataset::Nmr2D(Box::new(crate::state::Nmr2DDataset::load(
-            synthetic_2d(),
-        ))));
+    app.doc.datasets.push(Dataset::Nmr2D(Box::new(
+        crate::state::Nmr2DDataset::load(synthetic_2d()).unwrap(),
+    )));
     let expected = app.doc.datasets[0]
         .automatic_phase_params(PhaseAxis::F2)
         .unwrap();

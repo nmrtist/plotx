@@ -26,11 +26,15 @@ fn two_lorentzian_dataset(name: &str) -> Dataset {
         domain: plotx_io::Domain::Frequency,
         values,
         nucleus: "1H".to_owned(),
-        observe_freq_mhz: 400.0,
+        observe_freq_mhz: Some(400.0),
+        reference_freq_mhz: Some(400.0),
+        unit: nmr::axis::AxisUnit::Ppm,
         position: None,
         position_domain: plotx_io::Domain::Frequency,
     };
-    Dataset::Nmr(Box::new(NmrDataset::from_slice(slice, name.to_owned())))
+    Dataset::Nmr(Box::new(
+        NmrDataset::from_slice(slice, name.to_owned()).unwrap(),
+    ))
 }
 
 fn two_lorentzian_app() -> PlotxApp {

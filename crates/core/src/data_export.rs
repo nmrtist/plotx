@@ -8,6 +8,8 @@ use plotx_processing::{Processed2D, Spectrum2D, StackSpectrum, StepKind};
 use std::io::{self, Write};
 use std::sync::Arc;
 
+#[path = "data_export/nmr.rs"]
+mod nmr_export;
 mod service;
 pub use service::*;
 mod write;
@@ -482,7 +484,10 @@ fn capture_processed(dataset: &Dataset) -> Result<SnapshotData, DataExportError>
         Dataset::Nmr(nmr) => {
             let (axis, axis_label) = match &nmr.processed {
                 plotx_processing::Processed1D::Time(trace) => (trace.time_s.clone(), "time_s"),
-                plotx_processing::Processed1D::Frequency(spectrum) => (spectrum.ppm.clone(), "ppm"),
+                plotx_processing::Processed1D::Frequency(spectrum) => (
+                    spectrum.ppm.clone(),
+                    plotx_processing::axis_unit_label(Some(spectrum.unit)),
+                ),
             };
             Ok(SnapshotData::Nmr1D {
                 axis,
@@ -490,23 +495,7 @@ fn capture_processed(dataset: &Dataset) -> Result<SnapshotData, DataExportError>
                 values: nmr.processed.values().to_vec(),
             })
         }
-        Dataset::Nmr2D(nmr) => match &nmr.processed {
-            Processed2D::Ft(spectrum) => Ok(SnapshotData::True2D(Arc::clone(spectrum))),
-            Processed2D::Stack(spectrum) => {
-                let axis = nmr.data.pseudo_axis.as_ref();
-                Ok(SnapshotData::Pseudo2D {
-                    spectrum: Arc::clone(spectrum),
-                    ruler_name: axis
-                        .map(|axis| axis.name.clone())
-                        .filter(|name| !name.is_empty())
-                        .unwrap_or_else(|| "Ruler".into()),
-                    ruler_unit: axis.map(|axis| axis.unit.clone()).unwrap_or_default(),
-                    ruler: axis
-                        .map(|axis| axis.values.clone())
-                        .unwrap_or_else(|| (0..spectrum.increments()).map(|i| i as f64).collect()),
-                })
-            }
-        },
+        Dataset::Nmr2D(nmr) => nmr_export::snapshot_series(nmr),
         Dataset::Electrophysiology(recording) => {
             let channel = recording
                 .data

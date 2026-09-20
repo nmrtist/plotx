@@ -259,8 +259,8 @@ pub(super) fn write_true_2d<W: Write>(
     spectrum: &Spectrum2D,
     request: DataExportRequest,
 ) -> io::Result<()> {
-    let f1_label = domain_column("f1", spectrum.f1_domain);
-    let f2_label = domain_column("f2", spectrum.f2_domain);
+    let f1_label = axis_column("f1", spectrum.indirect.unit);
+    let f2_label = axis_column("f2", spectrum.direct.unit);
     if request.shape == TableShape::Long {
         writer.write_record(&[
             Field::Text(&f1_label),
@@ -273,7 +273,12 @@ pub(super) fn write_true_2d<W: Write>(
                     .data
                     .get(row * spectrum.f2_size + column)
                     .copied()
-                    .map(|value| request.channel.reduce(value));
+                    .and_then(|value| match request.channel {
+                        IntensityChannel::Magnitude => {
+                            spectrum.magnitude_at(row * spectrum.f2_size + column)
+                        }
+                        _ => Some(request.channel.reduce(value)),
+                    });
                 writer.write_record(&[
                     Field::Number(*f1),
                     Field::Number(*f2),
@@ -284,8 +289,8 @@ pub(super) fn write_true_2d<W: Write>(
         return Ok(());
     }
     let mut header = Vec::with_capacity(spectrum.f2_ppm.len() + 1);
-    let corner = if spectrum.f1_domain == plotx_io::Domain::Frequency
-        && spectrum.f2_domain == plotx_io::Domain::Frequency
+    let corner = if spectrum.indirect.unit == Some(nmr::axis::AxisUnit::Ppm)
+        && spectrum.direct.unit == Some(nmr::axis::AxisUnit::Ppm)
     {
         "F1/F2 (ppm)".to_owned()
     } else {
@@ -304,7 +309,12 @@ pub(super) fn write_true_2d<W: Write>(
                     .get(row * spectrum.f2_size + column)
                     .copied()
                     .map_or(Field::Empty, |value| {
-                        Field::Number(request.channel.reduce(value))
+                        Field::Number(match request.channel {
+                            IntensityChannel::Magnitude => spectrum
+                                .magnitude_at(row * spectrum.f2_size + column)
+                                .expect("view shape"),
+                            _ => request.channel.reduce(value),
+                        })
                     }),
             );
         }
@@ -324,7 +334,7 @@ pub(super) fn write_pseudo_2d<W: Write>(
     let ruler_header = with_unit(ruler_name, ruler_unit);
     let direct_label = match spectrum.direct_domain {
         plotx_io::Domain::Time => "direct_time_s".to_owned(),
-        plotx_io::Domain::Frequency => "ppm".to_owned(),
+        plotx_io::Domain::Frequency => spectrum.direct.unit_label().to_owned(),
     };
     if request.shape == TableShape::Long {
         writer.write_record(&[
@@ -369,10 +379,10 @@ pub(super) fn write_pseudo_2d<W: Write>(
     Ok(())
 }
 
-fn domain_column(axis: &str, domain: plotx_io::Domain) -> String {
-    match domain {
-        plotx_io::Domain::Time => format!("{axis}_time_s"),
-        plotx_io::Domain::Frequency => format!("{axis}_ppm"),
+fn axis_column(axis: &str, unit: Option<nmr::axis::AxisUnit>) -> String {
+    match unit {
+        Some(nmr::axis::AxisUnit::Second) => format!("{axis}_time_s"),
+        _ => format!("{axis}_{}", plotx_processing::axis_unit_label(unit)),
     }
 }
 

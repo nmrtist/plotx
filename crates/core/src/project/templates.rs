@@ -114,16 +114,19 @@ mod tests {
         let points = (0..64)
             .map(|k| Complex64::from_polar((-(k as f64) / 16.0).exp(), 0.4 * k as f64))
             .collect();
-        Dataset::Nmr(Box::new(NmrDataset::load(NmrData {
-            points,
-            domain: Domain::Time,
-            spectral_width_hz: 4000.0,
-            observe_freq_mhz: 400.0,
-            carrier_ppm: 5.0,
-            nucleus: "1H".to_owned(),
-            source: "synthetic".to_owned(),
-            group_delay: 0.0,
-        })))
+        Dataset::Nmr(Box::new(
+            NmrDataset::load(NmrData {
+                points,
+                domain: Domain::Time,
+                spectral_width_hz: 4000.0,
+                observe_freq_mhz: 400.0,
+                carrier_ppm: 5.0,
+                nucleus: "1H".to_owned(),
+                source: "synthetic".to_owned(),
+                group_delay: 0.0,
+            })
+            .unwrap(),
+        ))
     }
 
     #[test]

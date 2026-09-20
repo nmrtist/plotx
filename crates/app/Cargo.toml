@@ -17,6 +17,7 @@ default = []
 datafusion = ["plotx-core/datafusion"]
 
 [dependencies]
+nmr.workspace = true
 plotx-core.workspace = true
 plotx-analysis.workspace = true
 plotx-io.workspace = true

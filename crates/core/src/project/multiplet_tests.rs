@@ -26,7 +26,7 @@ pub(super) fn sample_multiplet() -> StoredMultiplet {
 
 #[test]
 fn multiplets_survive_project_roundtrip() {
-    let mut dataset = NmrDataset::load(synthetic_1d());
+    let mut dataset = NmrDataset::load(synthetic_1d()).unwrap();
     dataset.multiplets.push(sample_multiplet());
     dataset.next_multiplet_id = 4;
     let mut app = crate::state::PlotxApp::new();
@@ -45,7 +45,7 @@ fn multiplets_survive_project_roundtrip() {
 
 #[test]
 fn recipe_without_multiplets_key_is_rejected() {
-    let mut dataset = NmrDataset::load(synthetic_1d());
+    let mut dataset = NmrDataset::load(synthetic_1d()).unwrap();
     dataset.multiplets.push(sample_multiplet());
     dataset.next_multiplet_id = 4;
     let recipe = RecipeObject {

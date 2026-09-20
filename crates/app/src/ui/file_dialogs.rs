@@ -9,6 +9,7 @@ use plotx_core::state::ProcessingSchemeDialogState;
 mod delimited;
 mod discovery;
 pub(crate) mod image_import;
+pub(crate) mod nmr_sampling;
 mod origin;
 mod path;
 mod preview;
@@ -365,11 +366,16 @@ where
 }
 
 pub(crate) fn load_and_note(app: &mut PlotxApp, path: &std::path::Path) {
-    let before = app.doc.datasets.len();
-    app.load_from(path);
-    if app.doc.datasets.len() > before {
-        app.note_recent_file(path);
+    if plotx_io::archive::is_zip(path) {
+        let before = app.doc.datasets.len();
+        app.load_from(path);
+        if app.doc.datasets.len() > before {
+            app.note_recent_file(path);
+        }
+        return;
     }
+    let selected = path.to_owned();
+    app.queue_data_import(selected.clone(), move || Ok(vec![selected]));
 }
 
 pub(crate) fn open_file(app: &mut PlotxApp) {
@@ -440,30 +446,8 @@ pub(crate) fn open_folder(app: &mut PlotxApp) {
 /// flush every other entry out of the capped list. The folder is noted when
 /// any file of the batch loaded, not just the last one.
 fn open_folder_path(app: &mut PlotxApp, path: &std::path::Path) {
-    let before = app.doc.datasets.len();
-    let mut data_files = Vec::new();
-    discovery::collect_data_files(path, &mut data_files);
-    if data_files.is_empty() {
-        app.load_from(path);
-    } else {
-        data_files.sort();
-        let companion_paths: std::collections::HashSet<std::path::PathBuf> = data_files
-            .iter()
-            .filter(|file| {
-                file.extension()
-                    .is_some_and(|ext| ext.eq_ignore_ascii_case("pfc"))
-            })
-            .filter_map(|file| plotx_io::load_path(file).ok())
-            .flat_map(|loaded| loaded.provenance.companion_paths)
-            .collect();
-        data_files.retain(|file| !companion_paths.contains(file));
-        for file in data_files {
-            app.load_from(&file);
-        }
-    }
-    if app.doc.datasets.len() > before {
-        app.note_recent_file(path);
-    }
+    let folder = path.to_owned();
+    app.queue_data_import(folder.clone(), move || discovery::discover_folder(&folder));
 }
 
 pub(crate) fn choose_export_path(settings: &ExportSettings) -> Option<std::path::PathBuf> {

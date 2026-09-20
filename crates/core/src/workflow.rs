@@ -9,7 +9,7 @@ use crate::state::{
     PlotObject, PlotxApp, StackMode, StackSpec, default_chart_type,
 };
 use plotx_figure::{Axis, Figure};
-use plotx_io::{Acquisition, DataFormat, Domain, LoadWarning, LoadWarningCode, Provenance};
+use plotx_io::{Acquisition, DataFormat, LoadWarning, LoadWarningCode, Provenance};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -21,10 +21,13 @@ pub use dataset::{
 };
 #[path = "workflow/mass_spec_layout.rs"]
 mod mass_spec_layout;
+#[path = "workflow/nmr.rs"]
+mod nmr_inspection;
 #[path = "workflow/trace_collection.rs"]
 mod trace_collection;
 #[path = "workflow/xps.rs"]
 mod xps;
+pub use nmr_inspection::{inspect_file, inspect_nmr_dataset};
 pub const INSPECTION_SCHEMA: &str = "plotx.inspect.v1";
 #[derive(Clone, Debug, Serialize)]
 pub struct InspectionReport {
@@ -151,6 +154,8 @@ pub struct ProcessResult {
 
 #[derive(Debug, thiserror::Error)]
 pub enum WorkflowError {
+    #[error("NMR dataset: {0}")]
+    Nmr(String),
     #[error("input load failed: {0}")]
     Load(#[from] plotx_io::IoError),
     #[error("processing scheme failed: {0}")]
@@ -169,15 +174,36 @@ pub enum WorkflowError {
 
 pub fn load_dataset(path: &Path) -> Result<LoadedDataset, WorkflowError> {
     let loaded = plotx_io::load_path(path)?;
-    let inspection = inspection_report(
+    dataset_from_load_result(loaded)
+}
+
+pub fn load_dataset_with_sampling(
+    path: &Path,
+    declaration: plotx_io::nmr_sampling::SamplingDeclaration,
+) -> Result<LoadedDataset, WorkflowError> {
+    dataset_from_load_result(plotx_io::nmr_sampling::load(path, declaration)?)
+}
+
+fn dataset_from_load_result(loaded: plotx_io::LoadResult) -> Result<LoadedDataset, WorkflowError> {
+    let mut inspection = inspection_report(
         loaded.format,
         &loaded.provenance,
         &loaded.warnings,
         &loaded.acquisition,
     );
-    let (acquisition, acquisition_identity, _, _, nmr_origin, _) = loaded.into_parts();
+    let (acquisition, acquisition_identity, _, _, _) = loaded.into_parts();
     let (dataset, source) =
-        dataset_from_loaded_acquisition(acquisition, acquisition_identity, nmr_origin, true);
+        dataset_from_loaded_acquisition(acquisition, acquisition_identity, true)?;
+    if let Some(warning) = dataset
+        .as_nmr2d()
+        .and_then(|data| data.reconstruction_warning.as_ref())
+    {
+        inspection.warnings.push(WarningReport {
+            code: "nmr-reconstruction-failed",
+            message: warning.clone(),
+            path: None,
+        });
+    }
     Ok(LoadedDataset {
         dataset,
         inspection,
@@ -191,7 +217,15 @@ pub fn process_file(
     output: &Path,
     format: ExportFormat,
 ) -> Result<ProcessResult, WorkflowError> {
-    let mut loaded = load_dataset(input)?;
+    process_loaded_dataset(load_dataset(input)?, scheme, output, format)
+}
+
+pub fn process_loaded_dataset(
+    mut loaded: LoadedDataset,
+    scheme: &Path,
+    output: &Path,
+    format: ExportFormat,
+) -> Result<ProcessResult, WorkflowError> {
     loaded.apply_scheme_file(scheme)?;
     let mut app = PlotxApp::new_with_settings(crate::settings::Settings::default());
     app.session
@@ -254,10 +288,12 @@ pub fn build_dataset_figure(dataset: &Dataset, chart: &ChartSpec, size_mm: [f32;
 
 fn default_binding(dataset: &Dataset) -> DataBinding {
     let fields = match dataset {
-        Dataset::Nmr2D(data) if !data.is_true_2d() => ["nmr.stack", "nmr.dosy_map", "nmr.ilt_map"]
-            .into_iter()
-            .filter_map(|key| data.field_catalog.id_for_key(key))
-            .collect::<Vec<_>>(),
+        Dataset::Nmr2D(data) if !data.is_true_2d() => {
+            [data.stack_field_key(), "nmr.dosy_map", "nmr.ilt_map"]
+                .into_iter()
+                .filter_map(|key| data.field_catalog.id_for_key(key))
+                .collect::<Vec<_>>()
+        }
         Dataset::Electrophysiology(_) => dataset
             .field_descriptors()
             .into_iter()
@@ -488,9 +524,45 @@ fn inspection_report(
     warnings: &[LoadWarning],
     acquisition: &Acquisition,
 ) -> InspectionReport {
-    let (count, shape, domain) = match acquisition {
-        Acquisition::D1(data) => (1, vec![data.len()], data.domain),
-        Acquisition::D2(data) => (2, vec![data.rows, data.cols], data.domain),
+    if let Acquisition::Nmr(source) = acquisition {
+        let axes = source.axes();
+        let domain = if axes
+            .iter()
+            .all(|axis| axis.domain == nmr::axis::AxisDomain::Time)
+        {
+            "time"
+        } else if axes
+            .iter()
+            .all(|axis| axis.domain == nmr::axis::AxisDomain::Frequency)
+        {
+            "frequency"
+        } else {
+            "mixed"
+        };
+        return InspectionReport {
+            schema: INSPECTION_SCHEMA,
+            format: format.as_str().to_owned(),
+            provenance: ProvenanceReport {
+                selected_path: provenance.selected_path.clone(),
+                data_path: provenance.data_path.clone(),
+                parameter_paths: provenance.parameter_paths.clone(),
+                companion_paths: provenance.companion_paths.clone(),
+            },
+            dimension: DimensionReport {
+                count: axes.len(),
+                shape: axes.iter().map(|axis| axis.points).collect(),
+            },
+            domain: domain.into(),
+            warnings: warnings.iter().map(warning_report).collect(),
+            electrophysiology: None,
+            afm: None,
+            mass_spectrometry: None,
+            xrd: None,
+            xps: None,
+        };
+    }
+    match acquisition {
+        Acquisition::Nmr(_) => unreachable!("native NMR was handled above"),
         Acquisition::Electrophysiology(data) => {
             let max_points = data
                 .sweeps
@@ -499,7 +571,7 @@ fn inspection_report(
                 .map(Vec::len)
                 .max()
                 .unwrap_or(0);
-            return InspectionReport {
+            InspectionReport {
                 schema: INSPECTION_SCHEMA,
                 format: format.as_str().to_owned(),
                 provenance: ProvenanceReport {
@@ -534,7 +606,7 @@ fn inspection_report(
                 mass_spectrometry: None,
                 xrd: None,
                 xps: None,
-            };
+            }
         }
         Acquisition::Afm(data) => {
             let force = data.forces.as_ref();
@@ -546,7 +618,7 @@ fn inspection_report(
                 },
                 |force| vec![force.grid_height, force.grid_width, force.samples_per_curve],
             );
-            return InspectionReport {
+            InspectionReport {
                 schema: INSPECTION_SCHEMA,
                 format: format.as_str().to_owned(),
                 provenance: ProvenanceReport {
@@ -573,7 +645,7 @@ fn inspection_report(
                 mass_spectrometry: None,
                 xrd: None,
                 xps: None,
-            };
+            }
         }
         Acquisition::MassSpec(run) => {
             let ms_scan_count = run
@@ -582,7 +654,7 @@ fn inspection_report(
                 .filter(|stream| stream.role == plotx_io::StreamRole::Primary)
                 .map(|stream| stream.spectra.len())
                 .sum();
-            return InspectionReport {
+            InspectionReport {
                 schema: INSPECTION_SCHEMA,
                 format: format.as_str().to_owned(),
                 provenance: ProvenanceReport {
@@ -611,68 +683,47 @@ fn inspection_report(
                 }),
                 xrd: None,
                 xps: None,
-            };
+            }
         }
-        Acquisition::Xrd(data) => {
-            return InspectionReport {
-                schema: INSPECTION_SCHEMA,
-                format: format.as_str().to_owned(),
-                provenance: ProvenanceReport {
-                    selected_path: provenance.selected_path.clone(),
-                    data_path: provenance.data_path.clone(),
-                    parameter_paths: provenance.parameter_paths.clone(),
-                    companion_paths: provenance.companion_paths.clone(),
-                },
-                dimension: DimensionReport {
-                    count: 1,
-                    shape: vec![data.len()],
-                },
-                domain: "xrd".to_owned(),
-                warnings: warnings.iter().map(warning_report).collect(),
-                electrophysiology: None,
-                afm: None,
-                mass_spectrometry: None,
-                xrd: Some(XrdReport {
-                    instrument: data.instrument.clone(),
-                    target: data.target.clone(),
-                    wavelength_angstrom: data.wavelength_angstrom,
-                    two_theta_range_deg: [
-                        data.two_theta_deg.first().copied().unwrap_or(0.0),
-                        data.two_theta_deg.last().copied().unwrap_or(0.0),
-                    ],
-                    point_count: data.len(),
-                }),
-                xps: None,
-            };
-        }
-        Acquisition::Xps(experiment) => {
-            return xps::inspection_report(format, provenance, warnings, experiment);
-        }
-    };
-    InspectionReport {
-        schema: INSPECTION_SCHEMA,
-        format: format.as_str().to_owned(),
-        provenance: ProvenanceReport {
-            selected_path: provenance.selected_path.clone(),
-            data_path: provenance.data_path.clone(),
-            parameter_paths: provenance.parameter_paths.clone(),
-            companion_paths: provenance.companion_paths.clone(),
+        Acquisition::Xrd(data) => InspectionReport {
+            schema: INSPECTION_SCHEMA,
+            format: format.as_str().to_owned(),
+            provenance: ProvenanceReport {
+                selected_path: provenance.selected_path.clone(),
+                data_path: provenance.data_path.clone(),
+                parameter_paths: provenance.parameter_paths.clone(),
+                companion_paths: provenance.companion_paths.clone(),
+            },
+            dimension: DimensionReport {
+                count: 1,
+                shape: vec![data.len()],
+            },
+            domain: "xrd".to_owned(),
+            warnings: warnings.iter().map(warning_report).collect(),
+            electrophysiology: None,
+            afm: None,
+            mass_spectrometry: None,
+            xrd: Some(XrdReport {
+                instrument: data.instrument.clone(),
+                target: data.target.clone(),
+                wavelength_angstrom: data.wavelength_angstrom,
+                two_theta_range_deg: [
+                    data.two_theta_deg.first().copied().unwrap_or(0.0),
+                    data.two_theta_deg.last().copied().unwrap_or(0.0),
+                ],
+                point_count: data.len(),
+            }),
+            xps: None,
         },
-        dimension: DimensionReport { count, shape },
-        domain: domain_label(domain).to_owned(),
-        warnings: warnings.iter().map(warning_report).collect(),
-        electrophysiology: None,
-        afm: None,
-        mass_spectrometry: None,
-        xrd: None,
-        xps: None,
+        Acquisition::Xps(experiment) => {
+            xps::inspection_report(format, provenance, warnings, experiment)
+        }
     }
 }
 
 pub(super) fn warning_report(warning: &LoadWarning) -> WarningReport {
     let code = match warning.code {
         LoadWarningCode::ArchiveEntryFailed => "archive-entry-failed",
-        LoadWarningCode::OptionalImaginaryMissing => "optional-imaginary-missing",
         LoadWarningCode::MissingStimulus => "missing-stimulus",
         LoadWarningCode::InvalidMetadata => "invalid-metadata",
         LoadWarningCode::MissingCalibration => "missing-calibration",
@@ -685,13 +736,6 @@ pub(super) fn warning_report(warning: &LoadWarning) -> WarningReport {
         code,
         message: warning.message.clone(),
         path: warning.path.clone(),
-    }
-}
-
-fn domain_label(domain: Domain) -> &'static str {
-    match domain {
-        Domain::Time => "time",
-        Domain::Frequency => "frequency",
     }
 }
 

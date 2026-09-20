@@ -78,17 +78,23 @@ pub(super) fn run(
 }
 
 fn analyze(path: &Path, overrides: &CraftParamOverrides) -> Result<Value, String> {
-    let loaded = workflow::load_dataset(path).map_err(|error| error.to_string())?;
-    let dataset = loaded
-        .dataset
-        .as_nmr()
-        .ok_or_else(|| "CRAFT requires a one-dimensional NMR dataset".to_owned())?;
-    let invocation = resolve_craft_invocation(
-        &dataset.data,
-        plotx_processing::craft::CraftReference::acquisition(&dataset.data),
-        overrides,
-        None,
+    let input = plotx_io::nmr_bridge::read(path, &mut nmr::ExecutionContext::default())
+        .map_err(|error| error.to_string())?;
+    let inspection = workflow::inspect_nmr_dataset(&input).map_err(|error| error.to_string())?;
+    let source = plotx_io::nmr_view::NmrSource::new(input).map_err(|error| error.to_string())?;
+    let data = source.craft_fid().map_err(|error| error.to_string())?;
+    let reference = source
+        .dataset()
+        .as_raw()
+        .and_then(|raw| raw.descriptor().axes().first())
+        .and_then(|axis| axis.chemical_shift_reference())
+        .ok_or("CRAFT requires chemical-shift reference evidence")?;
+    let reference = plotx_processing::craft::CraftReference::new(
+        reference.carrier_ppm(),
+        reference.reference_frequency_mhz(),
+        0.0,
     );
+    let invocation = resolve_craft_invocation(&data, reference, overrides, None);
     if !invocation.assessment.can_run() {
         return Err(invocation
             .assessment
@@ -96,9 +102,15 @@ fn analyze(path: &Path, overrides: &CraftParamOverrides) -> Result<Value, String
             .unwrap_or("CRAFT input cannot be analyzed")
             .to_owned());
     }
-    let result = process_craft_cancellable(&dataset.data, &invocation, &|| false)
+    let result = process_craft_cancellable(&data, &invocation, &|| false)
         .map_err(|error| error.to_string())?;
     let mut quality_issues = Vec::new();
+    quality_issues.extend(
+        inspection
+            .warnings
+            .iter()
+            .map(|warning| warning.message.clone()),
+    );
     quality_issues.extend(
         invocation
             .assessment
@@ -114,25 +126,28 @@ fn analyze(path: &Path, overrides: &CraftParamOverrides) -> Result<Value, String
             .filter(|warning| warning.blocks_quantitation())
             .map(|warning| warning.message.clone()),
     );
-    let mut fft_peaks = dataset
-        .spectrum()
-        .map(|spectrum| {
-            spectrum
-                .values
-                .windows(3)
-                .enumerate()
-                .filter_map(|(index, values)| {
-                    let magnitude = values[1].norm();
-                    (magnitude > values[0].norm() && magnitude >= values[2].norm()).then(|| {
-                        json!({
-                            "chemical_shift_ppm": spectrum.ppm[index + 1],
-                            "magnitude": magnitude,
-                        })
+    let spectrum = plotx_processing::craft::preview_spectrum(
+        &data,
+        invocation.reference,
+        invocation.derived_plan.effective_skip_points,
+    )
+    .map_err(|error| error.to_string())?;
+    let mut fft_peaks = {
+        spectrum
+            .values
+            .windows(3)
+            .enumerate()
+            .filter_map(|(index, values)| {
+                let magnitude = values[1].norm();
+                (magnitude > values[0].norm() && magnitude >= values[2].norm()).then(|| {
+                    json!({
+                        "chemical_shift_ppm": spectrum.ppm[index + 1],
+                        "magnitude": magnitude,
                     })
                 })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
+            })
+            .collect::<Vec<_>>()
+    };
     fft_peaks.sort_by(|left, right| {
         right["magnitude"]
             .as_f64()
@@ -140,16 +155,14 @@ fn analyze(path: &Path, overrides: &CraftParamOverrides) -> Result<Value, String
             .total_cmp(&left["magnitude"].as_f64().unwrap_or_default())
     });
     fft_peaks.truncate(20);
-    let region_fft_peaks = dataset
-        .spectrum()
-        .map(|spectrum| {
-            invocation
-                .params
-                .regions
-                .iter()
-                .map(|region| {
-                    let region = region.normalized();
-                    let mut peaks = spectrum
+    let region_fft_peaks = {
+        invocation
+            .params
+            .regions
+            .iter()
+            .map(|region| {
+                let region = region.normalized();
+                let mut peaks = spectrum
                         .ppm
                         .iter()
                         .zip(&spectrum.values)
@@ -160,18 +173,17 @@ fn analyze(path: &Path, overrides: &CraftParamOverrides) -> Result<Value, String
                             json!({ "chemical_shift_ppm": ppm, "magnitude": value.norm() })
                         })
                         .collect::<Vec<_>>();
-                    peaks.sort_by(|left, right| {
-                        right["magnitude"]
-                            .as_f64()
-                            .unwrap_or_default()
-                            .total_cmp(&left["magnitude"].as_f64().unwrap_or_default())
-                    });
-                    peaks.truncate(5);
-                    json!({ "region": region, "strongest_bins": peaks })
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
+                peaks.sort_by(|left, right| {
+                    right["magnitude"]
+                        .as_f64()
+                        .unwrap_or_default()
+                        .total_cmp(&left["magnitude"].as_f64().unwrap_or_default())
+                });
+                peaks.truncate(5);
+                json!({ "region": region, "strongest_bins": peaks })
+            })
+            .collect::<Vec<_>>()
+    };
     let region_amplitude_ratio = result.region_ratio.map(|ratio| ratio.value);
     Ok(json!({
         "input": path,
@@ -180,15 +192,16 @@ fn analyze(path: &Path, overrides: &CraftParamOverrides) -> Result<Value, String
             "passed": quality_issues.is_empty(),
             "issues": quality_issues,
         },
-        "inspection": loaded.inspection,
+        "inspection": inspection,
         "acquisition": {
-            "spectral_width_hz": dataset.data.spectral_width_hz,
-            "observe_frequency_mhz": dataset.data.observe_freq_mhz,
-            "carrier_ppm": dataset.data.carrier_ppm,
-            "group_delay_points": dataset.data.group_delay,
-            "point_count": dataset.data.points.len(),
+            "spectral_width_hz": data.spectral_width_hz,
+            "observe_frequency_mhz": data.observe_freq_mhz,
+            "carrier_ppm": data.carrier_ppm,
+            "group_delay_points": data.group_delay,
+            "point_count": data.points.len(),
         },
         "chemical_shift_reference": {
+            "reference_frequency_mhz": invocation.reference.reference_frequency_mhz,
             "offset_ppm": invocation.reference.offset_ppm,
             "effective_carrier_ppm": invocation.reference.effective_carrier_ppm(),
         },
@@ -204,15 +217,21 @@ fn analyze(path: &Path, overrides: &CraftParamOverrides) -> Result<Value, String
 }
 
 fn acquisition_inputs(input: &Path) -> Result<Vec<PathBuf>, String> {
-    if !input.is_dir() || input.extension().is_some() || is_raw_acquisition(input) {
+    if !input.is_dir() || input.extension().is_some() || is_raw_acquisition(input)? {
         return Ok(vec![input.to_owned()]);
     }
     let mut children = std::fs::read_dir(input)
         .map_err(|error| format!("could not read {}: {error}", input.display()))?
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| path.is_dir() && is_raw_acquisition(path))
-        .collect::<Vec<_>>();
+        .map(|entry| entry.map(|entry| entry.path()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("could not enumerate {}: {error}", input.display()))?
+        .into_iter()
+        .try_fold(Vec::new(), |mut paths, path| {
+            if path.is_dir() && is_raw_acquisition(&path)? {
+                paths.push(path);
+            }
+            Ok::<_, String>(paths)
+        })?;
     children.sort();
     if children.is_empty() {
         Err(format!(
@@ -224,13 +243,12 @@ fn acquisition_inputs(input: &Path) -> Result<Vec<PathBuf>, String> {
     }
 }
 
-fn is_raw_acquisition(path: &Path) -> bool {
-    matches!(
-        plotx_io::detect_format(path),
-        Ok(plotx_io::DataFormat::Nmr(
-            plotx_io::NmrFormat::BrukerRaw | plotx_io::NmrFormat::VarianAgilentRaw,
-        ))
-    )
+fn is_raw_acquisition(path: &Path) -> Result<bool, String> {
+    match plotx_io::nmr_bridge::read_options().detect(path) {
+        Ok(format) => Ok(matches!(format, nmr::Format::Raw(_))),
+        Err(error) if error.kind() == nmr::ReadErrorKind::Unrecognized => Ok(false),
+        Err(error) => Err(format!("could not detect {}: {error}", path.display())),
+    }
 }
 
 #[cfg(test)]

@@ -51,6 +51,7 @@ pub(super) fn command_identity(
         CommandId::CloseProject => plain("Close Project", Some(icon::X)),
         CommandId::OpenFile => plain("Open File…", Some(icon::FILE)),
         CommandId::OpenFolder => plain("Open Folder…", Some(icon::FOLDER)),
+        CommandId::ImportNmrSampling => plain("Import NMR with Sampling Table…", Some(icon::FILE)),
         CommandId::RunBatchWorkflow => plain("Automation…", Some(icon::PLAY)),
         CommandId::RunScientificScript => plain("Run Scientific Script", Some(icon::PLAY)),
         CommandId::OpenRecent(i) => (
@@ -416,6 +417,7 @@ fn simple_stable_id(id: CommandId) -> &'static str {
         CommandId::CloseProject => "file.close_project",
         CommandId::OpenFile => "file.open_file",
         CommandId::OpenFolder => "file.open_folder",
+        CommandId::ImportNmrSampling => "file.import_nmr_sampling",
         CommandId::RunBatchWorkflow => "tools.automation",
         CommandId::RunScientificScript => "tools.run_scientific_script",
         CommandId::ImportTable => "file.import_table",

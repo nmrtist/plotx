@@ -91,10 +91,10 @@ pub(super) fn synthetic_dosy_2d() -> NmrData2D {
 
 pub(super) fn sample_app() -> PlotxApp {
     let mut app = PlotxApp::new();
-    let mut dataset = NmrDataset::load(synthetic_1d());
+    let mut dataset = NmrDataset::load(synthetic_1d()).unwrap();
     dataset.name = Some("sample data".to_owned());
     set_manual_phase(&mut dataset.pipeline, 0.25, -0.5, 0.4);
-    dataset.rebuild();
+    dataset.rebuild().unwrap();
     app.doc.datasets.push(Dataset::Nmr(Box::new(dataset)));
 
     let chart = crate::state::ChartSpec::default_for(app.doc.datasets[0].domain());
@@ -369,7 +369,7 @@ fn project_roundtrip_preserves_data_recipe_and_view() {
         panic!("expected 1D NMR dataset");
     };
     assert_eq!(n.name.as_deref(), Some("sample data"));
-    assert_eq!(n.data.points.len(), 1024);
+    assert_eq!(n.data.len(), 1024);
     assert_eq!(n.peaks.marks.len(), 1);
     assert_eq!(n.peaks.marks[0].label.as_deref(), Some("2.00"));
     assert_eq!(n.integrals.len(), 1);
@@ -416,7 +416,7 @@ fn project_roundtrip_preserves_axis_projections() {
 
     // dataset 0 = the 1D spectrum a projection attaches to; dataset 1 = the contour.
     let mut app = sample_app();
-    let ds = Nmr2DDataset::load(synthetic_true_2d());
+    let ds = crate::nmr_test_support::load_2d(synthetic_true_2d()).unwrap();
     assert!(ds.is_true_2d());
     app.doc.datasets.push(Dataset::Nmr2D(Box::new(ds)));
     let mut canvas = CanvasDocument::new("2d".to_owned(), [120.0, 80.0]);
@@ -459,7 +459,7 @@ fn project_roundtrip_preserves_axis_projections() {
 #[test]
 fn project_roundtrip_preserves_pseudo2d_metadata() {
     let mut app = PlotxApp::new();
-    let ds = Nmr2DDataset::load(synthetic_dosy_2d());
+    let ds = Nmr2DDataset::load(synthetic_dosy_2d()).unwrap();
     assert!(ds.is_pseudo(), "fixture should be a pseudo-2D dataset");
     app.doc.datasets.push(Dataset::Nmr2D(Box::new(ds)));
 
@@ -477,7 +477,7 @@ fn project_roundtrip_preserves_pseudo2d_metadata() {
     assert_eq!(axis.name, "g");
     assert_eq!(axis.kind, PseudoKind::Gradient);
     assert_eq!(axis.unit, "mT/m");
-    assert_eq!(axis.source, AxisSource::EmbeddedRamp);
+    assert_eq!(axis.source, AxisSource::LibraryEvidence);
     assert_eq!(axis.values.len(), 8);
     let meta = n.data.diffusion.as_ref().expect("diffusion meta preserved");
     assert!((meta.delta - 2e-3).abs() < 1e-12);
@@ -487,7 +487,7 @@ fn project_roundtrip_preserves_pseudo2d_metadata() {
 
 #[test]
 fn project_roundtrip_preserves_trace_item_sources_and_visibility() {
-    let dataset = Dataset::Nmr2D(Box::new(Nmr2DDataset::load(synthetic_dosy_2d())));
+    let dataset = Dataset::Nmr2D(Box::new(Nmr2DDataset::load(synthetic_dosy_2d()).unwrap()));
     let mut app = PlotxApp::new();
     app.doc.canvases.push(crate::workflow::build_default_canvas(
         &dataset,
@@ -609,9 +609,9 @@ fn project_roundtrip_preserves_zorder() {
 fn project_roundtrip_preserves_overlay_binding() {
     let mut app = PlotxApp::new();
     for _ in 0..2 {
-        app.doc
-            .datasets
-            .push(Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()))));
+        app.doc.datasets.push(Dataset::Nmr(Box::new(
+            NmrDataset::load(synthetic_1d()).unwrap(),
+        )));
     }
     app.doc.datasets[1].set_name(Some("treatment".to_owned()));
     let mut canvas = CanvasDocument::new("overlay".to_owned(), [120.0, 80.0]);
@@ -665,9 +665,9 @@ fn project_roundtrip_preserves_overlay_binding() {
 fn project_roundtrip_preserves_stack_spec_and_series_fields() {
     let mut app = PlotxApp::new();
     for _ in 0..2 {
-        app.doc
-            .datasets
-            .push(Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()))));
+        app.doc.datasets.push(Dataset::Nmr(Box::new(
+            NmrDataset::load(synthetic_1d()).unwrap(),
+        )));
     }
     let mut canvas = CanvasDocument::new("stack".to_owned(), [120.0, 80.0]);
     let [w, h] = canvas.size_pt();
@@ -731,7 +731,7 @@ fn plot_without_explicit_series_is_rejected_by_the_project_schema() {
 #[test]
 fn scheme_save_load_apply_roundtrips() {
     use crate::actions::DatasetProcessingState;
-    let mut source = NmrDataset::load(synthetic_1d());
+    let mut source = NmrDataset::load(synthetic_1d()).unwrap();
     set_manual_phase(&mut source.pipeline, 0.3, 0.1, 0.6);
     let source_ds = Dataset::Nmr(Box::new(source));
 
@@ -742,7 +742,7 @@ fn scheme_save_load_apply_roundtrips() {
     let _ = std::fs::remove_file(&path);
     assert_eq!(scheme.dimension_count, 1);
 
-    let target = Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d())));
+    let target = Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()).unwrap()));
     let DatasetProcessingState::Nmr { pipeline, .. } = apply_scheme(&scheme, &target).unwrap()
     else {
         panic!("expected a 1D processing state");
@@ -752,7 +752,9 @@ fn scheme_save_load_apply_roundtrips() {
     assert!((phase.phase0 - 0.3).abs() < 1e-9);
     assert!((phase.pivot_frac - 0.6).abs() < 1e-9);
 
-    let two_d = Dataset::Nmr2D(Box::new(Nmr2DDataset::load(synthetic_true_2d())));
+    let two_d = Dataset::Nmr2D(Box::new(
+        crate::nmr_test_support::load_2d(synthetic_true_2d()).unwrap(),
+    ));
     assert!(apply_scheme(&scheme, &two_d).is_err());
 
     let DatasetProcessingState::Nmr { pipeline, .. } = reset_processing(&source_ds).unwrap() else {

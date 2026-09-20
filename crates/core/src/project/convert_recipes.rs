@@ -19,7 +19,7 @@ pub fn apply_1d_recipe(dataset: &mut NmrDataset, recipe: &RecipeObject) -> Resul
         .unwrap_or(0);
     dataset.repair_step_allocator();
     dataset.group_delay_correct = p.group_delay_correct;
-    dataset.has_imaginary = true;
+    dataset.has_imaginary = dataset.data.has_imaginary(0);
     let analysis = recipe.extensions.get("plotx.analysis").ok_or_else(|| {
         ProjectError::Invalid("1D NMR recipe is missing plotx.analysis".to_owned())
     })?;
@@ -89,6 +89,10 @@ pub(super) fn nmr2d_recipe_extensions(
 ) -> serde_json::Value {
     let mut extensions = serde_json::Map::new();
     extensions.insert(
+        "plotx.nus_request".into(),
+        serde_json::json!(dataset.nus_request),
+    );
+    extensions.insert(
         "plotx.step_allocator".to_owned(),
         serde_json::json!({ "next_id": dataset.next_step_id }),
     );
@@ -123,6 +127,13 @@ pub(super) fn nmr2d_recipe_extensions(
 }
 
 pub fn apply_2d_recipe(dataset: &mut Nmr2DDataset, recipe: &RecipeObject) -> Result<()> {
+    dataset.nus_request = recipe
+        .extensions
+        .get("plotx.nus_request")
+        .map(|value| serde_json::from_value(value.clone()))
+        .transpose()
+        .map_err(|error| ProjectError::Invalid(format!("Invalid NUS request: {error}")))?
+        .flatten();
     let p = &recipe.parameters;
     let preset = p
         .preset
@@ -141,14 +152,8 @@ pub fn apply_2d_recipe(dataset: &mut Nmr2DDataset, recipe: &RecipeObject) -> Res
         .as_deref()
         .map(layout_from_str)
         .unwrap_or_else(|| preset.layout());
-    params
-        .f2
-        .output_domain(dataset.data.domain)
-        .map_err(|error| ProjectError::Invalid(format!("invalid F2 pipeline: {error}")))?;
-    params
-        .f1
-        .output_domain(dataset.data.domain)
-        .map_err(|error| ProjectError::Invalid(format!("invalid F1 pipeline: {error}")))?;
+    plotx_processing::nmr_execution::validate_2d_domains(&dataset.data, &params)
+        .map_err(ProjectError::Invalid)?;
 
     dataset.preset = preset;
     dataset.params = params;
@@ -160,6 +165,6 @@ pub fn apply_2d_recipe(dataset: &mut Nmr2DDataset, recipe: &RecipeObject) -> Res
         .unwrap_or(0);
     dataset.repair_step_allocator();
     dataset.group_delay_correct = p.group_delay_correct;
-    dataset.has_imaginary = true;
+    dataset.has_imaginary = dataset.data.source_dataset().has_imaginary(1);
     Ok(())
 }

@@ -27,11 +27,18 @@ pub(super) fn time_domain_app() -> PlotxApp {
     let mut app = PlotxApp::new();
     app.doc
         .datasets
-        .push(Dataset::Nmr(Box::new(NmrDataset::load(data))));
+        .push(Dataset::Nmr(Box::new(NmrDataset::load(data).unwrap())));
     app
 }
 
 pub(super) fn states_2d_app(rows: usize, cols: usize) -> PlotxApp {
+    states_2d_app_with_sampling(rows, cols, None)
+}
+pub(super) fn states_2d_app_with_sampling(
+    rows: usize,
+    cols: usize,
+    nus: Option<plotx_io::NusMeta>,
+) -> PlotxApp {
     let dim = |nucleus: &str, width| Dim {
         spectral_width_hz: width,
         observe_freq_mhz: 400.0,
@@ -53,13 +60,23 @@ pub(super) fn states_2d_app(rows: usize, cols: usize) -> PlotxApp {
         experiment: Some("hsqc".to_owned()),
         pseudo_axis: None,
         diffusion: None,
-        nus: None,
+        nus,
         source: "States property test".to_owned(),
     };
     let mut app = PlotxApp::new();
-    app.doc
-        .datasets
-        .push(Dataset::Nmr2D(Box::new(Nmr2DDataset::load(data))));
+    app.doc.datasets.push(Dataset::Nmr2D(Box::new(
+        Nmr2DDataset::load_with_pipeline(
+            data,
+            Some(plotx_processing::Params2D::default()),
+            Some(true),
+            Some(plotx_processing::nmr_execution::NusRequest {
+                noise_standard_deviation: Some(0.0),
+                ..Default::default()
+            }),
+            true,
+        )
+        .unwrap(),
+    )));
     app
 }
 

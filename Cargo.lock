@@ -3422,6 +3422,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "nmr"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5749f9cb01773d2df50a3824c4591af5367da58daeaf9dd199d051a1358fda9c"
+dependencies = [
+ "num-complex",
+ "rustfft",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "no-std-compat"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4136,6 +4149,7 @@ dependencies = [
  "libc",
  "log",
  "muda",
+ "nmr",
  "num-complex",
  "plotx-analysis",
  "plotx-core",
@@ -4170,10 +4184,12 @@ dependencies = [
 name = "plotx-cli"
 version = "0.1.0"
 dependencies = [
+ "nmr",
  "plotx-core",
  "plotx-io",
  "plotx-processing",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -4182,6 +4198,7 @@ version = "0.1.0"
 dependencies = [
  "directories",
  "image",
+ "nmr",
  "num-complex",
  "pdf-writer",
  "plotx-analysis",
@@ -4249,6 +4266,7 @@ dependencies = [
  "flate2",
  "image",
  "memmap2",
+ "nmr",
  "num-complex",
  "quick-xml",
  "rust_xlsxwriter",
@@ -4265,10 +4283,10 @@ dependencies = [
 name = "plotx-processing"
 version = "0.1.0"
 dependencies = [
+ "nmr",
  "num-complex",
  "plotx-analysis",
  "plotx-io",
- "rustfft",
  "serde",
  "thiserror 2.0.18",
 ]
@@ -4894,9 +4912,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.42"
+version = "0.23.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c54fcab019b409d04215d3a17cb438fd7fbf192ee61461f20f4fe18704bc138"
+checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
 dependencies = [
  "log",
  "once_cell",
@@ -4918,9 +4936,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.13"
+version = "0.103.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61c429a8649f110dddef65e2a5ad240f747e85f7758a6bccc7e5777bd33f756e"
+checksum = "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2"
 dependencies = [
  "ring",
  "rustls-pki-types",

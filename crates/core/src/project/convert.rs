@@ -8,7 +8,7 @@ use crate::{DosyMethod, PseudoDisplay};
 use plotx_processing::Processed2D;
 
 pub enum DatasetBlob<'a> {
-    Complex(&'a [Complex64]),
+    Nmr(&'a nmr::Dataset),
     Electrophysiology(&'a crate::state::ElectrophysiologyDataset),
     Afm(&'a plotx_io::AfmData),
     MassSpec(&'a crate::state::MassSpecDataset),
@@ -47,18 +47,14 @@ pub fn dataset_to_objects<'a>(
                 role: "data".to_owned(),
                 classification: nmr_acquisition_classification(),
                 label: n.name.clone(),
-                dimensions: vec![dimension_from_1d(&n.data)],
+                dimensions: Vec::new(),
                 payload: Payload {
-                    storage: STORAGE_COMPLEX_F64_LE.to_owned(),
+                    storage: super::nmr_snapshot::STORAGE.to_owned(),
                     blob: format!("objects/{data_id}/data.bin"),
-                    shape: vec![n.data.points.len()],
-                    domain: domain_to_str(n.data.domain).to_owned(),
+                    shape: vec![n.data.len()],
+                    domain: "nmr".to_owned(),
                 },
                 extensions: serde_json::json!({
-                    "plotx.nmr": {
-                        "source": &n.data.source,
-                        "origin": &n.origin
-                    },
                     "plotx.fields": &n.field_catalog
                 }),
             };
@@ -86,7 +82,7 @@ pub fn dataset_to_objects<'a>(
                     }
                 }),
             };
-            DatasetObjects::primary(data, DatasetBlob::Complex(&n.data.points), recipe)
+            DatasetObjects::primary(data, DatasetBlob::Nmr(n.data.dataset()), recipe)
         }
         Dataset::Nmr2D(n) => {
             let data = DataObject {
@@ -94,26 +90,20 @@ pub fn dataset_to_objects<'a>(
                 role: "data".to_owned(),
                 classification: nmr_acquisition_classification(),
                 label: n.name.clone(),
-                dimensions: vec![
-                    dimension_from_dim("f1", "indirect", 0, n.data.rows, &n.data.indirect),
-                    dimension_from_dim("f2", "direct", 1, n.data.cols, &n.data.direct),
-                ],
+                dimensions: Vec::new(),
                 payload: Payload {
-                    storage: STORAGE_COMPLEX_F64_LE.to_owned(),
+                    storage: super::nmr_snapshot::STORAGE.to_owned(),
                     blob: format!("objects/{data_id}/data.bin"),
-                    shape: vec![n.data.rows, n.data.cols],
-                    domain: domain_to_str(n.data.domain).to_owned(),
+                    shape: n
+                        .data
+                        .source_dataset()
+                        .axes()
+                        .iter()
+                        .map(|axis| axis.points)
+                        .collect(),
+                    domain: "nmr".to_owned(),
                 },
                 extensions: serde_json::json!({
-                    "plotx.nmr": {
-                        "source": &n.data.source,
-                        "origin": &n.origin,
-                        "quad": quad_to_str(n.data.quad),
-                        "indirect_conjugate": n.data.indirect_conjugate,
-                        "experiment_hint": &n.data.experiment,
-                        "pseudo_axis": n.data.pseudo_axis.as_ref().map(pseudo_axis_to_dto),
-                        "diffusion": n.data.diffusion.as_ref().map(diffusion_to_dto),
-                    },
                     "plotx.fields": &n.field_catalog
                 }),
             };
@@ -177,7 +167,7 @@ pub fn dataset_to_objects<'a>(
             };
             DatasetObjects {
                 data,
-                blob: DatasetBlob::Complex(&n.data.data),
+                blob: DatasetBlob::Nmr(n.data.source_dataset().dataset()),
                 recipe,
                 extra_blobs,
             }
@@ -320,6 +310,20 @@ pub fn dataset_to_objects<'a>(
         Dataset::Xps(xps) => super::xps_convert::to_objects(xps, data_id, recipe_id),
     };
     write_acquisition_identity(&mut objects.data, dataset.acquisition_identity())?;
+    let execution = match dataset {
+        Dataset::Nmr(n) => Some(super::nmr_snapshot::execution_evidence(
+            &n.native_processed,
+            &n.phase_reports,
+        )?),
+        Dataset::Nmr2D(n) => Some(super::nmr_snapshot::execution_evidence(
+            &n.native_processed,
+            &n.phase_reports,
+        )?),
+        _ => None,
+    };
+    if let Some(execution) = execution {
+        objects.data.extensions["plotx.nmr_execution"] = execution;
+    }
     Ok(objects)
 }
 
@@ -489,144 +493,29 @@ pub fn object_to_dataset(
             data.classification.domain, data.classification.technique, data.classification.object
         )));
     }
-    if data.payload.storage != STORAGE_COMPLEX_F64_LE {
-        return Err(ProjectError::Unsupported(format!(
-            "payload storage {}",
-            data.payload.storage
-        )));
+    if recipe.parameters.dimension_count == 1 {
+        return super::nmr_snapshot::read_1d(zip, data, recipe);
     }
-    let expected_values = match data.dimensions.len() {
-        1 => data
-            .payload
-            .shape
-            .first()
-            .copied()
-            .unwrap_or(data.dimensions[0].size),
-        2 => data
-            .payload
-            .shape
-            .first()
-            .copied()
-            .zip(data.payload.shape.get(1).copied())
-            .ok_or_else(|| ProjectError::Invalid("2D payload shape is incomplete".to_owned()))?
-            .0
-            .checked_mul(data.payload.shape[1])
-            .ok_or_else(|| ProjectError::Invalid("2D NMR shape overflows usize".to_owned()))?,
-        n => {
-            return Err(ProjectError::Unsupported(format!(
-                "NMR acquisitions with {n} dimensions"
-            )));
-        }
-    };
-    let expected_bytes = expected_values.checked_mul(16).ok_or_else(|| {
-        ProjectError::Invalid("NMR payload byte length overflows usize".to_owned())
-    })?;
-    let values = read_entry(
-        zip,
-        &data.payload.blob,
-        "NMR complex-f64 payload",
-        ProjectLoadLimits::default().max_entry_bytes,
-        |reader| {
-            if reader.remaining() != expected_bytes as u64 {
-                return Err(reader.invalid(format!(
-                    "complex payload has {} bytes but shape requires {expected_bytes}",
-                    reader.remaining()
-                )));
-            }
-            complex_from_reader(reader)
-        },
-    )?;
-    match data.dimensions.len() {
-        1 => {
-            let dim = data.dimensions.first().unwrap();
-            let expected = data.payload.shape.first().copied().unwrap_or(dim.size);
-            if values.len() != expected {
-                return Err(ProjectError::Invalid(format!(
-                    "1D data length {} does not match shape {expected}",
-                    values.len()
-                )));
-            }
-            let mut dataset = NmrDataset::load_with_origin(
-                NmrData {
-                    points: values,
-                    domain: domain_from_str(&data.payload.domain),
-                    spectral_width_hz: required(dim.spectral_width_hz, "spectral_width_hz")?,
-                    observe_freq_mhz: required(dim.observe_freq_mhz, "observe_freq_mhz")?,
-                    carrier_ppm: required(dim.carrier_ppm, "carrier_ppm")?,
-                    nucleus: dim.nucleus.clone().unwrap_or_else(|| "X".to_owned()),
-                    source: nmr_source(data),
-                    group_delay: dim.group_delay.unwrap_or(0.0),
-                },
-                read_nmr_origin(data)?,
-            );
-            dataset.acquisition_identity = read_acquisition_identity(data)?;
-            dataset.field_catalog = read_field_catalog(data)?;
-            apply_1d_recipe(&mut dataset, recipe)?;
-            dataset.name = data.label.clone();
-            dataset.retransform();
-            let dataset = Dataset::Nmr(Box::new(dataset));
-            dataset
-                .validate_field_catalog()
-                .map_err(ProjectError::Invalid)?;
-            Ok(dataset)
-        }
+    let source = super::nmr_snapshot::read(zip, data)?;
+    match source.axes().len() {
         2 => {
-            let rows = *data
-                .payload
-                .shape
-                .first()
-                .ok_or_else(|| ProjectError::Invalid("2D payload missing rows".to_owned()))?;
-            let cols = *data
-                .payload
-                .shape
-                .get(1)
-                .ok_or_else(|| ProjectError::Invalid("2D payload missing cols".to_owned()))?;
-            let expected_len = rows
-                .checked_mul(cols)
-                .ok_or_else(|| ProjectError::Invalid("2D NMR shape overflows usize".to_owned()))?;
-            if values.len() != expected_len {
-                return Err(ProjectError::Invalid(format!(
-                    "2D data length {} does not match shape {}x{}",
-                    values.len(),
-                    rows,
-                    cols
-                )));
-            }
-            let direct = data
-                .dimensions
-                .iter()
-                .find(|d| d.role == "direct")
-                .or_else(|| data.dimensions.iter().find(|d| d.storage_axis == 1))
-                .ok_or_else(|| {
-                    ProjectError::Invalid("2D data missing direct dimension".to_owned())
-                })?;
-            let indirect = data
-                .dimensions
-                .iter()
-                .find(|d| d.role == "indirect")
-                .or_else(|| data.dimensions.iter().find(|d| d.storage_axis == 0))
-                .ok_or_else(|| {
-                    ProjectError::Invalid("2D data missing indirect dimension".to_owned())
-                })?;
-            let mut dataset = Nmr2DDataset::load_with_origin_and_equal_scale_preference(
-                NmrData2D {
-                    data: values,
-                    rows,
-                    cols,
-                    domain: domain_from_str(&data.payload.domain),
-                    direct: dim_from_dimension(direct)?,
-                    indirect: dim_from_dimension(indirect)?,
-                    quad: quad_from_str(nmr_ext_str(data, "quad").unwrap_or("complex")),
-                    indirect_conjugate: nmr_ext_bool(data, "indirect_conjugate").unwrap_or(false),
-                    experiment: nmr_ext_str(data, "experiment_hint").map(str::to_owned),
-                    pseudo_axis: read_pseudo_axis(data),
-                    diffusion: read_diffusion(data),
-                    nus: None,
-                    source: nmr_source(data),
+            let initial = Params2D {
+                layout: if source.axes()[0].domain == nmr::axis::AxisDomain::Parameter
+                    || source
+                        .dataset()
+                        .as_raw()
+                        .is_some_and(|raw| raw.data().is_sparse())
+                {
+                    Layout2D::Stack
+                } else {
+                    Layout2D::Ft
                 },
-                read_nmr_origin(data)?,
-                true,
-            );
+                f2: AxisPipeline { steps: Vec::new() },
+                f1: AxisPipeline { steps: Vec::new() },
+            };
+            let mut dataset =
+                Nmr2DDataset::load_with_pipeline(source, Some(initial), Some(false), None, true)
+                    .map_err(ProjectError::Invalid)?;
             dataset.acquisition_identity = read_acquisition_identity(data)?;
             dataset.field_catalog = read_field_catalog(data)?;
             apply_2d_recipe(&mut dataset, recipe)?;
@@ -634,7 +523,7 @@ pub fn object_to_dataset(
             read_integrals_2d(&mut dataset, recipe)?;
             read_peaks_2d(&mut dataset, recipe)?;
             dataset.name = data.label.clone();
-            dataset.retransform();
+            dataset.retransform().map_err(ProjectError::Invalid)?;
             // `retransform` deliberately invalidates every analysis map. Restore
             // auxiliary DOSY state only after it, or a load will silently erase
             // the stored result and serve the stack fallback instead.

@@ -18,7 +18,7 @@ charge correction is shared by all regions at one measurement position. See
 
 ## A typical 1D spectrum
 
-A newly imported time-domain 1D dataset already carries the standard pipeline —
+A time-domain 1D dataset with known digital-filter delay carries the standard pipeline —
 apodization, zero filling, FFT, phase correction, and baseline correction, in
 that order — with automatic phasing enabled. In most cases the spectrum on
 screen is immediately usable, and a session touches at most three things:
@@ -39,6 +39,72 @@ acquisition shows two pipelines, **F2 (direct)** then **F1 (indirect)**, in the
 order they are processed. A dataset that arrives already transformed is marked
 **Imported spectrum** and has no time-domain steps and no FFT: PlotX does not
 invent an FID for data it never acquired.
+
+**Reset to default** restores the import settings. Raw data with unknown
+filter delay remains uncorrected; imported spectra have no FFT, and spectra
+containing only real values have no phase-correction step.
+
+## Check calibration before analysis
+
+Check the axis units before choosing an analysis: FIDs use seconds, while spectra
+use Hz or ppm. Missing calibration is not treated as zero.
+
+- **Reference** requires a ppm axis and shifts coordinates without changing intensities.
+- **CRAFT** requires a complex FID with known spectral width, observe frequency,
+  chemical-shift reference, and digital-filter delay.
+- **DOSY maps** require a frequency-domain series calibrated in ppm.
+- **Multiplet analysis** requires a ppm spectrum and a known chemical-shift reference
+  frequency to report coupling constants in Hz.
+
+The observe frequency and chemical-shift reference frequency serve different
+purposes; do not substitute one for the other when interpreting ppm-to-Hz
+conversions. For imported Bruker processed spectra, `SF` provides the reference
+for converting ppm intervals to Hz. It does not supply missing acquisition
+frequency or carrier information, or confirm that digital-filter correction was applied.
+
+## Reconstruct a non-uniformly sampled spectrum
+
+Non-uniform sampling (NUS) records only selected points along the indirect time
+axis. PlotX uses the sampling table to reconstruct the full grid before the F1
+FFT produces a 2D spectrum. The grid size need not be a power of two.
+
+1. Import a supported Bruker NUS or JEOL acquisition with its sampling table.
+   If the table is missing, restore the vendor companion files or use
+   [Import NMR with Sampling Table](/guides/importing-data/#supplying-a-missing-nmr-sampling-table).
+2. Allow the default processing to finish. PlotX estimates noise automatically;
+   you do not need to select a noise region or enter a noise value.
+3. Check the status bar for errors before interpreting the result. If reconstruction
+   fails during import, the original observations remain available, but their
+   display is **not a reconstructed spectrum**. If a later processing change
+   fails, the last successful display remains visible.
+
+### Noise and convergence settings
+
+The automatic noise estimate uses the spectrum after the current F2 processing
+steps and updates when those steps change. It requires at least 48 observations
+and 32 F2 frequency points, or 32 observations and 128 points for an estimate
+checked against held-out observations. Meeting these sizes alone does not
+ensure a reliable estimate; additional noise-quality checks must also pass.
+
+If you have an independently determined noise standard deviation, enable
+**Override automatic noise estimate** under **Non-uniform sampling**. Enter it
+in the amplitude units of the spectrum after F2 processing. A value of 0 means
+noiseless input, not automatic estimation. Update the value if you change F2
+processing in a way that changes the noise scale.
+
+Set the maximum iteration count between 1 and 2048. Reaching this limit without
+convergence reports an error. Keep the F2 and F1 FFT steps enabled to obtain
+both frequency axes. Noise settings are saved in the project but are not
+transferred to other acquisitions by reusable processing recipes.
+
+### Input limitations
+
+Reconstruction requires a sampling table without repeated coordinates and
+enough real and imaginary signal information to reconstruct the indirect axis.
+Not all acquisition arrangements are supported; an unsupported arrangement
+reports an error. Repeated observations can
+be imported and saved, but cannot currently be reconstructed; do not delete
+repeats from the sampling table to bypass this restriction.
 
 ## Where processing lives
 
@@ -122,6 +188,13 @@ Processing card's ⋮ menu, applied before the pipeline. It governs 1D and 2D
 data alike: switch it off on a 2D dataset and the direct dimension is left
 uncorrected too.
 
+For Bruker data, a nonnegative `GRPDLY` supplies the delay, including zero.
+If it is missing or -1, PlotX uses supported `DSPFVS`/`DECIM` settings to determine
+the delay. Otherwise the delay remains unknown and raw data initially appears
+as an FID. To view an uncorrected spectrum, turn off **Group-delay correction**
+under **Advanced** and enable FFT. Review the result for filter-related distortion;
+disabling correction does not establish the delay required by CRAFT.
+
 ## Apodization
 
 Click the **Apodize** step to open its settings. All of them are shown at once,
@@ -189,6 +262,15 @@ automatic method each row says which switch to flip first.
 
 Through [Automation](/guides/automation/) these values keep their own units:
 phase angles in radians, the pivot as a fraction.
+
+For 2D data, the selected automatic method estimates a correction from the trace
+containing the strongest real or imaginary signal and applies the same correction
+across the series, preserving relative row signs. If it fails, review the error
+and choose another method or adjust the phase manually.
+
+For JEOL COSY, both F2 and F1 support phase correction and Reference. An extracted
+row follows F2; a column follows F1. Both retain real and imaginary values for
+further phase correction.
 
 ## Baseline correction
 

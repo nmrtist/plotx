@@ -6,7 +6,7 @@
 use num_complex::Complex64;
 use plotx_io::Domain;
 
-use crate::{Spectrum2D, StackSpectrum};
+use crate::Spectrum2D;
 
 /// The orientation of a 1D cut through a true-2D spectrum. `Row`/`Column` name
 /// the axis the resulting trace runs *along*.
@@ -35,7 +35,9 @@ pub struct Slice1D {
     pub domain: Domain,
     pub values: Vec<Complex64>,
     pub nucleus: String,
-    pub observe_freq_mhz: f64,
+    pub observe_freq_mhz: Option<f64>,
+    pub reference_freq_mhz: Option<f64>,
+    pub unit: nmr::axis::AxisUnit,
     /// The fixed-axis coordinate the cut was taken at, for labelling.
     /// `None` for a projection, which spans the whole axis.
     pub position: Option<f64>,
@@ -52,83 +54,6 @@ impl Spectrum2D {
     pub fn nearest_f1(&self, ppm: f64) -> usize {
         nearest(&self.f1_ppm, ppm)
     }
-
-    /// A single row/column cut at a grid index (clamped in range).
-    pub fn slice(&self, kind: SliceKind, index: usize) -> Slice1D {
-        match kind {
-            SliceKind::Row => {
-                let r = index.min(self.f1_size.saturating_sub(1));
-                let start = r * self.f2_size;
-                Slice1D {
-                    coordinates: self.f2_ppm.clone(),
-                    domain: self.f2_domain,
-                    values: self.data[start..start + self.f2_size].to_vec(),
-                    nucleus: self.direct.nucleus.clone(),
-                    observe_freq_mhz: self.direct.observe_freq_mhz,
-                    position: self.f1_ppm.get(r).copied(),
-                    position_domain: self.f1_domain,
-                }
-            }
-            SliceKind::Column => {
-                let c = index.min(self.f2_size.saturating_sub(1));
-                Slice1D {
-                    coordinates: self.f1_ppm.clone(),
-                    domain: self.f1_domain,
-                    values: (0..self.f1_size).map(|r| self.at(r, c)).collect(),
-                    nucleus: self.indirect.nucleus.clone(),
-                    observe_freq_mhz: self.indirect.observe_freq_mhz,
-                    position: self.f2_ppm.get(c).copied(),
-                    position_domain: self.f2_domain,
-                }
-            }
-        }
-    }
-
-    /// A whole-axis projection. `kind` names the surviving axis (as for
-    /// [`Self::slice`]): a `Row` projection collapses F1 to give intensity vs F2,
-    /// a `Column` projection collapses F2 to give intensity vs F1.
-    pub fn project(&self, kind: SliceKind, mode: ProjectionMode) -> Slice1D {
-        match kind {
-            SliceKind::Row => Slice1D {
-                coordinates: self.f2_ppm.clone(),
-                domain: self.f2_domain,
-                values: (0..self.f2_size)
-                    .map(|c| reduce((0..self.f1_size).map(|r| self.at(r, c)), mode))
-                    .collect(),
-                nucleus: self.direct.nucleus.clone(),
-                observe_freq_mhz: self.direct.observe_freq_mhz,
-                position: None,
-                position_domain: self.f1_domain,
-            },
-            SliceKind::Column => Slice1D {
-                coordinates: self.f1_ppm.clone(),
-                domain: self.f1_domain,
-                values: (0..self.f1_size)
-                    .map(|r| reduce((0..self.f2_size).map(|c| self.at(r, c)), mode))
-                    .collect(),
-                nucleus: self.indirect.nucleus.clone(),
-                observe_freq_mhz: self.indirect.observe_freq_mhz,
-                position: None,
-                position_domain: self.f2_domain,
-            },
-        }
-    }
-}
-
-impl StackSpectrum {
-    /// One increment's direct-dimension 1D trace (clamped in range).
-    pub fn slice(&self, increment: usize) -> Slice1D {
-        let i = increment.min(self.increments().saturating_sub(1));
-        Slice1D {
-            coordinates: self.ppm.clone(),
-            domain: self.direct_domain,
-            values: self.traces.get(i).cloned().unwrap_or_default(),
-            nucleus: self.direct.nucleus.clone(),
-            observe_freq_mhz: self.direct.observe_freq_mhz,
-            position: None,
-            position_domain: self.direct_domain,
-        }
-    }
 }
 
 fn nearest(axis: &[f64], ppm: f64) -> usize {
@@ -139,90 +64,82 @@ fn nearest(axis: &[f64], ppm: f64) -> usize {
         .unwrap_or(0)
 }
 
-fn reduce(values: impl Iterator<Item = Complex64>, mode: ProjectionMode) -> Complex64 {
-    match mode {
-        ProjectionMode::Sum => values.sum(),
-        ProjectionMode::Skyline => values.fold(Complex64::new(0.0, 0.0), |best, c| {
-            if c.norm() > best.norm() { c } else { best }
-        }),
-    }
+/// A native reduction removes the selected dimension and its explicitly chosen
+/// real component. The surviving axis retains all of its Cartesian components.
+#[derive(Clone, Copy, Debug)]
+pub enum Reduction {
+    Slice(usize),
+    Projection(ProjectionMode),
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::AxisMeta;
-
-    fn spectrum() -> Spectrum2D {
-        // 2 rows (F1) × 3 cols (F2): row r, col c carries value (r*10 + c).
-        let (f2_size, f1_size) = (3, 2);
-        let data = (0..f1_size)
-            .flat_map(|r| (0..f2_size).map(move |c| Complex64::new((r * 10 + c) as f64, 0.0)))
-            .collect();
-        Spectrum2D {
-            f2_domain: plotx_io::Domain::Frequency,
-            f1_domain: plotx_io::Domain::Frequency,
-            f2_ppm: vec![1.0, 2.0, 3.0],
-            f1_ppm: vec![10.0, 20.0],
-            data,
-            f2_size,
-            f1_size,
-            direct: AxisMeta {
-                nucleus: "1H".into(),
-                observe_freq_mhz: 400.0,
-            },
-            indirect: AxisMeta {
-                nucleus: "13C".into(),
-                observe_freq_mhz: 100.0,
-            },
-            source: "t".into(),
+pub fn extract(
+    source: &plotx_io::nmr_view::NmrSource,
+    kind: SliceKind,
+    reduction: Reduction,
+) -> Result<(plotx_io::nmr_view::NmrSource, Slice1D), String> {
+    use crate::Processed1D;
+    use nmr::processing::{
+        ProcessingOperation, ProcessingOptions, ProcessingPlan, SpectrumOperation,
+    };
+    let axis = match kind {
+        SliceKind::Row => 0,
+        SliceKind::Column => 1,
+    };
+    let axes = source.axes();
+    if axes.len() != 2 {
+        return Err("Slice extraction requires two axes".into());
+    }
+    let operation = match reduction {
+        Reduction::Slice(index) => SpectrumOperation::Slice {
+            index,
+            component: 0,
+        },
+        Reduction::Projection(ProjectionMode::Sum) => SpectrumOperation::Sum { component: 0 },
+        Reduction::Projection(ProjectionMode::Skyline) => {
+            SpectrumOperation::Skyline { component: 0 }
         }
-    }
-
-    #[test]
-    fn row_slice_is_a_full_f2_trace_at_fixed_f1() {
-        let s = spectrum();
-        let row = s.slice(SliceKind::Row, 1);
-        assert_eq!(row.coordinates, vec![1.0, 2.0, 3.0]);
-        assert_eq!(row.domain, Domain::Frequency);
-        assert_eq!(
-            row.values.iter().map(|c| c.re).collect::<Vec<_>>(),
-            vec![10.0, 11.0, 12.0]
-        );
-        assert_eq!(row.nucleus, "1H");
-        assert_eq!(row.position, Some(20.0));
-        assert_eq!(row.position_domain, Domain::Frequency);
-    }
-
-    #[test]
-    fn column_slice_is_a_full_f1_trace_at_fixed_f2() {
-        let s = spectrum();
-        let col = s.slice(SliceKind::Column, 2);
-        assert_eq!(col.coordinates, vec![10.0, 20.0]);
-        assert_eq!(
-            col.values.iter().map(|c| c.re).collect::<Vec<_>>(),
-            vec![2.0, 12.0]
-        );
-        assert_eq!(col.nucleus, "13C");
-        assert_eq!(col.position, Some(3.0));
-    }
-
-    #[test]
-    fn sum_projection_collapses_the_other_axis() {
-        let s = spectrum();
-        let proj = s.project(SliceKind::Row, ProjectionMode::Sum);
-        // Column c sums rows: (0+10), (1+11), (2+12).
-        assert_eq!(
-            proj.values.iter().map(|c| c.re).collect::<Vec<_>>(),
-            vec![10.0, 12.0, 14.0]
-        );
-        assert_eq!(proj.position, None);
-    }
-
-    #[test]
-    fn nearest_index_snaps_to_the_grid() {
-        let s = spectrum();
-        assert_eq!(s.nearest_f2(2.4), 1);
-        assert_eq!(s.nearest_f1(18.0), 1);
-    }
+    };
+    let output = ProcessingPlan::new(vec![ProcessingOperation::Spectrum { axis, operation }])
+        .and_then(|plan| {
+            plan.apply_with_context(
+                source.dataset(),
+                ProcessingOptions::default(),
+                &mut nmr::ExecutionContext::default(),
+            )
+        })
+        .map_err(|error| error.to_string())?;
+    let output = plotx_io::nmr_view::NmrSource::new(std::sync::Arc::new(output))
+        .map_err(|error| error.to_string())?;
+    let view = crate::nmr_execution::view_1d(&output).map_err(|error| error.to_string())?;
+    let (coordinates, domain, values) = match view {
+        Processed1D::Frequency(s) => (s.ppm, Domain::Frequency, s.values),
+        Processed1D::Time(t) => (t.time_s, Domain::Time, t.values),
+    };
+    let surviving = &output.axes()[0];
+    let position = match reduction {
+        Reduction::Slice(index) => axes[axis]
+            .coordinate_values()
+            .map_err(|error| error.to_string())?
+            .get(index)
+            .copied(),
+        Reduction::Projection(_) => None,
+    };
+    let slice = Slice1D {
+        coordinates,
+        domain,
+        values,
+        reference_freq_mhz: output.reference_frequency_mhz(0),
+        nucleus: surviving.nucleus.clone().unwrap_or_default(),
+        observe_freq_mhz: surviving.observe_frequency_mhz(),
+        unit: surviving
+            .unit
+            .ok_or_else(|| "Slice has no spectral unit".to_owned())?,
+        position,
+        position_domain: if axes[axis].domain == nmr::axis::AxisDomain::Time {
+            Domain::Time
+        } else {
+            Domain::Frequency
+        },
+    };
+    Ok((output, slice))
 }

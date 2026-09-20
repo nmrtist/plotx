@@ -11,11 +11,13 @@ fn doublet_marked_app() -> PlotxApp {
         domain: plotx_io::Domain::Frequency,
         values,
         nucleus: "1H".to_owned(),
-        observe_freq_mhz: 400.0,
+        observe_freq_mhz: Some(400.0),
+        reference_freq_mhz: Some(400.0),
+        unit: nmr::axis::AxisUnit::Ppm,
         position: None,
         position_domain: plotx_io::Domain::Frequency,
     };
-    let mut nmr = NmrDataset::from_slice(slice, "doublet".to_owned());
+    let mut nmr = NmrDataset::from_slice(slice, "doublet".to_owned()).unwrap();
     for (id, x) in [(0u64, 2.0), (1u64, 2.0 + 7.0 / 400.0)] {
         nmr.peaks.marks.push(PeakMark {
             id,

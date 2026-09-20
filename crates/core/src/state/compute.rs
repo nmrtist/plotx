@@ -1,5 +1,5 @@
+use nmr::CancellationToken;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -8,11 +8,12 @@ use std::time::{Duration, Instant};
 use plotx_analysis::diffusion::{DiffusionMap, diffusion_map_cancellable};
 use plotx_analysis::ilt::{IltResult, ilt_map_cancellable};
 use plotx_figure::Figure;
-use plotx_io::{DiffusionMeta, NmrData, NmrData2D};
+use plotx_io::{DiffusionMeta, NmrData, nmr_view::NmrSource};
 use plotx_processing::{
     Params2D, Processed2D, StackSpectrum,
     craft::{CraftInvocation, CraftResult, process_craft_cancellable},
-    process_2d_cancellable, reapply_2d_cancellable,
+    nmr_bridge::{DelayPolicy, RecipeRange},
+    nmr_execution::{NusRequest, Output2D, execute_2d},
 };
 
 use super::{
@@ -93,7 +94,7 @@ enum Job {
         generation: u64,
         dataset: DatasetId,
         epoch: u64,
-        token: Arc<AtomicBool>,
+        token: CancellationToken,
         stack: Arc<StackSpectrum>,
         b_factors: Vec<f64>,
         d_grid: Vec<f64>,
@@ -110,7 +111,7 @@ enum Job {
         generation: u64,
         dataset: DatasetId,
         epoch: u64,
-        token: Arc<AtomicBool>,
+        token: CancellationToken,
         stack: Arc<StackSpectrum>,
         values: Vec<f64>,
         meta: DiffusionMeta,
@@ -121,7 +122,7 @@ enum Job {
         generation: u64,
         dataset: DatasetId,
         epoch: u64,
-        token: Arc<AtomicBool>,
+        token: CancellationToken,
         data: Arc<NmrData>,
         invocation: Box<CraftInvocation>,
         parent_run: Option<CraftRunId>,
@@ -129,7 +130,7 @@ enum Job {
     Process2D {
         version: FieldVersion,
         dataset: DatasetId,
-        token: Arc<AtomicBool>,
+        token: CancellationToken,
         input: ProcessingInput,
         params: Params2D,
         fields: Vec<VersionedProcessingField>,
@@ -150,9 +151,15 @@ enum ProcessingInputKind {
     Reapply,
 }
 
+pub(crate) struct Full2DInput {
+    pub source: NmrSource,
+    pub delay: DelayPolicy,
+    pub nus: Option<NusRequest>,
+}
+
 enum ProcessingInput {
-    Full(Arc<NmrData2D>),
-    Reapply(Processed2D),
+    Full(Full2DInput),
+    Reapply(NmrSource),
 }
 
 impl ProcessingInput {
@@ -175,7 +182,7 @@ struct DeferredProcessing {
 struct ActiveJob {
     generation: u64,
     started_at: Instant,
-    token: Arc<AtomicBool>,
+    token: CancellationToken,
     processing_input: Option<ProcessingInputKind>,
 }
 
@@ -217,10 +224,15 @@ pub enum Done {
     Processing2D {
         version: FieldVersion,
         dataset: DatasetId,
-        base: Option<Processed2D>,
-        processed: Processed2D,
+        base: Option<Output2D>,
+        processed: Output2D,
         fields: Vec<ProcessedFieldArtifact>,
         params: Params2D,
+    },
+    Processing2DFailed {
+        version: FieldVersion,
+        dataset: DatasetId,
+        message: String,
     },
     EstimateField {
         key: EstimateKey,
@@ -316,13 +328,13 @@ impl ComputeService {
             return Err(EnqueueError::Busy(kind));
         }
         let generation = self.next_generation(dataset, ComputeKind::Ilt);
-        let token = Arc::new(AtomicBool::new(false));
+        let token = CancellationToken::new();
         self.active.insert(
             (dataset, ComputeKind::Ilt),
             ActiveJob {
                 generation,
                 started_at: Instant::now(),
-                token: Arc::clone(&token),
+                token: token.clone(),
                 processing_input: None,
             },
         );
@@ -366,13 +378,13 @@ impl ComputeService {
             return Err(EnqueueError::Busy(kind));
         }
         let generation = self.next_generation(dataset, ComputeKind::Dosy);
-        let token = Arc::new(AtomicBool::new(false));
+        let token = CancellationToken::new();
         self.active.insert(
             (dataset, ComputeKind::Dosy),
             ActiveJob {
                 generation,
                 started_at: Instant::now(),
-                token: Arc::clone(&token),
+                token: token.clone(),
                 processing_input: None,
             },
         );
@@ -409,13 +421,13 @@ impl ComputeService {
             return Err(EnqueueError::Busy(kind));
         }
         let generation = self.next_generation(dataset, ComputeKind::Craft);
-        let token = Arc::new(AtomicBool::new(false));
+        let token = CancellationToken::new();
         self.active.insert(
             (dataset, ComputeKind::Craft),
             ActiveJob {
                 generation,
                 started_at: Instant::now(),
-                token: Arc::clone(&token),
+                token: token.clone(),
                 processing_input: None,
             },
         );
@@ -444,7 +456,7 @@ impl ComputeService {
         &mut self,
         dataset: DatasetId,
         fields: &[ProcessingField],
-        data: Arc<NmrData2D>,
+        data: Full2DInput,
         params: Params2D,
     ) -> Result<Vec<ComputeKind>, FieldEnqueueError> {
         self.request_2d(dataset, fields, ProcessingInput::Full(data), params)
@@ -456,7 +468,7 @@ impl ComputeService {
         &mut self,
         dataset: DatasetId,
         fields: &[ProcessingField],
-        base: Processed2D,
+        base: NmrSource,
         params: Params2D,
     ) -> Result<Vec<ComputeKind>, FieldEnqueueError> {
         self.request_2d(dataset, fields, ProcessingInput::Reapply(base), params)
@@ -533,14 +545,14 @@ impl ComputeService {
             let Some(request) = self.deferred_processing.remove(&dataset) else {
                 continue;
             };
-            let token = Arc::new(AtomicBool::new(false));
+            let token = CancellationToken::new();
             let input_kind = request.input.kind();
             self.active.insert(
                 (dataset, ComputeKind::Processing2D),
                 ActiveJob {
                     generation: request.version.0,
                     started_at: Instant::now(),
-                    token: Arc::clone(&token),
+                    token: token.clone(),
                     processing_input: Some(input_kind),
                 },
             );
@@ -586,6 +598,7 @@ impl ComputeService {
                 | Done::Craft { .. }
                 | Done::CraftFailed { .. }
                 | Done::Processing2D { .. }
+                | Done::Processing2DFailed { .. }
                 | Done::Cancelled { .. }
                 | Done::Failed { .. } => {}
             }
@@ -596,12 +609,15 @@ impl ComputeService {
                 .active
                 .get(&(dataset, kind))
                 .filter(|active| active.generation == generation);
+            if kind == ComputeKind::Processing2D && matching_active.is_none() {
+                continue;
+            }
             // A worker can send success immediately before cancellation. Check
             // the shared token again on the receiving side so explicit cancel,
             // Full/Reapply replacement, and dataset invalidation cannot install
             // that already-queued success.
             let cancelled_after_send =
-                matching_active.is_some_and(|active| active.token.load(Ordering::Relaxed));
+                matching_active.is_some_and(|active| active.token.is_cancelled());
             if matching_active.is_some() {
                 self.active.remove(&(dataset, kind));
             }
@@ -621,9 +637,9 @@ impl ComputeService {
     }
 
     pub fn progress(&self, dataset: DatasetId, kind: ComputeKind) -> Option<Duration> {
-        self.active.get(&(dataset, kind)).and_then(|active| {
-            (!active.token.load(Ordering::Relaxed)).then(|| active.started_at.elapsed())
-        })
+        self.active
+            .get(&(dataset, kind))
+            .and_then(|active| (!active.token.is_cancelled()).then(|| active.started_at.elapsed()))
     }
 
     /// Return the active DOSY computation regardless of which method the UI is
@@ -645,7 +661,7 @@ impl ComputeService {
         self.active
             .iter()
             .find(|((active_dataset, _), active)| {
-                *active_dataset == dataset && !active.token.load(Ordering::Relaxed)
+                *active_dataset == dataset && !active.token.is_cancelled()
             })
             .map(|((_, kind), _)| *kind)
     }
@@ -671,7 +687,8 @@ impl ComputeService {
             if compatible_reapply {
                 continue;
             }
-            let running = !active.token.swap(true, Ordering::Relaxed);
+            let running = !active.token.is_cancelled();
+            active.token.cancel();
             if running && *kind != ComputeKind::Processing2D {
                 aborted.push(*kind);
             }
@@ -685,7 +702,7 @@ impl ComputeService {
     pub fn cancel(&mut self, dataset: DatasetId, kind: ComputeKind) -> bool {
         let mut cancelled = false;
         if let Some(active) = self.active.get(&(dataset, kind)) {
-            active.token.store(true, Ordering::Relaxed);
+            active.token.cancel();
             cancelled = true;
         }
         if kind == ComputeKind::Processing2D && self.deferred_processing.remove(&dataset).is_some()
@@ -744,6 +761,9 @@ fn done_identity(done: &Done) -> Option<(DatasetId, ComputeKind, u64)> {
             ..
         } => Some((*dataset, ComputeKind::Craft, *generation)),
         Done::Processing2D {
+            dataset, version, ..
+        }
+        | Done::Processing2DFailed {
             dataset, version, ..
         } => Some((*dataset, ComputeKind::Processing2D, version.0)),
         Done::Cancelled {

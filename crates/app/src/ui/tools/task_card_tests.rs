@@ -15,9 +15,14 @@ fn app_with_task(tab: TaskDockTab, collapsed: bool) -> PlotxApp {
         source: "test".into(),
         group_delay: 0.0,
     };
-    app.doc
-        .datasets
-        .push(Dataset::Nmr(Box::new(NmrDataset::load(data))));
+    app.doc.datasets.push(Dataset::Nmr(Box::new(
+        NmrDataset::load_with_pipeline(
+            data,
+            Some(plotx_processing::AxisPipeline { steps: Vec::new() }),
+            Some(false),
+        )
+        .unwrap(),
+    )));
     app.doc
         .canvases
         .push(CanvasDocument::new("p".into(), [100.0, 80.0]));

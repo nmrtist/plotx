@@ -15,7 +15,7 @@ pub(super) fn stability_diagnostics(
     reference: CraftReference,
     data: &NmrData,
 ) -> CraftStabilityDiagnostics {
-    let delta_ppm = (0.01_f64).max(8.0 / data.observe_freq_mhz.max(f64::MIN_POSITIVE));
+    let delta_ppm = (0.01_f64).max(8.0 / reference.reference_frequency_mhz.max(f64::MIN_POSITIVE));
     let mut perturbations = vec![("original".to_owned(), selections.to_vec())];
     for (name, start_delta, end_delta) in [
         ("shift left", -delta_ppm, -delta_ppm),
@@ -55,7 +55,7 @@ pub(super) fn stability_diagnostics(
     }
 
     let carrier = reference.effective_carrier_ppm();
-    let half_ppm = data.spectral_width_hz / (2.0 * data.observe_freq_mhz);
+    let half_ppm = data.spectral_width_hz / (2.0 * reference.reference_frequency_mhz);
     let lower = carrier - half_ppm;
     let upper = carrier + half_ppm;
     let mut skipped = Vec::new();

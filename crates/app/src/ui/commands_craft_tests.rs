@@ -28,7 +28,9 @@ fn craft_command_opens_a_task_for_the_original_time_domain_fid() {
 fn craft_warning_does_not_disable_run() {
     let mut app = app_with_nmr();
     let nmr = app.doc.datasets[0].as_nmr_mut().unwrap();
-    nmr.data.points.fill(num_complex::Complex64::new(0.0, 0.0));
+    let mut input = nmr.data.craft_fid().unwrap();
+    input.points.fill(num_complex::Complex64::new(0.0, 0.0));
+    nmr.data = input.try_into().unwrap();
 
     execute_without_clipboard(CommandId::Craft, &mut app, &egui::Context::default());
     use_short_fixture_filter(&mut app);
@@ -40,7 +42,9 @@ fn craft_warning_does_not_disable_run() {
 fn craft_hard_preflight_error_disables_run() {
     let mut app = app_with_nmr();
     let nmr = app.doc.datasets[0].as_nmr_mut().unwrap();
-    nmr.data.group_delay = nmr.data.points.len().saturating_sub(8) as f64;
+    let mut input = nmr.data.craft_fid().unwrap();
+    input.group_delay = input.points.len().saturating_sub(8) as f64;
+    nmr.data = input.try_into().unwrap();
 
     execute_without_clipboard(CommandId::Craft, &mut app, &egui::Context::default());
     use_short_fixture_filter(&mut app);

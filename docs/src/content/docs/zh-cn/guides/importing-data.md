@@ -9,9 +9,9 @@ PlotX 直接读取厂商 LC–MS、NMR、XPS、AFM 与电生理格式，无需�
 
 | 格式 | 扩展名 | 说明 |
 | --- | --- | --- |
-| JEOL Delta | `.jdf` | 1D、2D 及伪 2D（DOSY / T1 / T2） |
-| Bruker TopSpin | `fid` / `ser` 目录 | 1D 与 2D |
-| Varian/Agilent VnmrJ | `.fid` 目录 | 原始时域 1D 与常规 2D |
+| JEOL Delta | `.jdf` | 原始与已处理的 1D、2D 及参数系列；实验性支持 |
+| Bruker TopSpin | `fid` / `ser` / `pdata` | 原始及已处理的 1D、2D；NUS 为实验性支持 |
+| Varian/Agilent VnmrJ | `.fid` 目录 | 原始 1D、`phase=[1,2]` 的 2D，或单参数变化系列 |
 | Waters MassLynx RAW | `.raw` 目录 | 已验证的低分辨率数据，包括 SQD2 数据 |
 | SCIEX legacy WIFF | `.wiff` + `.wiff.scan` | 支持单样本与多样本 legacy 数据；两个文件必须放在一起 |
 | Rigaku 粉末 XRD | `.rasx`、FI `.raw`、RAS_RAW `.txt` | 衍射图样、采集元数据，以及文件提供的衰减系数 |
@@ -40,14 +40,44 @@ PlotX 直接读取厂商 LC–MS、NMR、XPS、AFM 与电生理格式，无需�
 CasaXPS `.txt` 按结构头内容识别，而不是只看扩展名；其他 `.txt` 仍进入表格导入。
 能量轴与拟合细节见 [XPS 工作流](/zh-cn/guides/xps/)。
 
+## 查看导入进度
+
+科学数据文件与采集目录在后台逐个加载，期间可以继续操作。完成的数据集会出现在
+画板上，不会切换当前页面或选择。状态栏显示当前文件及成功、失败数量；错误可在
+诊断历史中查看。追加导入会排在当前批次之后。打开、关闭或新建项目会取消旧项目
+尚未完成的导入。
+
+NMR 导入包含默认处理，NUS 重建可能比读取文件耗时长得多。项目文件、表格预览、
+ZIP 文件和手动补录采样表的导入使用各自的导入流程。
+
+## 补录缺失的 NMR 采样表
+
+此选项适用于受支持的二维 Bruker NUS 或只采集了部分间接网格点的 JEOL 数据。
+请准备原始采样表，以及含有足够网格与校准信息、可用于核对采样表的采集文件。
+
+1. 选择 **File → Import NMR with Sampling Table…**（命令面板中也可搜索），
+   再选择 Bruker `ser` 或 JEOL `.jdf` 文件。
+2. 填写采样表来源或说明，以及原始间接轴的完整网格点数（包括未采样点）。
+3. 填写 **Lanes per observation**：每个所列间接点采集的分量记录数。
+   请按采集设置填写，不是填写采样表的点数。
+4. 根据原表选择 **Zero-based**（从 0 开始）或 **One-based**（从 1 开始）。
+   按采集顺序每行填写一个间接索引；每行代表该次观测的全部分量，并保留重复观测。
+5. 点击 **Validate and import**。校验失败时，根据提示与采集记录核对。
+   与已有采样表冲突、观测或分量数量不符、缺少网格或校准信息，都会阻止导入。
+
+导入不会修改厂商文件。保存项目后，采样表及其来源会一并保留，重开无需原文件。
+重复坐标可以导入，但目前不能进行 [NUS 重建](/zh-cn/guides/processing/#重建非均匀采样谱)。
+脚本用法见 [CLI 声明格式](/zh-cn/reference/cli/#采样声明)。
+
 ## Varian/Agilent VnmrJ
 
 要导入原始 1D 或常规 2D 采集，请选择 **Open Folder…** 并选中
 `.fid` 目录。也可以选择 **Open File…**，再选中目录内的 `fid`
 文件。请将 `fid` 和 `procpar` 保持在同一目录中。
 
-暂不支持处理后的谱图、3D 或 4D 实验、成像、伪 2D 实验、非均匀采样及
-其他数组实验。兼容性详情见[文件格式](/zh-cn/reference/file-formats/)。
+也支持仅改变一个非分组参数的系列。二维数据要求 `phase=[1,2]`。分组或多个参数数组、
+其他 phase 顺序、Varian NUS、已处理谱和超过二维的数据不受支持。
+校准要求与格式限制见[文件格式](/zh-cn/reference/file-formats/#nmr-数据与项目)。
 
 ## mzML
 

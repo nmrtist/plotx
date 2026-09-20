@@ -81,7 +81,7 @@ mod tests {
             source: "field validation".to_owned(),
             group_delay: 0.0,
         };
-        let dataset = Dataset::Nmr(Box::new(crate::state::NmrDataset::load(source)));
+        let dataset = Dataset::Nmr(Box::new(crate::nmr_test_support::load_1d(source).unwrap()));
         let field = dataset.default_field_id().unwrap();
         let error = validate_series(
             &dataset,

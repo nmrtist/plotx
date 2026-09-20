@@ -1,5 +1,5 @@
 use super::*;
-use plotx_processing::Slice1D;
+use plotx_io::nmr_view::NmrSource;
 use plotx_processing::arithmetic::{
     SpectrumBinaryOp, combine_spectra, same_grid, scale_offset_spectrum,
 };
@@ -34,6 +34,17 @@ impl PlotxApp {
                 sa.nucleus, sb.nucleus
             ));
         }
+        let left = self.doc.datasets[a]
+            .as_nmr()
+            .ok_or("Select an NMR spectrum")?;
+        let right = self.doc.datasets[b]
+            .as_nmr()
+            .ok_or("Select an NMR spectrum")?;
+        plotx_processing::arithmetic::validate_combination(
+            &left.native_processed,
+            &right.native_processed,
+        )
+        .map_err(|error| error.to_string())?;
         if same_grid(sa, sb) {
             Ok(None)
         } else {
@@ -46,12 +57,14 @@ impl PlotxApp {
     }
 
     pub fn combine_spectra_datasets(&mut self, a: usize, b: usize, op: SpectrumBinaryOp, k: f64) {
-        let (Some(sa), Some(sb)) = (self.arithmetic_spectrum(a), self.arithmetic_spectrum(b))
-        else {
+        let (Some(sa), Some(sb)) = (
+            self.doc.datasets.get(a).and_then(Dataset::as_nmr),
+            self.doc.datasets.get(b).and_then(Dataset::as_nmr),
+        ) else {
             self.session.status = "Spectrum arithmetic needs two 1D NMR spectra.".into();
             return;
         };
-        let result = match combine_spectra(sa, sb, op, k) {
+        let result = match combine_spectra(&sa.native_processed, &sb.native_processed, op, k) {
             Ok(result) => result,
             Err(error) => {
                 self.session.status = error.to_string();
@@ -70,7 +83,7 @@ impl PlotxApp {
     }
 
     pub fn scale_spectrum_dataset(&mut self, a: usize, scale: f64, offset: f64) {
-        let Some(sa) = self.arithmetic_spectrum(a) else {
+        let Some(sa) = self.doc.datasets.get(a).and_then(Dataset::as_nmr) else {
             self.session.status = "Spectrum arithmetic needs a 1D NMR spectrum.".into();
             return;
         };
@@ -78,7 +91,13 @@ impl PlotxApp {
             self.session.status = "Nothing to compute: scale is 1 and offset is 0.".into();
             return;
         }
-        let result = scale_offset_spectrum(sa, scale, offset);
+        let result = match scale_offset_spectrum(&sa.native_processed, scale, offset) {
+            Ok(result) => result,
+            Err(error) => {
+                self.session.status = error.to_string();
+                return;
+            }
+        };
         let name_a = self.doc.datasets[a].display_name();
         let scaled = if scale == 1.0 {
             name_a
@@ -108,7 +127,7 @@ impl PlotxApp {
     /// dataset on its own page, as one undoable step (same path as slices).
     fn insert_arithmetic_dataset(
         &mut self,
-        result: Spectrum,
+        result: NmrSource,
         name: String,
         sources: impl IntoIterator<Item = usize>,
     ) {
@@ -116,16 +135,20 @@ impl PlotxApp {
             .into_iter()
             .filter_map(|index| self.doc.datasets.get(index).map(Dataset::resource_id))
             .collect::<Vec<_>>();
-        let slice = Slice1D {
-            coordinates: result.ppm,
-            domain: plotx_io::Domain::Frequency,
-            values: result.values,
-            nucleus: result.nucleus,
-            observe_freq_mhz: result.observe_freq_mhz,
-            position: None,
-            position_domain: plotx_io::Domain::Frequency,
+        let dataset = match NmrDataset::load_with_pipeline(
+            result,
+            Some(AxisPipeline { steps: Vec::new() }),
+            Some(false),
+        ) {
+            Ok(dataset) => dataset,
+            Err(error) => {
+                self.session.status = format!("Spectrum arithmetic failed: {error}");
+                return;
+            }
         };
-        let mut ds = Dataset::Nmr(Box::new(NmrDataset::from_slice(slice, name.clone())));
+        let mut dataset = dataset;
+        dataset.name = Some(name.clone());
+        let mut ds = Dataset::Nmr(Box::new(dataset));
         ds.set_lineage(Some(DatasetLineage::new(
             DerivationKind::SpectrumArithmetic,
             sources,

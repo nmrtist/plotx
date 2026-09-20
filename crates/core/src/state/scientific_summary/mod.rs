@@ -81,12 +81,12 @@ fn format_parts(parts: &[SummaryPart]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::state::{Dataset, NmrDataset, PlotxApp};
+    use crate::state::{Dataset, PlotxApp};
     use num_complex::Complex64;
     use plotx_io::{AcquisitionIdentity, Domain, NmrData};
 
     fn nmr_dataset() -> Dataset {
-        let mut dataset = NmrDataset::load(NmrData {
+        let mut dataset = crate::nmr_test_support::load_1d(NmrData {
             points: vec![Complex64::new(1.0, 0.0); 8],
             domain: Domain::Frequency,
             spectral_width_hz: 4_000.0,
@@ -95,7 +95,8 @@ mod tests {
             nucleus: "1H".to_owned(),
             source: "raw/exp1/fid".to_owned(),
             group_delay: 0.0,
-        });
+        })
+        .unwrap();
         dataset.acquisition_identity = AcquisitionIdentity {
             subject: Some("Sample A".to_owned()),
             acquisition: Some("zg30".to_owned()),

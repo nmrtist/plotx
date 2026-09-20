@@ -1,8 +1,6 @@
 use plotx_analysis::peaks::{DetectParams, detect_peaks, estimate_noise};
 use plotx_io::{Domain, NmrData};
-use rustfft::FftPlanner;
 use serde::{Deserialize, Serialize};
-use std::f64::consts::PI;
 
 use super::{CraftDerivedPlan, CraftParams, CraftReference, CraftRegionId};
 
@@ -28,6 +26,7 @@ pub enum CraftIssueCode {
     NoClearSignal,
     RegionWithoutClearSignal,
     DenseSignalWindow,
+    ProcessingFailure,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -89,6 +88,13 @@ impl CraftInputAssessment {
                     action,
                 })
             };
+            if let Some(message) = &plan.processing_error {
+                error(
+                    CraftIssueCode::ProcessingFailure,
+                    message,
+                    CraftIssueAction::CheckAcquisitionMetadata,
+                );
+            }
             if data.domain != Domain::Time {
                 error(
                     CraftIssueCode::IncompatibleDomain,
@@ -177,7 +183,19 @@ impl CraftInputAssessment {
         {
             Vec::new()
         } else {
-            detect_clear_signals(data, reference, plan.effective_skip_points)
+            match detect_clear_signals(data, reference, plan.effective_skip_points) {
+                Ok(signals) => signals,
+                Err(error) => {
+                    issues.push(CraftAssessmentIssue {
+                        code: CraftIssueCode::ProcessingFailure,
+                        severity: CraftIssueSeverity::Error,
+                        region: None,
+                        message: error.to_string(),
+                        action: CraftIssueAction::CheckAcquisitionMetadata,
+                    });
+                    Vec::new()
+                }
+            }
         };
         if plan.available_points >= 16 && clear_signals.is_empty() {
             issues.push(warning(CraftIssueCode::NoClearSignal, None, "No clear signal reached the 6σ height and 5σ prominence thresholds; the calculation can run but needs review.", CraftIssueAction::ConfirmWithIndependentEvidence));
@@ -258,7 +276,7 @@ fn regions_outside_bandwidth_or_overlap(
     {
         return false;
     }
-    let half_ppm = data.spectral_width_hz / (2.0 * data.observe_freq_mhz);
+    let half_ppm = data.spectral_width_hz / (2.0 * reference.reference_frequency_mhz);
     let carrier = reference.effective_carrier_ppm();
     let lower = carrier - half_ppm;
     let upper = carrier + half_ppm;
@@ -284,28 +302,20 @@ pub(super) fn detect_clear_signals(
     data: &NmrData,
     reference: CraftReference,
     skip: usize,
-) -> Vec<CraftSignalSuggestion> {
-    let input = &data.points[skip..];
+) -> Result<Vec<CraftSignalSuggestion>, super::CraftError> {
+    let input = data
+        .points
+        .get(skip..)
+        .ok_or(super::CraftError::InvalidInput)?;
     if input.len() < 3 {
-        return Vec::new();
+        return Ok(Vec::new());
     }
-    let fft_len = input.len().next_power_of_two();
-    let mut spectrum = vec![num_complex::Complex64::new(0.0, 0.0); fft_len];
-    let duration_s = input.len() as f64 / data.spectral_width_hz;
-    let matched_line_broadening_hz = 1.0 / duration_s.max(f64::MIN_POSITIVE);
-    for (index, (&sample, output)) in input.iter().zip(&mut spectrum).enumerate() {
-        let time_s = index as f64 / data.spectral_width_hz;
-        *output = sample * (-PI * matched_line_broadening_hz * time_s).exp();
-    }
-    FftPlanner::<f64>::new()
-        .plan_fft_forward(fft_len)
-        .process(&mut spectrum);
-    let magnitudes = spectrum
+    let spectrum = super::preview_spectrum(data, reference, skip)?;
+    let fft_len = spectrum.len();
+    let shifted = spectrum
+        .values
         .iter()
-        .map(|value| value.norm())
-        .collect::<Vec<_>>();
-    let shifted = (0..fft_len)
-        .map(|index| magnitudes[(index + fft_len / 2) % fft_len])
+        .map(|value| value.re)
         .collect::<Vec<_>>();
     let sigma = estimate_noise(&shifted).max(f64::MIN_POSITIVE);
     let xs = (0..fft_len).map(|index| index as f64).collect::<Vec<_>>();
@@ -326,16 +336,12 @@ pub(super) fn detect_clear_signals(
             max_count: Some(64),
         },
     );
-    peaks
+    Ok(peaks
         .into_iter()
-        .map(|peak| {
-            let frequency_hz = (peak.index as f64 / fft_len as f64 - 0.5) * data.spectral_width_hz;
-            CraftSignalSuggestion {
-                chemical_shift_ppm: reference.effective_carrier_ppm()
-                    + frequency_hz / data.observe_freq_mhz,
-                height_sigma: shifted[peak.index] / sigma,
-                prominence_sigma: peak.prominence / sigma,
-            }
+        .map(|peak| CraftSignalSuggestion {
+            chemical_shift_ppm: spectrum.ppm[peak.index],
+            height_sigma: shifted[peak.index] / sigma,
+            prominence_sigma: peak.prominence / sigma,
         })
-        .collect()
+        .collect())
 }

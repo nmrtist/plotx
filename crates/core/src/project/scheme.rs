@@ -201,9 +201,9 @@ pub fn apply_scheme(
                 .first()
                 .ok_or_else(|| incompatible("scheme carries no pipeline"))?;
             let mut pipeline = pipeline_from_dto(dto);
+            remint_pipeline(&mut pipeline, &mut dataset_next_step_id(dataset));
             validate_1d_pipeline(&n.data, &pipeline, scheme.group_delay_correct)
                 .map_err(ProjectError::Invalid)?;
-            remint_pipeline(&mut pipeline, &mut dataset_next_step_id(dataset));
             Ok(DatasetProcessingState::Nmr {
                 pipeline,
                 group_delay_correct: scheme.group_delay_correct,
@@ -231,18 +231,13 @@ pub fn apply_scheme(
                 f2: pipeline_from_dto(f2),
                 f1: pipeline_from_dto(f1),
             };
-            params
-                .f2
-                .output_domain(n.data.domain)
-                .map_err(|error| incompatible(&error.to_string()))?;
-            params
-                .f1
-                .output_domain(n.data.domain)
-                .map_err(|error| incompatible(&error.to_string()))?;
+            plotx_processing::nmr_execution::validate_2d_domains(&n.data, &params)
+                .map_err(|error| incompatible(&error))?;
             let mut next = dataset_next_step_id(dataset);
             remint_pipeline(&mut params.f2, &mut next);
             remint_pipeline(&mut params.f1, &mut next);
             Ok(DatasetProcessingState::Nmr2D {
+                nus_request: n.nus_request,
                 params,
                 preset: n.preset,
                 group_delay_correct: scheme.group_delay_correct,
@@ -287,13 +282,14 @@ fn remint_pipeline(pipeline: &mut AxisPipeline, next: &mut u64) {
 pub fn reset_processing(dataset: &Dataset) -> Option<DatasetProcessingState> {
     let mut state = match dataset {
         Dataset::Nmr(n) => Some(DatasetProcessingState::Nmr {
-            pipeline: AxisPipeline::default_1d(),
-            group_delay_correct: crate::state::default_group_delay_correct(n.data.domain),
+            pipeline: crate::state::default_nmr_pipeline(&n.data),
+            group_delay_correct: crate::state::default_group_delay_correct(&n.data),
         }),
         Dataset::Nmr2D(n) => Some(DatasetProcessingState::Nmr2D {
-            params: Params2D::default_for(n.preset),
+            nus_request: n.nus_request,
+            params: crate::state::default_nmr_params(&n.data, n.preset),
             preset: n.preset,
-            group_delay_correct: crate::state::default_group_delay_correct(n.data.domain),
+            group_delay_correct: crate::state::default_group_delay_correct(n.data.source_dataset()),
         }),
         Dataset::Table(_) => None,
         Dataset::Electrophysiology(_) => None,

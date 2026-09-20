@@ -75,14 +75,14 @@ impl PropertyProvider for BinProvider {
         let StepKind::Bin(current) = context.step.kind else {
             unreachable!("the shared context checked the step kind");
         };
-        let bounds = resolved_width_bounds(&context)?;
+        let (bounds, unit) = resolved_width_bounds(&context)?;
         Ok(ResolvedProperty {
             address: address.clone(),
             modified: None,
             value: AggregateValue::Uniform(value_of(definition, current)?),
             default_value: None,
             availability: Availability::Editable,
-            schema: schema_for(definition, bounds),
+            schema: schema_for(definition, bounds, unit),
         })
     }
 
@@ -97,7 +97,7 @@ impl PropertyProvider for BinProvider {
         let context = step_context(app, address, definition, |kind| {
             matches!(kind, StepKind::Bin(_))
         })?;
-        let bounds = resolved_width_bounds(&context)?;
+        let (bounds, _) = resolved_width_bounds(&context)?;
         let value = match operation {
             EditOp::Set(value) => checked_value(definition, bounds, value)?,
             EditOp::Reset => {
@@ -140,11 +140,15 @@ fn value_of(
     }
 }
 
-fn schema_for(definition: &'static PropertyDefinition, bounds: FloatBounds) -> ResolvedSchema {
+fn schema_for(
+    definition: &'static PropertyDefinition,
+    bounds: FloatBounds,
+    unit: &'static str,
+) -> ResolvedSchema {
     if definition.id == WIDTH {
         ResolvedSchema::Float {
             bounds,
-            display: FloatDisplay::Linear("ppm"),
+            display: FloatDisplay::Linear(unit),
         }
     } else {
         ResolvedSchema::Enum {
@@ -179,12 +183,15 @@ fn checked_value(
 
 fn resolved_width_bounds(
     context: &super::processing_common::StepContext<'_>,
-) -> Result<FloatBounds, PropertyError> {
+) -> Result<(FloatBounds, &'static str), PropertyError> {
     let spectrum = spectrum_before_step(context).ok_or_else(|| {
         PropertyError::NotApplicable(
             "Binning needs a one-dimensional input spectrum with an axis.".to_owned(),
         )
     })?;
-    let axis_step = plotx_processing::cleanup::axis_step(&spectrum.ppm);
-    Ok(FloatBounds::above(1.5 * axis_step, f64::MAX))
+    let axis_step = spectrum.coordinate_spacing().unwrap_or(0.0);
+    Ok((
+        FloatBounds::above(1.5 * axis_step, f64::MAX),
+        plotx_processing::axis_unit_label(Some(spectrum.unit)),
+    ))
 }

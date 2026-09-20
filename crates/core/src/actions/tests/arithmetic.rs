@@ -4,9 +4,9 @@ use plotx_processing::arithmetic::SpectrumBinaryOp;
 
 fn two_spectrum_app() -> PlotxApp {
     let mut app = sample_app();
-    app.doc
-        .datasets
-        .push(Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()))));
+    app.doc.datasets.push(Dataset::Nmr(Box::new(
+        NmrDataset::load(synthetic_1d()).unwrap(),
+    )));
     app
 }
 
@@ -86,7 +86,7 @@ fn result_dataset_replays_exactly_after_retransform() {
     app.combine_spectra_datasets(0, 1, SpectrumBinaryOp::Subtract, 0.5);
     let mut ds = app.doc.datasets[2].as_nmr().unwrap().clone();
     let shown = ds.spectrum().unwrap().clone();
-    ds.retransform();
+    ds.retransform().unwrap();
     assert_eq!(ds.spectrum().unwrap().values.len(), shown.values.len());
     for (a, b) in ds.spectrum().unwrap().values.iter().zip(&shown.values) {
         assert!((a - b).norm() < 1e-9);
@@ -103,14 +103,18 @@ fn nucleus_mismatch_is_rejected_without_side_effects() {
     other.nucleus = "13C".to_owned();
     app.doc
         .datasets
-        .push(Dataset::Nmr(Box::new(NmrDataset::load(other))));
+        .push(Dataset::Nmr(Box::new(NmrDataset::load(other).unwrap())));
     let canvases_before = app.doc.canvases.len();
 
     app.combine_spectra_datasets(0, 1, SpectrumBinaryOp::Subtract, 1.0);
 
     assert_eq!(app.doc.datasets.len(), 2);
     assert_eq!(app.doc.canvases.len(), canvases_before);
-    assert!(app.session.status.contains("Nuclei differ"));
+    assert!(
+        app.session.status.contains("incompatible"),
+        "{}",
+        app.session.status
+    );
     assert!(app.spectrum_arithmetic_compat(0, 1).is_err());
 }
 
@@ -135,17 +139,16 @@ fn single_point_operands_combine_without_panicking() {
         domain: plotx_io::Domain::Frequency,
         values: vec![num_complex::Complex64::new(re, 0.0)],
         nucleus: "1H".to_owned(),
-        observe_freq_mhz: 400.0,
+        observe_freq_mhz: Some(400.0),
+        reference_freq_mhz: Some(400.0),
+        unit: nmr::axis::AxisUnit::Ppm,
         position: None,
         position_domain: plotx_io::Domain::Frequency,
     };
     for (i, s) in [point(1.0, 2.0), point(3.0, 5.0)].into_iter().enumerate() {
-        app.doc
-            .datasets
-            .push(Dataset::Nmr(Box::new(NmrDataset::from_slice(
-                s,
-                format!("p{i}"),
-            ))));
+        app.doc.datasets.push(Dataset::Nmr(Box::new(
+            NmrDataset::from_slice(s, format!("p{i}")).unwrap(),
+        )));
     }
 
     app.combine_spectra_datasets(0, 1, SpectrumBinaryOp::Add, 1.0);

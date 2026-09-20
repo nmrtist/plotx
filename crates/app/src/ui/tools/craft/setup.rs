@@ -9,7 +9,13 @@ use plotx_processing::craft::{
 use crate::ui::commands::CommandId;
 
 pub(super) fn show(app: &mut PlotxApp, index: usize, ui: &mut Ui) {
-    let invocation = resolved(app, index);
+    let invocation = match resolved(app, index) {
+        Ok(invocation) => invocation,
+        Err(error) => {
+            ui.colored_label(ui.visuals().error_fg_color, error);
+            return;
+        }
+    };
     settings(app, index, &invocation, ui);
     ui.separator();
     readiness(app.session.ui.craft_analysis_intent, &invocation, ui);
@@ -17,10 +23,12 @@ pub(super) fn show(app: &mut PlotxApp, index: usize, ui: &mut Ui) {
     run_controls(app, index, ui);
 }
 
-pub(super) fn resolved(app: &mut PlotxApp, index: usize) -> CraftInvocation {
+pub(super) fn resolved(app: &mut PlotxApp, index: usize) -> Result<CraftInvocation, String> {
     let nmr = app.doc.datasets[index].as_nmr().unwrap();
     let dataset = nmr.resource_id;
-    let reference = nmr.craft_reference();
+    let reference = nmr
+        .craft_reference()
+        .ok_or("CRAFT requires chemical-shift reference evidence")?;
     let parent_run = app.session.ui.craft_base_run;
     if let Some(cache) = &app.session.ui.craft_resolution_cache
         && cache.dataset == dataset
@@ -29,10 +37,11 @@ pub(super) fn resolved(app: &mut PlotxApp, index: usize) -> CraftInvocation {
         && cache.overrides == app.session.ui.craft_overrides
         && cache.parent_run == parent_run
     {
-        return cache.invocation.clone();
+        return Ok(cache.invocation.clone());
     }
+    let data = nmr.data.craft_fid().map_err(|error| error.to_string())?;
     let invocation = resolve_craft_invocation(
-        &nmr.data,
+        &data,
         reference,
         &app.session.ui.craft_overrides,
         parent_run.and_then(|id| nmr.craft_run(id).map(|run| &run.provenance.invocation)),
@@ -45,7 +54,7 @@ pub(super) fn resolved(app: &mut PlotxApp, index: usize) -> CraftInvocation {
         parent_run,
         invocation: invocation.clone(),
     });
-    invocation
+    Ok(invocation)
 }
 
 fn readiness(intent: CraftAnalysisIntent, invocation: &CraftInvocation, ui: &mut Ui) {
@@ -102,7 +111,7 @@ fn readiness(intent: CraftAnalysisIntent, invocation: &CraftInvocation, ui: &mut
 
 fn settings(app: &mut PlotxApp, index: usize, invocation: &CraftInvocation, ui: &mut Ui) {
     let nmr = app.doc.datasets[index].as_nmr().unwrap().clone();
-    let reference = nmr.craft_reference();
+    let reference = invocation.reference;
     ui.label(crate::typography::headline("1. Choose the analysis goal"));
     ui.horizontal_wrapped(|ui| {
         ui.selectable_value(
@@ -155,7 +164,7 @@ fn settings(app: &mut PlotxApp, index: usize, invocation: &CraftInvocation, ui: 
 
     ui.weak(format!(
         "Chemical-shift axis: acquisition {:.5} ppm · reference {:+.5} ppm · effective {:.5} ppm",
-        nmr.data.carrier_ppm,
+        reference.acquisition_carrier_ppm,
         reference.offset_ppm,
         reference.effective_carrier_ppm(),
     ));
@@ -339,7 +348,7 @@ fn regions(
             regions.remove(position);
             changed = true;
         }
-        let half_width = 45.0 / nmr.data.observe_freq_mhz.max(f64::MIN_POSITIVE);
+        let half_width = 45.0 / invocation.reference.reference_frequency_mhz;
         let suggestions = invocation
             .assessment
             .clear_signals
@@ -375,7 +384,7 @@ fn regions(
             });
         }
         if ui.small_button("Add custom region").clicked() {
-            let center = nmr.craft_reference().effective_carrier_ppm();
+            let center = invocation.reference.effective_carrier_ppm();
             regions.push(CraftRegion::new(
                 next_region_id(&regions),
                 center - half_width,
@@ -428,7 +437,13 @@ fn run_controls(app: &mut PlotxApp, index: usize, ui: &mut Ui) {
         _ => ui.label("Run"),
     };
     super::command_button(app, CommandId::RunCraft, "Run CRAFT", true, ui);
-    let invocation = resolved(app, index);
+    let invocation = match resolved(app, index) {
+        Ok(invocation) => invocation,
+        Err(error) => {
+            ui.colored_label(ui.visuals().error_fg_color, error);
+            return;
+        }
+    };
     if let Some(message) = invocation.assessment.first_blocking_message() {
         ui.colored_label(ui.visuals().error_fg_color, message);
     }

@@ -54,9 +54,9 @@ fn synthetic_1d() -> NmrData {
 pub(super) fn sample_app() -> PlotxApp {
     let mut app = PlotxApp::new();
     app.doc.save_include_view_snapshots = false;
-    app.doc
-        .datasets
-        .push(Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()))));
+    app.doc.datasets.push(Dataset::Nmr(Box::new(
+        NmrDataset::load(synthetic_1d()).unwrap(),
+    )));
     push_canvas(&mut app, 0, "sample canvas", [120.0, 80.0]);
     app.focus_single(0);
     app.session.active_canvas = Some(0);
@@ -115,7 +115,7 @@ fn data_tool_target_requires_data_verb_and_selected_plot() {
 fn insert_dataset_new_canvas_does_not_select_object() {
     let mut app = PlotxApp::new();
     app.doc.save_include_view_snapshots = false;
-    let dataset = Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d())));
+    let dataset = Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()).unwrap()));
 
     app.execute_action(Action::insert_dataset_with_default_canvas(
         &app,
@@ -141,7 +141,7 @@ fn insert_dataset_existing_canvas_does_not_select_inserted_object() {
     app.doc.canvases[0].selected_object = None;
     let inserted_id = app.doc.canvases[0].next_object_id;
     let dataset_index = app.doc.datasets.len();
-    let dataset = Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d())));
+    let dataset = Dataset::Nmr(Box::new(NmrDataset::load(synthetic_1d()).unwrap()));
 
     app.execute_action(Action::InsertDatasetWithCanvas {
         dataset_index,
@@ -761,7 +761,12 @@ pub(super) fn synthetic_2d() -> plotx_io::NmrData2D {
         group_delay: 0.0,
     };
     NmrData2D {
-        data: vec![Complex64::new(0.0, 0.0); rows * cols],
+        data: (0..rows * cols)
+            .map(|i| {
+                Complex64::from_polar((-0.05 * (i % cols) as f64).exp(), 0.8 * (i % cols) as f64)
+                    * (0.3 * (i / cols) as f64).cos()
+            })
+            .collect(),
         rows,
         cols,
         domain: Domain::Time,
