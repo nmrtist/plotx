@@ -65,8 +65,8 @@ impl DataImports {
 }
 
 impl PlotxApp {
-    /// Discovery, parsing, default processing and figure preparation run on one
-    /// worker. Additional gestures queue behind it instead of multiplying RAM use.
+    /// Discovery runs off-thread; preparation uses at most four CPU workers.
+    /// Additional gestures queue behind the active batch to bound memory use.
     pub fn queue_data_import(
         &mut self,
         recent: PathBuf,
@@ -107,17 +107,15 @@ impl PlotxApp {
                             return;
                         }
                     };
-                    let total = paths.len();
-                    for path in paths {
-                        if sender.send(Event::Started(path.clone(), total)).is_err() {
-                            return;
-                        }
-                        let result = plotx_io::load_path(&path)
+                    let workers = std::thread::available_parallelism()
+                        .map_or(1, usize::from)
+                        .min(4);
+                    if !prepare_paths(&paths, &sender, workers, &|path| {
+                        plotx_io::load_path(path)
                             .map_err(|error| error.to_string())
-                            .and_then(|loaded| PreparedImport::new(loaded, request.equal_scale));
-                        if sender.send(Event::Item(path, result)).is_err() {
-                            return;
-                        }
+                            .and_then(|loaded| PreparedImport::new(loaded, request.equal_scale))
+                    }) {
+                        return;
                     }
                     // A disconnected receiver means the document was closed.
                     if sender.send(Event::Finished).is_err() {
@@ -197,4 +195,50 @@ impl PlotxApp {
         self.session.data_imports = imports;
         busy
     }
+}
+
+/// Small windows bound both active processing and completed results awaiting the
+/// UI. Publish in discovery order so scheduling cannot change board/undo order.
+fn prepare_paths(
+    paths: &[PathBuf],
+    sender: &mpsc::SyncSender<Event>,
+    workers: usize,
+    prepare: &(impl Fn(&std::path::Path) -> Result<PreparedImport, String> + Sync),
+) -> bool {
+    for window in paths.chunks(workers.max(1)) {
+        if sender
+            .send(Event::Started(window[0].clone(), paths.len()))
+            .is_err()
+        {
+            return false;
+        }
+        let connected = std::thread::scope(|scope| {
+            let handles: Vec<_> = window
+                .iter()
+                .map(|path| {
+                    let handle = std::thread::Builder::new()
+                        .name("data-import-prepare".into())
+                        .spawn_scoped(scope, move || prepare(path));
+                    (path, handle)
+                })
+                .collect();
+            let mut connected = true;
+            for (path, handle) in handles {
+                let result = match handle {
+                    Ok(handle) => handle.join().unwrap_or_else(|_| {
+                        Err("The import worker stopped unexpectedly; retry the import.".into())
+                    }),
+                    Err(error) => Err(format!("Could not start import worker: {error}")),
+                };
+                if connected && sender.send(Event::Item(path.clone(), result)).is_err() {
+                    connected = false;
+                }
+            }
+            connected
+        });
+        if !connected {
+            return false;
+        }
+    }
+    true
 }

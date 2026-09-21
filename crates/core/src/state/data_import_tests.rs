@@ -129,3 +129,58 @@ fn discovery_runs_off_thread_and_poll_does_not_wait_for_it() {
     release.send(()).unwrap();
     assert!(!app.poll_data_import());
 }
+
+#[test]
+fn preparation_is_parallel_bounded_ordered_and_keeps_item_errors() {
+    use std::sync::{
+        Arc, Barrier,
+        atomic::{AtomicUsize, Ordering},
+    };
+    let (sender, receiver) = mpsc::sync_channel(1);
+    let barrier = Arc::new(Barrier::new(2));
+    let running = Arc::new(AtomicUsize::new(0));
+    let peak = Arc::new(AtomicUsize::new(0));
+    let peak_worker = peak.clone();
+    let worker = std::thread::spawn(move || {
+        let paths = (0..4)
+            .map(|i| PathBuf::from(i.to_string()))
+            .collect::<Vec<_>>();
+        prepare_paths(&paths, &sender, 2, &|path| {
+            let active = running.fetch_add(1, Ordering::SeqCst) + 1;
+            peak_worker.fetch_max(active, Ordering::SeqCst);
+            barrier.wait();
+            running.fetch_sub(1, Ordering::SeqCst);
+            if path == std::path::Path::new("1") {
+                Err("bad item".into())
+            } else {
+                Ok(prepared())
+            }
+        })
+    });
+    let mut items = Vec::new();
+    while let Ok(event) = receiver.recv_timeout(std::time::Duration::from_secs(10)) {
+        if let Event::Item(path, result) = event {
+            items.push((path, result.is_ok()));
+        }
+    }
+    assert!(worker.join().unwrap());
+    assert_eq!(peak.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        items,
+        vec![
+            ("0".into(), true),
+            ("1".into(), false),
+            ("2".into(), true),
+            ("3".into(), true)
+        ]
+    );
+}
+
+#[test]
+fn disconnected_import_does_not_prepare_another_window() {
+    let (sender, receiver) = mpsc::sync_channel(1);
+    drop(receiver);
+    assert!(!prepare_paths(&["unused".into()], &sender, 2, &|_| {
+        panic!("closed document must not start preparation")
+    }));
+}
