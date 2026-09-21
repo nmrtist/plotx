@@ -229,6 +229,11 @@ const MM_PER_IN: f32 = 25.4;
 
 pub type GroupId = u64;
 
+mod phase_preview;
+
+#[cfg(test)]
+mod phase_preview_tests;
+
 #[cfg(test)]
 mod tests {
     use super::*;

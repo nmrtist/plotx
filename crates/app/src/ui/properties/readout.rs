@@ -53,6 +53,10 @@ fn peak_floor(readout: &ContourBaseReadout) -> String {
 pub(crate) fn summary(readout: &ContourBaseReadout) -> String {
     let expression = anchor_expression(readout);
     match readout.anchor {
+        ContourAnchor::PhasePreview => match readout.lowest_level {
+            Some(level) => format!("Preview level {} — fixed while phasing", number(level)),
+            None => "Preview threshold fixed while phasing".into(),
+        },
         // The estimator measured no spread at all. Reporting `5 × σ = 0` would
         // describe a blank plot, and the plot is not blank: the ladder falls
         // back to one derived from the field's own peak. Say that instead.
@@ -163,6 +167,7 @@ fn value_summary(value: &PropertyValue) -> String {
 /// edits. `None` when the number is the level and there is nothing to add.
 pub(crate) fn resolution_suffix(readout: &ContourBaseReadout) -> Option<String> {
     match readout.anchor {
+        ContourAnchor::PhasePreview => Some("fixed while phasing".into()),
         ContourAnchor::Degenerate => Some("no spread measured".to_owned()),
         ContourAnchor::Measuring => Some("measuring…".to_owned()),
         // The row's own unit reads "× noise floor", which is true of both terms.
@@ -195,6 +200,9 @@ pub(crate) fn explanation(readout: &ContourBaseReadout) -> String {
         );
     }
     let anchor = match readout.anchor {
+        ContourAnchor::PhasePreview => {
+            "The contour threshold is fixed during this phase gesture. It is recalculated from the final data when the gesture ends."
+        }
         ContourAnchor::Direct => "This level is set directly, so it needs no measurement.",
         // Only an anchor that *has* a floor may mention one; a background anchor
         // has none, and inventing one here would describe a rule it does not

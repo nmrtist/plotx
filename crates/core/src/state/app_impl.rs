@@ -79,6 +79,7 @@ impl PlotxApp {
                     ..Default::default()
                 },
                 compute: ComputeService::new(),
+                phase_preview: Default::default(),
                 data_imports: DataImports::default(),
                 updates: crate::update::UpdateService::new(&settings.updates),
                 line_fit_job: None,
@@ -266,6 +267,14 @@ impl PlotxApp {
     }
 
     pub fn rebuild_canvases_for(&mut self, dataset: usize) {
+        self.rebuild_canvases_matching(dataset, None);
+    }
+
+    pub(super) fn rebuild_canvases_for_field(&mut self, dataset: usize, field: FieldRef) {
+        self.rebuild_canvases_matching(dataset, Some(field));
+    }
+
+    fn rebuild_canvases_matching(&mut self, dataset: usize, field: Option<FieldRef>) {
         let Some(dataset_id) = self.doc.datasets.get(dataset).map(Dataset::resource_id) else {
             return;
         };
@@ -276,7 +285,17 @@ impl PlotxApp {
                 .filter_map(|object| {
                     object
                         .plot()
-                        .filter(|plot| plot.binding.contains_dataset(dataset_id))
+                        .filter(|plot| {
+                            self.display_binding(plot.display_owner, &plot.binding)
+                                .series
+                                .iter()
+                                .any(|series| {
+                                    series.visible
+                                        && series.source.resource == dataset_id
+                                        && field
+                                            .is_none_or(|field| field.field == series.source.field)
+                                })
+                        })
                         .map(|_| object.id)
                 })
                 .collect();
@@ -294,6 +313,28 @@ impl PlotxApp {
                     )
                 };
                 let size = [frame.width / MM_TO_PT, frame.height / MM_TO_PT];
+                let displayed = self.display_binding(owner, &binding);
+                // Queue missing artifacts before building projections/overlays:
+                // the entire new figure would be discarded while they wait.
+                for series in displayed.series.iter().filter(|series| {
+                    series.visible
+                        && matches!(series.encoding, plotx_figure::SeriesEncoding::Contour(_))
+                }) {
+                    self.prepare_contour_series(series);
+                }
+                // Processing promotes the field before its estimates and geometry
+                // are ready. Keep the complete displayed frame through both jobs,
+                // including projections and overlays, instead of flashing blank.
+                // Explicit plot edits use their own rebuild path and still apply
+                // immediately; this only defers background data refreshes.
+                if self.binding_contours_pending(&displayed)
+                    && self.doc.canvases[ci]
+                        .object(id)
+                        .and_then(|object| object.plot())
+                        .is_some_and(|plot| !plot.figure().contours.is_empty())
+                {
+                    continue;
+                }
                 let fig =
                     self.build_object_figure(owner, &binding, &chart, &stack, &projections, size);
                 self.apply_viewport_to_plot_object(ci, id, fig);

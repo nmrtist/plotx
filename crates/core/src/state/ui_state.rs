@@ -642,6 +642,7 @@ pub struct Session {
     /// Off-thread runner for the heaviest button-triggered DOSY computations.
     /// Not serialized; rebuilt fresh whenever a `PlotxApp` is constructed.
     pub compute: ComputeService,
+    pub(crate) phase_preview: super::phase_preview::PhasePreview,
     pub data_imports: super::DataImports,
     /// Background update checker/downloader. Not serialized.
     pub updates: crate::update::UpdateService,

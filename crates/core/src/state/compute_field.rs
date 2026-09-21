@@ -21,6 +21,21 @@ pub enum FieldEnqueueError {
 }
 
 impl ComputeService {
+    pub(crate) fn cached_field_grid(
+        &mut self,
+        source: VersionedFieldRef,
+    ) -> Option<Arc<ScalarGrid2D>> {
+        self.field_runtime.grid(source)
+    }
+
+    pub(crate) fn remember_field_grid(
+        &mut self,
+        source: VersionedFieldRef,
+        grid: Arc<ScalarGrid2D>,
+    ) {
+        self.field_runtime.remember_grid(source, grid);
+    }
+
     /// Import/load boundary for a field provider that has no processing
     /// pipeline (for example an RGB image). It still receives a session version
     /// from `ComputeService`; payload type decides whether it has a summary or
@@ -167,6 +182,7 @@ impl ComputeService {
         }
         #[cfg(test)]
         crate::contour_probe::record_queued_estimate();
+        self.remember_field_grid(key.source, Arc::clone(&grid));
         if self
             .job_tx
             .send(Job::EstimateField {
@@ -193,6 +209,7 @@ impl ComputeService {
         }
         #[cfg(test)]
         crate::contour_probe::record_queued_contour_build();
+        self.remember_field_grid(key.source, Arc::clone(&grid));
         if self
             .job_tx
             .send(Job::BuildContour {
@@ -230,6 +247,8 @@ pub(super) fn run_estimate_field(
     key: EstimateKey,
     grid: Arc<ScalarGrid2D>,
 ) -> Result<EstimateResult, String> {
+    #[cfg(test)]
+    let _timer = crate::contour_probe::Timer::new("estimate");
     if !grid.has_valid_shape() {
         return Err("scalar grid dimensions do not match its row-major values".to_owned());
     }
@@ -307,6 +326,8 @@ pub(super) fn run_build_contour(
     key: ContourGeometryCacheKey,
     grid: Arc<ScalarGrid2D>,
 ) -> Result<ContourGeometry, String> {
+    #[cfg(test)]
+    let _timer = crate::contour_probe::Timer::new("contour");
     if !grid.has_valid_shape() {
         return Err("scalar grid dimensions do not match its row-major values".to_owned());
     }

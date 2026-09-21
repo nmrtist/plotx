@@ -74,6 +74,8 @@ pub(crate) fn uniform_readout(
 /// not when it cannot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ContourAnchor {
+    /// A manual phase gesture is temporarily holding the resolved threshold.
+    PhasePreview,
     /// The magnitude needs no measurement: it is already a level, or a fraction
     /// of a range the field summary knows.
     Direct,
@@ -149,39 +151,46 @@ pub(crate) fn contour_base_readout(
         })?,
     };
     let summary = app.session.compute.peek_field_summary(source);
-    let anchor = match &spec.positive.base {
-        ContourBasePolicy::Absolute(_) | ContourBasePolicy::FractionOfRange(_) => {
-            ContourAnchor::Direct
+    let preview = summary.and_then(|summary| app.session.phase_preview.peek(source, spec, summary));
+    let anchor = if preview.is_some() {
+        ContourAnchor::PhasePreview
+    } else {
+        match &spec.positive.base {
+            ContourBasePolicy::Absolute(_) | ContourBasePolicy::FractionOfRange(_) => {
+                ContourAnchor::Direct
+            }
+            ContourBasePolicy::NoiseFloor {
+                peak_fraction,
+                estimator,
+                ..
+            } => floored_anchor_of(
+                app,
+                &EstimateKey {
+                    source,
+                    kind: EstimateKind::Noise,
+                    estimator: estimator.clone(),
+                },
+                *peak_fraction,
+                summary,
+            ),
+            ContourBasePolicy::BackgroundScale { estimator, .. } => anchor_of(
+                app,
+                &EstimateKey {
+                    source,
+                    kind: EstimateKind::Background,
+                    estimator: estimator.clone(),
+                },
+            ),
         }
-        ContourBasePolicy::NoiseFloor {
-            peak_fraction,
-            estimator,
-            ..
-        } => floored_anchor_of(
-            app,
-            &EstimateKey {
-                source,
-                kind: EstimateKind::Noise,
-                estimator: estimator.clone(),
-            },
-            *peak_fraction,
-            summary,
-        ),
-        ContourBasePolicy::BackgroundScale { estimator, .. } => anchor_of(
-            app,
-            &EstimateKey {
-                source,
-                kind: EstimateKind::Background,
-                estimator: estimator.clone(),
-            },
-        ),
     };
     // Resolution is pure arithmetic over a cached summary and cached
     // estimates; the payload is never touched. A miss simply yields
     // `Pending`, which is reported rather than acted on.
     let lowest_level = summary.and_then(|summary| {
-        match resolve_contour_levels(source, spec, summary, |key| {
-            app.session.compute.peek_estimate(key).cloned()
+        match preview.unwrap_or_else(|| {
+            resolve_contour_levels(source, spec, summary, |key| {
+                app.session.compute.peek_estimate(key).cloned()
+            })
         }) {
             ContourResolution::Ready { levels, .. } => {
                 levels.positive.first().map(|level| level.get())
