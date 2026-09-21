@@ -17,6 +17,26 @@
 
 use std::cell::Cell;
 
+pub(crate) struct Timer(&'static str, std::time::Instant);
+
+impl Timer {
+    pub(crate) fn new(stage: &'static str) -> Self {
+        Self(stage, std::time::Instant::now())
+    }
+}
+
+impl Drop for Timer {
+    fn drop(&mut self) {
+        if std::env::var_os("PLOTX_BENCH_PHASE_TIMING").is_some() {
+            eprintln!(
+                "{}: {:.3} ms",
+                self.0,
+                self.1.elapsed().as_secs_f64() * 1000.0
+            );
+        }
+    }
+}
+
 thread_local! {
     static MARCHING_SQUARES: Cell<usize> = const { Cell::new(0) };
     static QUEUED_CONTOUR_BUILDS: Cell<usize> = const { Cell::new(0) };

@@ -163,3 +163,96 @@ fn a_pending_estimate_names_the_measurement_it_is_waiting_for() {
     assert!(figure.contours.is_empty());
     assert_eq!(app.session.status, "Measuring this field's noise scale…");
 }
+
+#[test]
+fn data_refresh_keeps_complete_contours_until_replacement_is_ready() {
+    use crate::state::{CanvasDocument, ObjectFrame};
+
+    for needs_estimate in [false, true] {
+        let (mut app, mut binding) = app_with_contour(Some(absolute_spec()));
+        if needs_estimate {
+            let SeriesEncoding::Contour(spec) = &mut binding.series[0].encoding else {
+                unreachable!();
+            };
+            spec.positive.base = ContourBasePolicy::NoiseFloor {
+                multiplier: PositiveFiniteF64::new(0.1).unwrap(),
+                peak_fraction: plotx_figure::UnitInterval::new(0.0).unwrap(),
+                estimator: plotx_figure::EstimatorSelection::FollowLatest,
+            };
+        }
+        let mut canvas = CanvasDocument::new("Phase refresh".into(), [120.0, 80.0]);
+        let id = canvas.allocate_object_id();
+        let mut object = app.build_plot_object(
+            0,
+            ObjectFrame::new(0.0, 0.0, 340.0, 220.0),
+            id,
+            "Spectrum".into(),
+        );
+        object.plot_mut().unwrap().binding = binding.clone();
+        canvas.objects.push(object);
+        app.doc.canvases.push(canvas);
+        app.rebuild_canvas(0);
+        wait_for_app_compute(&mut app);
+        let plot = app.doc.canvases[0].object(id).unwrap().plot().unwrap();
+        assert!(!plot.figure().contours.is_empty());
+        let generation = plot.figure_geometry_generation();
+
+        // Reproduce the processing completion boundary without worker timing:
+        // a new version has landed, but none of its derived artifacts have.
+        let field = FieldRef {
+            resource: binding.series[0].source.resource,
+            field: binding.series[0].source.field,
+        };
+        let version = app.session.compute.reserve_field_version().unwrap();
+        app.session
+            .compute
+            .promote_field_version(VersionedFieldRef { field, version }, None);
+        for _ in 0..3 {
+            app.rebuild_canvases_for(0);
+            let plot = app.doc.canvases[0].object(id).unwrap().plot().unwrap();
+            assert_eq!(plot.figure_geometry_generation(), generation);
+            assert!(!plot.figure().contours.is_empty());
+        }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while app.compute_busy() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "refresh did not finish"
+            );
+            app.poll_compute();
+            let plot = app.doc.canvases[0].object(id).unwrap().plot().unwrap();
+            assert!(
+                !plot.figure().contours.is_empty(),
+                "a refresh frame went blank"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let plot = app.doc.canvases[0].object(id).unwrap().plot().unwrap();
+        assert_ne!(plot.figure_geometry_generation(), generation);
+        assert!(!plot.figure().contours.is_empty());
+
+        // A completed empty result must clear the old lines, not retain them.
+        let plot = app.doc.canvases[0]
+            .object_mut(id)
+            .unwrap()
+            .plot_mut()
+            .unwrap();
+        let SeriesEncoding::Contour(spec) = &mut plot.binding.series[0].encoding else {
+            unreachable!();
+        };
+        spec.positive.base = ContourBasePolicy::Absolute(PositiveFiniteF64::new(100.0).unwrap());
+        spec.negative = None;
+        app.rebuild_canvases_for(0);
+        wait_for_app_compute(&mut app);
+        assert!(
+            app.doc.canvases[0]
+                .object(id)
+                .unwrap()
+                .plot()
+                .unwrap()
+                .figure()
+                .contours
+                .is_empty()
+        );
+    }
+}

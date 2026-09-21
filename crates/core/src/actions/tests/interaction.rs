@@ -116,7 +116,7 @@ fn gesture_active_covers_only_the_board_freezing_drags() {
         (
             Interaction::Phase(PhaseDrag {
                 kind: PhaseDragKind::Ph0,
-                dataset: 0,
+                dataset: app.doc.datasets[0].resource_id(),
                 axis: PhaseAxis::Direct,
                 preview_pivot_ppm: None,
                 gesture_before: crate::actions::DatasetProcessingState::from_dataset(
@@ -215,7 +215,7 @@ fn toggling_manual_phase_cancels_the_in_flight_drag() {
     app.apply_dataset_edit(0);
     app.set_interaction(Interaction::Phase(PhaseDrag {
         kind: PhaseDragKind::Ph0,
-        dataset: 0,
+        dataset: app.doc.datasets[0].resource_id(),
         axis: PhaseAxis::Direct,
         preview_pivot_ppm: None,
         gesture_before: before,

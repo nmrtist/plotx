@@ -3,6 +3,56 @@ use plotx_figure::{Color, Figure, RangeAnnotation};
 use std::sync::Arc;
 
 impl PlotxApp {
+    /// Only queued work for the displayed binding can defer a data refresh.
+    /// Empty completed geometry and unavailable fields must still replace it.
+    pub(super) fn binding_contours_pending(&mut self, binding: &DataBinding) -> bool {
+        binding
+            .series
+            .iter()
+            .filter(|series| series.visible)
+            .any(|series| {
+                let plotx_figure::SeriesEncoding::Contour(spec) = &series.encoding else {
+                    return false;
+                };
+                if series.source.item.is_some()
+                    || !self
+                        .doc
+                        .dataset_by_id(series.source.resource)
+                        .is_some_and(|dataset| {
+                            dataset.supports_encoding(series.source.field, &series.encoding)
+                        })
+                {
+                    return false;
+                }
+                let field = FieldRef {
+                    resource: series.source.resource,
+                    field: series.source.field,
+                };
+                let Some(version) = self.session.compute.current_field_version(field) else {
+                    return false;
+                };
+                let source = VersionedFieldRef { field, version };
+                let Some(summary) = self.session.compute.cached_field_summary(source) else {
+                    return false;
+                };
+                match self.session.phase_preview.resolve(
+                    &mut self.session.compute,
+                    source,
+                    spec,
+                    summary,
+                ) {
+                    ContourResolution::Pending(keys) => keys
+                        .iter()
+                        .any(|key| self.session.compute.estimate_in_flight(key)),
+                    ContourResolution::Ready { levels, .. } => self
+                        .session
+                        .compute
+                        .geometry_in_flight(&ContourGeometryCacheKey { source, levels }),
+                    ContourResolution::Unavailable => false,
+                }
+            })
+    }
+
     /// Project a live plot's persisted binding onto its current owner field.
     ///
     /// Alternate fields belonging to the owner remain persisted so switching
@@ -369,6 +419,18 @@ impl PlotxApp {
     }
 
     pub(super) fn build_encoded_series_figure(&mut self, series: &SeriesBinding) -> Option<Figure> {
+        self.resolve_encoded_series(series, false)
+    }
+
+    pub(super) fn prepare_contour_series(&mut self, series: &SeriesBinding) {
+        drop(self.resolve_encoded_series(series, true));
+    }
+
+    fn resolve_encoded_series(
+        &mut self,
+        series: &SeriesBinding,
+        prepare_only: bool,
+    ) -> Option<Figure> {
         let dataset = self.doc.dataset_by_id(series.source.resource)?;
         if let Some(item) = series.source.item {
             return dataset.trace_item_figure(series.source.field, item);
@@ -403,9 +465,10 @@ impl PlotxApp {
                 snapshot.summary?
             }
         };
-        let resolution = resolve_contour_levels(source, contour, summary, |key| {
-            self.session.compute.estimate_for(key).cloned()
-        });
+        let resolution =
+            self.session
+                .phase_preview
+                .resolve(&mut self.session.compute, source, contour, summary);
         match resolution {
             ContourResolution::Ready {
                 levels,
@@ -419,6 +482,9 @@ impl PlotxApp {
                 }
                 let key = ContourGeometryCacheKey { source, levels };
                 if let Some(geometry) = self.session.compute.geometry_for(&key) {
+                    if prepare_only {
+                        return None;
+                    }
                     // A capped build drew fewer levels than the panel lists.
                     // Saying so is the difference between a contour the user
                     // chose and one the renderer silently cut down.
@@ -437,7 +503,9 @@ impl PlotxApp {
                 // clone the whole plane each time only for the enqueue to
                 // recognize the duplicate and drop it.
                 if !self.session.compute.geometry_in_flight(&key) {
-                    let grid = self.contour_grid(dataset, series.source.field, version, summary)?;
+                    let grid = self.session.compute.cached_field_grid(source).or_else(|| {
+                        self.contour_grid(dataset, series.source.field, version, summary)
+                    })?;
                     if let Err(error) = self.session.compute.enqueue_contour(key, grid) {
                         self.session.status = field_enqueue_error_status(error);
                         return dataset.encoded_field_figure(series.source.field, &series.encoding);
@@ -462,7 +530,9 @@ impl PlotxApp {
                     .iter()
                     .any(|key| !self.session.compute.estimate_in_flight(key))
                 {
-                    let grid = self.contour_grid(dataset, series.source.field, version, summary)?;
+                    let grid = self.session.compute.cached_field_grid(source).or_else(|| {
+                        self.contour_grid(dataset, series.source.field, version, summary)
+                    })?;
                     for key in keys {
                         if let Err(error) = self
                             .session
@@ -480,6 +550,9 @@ impl PlotxApp {
             ContourResolution::Unavailable => {
                 self.session.status = "Contour levels are unavailable for this field.".into();
             }
+        }
+        if prepare_only {
+            return None;
         }
         dataset.encoded_field_figure(series.source.field, &series.encoding)
     }

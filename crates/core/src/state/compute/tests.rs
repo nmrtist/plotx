@@ -364,3 +364,167 @@ fn cancelled_ilt_job_reports_acknowledgement_without_a_result() {
         } if id == dataset(2)
     ));
 }
+
+#[test]
+fn reapply_overlaps_geometry_but_waits_to_deliver_then_dispatches_latest_recipe() {
+    let mut service = ComputeService::new();
+    let source = VersionedFieldRef {
+        field: FieldRef {
+            resource: dataset(0),
+            field: FieldId::new(0),
+        },
+        version: FieldVersion(1),
+    };
+    let key = ContourGeometryCacheKey {
+        source,
+        levels: crate::state::ResolvedContourLevels {
+            positive: Arc::from([]),
+            negative: Arc::from([]),
+        },
+    };
+    assert!(service.field_runtime.begin_geometry(key.clone()));
+    let base = execute_2d(
+        &data_2d().source,
+        &Params2D::default_for(Preset2D::Cosy),
+        DelayPolicy::Disabled,
+        RecipeRange::Base,
+        None,
+        &mut nmr::ExecutionContext::default(),
+    )
+    .unwrap()
+    .source;
+    for _ in 0..20 {
+        service
+            .request_2d_reapply(
+                dataset(0),
+                &processing_fields(),
+                base.clone(),
+                Params2D::default_for(Preset2D::Cosy),
+            )
+            .unwrap();
+        assert!(
+            service
+                .active
+                .contains_key(&(dataset(0), ComputeKind::Processing2D))
+        );
+    }
+    let latest = service.deferred_processing[&dataset(0)].version;
+    // Another dataset is independent of this preview's downstream work.
+    service
+        .request_2d_reapply(
+            dataset(1),
+            &processing_fields(),
+            base,
+            Params2D::default_for(Preset2D::Cosy),
+        )
+        .unwrap();
+    assert!(
+        service
+            .active
+            .contains_key(&(dataset(1), ComputeKind::Processing2D))
+    );
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while service.completed_processing.is_empty() {
+        assert!(Instant::now() < deadline);
+        assert!(!service.try_drain().iter().any(
+            |done| matches!(done, Done::Processing2D { dataset: id, .. } if *id == dataset(0))
+        ));
+        thread::sleep(Duration::from_millis(1));
+    }
+    service.field_runtime.finish_geometry_request(&key);
+    let delivered = service.try_drain();
+    assert!(
+        delivered.iter().any(
+            |done| matches!(done, Done::Processing2D { dataset: id, .. } if *id == dataset(0))
+        )
+    );
+    assert_eq!(
+        service.active[&(dataset(0), ComputeKind::Processing2D)].generation,
+        latest.0
+    );
+    assert!(!service.deferred_processing.contains_key(&dataset(0)));
+}
+
+#[test]
+fn held_processing_respects_estimate_to_geometry_boundary_and_cancellation() {
+    for cancel in [false, true] {
+        let mut service = ComputeService::new();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        service.done_rx = done_rx;
+        let params = Params2D::default_for(Preset2D::Cosy);
+        let processed = execute_2d(
+            &data_2d().source,
+            &params,
+            DelayPolicy::Disabled,
+            RecipeRange::All,
+            None,
+            &mut nmr::ExecutionContext::default(),
+        )
+        .unwrap();
+        let source = VersionedFieldRef {
+            field: FieldRef {
+                resource: dataset(0),
+                field: FieldId::new(0),
+            },
+            version: FieldVersion(1),
+        };
+        let estimate = EstimateKey {
+            source,
+            kind: crate::state::EstimateKind::Noise,
+            estimator: plotx_figure::EstimatorSelection::FollowLatest,
+        };
+        service.field_runtime.begin_estimate(estimate.clone());
+        service.active.insert(
+            (dataset(0), ComputeKind::Processing2D),
+            ActiveJob {
+                generation: 2,
+                started_at: Instant::now(),
+                token: CancellationToken::new(),
+                processing_input: Some(ProcessingInputKind::Reapply),
+            },
+        );
+        done_tx
+            .send(Done::EstimateField {
+                key: estimate,
+                result: EstimateResult::Scale(crate::state::ScaleEstimate {
+                    scale: crate::state::EstimatedScale::Degenerate,
+                    provenance: crate::state::EstimateProvenance {
+                        estimator: "test".into(),
+                        version: 1,
+                    },
+                }),
+            })
+            .unwrap();
+        done_tx
+            .send(Done::Processing2D {
+                version: FieldVersion(2),
+                dataset: dataset(0),
+                base: None,
+                processed,
+                fields: vec![],
+                params,
+            })
+            .unwrap();
+        let delivered = service.try_drain();
+        assert_eq!(delivered.len(), 1);
+        assert!(matches!(delivered[0], Done::EstimateField { .. }));
+        assert_eq!(service.completed_processing.len(), 1);
+        // The app resolves the estimate and queues geometry between polls.
+        let geometry = ContourGeometryCacheKey {
+            source,
+            levels: crate::state::ResolvedContourLevels {
+                positive: Arc::from([]),
+                negative: Arc::from([]),
+            },
+        };
+        service.field_runtime.begin_geometry(geometry.clone());
+        assert!(service.try_drain().is_empty());
+        if cancel {
+            assert!(service.cancel(dataset(0), ComputeKind::Processing2D));
+        }
+        service.field_runtime.finish_geometry_request(&geometry);
+        let delivered = service.try_drain();
+        assert_eq!(delivered.len(), usize::from(!cancel));
+        assert!(!service.is_busy());
+    }
+}

@@ -29,6 +29,8 @@ pub(crate) use compute_field::FieldEnqueueError;
 #[path = "compute_worker.rs"]
 mod compute_worker;
 use compute_worker::run_job;
+#[path = "compute_results.rs"]
+mod compute_results;
 
 /// Which user-visible heavy operation is running. ILT/DOSY retain their own
 /// generation guard; scalar field artifacts use `FieldVersion` and
@@ -83,10 +85,11 @@ struct VersionedProcessingField {
     component: ProcessedFieldComponent,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct ProcessedFieldArtifact {
     pub source: VersionedFieldRef,
     pub summary: Option<FieldSummary>,
+    pub grid: Option<Arc<ScalarGrid2D>>,
 }
 
 enum Job {
@@ -277,6 +280,7 @@ pub struct ComputeService {
     latest: HashMap<(DatasetId, ComputeKind), u64>,
     active: HashMap<(DatasetId, ComputeKind), ActiveJob>,
     deferred_processing: HashMap<DatasetId, DeferredProcessing>,
+    completed_processing: Vec<Done>,
     field_runtime: FieldRuntime,
     /// Dispatch failures awaiting collection by `try_drain`.
     failures: Vec<Done>,
@@ -304,6 +308,7 @@ impl ComputeService {
             latest: HashMap::new(),
             active: HashMap::new(),
             deferred_processing: HashMap::new(),
+            completed_processing: Vec::new(),
             field_runtime: FieldRuntime::default(),
             failures: Vec::new(),
         }
@@ -578,58 +583,6 @@ impl ComputeService {
         }
     }
 
-    pub fn try_drain(&mut self) -> Vec<Done> {
-        self.dispatch_ready_processing();
-        let mut out = std::mem::take(&mut self.failures);
-        while let Ok(done) = self.done_rx.try_recv() {
-            match &done {
-                Done::EstimateField { key, .. } | Done::EstimateFieldFailed { key, .. } => {
-                    self.field_runtime.finish_estimate_request(key);
-                    out.push(done);
-                    continue;
-                }
-                Done::BuildContour { key, .. } | Done::BuildContourFailed { key, .. } => {
-                    self.field_runtime.finish_geometry_request(key);
-                    out.push(done);
-                    continue;
-                }
-                Done::Ilt { .. }
-                | Done::Dosy { .. }
-                | Done::Craft { .. }
-                | Done::CraftFailed { .. }
-                | Done::Processing2D { .. }
-                | Done::Processing2DFailed { .. }
-                | Done::Cancelled { .. }
-                | Done::Failed { .. } => {}
-            }
-            let Some((dataset, kind, generation)) = done_identity(&done) else {
-                continue;
-            };
-            let matching_active = self
-                .active
-                .get(&(dataset, kind))
-                .filter(|active| active.generation == generation);
-            if kind == ComputeKind::Processing2D && matching_active.is_none() {
-                continue;
-            }
-            // A worker can send success immediately before cancellation. Check
-            // the shared token again on the receiving side so explicit cancel,
-            // Full/Reapply replacement, and dataset invalidation cannot install
-            // that already-queued success.
-            let cancelled_after_send =
-                matching_active.is_some_and(|active| active.token.is_cancelled());
-            if matching_active.is_some() {
-                self.active.remove(&(dataset, kind));
-            }
-            if !cancelled_after_send && !matches!(done, Done::Cancelled { .. }) {
-                out.push(done);
-            }
-        }
-        self.dispatch_ready_processing();
-        out.append(&mut self.failures);
-        out
-    }
-
     pub fn is_busy(&self) -> bool {
         !self.active.is_empty()
             || !self.deferred_processing.is_empty()
@@ -735,51 +688,6 @@ fn worker_loop(job_rx: Arc<Mutex<Receiver<Job>>>, done_tx: Sender<Done>) {
         if done_tx.send(done).is_err() {
             break;
         }
-    }
-}
-
-fn done_identity(done: &Done) -> Option<(DatasetId, ComputeKind, u64)> {
-    match done {
-        Done::Ilt {
-            dataset,
-            generation,
-            ..
-        } => Some((*dataset, ComputeKind::Ilt, *generation)),
-        Done::Dosy {
-            dataset,
-            generation,
-            ..
-        } => Some((*dataset, ComputeKind::Dosy, *generation)),
-        Done::Craft {
-            dataset,
-            generation,
-            ..
-        }
-        | Done::CraftFailed {
-            dataset,
-            generation,
-            ..
-        } => Some((*dataset, ComputeKind::Craft, *generation)),
-        Done::Processing2D {
-            dataset, version, ..
-        }
-        | Done::Processing2DFailed {
-            dataset, version, ..
-        } => Some((*dataset, ComputeKind::Processing2D, version.0)),
-        Done::Cancelled {
-            dataset,
-            generation,
-            kind,
-        }
-        | Done::Failed {
-            dataset,
-            generation,
-            kind,
-        } => Some((*dataset, *kind, *generation)),
-        Done::EstimateField { .. }
-        | Done::EstimateFieldFailed { .. }
-        | Done::BuildContour { .. }
-        | Done::BuildContourFailed { .. } => None,
     }
 }
 

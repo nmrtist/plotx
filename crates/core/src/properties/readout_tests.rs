@@ -133,6 +133,36 @@ fn a_cached_estimate_resolves_the_level_and_reading_it_stays_free() {
     );
 }
 
+#[test]
+fn phase_preview_readout_reports_fixed_threshold_without_starting_measurements() {
+    let (mut app, target) = contour_app();
+    warm(&mut app);
+    let before = contour_readout(&app, &target).lowest_level;
+    app.begin_property_gesture(crate::properties::phase::PHASE0);
+    app.doc.datasets[0]
+        .phase_params_mut(crate::state::PhaseAxis::F2)
+        .unwrap()
+        .phase0 = 0.2;
+    app.apply_dataset_edit(0);
+    warm(&mut app);
+    contour_probe::reset();
+    for _ in 0..8 {
+        let readout = contour_readout(&app, &target);
+        assert_eq!(readout.anchor, ContourAnchor::PhasePreview);
+        assert_eq!(readout.lowest_level, before);
+    }
+    assert_eq!(contour_probe::queued_estimates(), 0);
+    assert_eq!(contour_probe::queued_contour_builds(), 0);
+    assert_eq!(contour_probe::field_payload_materializations(), 0);
+    app.end_property_gesture();
+    app.poll_compute();
+    warm(&mut app);
+    assert_ne!(
+        contour_readout(&app, &target).anchor,
+        ContourAnchor::PhasePreview
+    );
+}
+
 /// §4.3, and the whole point of spelling the floor into the policy: when the
 /// floor is what the level came from, the readout says so rather than passing
 /// the level off as a multiple of an estimate that did not produce it.

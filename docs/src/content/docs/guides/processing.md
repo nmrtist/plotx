@@ -251,6 +251,12 @@ until you press it.
 Automatic phase correction is enabled by default; you can switch methods or
 adjust φ0 / φ1 manually with live preview.
 
+While dragging a 2D phase control, PlotX holds resolved contour thresholds fixed
+and updates contour shapes as the real intensities change. Previews retain full
+resolution; continuous inputs are coalesced and the last complete plot stays
+visible while an update is computing. On release, PlotX finishes the latest
+parameters and recalculates thresholds using the selected contour policy.
+
 Open the **Phase** step and its four rows sit together: **Mode**, **φ0**, **φ1**
 and **Pivot**. φ0 and φ1 are in degrees. The pivot is a fraction of the axis
 from 0 to 1, with the ppm position it currently lands on shown beside it. While

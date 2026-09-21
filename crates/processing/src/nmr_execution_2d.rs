@@ -214,40 +214,37 @@ pub fn view_2d(
             .dataset()
             .as_processed()
             .ok_or_else(|| RecipeError::Invalid("unsupported 2D representation".into()))?;
-        let descriptor = data.descriptor();
-        let sample = |row, col, indirect, direct| {
-            data.data()
-                .get(&[row, col], &[indirect, direct])
-                .map_err(|error| IoError::NmrConversion(error.to_string()))
-        };
-        for row in 0..axes[0].points {
-            context.check_cancelled().map_err(|e| library(e.into()))?;
-            let mut trace = Vec::with_capacity(cols);
-            for col in 0..cols {
-                if col % 4096 == 0 {
-                    context
-                        .check_cancelled()
-                        .map_err(|error| library(error.into()))?;
-                }
-                trace.push(Complex64::new(
-                    sample(row, col, 0, 0)?,
-                    if descriptor.axes()[1].component_count() == 2 {
-                        sample(row, col, 0, 1)?
-                    } else {
-                        0.0
-                    },
-                ));
-                // A display reduction of every Cartesian field. The canonical
-                // dataset and any requested magnitude operation stay in nmr.
-                let mut magnitude = 0.0_f64;
-                for indirect in 0..descriptor.axes()[0].component_count() {
-                    for direct in 0..descriptor.axes()[1].component_count() {
-                        magnitude = magnitude.hypot(sample(row, col, indirect, direct)?);
+        // Validate each Cartesian component once, then stream its plane. Calling
+        // `get` for every scalar repeated rank/bounds/offset checks and read the
+        // displayed real/imaginary components again for magnitude reduction.
+        traces = vec![vec![Complex64::new(0.0, 0.0); cols]; rows];
+        if layout == Layout2D::Ft {
+            magnitudes = vec![0.0_f64; rows * cols];
+        }
+        for indirect in 0..data.descriptor().axes()[0].component_count() {
+            for direct in 0..data.descriptor().axes()[1].component_count() {
+                let plane = data
+                    .data()
+                    .component_plane(&[indirect, direct])
+                    .map_err(|error| IoError::NmrConversion(error.to_string()))?;
+                for (index, (value, output)) in plane.zip(traces.iter_mut().flatten()).enumerate() {
+                    if index % 4096 == 0 {
+                        context
+                            .check_cancelled()
+                            .map_err(|error| library(error.into()))?;
+                    }
+                    if indirect == 0 {
+                        if direct == 0 {
+                            output.re = *value;
+                        } else if direct == 1 {
+                            output.im = *value;
+                        }
+                    }
+                    if let Some(magnitude) = magnitudes.get_mut(index) {
+                        *magnitude = magnitude.hypot(*value);
                     }
                 }
-                magnitudes.push(magnitude);
             }
-            traces.push(trace);
         }
     }
     let source_label = source.source().to_owned();

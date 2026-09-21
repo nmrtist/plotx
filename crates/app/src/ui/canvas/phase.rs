@@ -21,7 +21,7 @@ pub(crate) fn displayed_phase_pivot_ppm(
 ) -> Option<f64> {
     match app.interaction() {
         Interaction::Phase(drag)
-            if drag.dataset == dataset
+            if drag.dataset == app.doc.datasets[dataset].resource_id()
                 && drag.axis == axis
                 && drag.kind == PhaseDragKind::Pivot =>
         {
@@ -150,7 +150,7 @@ pub(crate) fn handle_phase_drag(
         let gesture_before = DatasetProcessingState::from_dataset(&app.doc.datasets[di]);
         app.begin_interaction(Interaction::Phase(PhaseDrag {
             kind,
-            dataset: di,
+            dataset: app.doc.datasets[di].resource_id(),
             axis: ctx.axis,
             preview_pivot_ppm: (kind == PhaseDragKind::Pivot).then_some(ctx.pivot_ppm),
             gesture_before,
@@ -161,7 +161,7 @@ pub(crate) fn handle_phase_drag(
     }
 
     if let Interaction::Phase(drag) = app.interaction()
-        && drag.dataset != di
+        && drag.dataset != app.doc.datasets[di].resource_id()
     {
         return false;
     }

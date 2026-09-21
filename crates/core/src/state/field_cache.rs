@@ -9,8 +9,8 @@
 //! entries lazily is what keeps derived data free of invalidation fan-out.
 
 use super::{
-    ContourGeometry, ContourGeometryCacheKey, ContourSegment, EstimateKey, EstimateResult,
-    FieldRef, FieldSummary, FieldVersion, VersionedFieldRef,
+    ContourGeometry, ContourGeometryCacheKey, ContourSegment, DatasetId, EstimateKey,
+    EstimateResult, FieldRef, FieldSummary, FieldVersion, ScalarGrid2D, VersionedFieldRef,
 };
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
@@ -130,6 +130,7 @@ pub(crate) struct FieldRuntime {
     summaries: LruMap<VersionedFieldRef, FieldSummary>,
     estimates: LruMap<EstimateKey, EstimateResult>,
     geometry: LruMap<ContourGeometryCacheKey, Arc<ContourGeometry>>,
+    grids: LruMap<VersionedFieldRef, Arc<ScalarGrid2D>>,
     estimates_in_flight: HashSet<EstimateKey>,
     geometry_in_flight: HashSet<ContourGeometryCacheKey>,
 }
@@ -142,6 +143,7 @@ impl Default for FieldRuntime {
             summaries: LruMap::new(SUMMARY_ENTRY_LIMIT, SUMMARY_ENTRY_LIMIT),
             estimates: LruMap::new(ESTIMATE_ENTRY_LIMIT, ESTIMATE_ENTRY_LIMIT),
             geometry: LruMap::new(GEOMETRY_BYTE_BUDGET, GEOMETRY_ENTRY_LIMIT),
+            grids: LruMap::new(128 * 1024 * 1024, 16),
             estimates_in_flight: HashSet::new(),
             geometry_in_flight: HashSet::new(),
         }
@@ -149,6 +151,25 @@ impl Default for FieldRuntime {
 }
 
 impl FieldRuntime {
+    pub(crate) fn grid(&mut self, source: VersionedFieldRef) -> Option<Arc<ScalarGrid2D>> {
+        self.grids.get(&source).cloned()
+    }
+
+    pub(crate) fn remember_grid(&mut self, source: VersionedFieldRef, grid: Arc<ScalarGrid2D>) {
+        let bytes = grid.values.len().saturating_mul(size_of::<f32>());
+        self.grids.insert(source, grid, bytes, |_| false);
+    }
+
+    pub(crate) fn has_in_flight_for(&self, dataset: DatasetId) -> bool {
+        self.estimates_in_flight
+            .iter()
+            .any(|key| key.source.field.resource == dataset)
+            || self
+                .geometry_in_flight
+                .iter()
+                .any(|key| key.source.field.resource == dataset)
+    }
+
     pub(crate) fn version_for(&mut self, field: FieldRef) -> Option<FieldVersion> {
         if let Some(version) = self.current.get(&field) {
             return Some(*version);

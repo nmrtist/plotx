@@ -13,7 +13,7 @@ pub enum PhaseDragKind {
 
 pub struct PhaseDrag {
     pub kind: PhaseDragKind,
-    pub dataset: usize,
+    pub dataset: DatasetId,
     pub axis: PhaseAxis,
     /// Canvas-only pivot preview. The processing recipe is updated once, on
     /// pointer release, so moving the handle never rebuilds the spectrum.

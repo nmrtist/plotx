@@ -363,6 +363,7 @@ impl PlotxApp {
     /// Returns whether work is still outstanding (so the shell keeps repainting
     /// until it lands).
     pub fn poll_compute(&mut self) -> bool {
+        self.finish_phase_previews();
         for done in self.session.compute.try_drain() {
             match done {
                 Done::Ilt {
@@ -590,11 +591,15 @@ impl PlotxApp {
                         "Processing changed and invalidated the selected DOSY map",
                     );
                     for field in fields {
+                        if let Some(grid) = field.grid {
+                            self.session.compute.remember_field_grid(field.source, grid);
+                        }
                         self.session
                             .compute
                             .promote_field_version(field.source, field.summary);
                     }
                     self.initialize_nmr_result_bindings(dataset, previous_field);
+                    self.thaw_phase_preview(self.doc.datasets[dataset].resource_id());
                     self.recompute_integrals_2d_after_processing(dataset);
                     self.rebuild_canvases_for(dataset);
                     self.mark_document_dirty();
@@ -603,6 +608,9 @@ impl PlotxApp {
                 Done::Processing2DFailed {
                     dataset, message, ..
                 } => {
+                    // A failed gesture has no new field to finalize. Ending it
+                    // must not enqueue an old-field refresh over this error.
+                    self.session.phase_preview.discard(dataset);
                     if self.doc.dataset_index(dataset).is_some() {
                         self.session.status = format!("2D processing failed: {message}");
                     }
@@ -618,13 +626,14 @@ impl PlotxApp {
                             });
                     let current = dataset
                         .and_then(|_| self.session.compute.current_field_version(key.source.field));
+                    let field = key.source.field;
                     if self.session.compute.finish_estimate(key, result, current)
                         && let Some(dataset) = dataset
                     {
                         // The completed job only populated a content-addressed
                         // cache. Rebuilding resolves each binding's current key;
                         // it never writes a worker result into a plot directly.
-                        self.rebuild_canvases_for(dataset);
+                        self.rebuild_canvases_for_field(dataset, field);
                     }
                 }
                 Done::EstimateFieldFailed { key, message } => {
@@ -654,10 +663,11 @@ impl PlotxApp {
                             });
                     let current = dataset
                         .and_then(|_| self.session.compute.current_field_version(key.source.field));
+                    let field = key.source.field;
                     if self.session.compute.finish_contour(key, geometry, current)
                         && let Some(dataset) = dataset
                     {
-                        self.rebuild_canvases_for(dataset);
+                        self.rebuild_canvases_for_field(dataset, field);
                     }
                 }
                 Done::BuildContourFailed { key, message } => {
@@ -678,6 +688,9 @@ impl PlotxApp {
                 }
                 Done::Cancelled { .. } => {}
                 Done::Failed { dataset, kind, .. } => {
+                    if kind == ComputeKind::Processing2D {
+                        self.session.phase_preview.discard(dataset);
+                    }
                     let name = self
                         .doc
                         .dataset_index(dataset)
@@ -705,6 +718,7 @@ impl PlotxApp {
     /// coalesced by `ComputeService`; a time-domain change requests a new base,
     /// while a frequency-only change shares the immutable cached base.
     pub fn schedule_2d_processing(&mut self, dataset: usize, force_full: bool) -> bool {
+        self.prepare_phase_preview(dataset);
         let Some(d2) = self.doc.datasets.get(dataset).and_then(Dataset::as_nmr2d) else {
             return false;
         };
