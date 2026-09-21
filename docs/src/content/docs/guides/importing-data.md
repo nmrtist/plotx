@@ -48,10 +48,11 @@ extension alone. Other `.txt` files continue through table import. See the
 
 ## Follow import progress
 
-Scientific data files and acquisition folders load one dataset at a time in the
-background, so you can continue working. Completed datasets appear on the board
-without changing your current page or selection. The status bar shows the current
-file and success/failure counts; review failures in the diagnostic history.
+Scientific data files and acquisition folders load in the background, so you can
+continue working. When you import multiple datasets, they appear on the board in
+their original discovery order without changing your current page or selection.
+The status bar shows the current file and success/failure counts; review failures
+in the diagnostic history.
 Additional imports wait for the current batch. Opening, closing, or creating a
 project cancels unfinished imports for the previous project.
 

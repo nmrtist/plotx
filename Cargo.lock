@@ -3423,9 +3423,9 @@ dependencies = [
 
 [[package]]
 name = "nmr"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5749f9cb01773d2df50a3824c4591af5367da58daeaf9dd199d051a1358fda9c"
+checksum = "a82e45f821d8269a728af7928832bb4a0a76fbd5df960ea785397edd07e275bd"
 dependencies = [
  "num-complex",
  "rustfft",

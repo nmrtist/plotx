@@ -38,7 +38,7 @@ publish = false
 repository = "https://github.com/nmrtist/plotx"
 
 [workspace.dependencies]
-nmr = "=0.1.0"
+nmr = "=0.1.1"
 colorous = "1"
 num-complex = "0.4"
 nalgebra = { version = "0.35", default-features = false, features = ["std"] }
